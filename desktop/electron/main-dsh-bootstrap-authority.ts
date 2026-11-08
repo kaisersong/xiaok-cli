@@ -1,5 +1,8 @@
+import {appendIntrinsic,settleIntrinsicOperations} from '../../src/runtime/verification/intrinsic-async-collection.js';
+import {createOriginalMainDshKSwarmCoreChild,createOriginalMainDshBrokerCoreChild,closeOriginalMainDshCoreChild,type OriginalMainDshCoreChild} from './main-dsh-core-child-custody.js';
+import {createOriginalMainDshChildFunctionCustody} from './main-dsh-core-child-functions.js';
 import {createOriginalMainDshComponentCustody} from './main-dsh-component-custody.js';
-import {createOriginalMainDshKSwarmCleanup,combineOriginalMainDshCoreCloseError} from './main-dsh-core-kswarm-cleanup.js';
+import {combineOriginalMainDshCoreCloseError} from './main-dsh-core-kswarm-cleanup.js';
 import type {DshOriginalReferences,MainDshBootstrapAuthority,MainDshBootstrapView,MainDshKernelClockCut,MainDshClockView,State,InstalledPool,MainDshCoreCloseFailure} from './main-dsh-bootstrap-types.js';
 export type {DshOriginalReferences,MainDshBootstrapAuthority,MainDshBootstrapView,MainDshKernelClockCut,MainDshClockView} from './main-dsh-bootstrap-types.js';
 import {createOriginalMainDshCoreAccessors} from './main-dsh-core-accessors.js';
@@ -21,7 +24,7 @@ const apply=Reflect.apply,freeze=Object.freeze,create=Object.create,descriptor=O
 const get=WeakMap.prototype.get,set=WeakMap.prototype.set,isProxy=types.isProxy,NativeError=Error,FunctionPrototype=Function.prototype,prototype=Object.getPrototypeOf;
 const realms=new NativeWeakMap<object,State>();let singleton:MainDshBootstrapAuthority|undefined,birthAttempted=false,birthFailure:unknown;
 const installedPools=new NativeWeakMap<object,InstalledPool>();
-export const {joinOriginalMainDshServiceComponent,assertOptionalOriginalMainDshServiceComponent,prepareOriginalMainDshKSwarmChild,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut}=createOriginalMainDshCoreAccessors(realms,installedPools);
+export const {joinOriginalMainDshServiceComponent,assertOptionalOriginalMainDshServiceComponent,prepareOriginalMainDshKSwarmChild,prepareOriginalMainDshBrokerChild,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut}=createOriginalMainDshCoreAccessors(realms,installedPools);
 const NativePromise=Promise,nativeThen=Promise.prototype.then;
 const rejected=<T>(raw:unknown):Promise<T>=>new NativePromise<T>((_yes,no)=>no(raw));
 function denied():never{throw new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');}
@@ -39,6 +42,7 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
   const optional=(name:string)=>descriptor(api,name)?method(name):undefined;
   const serviceComponentAssert=optional('assertOriginalMainDshServiceComponent');
   const ksMethods=freeze({prepare:optional('prepareOriginalKSwarmChild'),assert:optional('assertOriginalKSwarmChildPort'),terminal:optional('assertOriginalKSwarmChildTerminal')});
+  const brokerMethods=freeze({prepare:optional('prepareOriginalBrokerChild'),assert:optional('assertOriginalBrokerChildPort'),terminal:optional('assertOriginalBrokerChildTerminal')});
   const issuer=apply(birth,api,[]);if(!issuer||typeof issuer!=='object'||isProxy(issuer)||types.isPromise(issuer))denied();
   let sealed=false,failed=false,store:object|undefined;
   const local=()=>{if(sealed||failed)denied();};
@@ -50,14 +54,13 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
    if(installedLease){if(core&&!installedCore)denied();return installedLease;}
    local();
    installedCore=core;
-   const lease=freeze(create(null)),stock=createRoomTurnCustody(),negativeStock=createRoomTurnCustody(),ksStock=createRoomTurnCustody(),ksCleanup=createRoomTurnCustody(),ksSources=createOriginalMainDshKSwarmCleanup(),ownerCleanup=createRoomTurnCustody(),ledgerStock=createRoomTurnCustody();
+   const lease=freeze(create(null)),stock=createRoomTurnCustody(),negativeStock=createRoomTurnCustody(),ownerCleanup=createRoomTurnCustody(),ledgerStock=createRoomTurnCustody();
    let opening:Promise<object>|undefined,closing:Promise<void>|undefined,connectEntered=false,connected:object|undefined,rootSession:object|undefined,rootApi:object|undefined;
    let rootClose:Function|undefined,installationClose:Function|undefined;
    let coreStarting:Promise<void>|undefined,ownerOpening:Promise<object>|undefined,ownerReturning:Promise<void>|undefined,ownerBorrowed=false;
    let budgetOpening:Promise<object>|undefined,budgetPrepared:unknown;
-   let ksOpening:Promise<object>|undefined,ksPort:object|undefined,ksEntered=false;
-   let ksAssert:Function|undefined,ksTerminal:Function|undefined,ksFailure:{raw:unknown}|undefined;
-   const ksProgress=()=>{progress();if(ownerReturning)denied();};
+   const ks=createOriginalMainDshKSwarmCoreChild(),broker=createOriginalMainDshBrokerCoreChild();
+   const childProgress=()=>{progress();if(ownerReturning)denied();};
    let admissionBundle:OriginalAdmissionDatabaseBundle|undefined,admissionClose:Function|undefined,coreReady=false;
    let releaseOwner!:()=>void,rejectOwner!:(raw:unknown)=>void;
    const ownerReturned=new NativePromise<void>((yes,no)=>{releaseOwner=yes;rejectOwner=no;});
@@ -95,21 +98,27 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
     const raw=await stock.sdk(fixedMethod(rootApi,'readOriginalMainPoolBootstrap'),rootApi,[rootSession]);
     return captureOriginalMainDshCoreBootstrap(raw);
    };
-   const closeKSwarm=async():Promise<MainDshCoreCloseFailure|undefined>=>{
-    if(ksOpening)try{await ksOpening;}catch{/* The private positive Promise retains its first cause. */}
-    if(ksEntered&&!ksPort)throw ksFailure?ksFailure.raw:new NativeError('DSH_MAIN_KSWARM_HANDLE_UNCONFIRMED');
-    if(!ksPort){await ksStock.waitPhysicalKnown();return;}
-    const identity=await ksCleanup.sdk(ksAssert!,api,[ksPort]);if(identity!==undefined)denied();
-    const cut=await ksSources.close(ksPort),first=cut.first;
-    if(!cut.sourceEntered){
-     const raw=await ksCleanup.sdk(fixedMethod(ksPort,'cancel'),ksPort,[]);if(raw!==undefined)throw new NativeError('DSH_MAIN_KSWARM_CANCEL_NONVOID',{cause:raw});
-    }
-    try{
-     const raw=await ksStock.consumeResource(ksTerminal!,ksPort,[ksPort]);if(raw!==undefined)denied();
-     await ksStock.waitPhysicalKnown();await ksCleanup.waitPhysicalKnown();
-    }catch(raw){if(first)throw combineOriginalMainDshCoreCloseError(first,{raw});throw raw;}
-    if(cut.unconfirmed)throw combineOriginalMainDshCoreCloseError(first??cut.unconfirmed);
-    return first;
+   const prepareChild=(child:OriginalMainDshCoreChild,methods:Readonly<{prepare?:Function;assert?:Function;terminal?:Function}>):Promise<object>=>{
+    if(!installedCore||!coreStarting||closing||ownerReturning)return rejected(new NativeError('DSH_MAIN_CORE_NOT_STARTED'));
+    if(child.opening)return child.opening;
+    let yes!:(value:object)=>void,no!:(raw:unknown)=>void;
+    child.opening=new NativePromise<object>((resolve,reject)=>{yes=resolve;no=reject;});define(child.opening,'constructor',{__proto__:null,value:NativePromise} as PropertyDescriptor);
+    child.functions=createOriginalMainDshChildFunctionCustody(methods);
+    const operation=child.stock.root(async()=>{
+     await coreStarting;childProgress();if(!coreReady)denied();
+     await readBootstrap();childProgress();current();childProgress();
+     child.assert=methods.assert;child.terminal=methods.terminal;if(!methods.prepare||!child.assert||!child.terminal)denied();
+     await child.functions!.capture();childProgress();current();childProgress();
+     child.entered=true;
+     await child.stock.sdk<object>(methods.prepare,api,[issuer],{accept:value=>{
+      if(!value||typeof value!=='object'||isProxy(value)||types.isPromise(value))return false;
+      child.port=value;return true;
+     },consumer:child.terminal,strictProxyGraph:true});childProgress();
+     const raw=await child.stock.sdk(child.assert,api,[child.port]);if(raw!==undefined)denied();childProgress();
+    });
+    const reject=(raw:unknown)=>{child.failure={raw};no(raw);};
+    apply(nativeThen,operation,[()=>{try{childProgress();yes(child.port!);}catch(raw){reject(raw);}},reject]);
+    return child.opening;
    };
    const state:InstalledPool={
     readLedger(){
@@ -123,26 +132,8 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
     },
     assertReadyForOwner(){progress();if(!installedCore||!coreReady||ownerReturning)denied();},
     readAdmission(){progress();if(!installedCore)return null;if(!coreReady||!admissionBundle)denied();return admissionBundle;},
-    prepareKSwarmChild(){
-     if(!installedCore||!coreStarting||closing||ownerReturning)return rejected(new NativeError('DSH_MAIN_CORE_NOT_STARTED'));
-     if(ksOpening)return ksOpening;
-     let yes!:(value:object)=>void,no!:(raw:unknown)=>void;
-     ksOpening=new NativePromise<object>((resolve,reject)=>{yes=resolve;no=reject;});define(ksOpening,'constructor',{__proto__:null,value:NativePromise} as PropertyDescriptor);
-     const operation=ksStock.root(async()=>{
-      await coreStarting;ksProgress();if(!coreReady)denied();
-      await readBootstrap();ksProgress();current();ksProgress();
-      const prepare=ksMethods.prepare;ksAssert=ksMethods.assert;ksTerminal=ksMethods.terminal;if(!prepare||!ksAssert||!ksTerminal)denied();
-      ksEntered=true;
-      await ksStock.sdk<object>(prepare,api,[issuer],{accept:value=>{
-       if(!value||typeof value!=='object'||isProxy(value)||types.isPromise(value))return false;
-       ksPort=value;return true;
-      },consumer:ksTerminal,strictProxyGraph:true});ksProgress();
-      const raw=await ksStock.sdk(ksAssert,api,[ksPort]);if(raw!==undefined)denied();ksProgress();
-     });
-     const reject=(raw:unknown)=>{ksFailure={raw};no(raw);};
-     apply(nativeThen,operation,[()=>{try{ksProgress();yes(ksPort!);}catch(raw){reject(raw);}},reject]);
-     return ksOpening;
-    },
+    prepareKSwarmChild(){return prepareChild(ks,ksMethods);},
+    prepareBrokerChild(){return prepareChild(broker,brokerMethods);},
     prepareBudgetWorker(prepared){
      if(!installedCore||!coreStarting||closing||ownerReturning)return rejected(new NativeError('DSH_MAIN_CORE_NOT_STARTED'));
      readOriginalHarnessBudgetWorkerBirth(prepared).assertLocal();
@@ -205,8 +196,16 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
      const operation=(async()=>{
       if(opening)try{await opening;}catch{/* The original open Promise preserves its exact first value. */}
       if(coreStarting)try{await coreStarting;}catch{/* Preserve Core startup's original first value. */}
-      if(ownerBorrowed)await ownerReturned;
-      const ksFirst=await closeKSwarm();
+      let childFirst:MainDshCoreCloseFailure|undefined,childUnknown=false;
+      if(ownerBorrowed)try{await ownerReturned;}catch(raw){childFirst={raw};childUnknown=true;}
+      const children=[ks,broker];
+      const childResults=await settleIntrinsicOperations(children,child=>closeOriginalMainDshCoreChild(child,api));
+      for(let i=0;i<childResults.length;i++){
+       const result=childResults[i]!;
+       if(result.status==='rejected'){childUnknown=true;if(!childFirst)childFirst={raw:result.reason};else{childFirst.secondary??=[];appendIntrinsic(childFirst.secondary,result.reason);}}
+       else if(result.value){if(!childFirst)childFirst=result.value;else{childFirst.secondary??=[];appendIntrinsic(childFirst.secondary,combineOriginalMainDshCoreCloseError(result.value));}}
+      }
+      if(childUnknown)throw combineOriginalMainDshCoreCloseError(childFirst!);
       try{
       if(admissionBundle){const raw=await negativeStock.sdk(admissionClose!,admissionBundle,[]);if(raw!==undefined)denied();}
       await ledgerStock.waitPhysicalKnown();
@@ -220,8 +219,8 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
       await stock.waitPhysicalKnown();
       await negativeStock.waitPhysicalKnown();
       await ownerCleanup.waitPhysicalKnown();
-      }catch(raw){if(ksFirst)throw combineOriginalMainDshCoreCloseError(ksFirst,{raw});throw raw;}
-      if(ksFirst)throw combineOriginalMainDshCoreCloseError(ksFirst);
+      }catch(raw){if(childFirst)throw combineOriginalMainDshCoreCloseError(childFirst,{raw});throw raw;}
+      if(childFirst)throw combineOriginalMainDshCoreCloseError(childFirst);
      })();
      apply(nativeThen,operation,[yes,no]);return closing;
     },

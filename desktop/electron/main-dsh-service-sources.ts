@@ -1,3 +1,4 @@
+import {prepareOriginalMainDshBrokerChild} from './main-dsh-core-broker.js';
 import {types} from 'node:util';
 import {captureGithubOpaqueRecord,captureGithubReadData,githubReadRecord,githubReadFields,githubReadText,githubReadFreeze} from '../../src/runtime/multi-agent/dsh-github-read-data.js';
 import {createIntrinsicSet} from '../../src/runtime/verification/intrinsic-async-collection.js';
@@ -186,6 +187,17 @@ export function prepareOriginalMainDshSourceKSwarmChild(candidate:unknown,lease:
  // Core reserves custody before entering the SDK. Preserve its exact Promise
  // so concurrent shutdown cannot discard a port already returned by the SDK.
  return prepareOriginalMainDshKSwarmChild(row.coreLease);
+}
+export function prepareOriginalMainDshSourceBrokerChild(candidate:unknown,lease:unknown):Promise<object> {
+ const row=apply(get,rows,[candidate]) as Row|undefined;
+ if(arguments.length!==2||!row||apply(get,leases,[lease])!==row||row.lease!==lease||
+  !row.claimed||!row.transferred||!row.birth||!row.store||!row.coreLease||!row.coreStock||
+  row.closing||row.serviceClosing||row.failure||row.resourcesClosed||row.storeClosed)throw denied();
+ readOriginalMainDshControlSourceBinding(row.user).assertLocal();
+ if(row.closing||row.serviceClosing||row.failure||row.resourcesClosed||row.storeClosed)throw denied();
+ // Core reserves custody before entering the SDK. Preserve its exact Promise
+ // so concurrent shutdown cannot discard a port already returned by the SDK.
+ return prepareOriginalMainDshBrokerChild(row.coreLease);
 }
 /** Negative startup cleanup only. Once Services has received the lifetime,
  * its existing shutdown path is the sole disposer of this runtime. */

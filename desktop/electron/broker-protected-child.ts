@@ -1,6 +1,7 @@
 /** Fixed Native child SDK consumer. This is a local process/stream receipt;
  * it grants no business work, cost refund, old-FD or namespace completeness. */
 import {data,method,setField} from './kswarm-protected-child-data.js';
+import {createProtectedChildCallbackCustody} from './protected-child-callback-custody.js';
 import type {ChildProcess} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname,join} from 'node:path';
@@ -10,7 +11,7 @@ import {constants} from 'node:os';
 import {types,TextDecoder} from 'node:util';
 import {createRoomTurnCustody} from './original-room-turn-custody.js';
 import {appendIntrinsic,createIntrinsicSet,settleIntrinsicOperations} from '../../src/runtime/verification/intrinsic-async-collection.js';
-const requireFixed=createRequire(import.meta.url),apply=Reflect.apply,define=Object.defineProperty as (target:object,key:PropertyKey,attributes:PropertyDescriptor&{__proto__?:null})=>object,descriptor=Object.getOwnPropertyDescriptor,own=Object.hasOwn,keys=Reflect.ownKeys;
+const requireFixed=createRequire(import.meta.url),apply=Reflect.apply,define=Object.defineProperty as (target:object,key:PropertyKey,attributes:PropertyDescriptor&{__proto__?:null})=>object,descriptor=Object.getOwnPropertyDescriptor,own=Object.hasOwn;
 const NativeMap=Map,NativePromise=Promise,then=Promise.prototype.then,stringify=JSON.stringify,parse=JSON.parse,bufferFrom=Buffer.from,bufferSubarray=Buffer.prototype.subarray;
 const decode=TextDecoder.prototype.decode,mapGet=Map.prototype.get,mapSet=Map.prototype.set;
 function removeAt<T>(array:T[],index:number):void{for(let at=index;at+1<array.length;at++)define(array,String(at),{__proto__:null,value:array[at+1],writable:true,enumerable:true,configurable:true});define(array,'length',{__proto__:null,value:array.length-1});}
@@ -21,17 +22,17 @@ function mapPut<K,V>(map:Map<K,V>,key:K,value:V):void{apply(mapSet,map,[key,valu
 const get=WeakMap.prototype.get,set=WeakMap.prototype.set,records=new WeakMap<object,Row>(),children=new WeakMap<object,Row>(),held=createIntrinsicSet<Row>();
 type Listener={fn:Function;once:boolean};
 type Emitter={object:Record<string,unknown>;listeners:Map<string,Listener[]>};
-interface Row {port:object;module:object;terminal:Function;methods:Record<string,Function>;child:Record<string,unknown>;events:Emitter;stdout:Emitter;stderr:Emitter;stock:ReturnType<typeof createRoomTurnCustody>;negative:ReturnType<typeof createRoomTurnCustody>;raw:unknown[];first?:{raw:unknown};launchEntered:boolean;launched:boolean;stopping:boolean;exited:boolean;joined:boolean;streams:boolean[];ipc:string;decoder:TextDecoder;out:{bytes:Buffer;offset:number;callback?:Function}[];frames:ReturnType<typeof createIntrinsicSet<ReturnType<typeof createRoomTurnCustody>>>;grace?:{controller:AbortController;reason:Error;aborted:boolean;stock:ReturnType<typeof createRoomTurnCustody>;negative:ReturnType<typeof createRoomTurnCustody>};loop?:Promise<void>;closing?:Promise<void>;done:Promise<void>;resolve:()=>void;reject:(raw:unknown)=>void}
+interface Row {callbacks:ReturnType<typeof createProtectedChildCallbackCustody>;port:object;module:object;terminal:Function;methods:Record<string,Function>;child:Record<string,unknown>;events:Emitter;stdout:Emitter;stderr:Emitter;stock:ReturnType<typeof createRoomTurnCustody>;negative:ReturnType<typeof createRoomTurnCustody>;raw:unknown[];first?:{raw:unknown};launchEntered:boolean;launched:boolean;stopping:boolean;exited:boolean;joined:boolean;streams:boolean[];ipc:string;decoder:TextDecoder;out:{bytes:Buffer;offset:number;callback?:Function}[];frames:ReturnType<typeof createIntrinsicSet<ReturnType<typeof createRoomTurnCustody>>>;grace?:{controller:AbortController;reason:Error;aborted:boolean;stock:ReturnType<typeof createRoomTurnCustody>;negative:ReturnType<typeof createRoomTurnCustody>};loop?:Promise<void>;closing?:Promise<void>;done:Promise<void>;resolve:()=>void;reject:(raw:unknown)=>void}
 function denied():never{throw Error('BROKER_ORIGINAL_CHILD_SOURCE_REQUIRED');}
 async function inventories(row:Row):Promise<void>{
- const stocks=[row.stock,row.negative],frames=row.frames.snapshot();for(let index=0;index<frames.length;index++)appendIntrinsic(stocks,frames[index]!);
+ const stocks=[row.stock,row.negative,row.callbacks],frames=row.frames.snapshot();for(let index=0;index<frames.length;index++)appendIntrinsic(stocks,frames[index]!);
  const results=await settleIntrinsicOperations(stocks,stock=>stock.waitPhysicalKnown());let first:{raw:unknown}|undefined;
  for(let index=0;index<results.length;index++)if(results[index]!.status==='rejected'){const raw=(results[index] as PromiseRejectedResult).reason;appendIntrinsic(row.raw,raw);first??={raw};}
  if(first)throw first.raw;
 }
 function assertPhysical(row:Row):void{
  let first:{raw:unknown}|undefined;const check=(work:()=>void)=>{try{work();}catch(raw){appendIntrinsic(row.raw,raw);first??={raw};}};
- check(()=>{if(!row.joined)return denied();});check(()=>row.stock.assertPhysicalKnown());check(()=>row.negative.assertPhysicalKnown());
+ check(()=>{if(!row.joined)return denied();});check(()=>row.stock.assertPhysicalKnown());check(()=>row.negative.assertPhysicalKnown());check(()=>row.callbacks.assertPhysicalKnown());
  const frames=row.frames.snapshot();for(let index=0;index<frames.length;index++)check(()=>frames[index]!.assertPhysicalKnown());
  check(()=>{const raw=apply(row.terminal,row.module,[row.port]);inventory(row,raw,true);if(raw!==undefined)return denied();});
  if(first)throw first.raw;
@@ -46,20 +47,19 @@ function remember(row:Row,raw:unknown):void{row.first??={raw};appendIntrinsic(ro
 function invoke(row:Row,name:string,args:unknown[],negative=false):unknown{
  try{const raw=apply(row.methods[name]!,row.port,args);inventory(row,raw,negative);return raw;}catch(raw){remember(row,raw);inventory(row,raw,true);throw raw;}
 }
-function listenerMetadata(row:Row,fn:Function):void{const names=keys(fn);for(let index=0;index<names.length;index++){const name=names[index]!;const d=descriptor(fn,name);if(!d||!own(d,'value')){inventory(row,fn);return;}inventory(row,d.value);}}
 function emit(row:Row,emitter:Emitter,name:string,args:unknown[]):void{
  const listeners=mapRead(emitter.listeners,name);if(!listeners)return;
  // A callback failure cannot skip the original sibling notification or close.
- const snapshot:Listener[]=[];for(let index=0;index<listeners.length;index++)appendIntrinsic(snapshot,listeners[index]!);for(let i=0;i<snapshot.length;i++){const listener=snapshot[i]!;if(listener.once){let at=-1;for(let index=0;index<listeners.length;index++)if(listeners[index]===listener){at=index;break;}if(at>=0)removeAt(listeners,at);}try{inventory(row,apply(listener.fn,emitter.object,args));}catch(raw){remember(row,raw);}}
+ const snapshot:Listener[]=[];for(let index=0;index<listeners.length;index++)appendIntrinsic(snapshot,listeners[index]!);for(let i=0;i<snapshot.length;i++){const listener=snapshot[i]!;if(listener.once){let at=-1;for(let index=0;index<listeners.length;index++)if(listeners[index]===listener){at=index;break;}if(at>=0)removeAt(listeners,at);}try{inventory(row,row.callbacks.invoke(listener.fn,emitter.object,args));}catch(raw){remember(row,raw);}}
 }
 function emitter(row:Row):Emitter{
  const value:Emitter={object:Object.create(null) as Record<string,unknown>,listeners:new NativeMap()};
- const add=(name:unknown,fn:unknown,once:boolean)=>{if(typeof name!=='string'||typeof fn!=='function'||types.isProxy(fn))return denied();listenerMetadata(row,fn);let list=mapRead(value.listeners,name);if(!list){list=[];mapPut(value.listeners,name,list);}appendIntrinsic(list,{fn,once});return value.object;};
+ const add=(name:unknown,fn:unknown,once:boolean)=>{if(typeof name!=='string'||typeof fn!=='function'||types.isProxy(fn))return denied();row.callbacks.capture(fn);let list=mapRead(value.listeners,name);if(!list){list=[];mapPut(value.listeners,name,list);}appendIntrinsic(list,{fn,once});return value.object;};
  const on=(name:unknown,fn:unknown)=>add(name,fn,false),once=(name:unknown,fn:unknown)=>add(name,fn,true);
  const remove=(name:unknown,fn:unknown)=>{if(typeof name!=='string')return denied();const list=mapRead(value.listeners,name);if(list)for(let at=list.length-1;at>=0;at--)if(list[at]!.fn===fn)removeAt(list,at);return value.object;};
  const methods=[['on',on],['once',once],['removeListener',remove],['off',remove]] as const;for(let index=0;index<methods.length;index++){const name=methods[index]![0],fn=methods[index]![1];Object.freeze(fn);define(value.object,name,{__proto__:null,value:fn,enumerable:true});}return value;
 }
-function callbacksClosed(row:Row,raw:unknown):void{for(let i=0;i<row.out.length;i++){const fn=row.out[i]!.callback;if(fn)try{inventory(row,apply(fn,row.child,[raw]));}catch(error){remember(row,error);}}row.out.length=0;}
+function callbacksClosed(row:Row,raw:unknown):void{for(let i=0;i<row.out.length;i++){const fn=row.out[i]!.callback;if(fn)try{inventory(row,row.callbacks.invoke(fn,row.child,[raw]));}catch(error){remember(row,error);}}row.out.length=0;}
 function signal(row:Row,name:unknown):boolean{
  const actual=name===undefined?'SIGTERM':name;if(actual!=='SIGTERM'&&actual!=='SIGKILL')return denied();if(row.exited)return false;
  invoke(row,'signal',[actual==='SIGTERM'?constants.signals.SIGTERM:constants.signals.SIGKILL],true);return true;
@@ -100,7 +100,7 @@ async function pump(row:Row):Promise<void>{
     if(typeof observed.pid!=='number'||typeof observed.waitStatus!=='number'||typeof observed.state!=='number')return denied();setField(row.child,'pid',observed.pid);
     if(observed.state===1&&!row.exited){row.exited=true;stopGrace(row);const status=observed.waitStatus,signalNumber=status&0x7f;let name:string|null=null;if(signalNumber!==0)for(let index=0;index<signalNames.length;index++)if(signalNames[index]![1]===signalNumber){name=signalNames[index]![0];break;}const code=signalNumber===0?(status>>8)&255:null;setField(row.child,'exitCode',code);setField(row.child,'signalCode',name);emit(row,row.events,'exit',[code,name]);}
    }catch(raw){remember(row,raw);failed=true;pollFailed=true;}
-   if(!row.stopping&&!row.exited&&row.out.length){try{const item=row.out[0]!,chunk=apply(bufferSubarray,item.bytes,[item.offset,Math.min(item.offset+65536,item.bytes.length)]) as Buffer;const count=invoke(row,'write',[chunk]);if(typeof count!=='number'||!Number.isSafeInteger(count)||count<0||count>chunk.length)return denied();item.offset+=count;if(item.offset===item.bytes.length){removeAt(row.out,0);if(item.callback)try{inventory(row,apply(item.callback,row.child,[null]));}catch(raw){remember(row,raw);}}}catch(raw){remember(row,raw);failed=true;}}
+   if(!row.stopping&&!row.exited&&row.out.length){try{const item=row.out[0]!,chunk=apply(bufferSubarray,item.bytes,[item.offset,Math.min(item.offset+65536,item.bytes.length)]) as Buffer;const count=invoke(row,'write',[chunk]);if(typeof count!=='number'||!Number.isSafeInteger(count)||count<0||count>chunk.length)return denied();item.offset+=count;if(item.offset===item.bytes.length){removeAt(row.out,0);if(item.callback)try{inventory(row,row.callbacks.invoke(item.callback,row.child,[null]));}catch(raw){remember(row,raw);}}}catch(raw){remember(row,raw);failed=true;}}
    if(row.exited&&row.streams[0]&&row.streams[1]&&row.streams[2]){
     if(!row.stopping){row.ipc+=apply(decode,row.decoder,[]);if(row.ipc)remember(row,Error('BROKER_ORIGINAL_CHILD_IPC_TRUNCATED'));}
     invoke(row,'join',[],true);row.joined=true;
@@ -122,7 +122,7 @@ async function pump(row:Row):Promise<void>{
 export async function createOriginalProtectedBrokerChild(port:object):Promise<ChildProcess>{
  if(!port||typeof port!=='object'||types.isProxy(port)||apply(get,records,[port]))return denied();
  let resolve!:()=>void,reject!:(raw:unknown)=>void;const done=new NativePromise<void>((yes,no)=>{resolve=yes;reject=no;});define(done,'constructor',{__proto__:null,value:NativePromise});apply(then,done,[undefined,()=>{}]);
- const row:Row={port,module:port,terminal:()=>{},methods:Object.create(null),child:Object.create(null),events:undefined!,stdout:undefined!,stderr:undefined!,stock:createRoomTurnCustody(),negative:createRoomTurnCustody(),raw:[],launchEntered:false,launched:false,stopping:false,exited:false,joined:false,streams:[false,false,false],frames:createIntrinsicSet(),ipc:'',decoder:new TextDecoder('utf-8',{fatal:true}),out:[],done,resolve,reject};apply(set,records,[port,row]);held.add(row);
+ const row:Row={callbacks:createProtectedChildCallbackCustody(),port,module:port,terminal:()=>{},methods:Object.create(null),child:Object.create(null),events:undefined!,stdout:undefined!,stderr:undefined!,stock:createRoomTurnCustody(),negative:createRoomTurnCustody(),raw:[],launchEntered:false,launched:false,stopping:false,exited:false,joined:false,streams:[false,false,false],frames:createIntrinsicSet(),ipc:'',decoder:new TextDecoder('utf-8',{fatal:true}),out:[],done,resolve,reject};apply(set,records,[port,row]);held.add(row);
  try{
   // Exact fixed Main addon; neither path nor API can be supplied by the caller.
   const module=requireFixed(join(dirname(fileURLToPath(import.meta.url)),'main_bootstrap.node')) as object;row.module=module;
@@ -130,7 +130,7 @@ export async function createOriginalProtectedBrokerChild(port:object):Promise<Ch
   const names=['launch','poll','read','write','signal','join','cancel'];for(let index=0;index<names.length;index++){const name=names[index]!;row.methods[name]=method(port,name);}
   row.events=emitter(row);row.child=row.events.object;row.stdout=emitter(row);row.stderr=emitter(row);
   const fields=[['connected',true],['exitCode',null],['signalCode',null],['killed',false],['pid',undefined]] as const;for(let index=0;index<fields.length;index++)setField(row.child,fields[index]![0],fields[index]![1]);
-  const send=(message:unknown,callback?:unknown)=>{if(callback!==undefined&&(typeof callback!=='function'||types.isProxy(callback)))return denied();if(row.stopping||row.exited||row.first)throw Error('BROKER_ORIGINAL_CHILD_CLOSED');const raw=stringify(message);inventory(row,raw);if(typeof raw!=='string')return denied();if(typeof callback==='function')listenerMetadata(row,callback);appendIntrinsic(row.out,{bytes:apply(bufferFrom,Buffer,[raw+'\n']) as Buffer,offset:0,...(typeof callback==='function'?{callback}:{})});return true;};
+  const send=(message:unknown,callback?:unknown)=>{if(callback!==undefined&&(typeof callback!=='function'||types.isProxy(callback)))return denied();if(row.stopping||row.exited||row.first)throw Error('BROKER_ORIGINAL_CHILD_CLOSED');const raw=stringify(message);inventory(row,raw);if(typeof raw!=='string')return denied();if(typeof callback==='function')row.callbacks.capture(callback);appendIntrinsic(row.out,{bytes:apply(bufferFrom,Buffer,[raw+'\n']) as Buffer,offset:0,...(typeof callback==='function'?{callback}:{})});return true;};
   const kill=(name?:unknown)=>{row.stopping=true;setField(row.child,'killed',true);callbacksClosed(row,Error('BROKER_ORIGINAL_CHILD_CLOSED'));return signal(row,name);};
   const values=[['stdout',row.stdout.object],['stderr',row.stderr.object],['send',Object.freeze(send)],['kill',Object.freeze(kill)]] as const;for(let index=0;index<values.length;index++){const name=values[index]![0],value=values[index]![1];define(row.child,name,{__proto__:null,value,enumerable:true});}
   apply(set,children,[row.child,row]);row.launchEntered=true;invoke(row,'launch',[]);row.launched=true;
