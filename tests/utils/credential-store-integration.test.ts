@@ -1,0 +1,25 @@
+import {afterEach,it,expect,vi} from 'vitest';
+import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomUUID} from 'node:crypto';
+import {Command} from 'commander';
+vi.unmock('../../src/utils/system-credentials.js');
+import {CredentialStore,protectCredentialPath} from '../../src/utils/credential-store.js';
+import {ProtectedJsonFile} from '../../src/utils/protected-json.js';
+import {loadConfig} from '../../src/utils/config.js';
+import {DEFAULT_CONFIG} from '../../src/types.js';
+import {getCredentialStore,systemCredentialBackend} from '../../src/utils/system-credentials.js';
+import {registerConfigCommands} from '../../src/commands/config.js';
+import {loadRuntimeConfig,createRuntimeAdapter} from '../../src/utils/runtime-config.js';
+const roots:string[]=[];const old=process.env.XIAOK_CONFIG_DIR;
+function root(){const p=mkdtempSync(join(tmpdir(),'xiaok-file-integration-'));roots.push(p);process.env.XIAOK_CONFIG_DIR=p;return p;}
+afterEach(()=>{vi.restoreAllMocks();if(old===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=old;for(const p of roots.splice(0))rmSync(p,{recursive:true,force:true});});
+it('loads config and completes a real adapter request from default files while all native access is denied',async()=>{
+ const p=root(),config=structuredClone(DEFAULT_CONFIG);config.defaultProvider='local';config.defaultModelId='test';config.providers.local={type:'custom',protocol:'openai_responses',baseUrl:'https://example.invalid/v1/',apiKey:'file-adapter-canary'};config.models.test={provider:'local',model:'test'};
+ const locked={get:vi.fn(()=>{throw Error('locked')}),put:vi.fn(()=>{throw Error('locked')})};new ProtectedJsonFile(join(p,'config.json'),new CredentialStore(p,locked)).save(config);
+ expect((await loadConfig()).providers.local.apiKey).toBe('file-adapter-canary');expect(getCredentialStore()).toBe('file');expect(locked.get).not.toHaveBeenCalled();expect(locked.put).not.toHaveBeenCalled();
+ const fetch=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({status:'completed',output:[{type:'message',content:[{type:'output_text',text:'file works'}]}]}),{headers:{'content-type':'application/json'}}));
+ const chunks=[];for await(const c of createRuntimeAdapter(loadRuntimeConfig()).stream([],[],'hi'))chunks.push(c);expect(chunks).toContainEqual({type:'text',delta:'file works'});expect(new Headers(fetch.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer file-adapter-canary');expect(readFileSync(join(p,'config.json'),'utf8')).not.toContain('file-adapter-canary');
+});
+it('lets CLI inspect and choose file mode without decrypting an inaccessible config',async()=>{const p=root();writeFileSync(join(p,'config.json'),'{malformed config');const log=vi.spyOn(console,'log').mockImplementation(()=>{});const program=()=>{const x=new Command();registerConfigCommands(x);return x;};await program().parseAsync(['node','xiaok','config','get','credential-store']);expect(log).toHaveBeenCalledWith('file');await program().parseAsync(['node','xiaok','config','set','credential-store','file']);expect(readFileSync(join(p,'config.json'),'utf8')).toBe('{malformed config');expect(log.mock.calls.flat().join(' ')).not.toContain('malformed');await expect(program().parseAsync(['node','xiaok','config','set','credential-store','auto'])).rejects.toThrow(/file.*keychain/);});
+it('keeps Electron main from accessing even file-backed secrets directly',()=>{root();const before=Object.getOwnPropertyDescriptor(process,'type');Object.defineProperty(process,'type',{value:'browser',configurable:true});try{expect(()=>systemCredentialBackend().get(randomUUID())).toThrow('credential_worker_required');expect(()=>new CredentialStore('unused',{get:()=>null,put:()=>{}})).toThrow('credential_worker_required');}finally{if(before)Object.defineProperty(process,'type',before);else delete(process as NodeJS.Process&{type?:string}).type;}});
+it('applies a restricted Windows DACL for custom paths and rejects failed ACL application',()=>{const run=vi.fn(()=>({status:0}));const path=join('custom profile','credential path');protectCredentialPath(path,true,'win32',run as never);expect(run.mock.calls[0][2]).toMatchObject({env:{XIAOK_CREDENTIAL_ACL_PATH:path,XIAOK_CREDENTIAL_ACL_DIRECTORY:'1'}});const script=Buffer.from(run.mock.calls[0][1][4],'base64').toString('utf16le');expect(script).toContain('SetAccessRuleProtection($true,$false)');expect(script).toContain('S-1-5-18');expect(()=>protectCredentialPath(path,false,'win32',vi.fn(()=>({status:1})) as never)).toThrow('credential_path_unsafe');});
+it('preserves file-integrity errors instead of misreporting them as a locked keychain',()=>{const p=root(),config=join(p,'config.json');const store=new ProtectedJsonFile(config);store.save({apiKey:'canary'});writeFileSync(join(p,'credentials','store.json'),'{broken');expect(()=>new ProtectedJsonFile(config).read()).toThrow('credential_config_corrupt');});
