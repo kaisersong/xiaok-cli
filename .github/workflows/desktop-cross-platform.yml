@@ -166,6 +166,8 @@ jobs:
           tests/main/room-scheduled-context.test.ts
           tests/renderer/scheduled-sidebar-selection.test.tsx
           tests/renderer/chat-approval-scroll.test.tsx
+          tests/renderer/channel-mcp-mutation-ui.test.tsx
+          tests/renderer/channel-mcp-mutation-ui-followup.test.tsx
 
       - name: Desktop services and model recommendation tests
         run: >-
