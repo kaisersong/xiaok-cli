@@ -21,6 +21,7 @@ import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
 import { registerSkillCommands } from './commands/skill.js';
 import { registerUpdateCommand } from './commands/update.js';
+import { registerVersionCommand } from './commands/version.js';
 import { handleFatalError, installGlobalCrashHandlers, setCrashContext } from './utils/crash-reporter.js';
 
 installGlobalCrashHandlers();
@@ -57,6 +58,7 @@ registerMemoryCommands(program);
 registerTraceCommands(program);
 registerDiagnoseCommands(program);
 registerUpdateCommand(program, version);
+registerVersionCommand(program);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   setCrashContext({
