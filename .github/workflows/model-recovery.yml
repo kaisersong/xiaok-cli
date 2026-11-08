@@ -1,37 +1,16 @@
 name: Model request recovery
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/ai/adapters/openai.ts'
-      - 'src/ai/providers/**'
-      - 'src/ai/models.ts'
-      - 'src/ai/runtime/**'
-      - 'src/ai/providers/**'
-      - 'tests/ai/providers/**'
-      - 'tests/ai/adapters/openai.test.ts'
-      - 'tests/ai/providers/**'
-      - 'tests/ai/models.test.ts'
-      - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
-      - 'tests/ai/runtime/**'
-      - 'tests/e2e/kimi-error-recovery*'
-      - 'scripts/diagnose-kimi-wire.mjs'
-      - 'tests/scripts/kimi-wire-diagnostic.test.mjs'
-      - 'tests/e2e/provider-errors*'
-      - 'tests/ai/adapters/openai-provider-errors.test.ts'
-      - 'src/commands/chat-model-recovery.ts'
-      - 'src/commands/chat.ts'
-      - '.github/workflows/model-recovery.yml'
   pull_request:
     paths:
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/providers/**'
       - 'src/ai/models.ts'
       - 'src/ai/runtime/**'
-      - 'src/ai/providers/**'
       - 'tests/ai/providers/**'
       - 'tests/ai/adapters/openai.test.ts'
-      - 'tests/ai/providers/**'
       - 'tests/ai/models.test.ts'
       - 'tests/ai/adapters/openai-provider-sse-error.test.ts'
       - 'tests/ai/runtime/**'
@@ -43,9 +22,20 @@ on:
       - 'src/commands/chat-model-recovery.ts'
       - 'src/commands/chat.ts'
       - '.github/workflows/model-recovery.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   recovery:
     strategy:

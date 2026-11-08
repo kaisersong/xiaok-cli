@@ -1,46 +1,8 @@
 name: Session resume
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/runtime/hooks-runner.ts'
-      - 'src/ai/adapters/openai.ts'
-      - 'src/ai/tools/index.ts'
-      - 'src/ai/tools/bash.ts'
-      - 'src/platform/runtime/registry-factory.ts'
-      - 'src/commands/registry.ts'
-      - 'tests/platform/runtime/registry-factory.test.ts'
-      - 'tests/e2e/yolo-mode.py'
-      - 'vitest.yolo.config.mjs'
-      - 'src/ui/permission-prompt.ts'
-      - 'src/ui/locale.ts'
-      - 'src/ai/permissions/**'
-      - 'tests/ai/permissions/**'
-      - 'tests/e2e/exact-command-approval.py'
-      - 'src/commands/chat-permission.ts'
-      - 'src/commands/chat.ts'
-      - 'src/commands/chat-permission-mode.ts'
-      - 'tests/commands/chat-permission-mode.test.ts'
-      - 'tests/e2e/mode-persistence.py'
-      - 'src/ui/resume-history.ts'
-      - 'src/ui/render.ts'
-      - 'tests/ui/resume-history.test.ts'
-      - 'tests/ui/render.test.ts'
-      - 'tests/ai/runtime/usage.test.ts'
-      - 'tests/ai/runtime/session*.test.ts'
-      - 'src/ai/runtime/usage.ts'
-      - 'src/ai/runtime/session*.ts'
-      - 'tests/e2e/resume-history-visibility.py'
-      - 'src/types.ts'
-      - 'tests/runtime/*hook*.test.ts'
-      - 'tests/ai/tools/index.test.ts'
-      - 'tests/e2e/permission-hook-fallback.py'
-      - 'tests/ai/adapters/openai-history-images.test.ts'
-      - 'tests/e2e/text-model-resume.py'
-      - 'tests/e2e/persistent-command-approval.py'
-      - 'tests/commands/chat-permission*.test.ts'
-      - 'tests/ui/permission-prompt.test.ts'
-      - '.github/workflows/permission-hooks.yml'
   pull_request:
     paths:
       - 'src/runtime/hooks-runner.ts'
@@ -81,9 +43,21 @@ on:
       - 'tests/commands/chat-permission*.test.ts'
       - 'tests/ui/permission-prompt.test.ts'
       - '.github/workflows/permission-hooks.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - 'tests/support/tty.ts'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   permission-hooks:
     strategy:

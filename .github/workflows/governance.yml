@@ -3,20 +3,66 @@ on:
   push:
     branches: [master]
   pull_request: {}
+  merge_group: {}
   workflow_dispatch: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Classify conservative documentation-only PRs
+        id: classify
+        shell: bash
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+          else
+            git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" "$CI_HEAD_SHA"
+            node .github/scripts/ci-plan.mjs docs
+          fi
   governance:
+    # Keep all three existing branch-protection contexts, including docs-only PRs.
+    name: governance (${{ matrix.os }})
+    needs: changes
+    if: ${{ always() }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ needs.changes.outputs.docs_only == 'true' && 'ubuntu-latest' || matrix.os }}
     steps:
+      - name: Require successful change classification
+        shell: bash
+        env:
+          RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          test "$RESULT" = success
+          case "$DOCS_ONLY" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only PR accepted
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo 'Documentation-only PR; required check completed without dependency installation.'
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+        if: needs.changes.outputs.docs_only != 'true'
       - run: npm run test:governance
+        if: needs.changes.outputs.docs_only != 'true'
       - run: npm run governance:check
+        if: needs.changes.outputs.docs_only != 'true'
+      - name: CI planning and real Vitest shard regressions
+        if: needs.changes.outputs.docs_only != 'true'
+        run: node --test .github/ci/*.test.mjs

@@ -9,36 +9,9 @@ name: Desktop Cross-Platform Tests
 # needs the sidecar repos and has unrelated Windows temp-dir teardown flakiness.
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/**'
-      - 'src/runtime/bundled-yzj-cli.ts'
-      - 'src/runtime/enterprise-cli-*.ts'
-      - 'data/skills/dingtalk-cli/**'
-      - 'data/skills/feishu-cli/**'
-      - 'data/skills/wecom-cli/**'
-      - 'src/commands/yzj-cli.ts'
-      - 'src/ai/skills/defaults.ts'
-      - 'data/yzj-cli/**'
-      - 'data/skills/yzj-cli/**'
-      - 'tests/runtime/*yzj-cli*.test.ts'
-      - 'tests/commands/yzj-cli.test.ts'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'src/ai/runtime/**'
-      - 'src/runtime/task-host/**'
-      - 'src/ai/adapters/**'
-      - 'src/ai/providers/kimi-models.ts'
-      - 'src/ai/memory/segment.ts'
-      - 'src/ai/memory/layered-store.ts'
-      - 'src/platform/mcp/python-server.ts'
-      - 'tests/platform/mcp/python-server.test.ts'
-      - 'scripts/read-kimi-coding-models.mjs'
-      - 'scripts/verify-packaged-kimi-smoke-result.mjs'
-      - 'scripts/check-desktop-sibling-pins.mjs'
-      - '.github/workflows/desktop-cross-platform.yml'
-      - '.github/workflows/desktop-release.yml'
   pull_request:
     paths:
       - 'desktop/**'
@@ -68,7 +41,25 @@ on:
       - 'scripts/check-desktop-sibling-pins.mjs'
       - '.github/workflows/desktop-cross-platform.yml'
       - '.github/workflows/desktop-release.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sibling-pin-consistency:
@@ -136,7 +127,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -249,7 +242,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 

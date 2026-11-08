@@ -9,9 +9,45 @@ import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createTeardownSteps } from '../support/teardown-steps.js';
 import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners, teardownOverrunError } from '../support/activity-owner-teardown.js';
+import { OwnedChatFixtures } from '../support/owned-chat-fixture.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
+
+const ownedFixtureState = vi.hoisted(() => ({ manager: undefined as OwnedChatFixtures | undefined }));
+vi.mock('../../src/ui/input.js', async original => {
+  const actual = await original<typeof import('../../src/ui/input.js')>();
+  class FixtureInputReader extends actual.InputReader {
+    private fixtureScope = ownedFixtureState.manager?.readerScope();
+    read(prompt: string, options?: Parameters<typeof actual.InputReader.prototype.read>[1]) {
+      const manager = ownedFixtureState.manager;
+      if (!manager || !this.fixtureScope) return super.read(prompt, options);
+      const next = manager.readOptions(this.fixtureScope, options);
+      return manager.readWithGate(this.fixtureScope, prompt, () => super.read(prompt, next));
+    }
+  }
+  return { ...actual, InputReader: FixtureInputReader };
+});
+vi.mock('../../src/runtime/conversation-activity/owner-launcher.js', async original => {
+  const actual = await original<typeof import('../../src/runtime/conversation-activity/owner-launcher.js')>();
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const { ACTIVITY_STORAGE_NAMES } = await import('../../src/runtime/conversation-activity/storage-permissions.js');
+  return { ...actual, ensureConversationActivityOwner: (config: Parameters<typeof actual.ensureConversationActivityOwner>[0], options: Parameters<typeof actual.ensureConversationActivityOwner>[1] = {}) => {
+    const manager = ownedFixtureState.manager;
+    if (!manager) return actual.ensureConversationActivityOwner(config, options);
+    const scope = manager.ownerScope(config.dataRoot);
+    const delegate = options.spawn ?? spawn;
+    const result = actual.ensureConversationActivityOwner(config, { ...options, spawn: (command, argv, spawnOptions) => {
+      manager.validateSpawn(scope, argv, {entryPath:fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js', import.meta.url)),configFile:join(config.dataRoot,ACTIVITY_STORAGE_NAMES.config)});
+      const child = delegate(command, argv, spawnOptions);
+      manager.recordChild(scope, child);
+      return child;
+    } });
+    manager.observeReady(scope, result);
+    return result;
+  } };
+});
 
 const watchdogEvents = vi.hoisted(() => [] as string[]);
 vi.mock('../../src/commands/chat-runtime-config.js', async importOriginal => {
@@ -907,18 +943,43 @@ function findReadyPromptIndex(lines: string[]): number {
   });
 }
 
+// Capture the reporter sink before per-case fake TTY streams are installed.
+const inputReadyDiagnosticWrite = process.stderr.write.bind(process.stderr);
+const inputReadyResourceTypes = new Set(['Timeout', 'Immediate', 'FSReqCallback', 'FSReqPromise', 'PipeWrap', 'TTYWrap', 'TCPServerWrap', 'TCPSocketWrap', 'MessagePort', 'ProcessWrap']);
+
 async function waitForInputTurnReady(harness: ReturnType<typeof createTtyHarness>): Promise<void> {
-  await waitFor(() => {
-    expectPromptVisible(harness);
-    expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
-    const lines = harness.screen.lines();
-    const hasLiveActivity = lines.some((line) => {
-      const trimmed = line.trim();
-      return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
-    });
-    expect(hasLiveActivity).toBe(false);
-  }, { timeoutMs: 3_000 });
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  const startedAt = performance.now();
+  try {
+    await waitFor(() => {
+      expectPromptVisible(harness);
+      expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+      const lines = harness.screen.lines();
+      const hasLiveActivity = lines.some((line) => {
+        const trimmed = line.trim();
+        return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
+      });
+      expect(hasLiveActivity).toBe(false);
+    }, { timeoutMs: 3_000 });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } catch (error) {
+    try {
+      const lines = harness.screen.lines();
+      const resources: Record<string, number> = {};
+      for (const type of process.getActiveResourcesInfo()) {
+        const key = inputReadyResourceTypes.has(type) ? type : 'other';
+        resources[key] = (resources[key] ?? 0) + 1;
+      }
+      inputReadyDiagnosticWrite(`[fixture-input-ready-failure] ${JSON.stringify({
+        node: process.version, platform: process.platform, arch: process.arch,
+        elapsedMs: Math.round(performance.now() - startedAt), requestedTimeoutMs: 3_000,
+        dataListenerCount: harness.emitter.listenerCount('data'), screenLineCount: lines.length,
+        promptRowIndices: lines.flatMap((line, index) => line.includes('❯') ? [index] : []).slice(0, 8),
+        liveActivityRowIndices: lines.flatMap((line, index) => /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(line.trim()) ? [index] : []).slice(0, 8),
+        rawOutputLength: harness.output.raw.length, resources,
+      })}\n`);
+    } catch { /* Diagnostics cannot replace the original assertion. */ }
+    throw error;
+  }
 }
 
 function findLineIndex(lines: string[], pattern: string | RegExp): number {
@@ -1202,6 +1263,8 @@ vi.mock('../../src/ui/model-selector.js', () => ({
 // Windows CI runners spend 7.6-9.9s median per case here; 20s keeps occasional slow cases (Node 24) from timing out.
 describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const tempDirs: string[] = [];
+  const ownedChats = new OwnedChatFixtures(() => tempDirs, { cleanupTimeoutMs: TEARDOWN_BUDGET_MS });
+  ownedFixtureState.manager = ownedChats;
   let originalConfigDir: string | undefined;
   let originalHome: string | undefined;
   let originalDisableGlobalPlugins: string | undefined;
@@ -1267,6 +1330,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   };
 
   beforeEach(() => {
+    ownedChats.beforeCase();
     resetAdapterState();
     watchdogEvents.length=0;
     mockSelectModel.mockReset();
@@ -1282,11 +1346,12 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     reportWorkerResources('before-case');
   });
 
-  afterAll(() => {
-    observeOwnCrashReports();
-    if (diagnosticReadFailures.length) {
-      throw new AggregateError(diagnosticReadFailures, 'fixture_fatal_diagnostic_read_failed');
-    }
+  afterAll(async () => {
+    const teardown = createTeardownSteps('fixture final cleanup');
+    await teardown.step(() => ownedChats.closeAll());
+    await teardown.step(() => observeOwnCrashReports());
+    if (diagnosticReadFailures.length) teardown.fail(new AggregateError(diagnosticReadFailures, 'fixture_fatal_diagnostic_read_failed'));
+    teardown.finish();
   });
 
   afterEach(async () => {
@@ -1298,16 +1363,19 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const teardownDeadline = teardownStartedAt + TEARDOWN_BUDGET_MS;
     const teardown = createTeardownSteps('用例收尾（#145）');
     const step = teardown.step;
+    await step(() => ownedChats.closeAll());
+    let canRestore = false;
+    await step(() => { ownedChats.assertCanRestoreAndDelete(); canRestore = true; });
     await step(() => observeOwnCrashReports());
     await step(() => { cwdSpy?.mockRestore(); cwdSpy = undefined; });
-    await step(() => {
+    if (canRestore) await step(() => {
       if (originalConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = originalConfigDir;
       if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
       if (originalDisableGlobalPlugins === undefined) delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
       else process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     });
 
-    const caseDirs = tempDirs.splice(0);
+    const caseDirs = canRestore ? tempDirs.splice(0) : [...tempDirs];
     // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
     // 一个文件跑完累积几十个常驻进程。还在启动中的 owner 先等它的 status 落盘再收；收不掉的按原因判本用例失败（闸门）。
     // 删目录之后按删除前算好的前缀（原始路径 + realpath）再扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出）。
@@ -1315,14 +1383,17 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，只删目录，PR 中列为未覆盖项。
     const report = await teardownCaseOwners({
       dirs: caseDirs, deadline: teardownDeadline, posix: process.platform !== 'win32', step,
-      removeDir: (dir, deadline) => removeTempDirWithRetry(dir, deadline),
+      removeDir: (dir, deadline) => {
+        if (!canRestore) throw new Error('fixture_owned_work_still_active');
+        return removeTempDirWithRetry(dir, deadline);
+      },
     });
     if (report.reclaimFailed) teardown.fail(report.error);
     const ownerSurvivors = report.survivors;
 
-    await step(() => vi.resetModules());
-    await step(() => vi.clearAllMocks());
-    await step(() => resetAdapterState());
+    if (canRestore) await step(() => vi.resetModules());
+    if (canRestore) await step(() => vi.clearAllMocks());
+    if (canRestore) await step(() => resetAdapterState());
     // #128（master）：收尾期间才以失败结束的会话在这里断言；放在清理步骤之后，迟到失败要报出来但不能让临时目录和 mock 漏清。
     await step(() => expect(lateChatFailures.splice(0)).toEqual([]));
     // 第 9/10 轮 DS：核对实际总耗时，越过“预算 + 余量”时报可读的失败（上面三步是同步重置，只能事后核对）。
@@ -1333,6 +1404,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
       teardown.fail(new Error(`用例收尾发现未按产品入口正常退休的 activity owner（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.budget === undefined ? '' : ` budget=${owner.budget}`}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
     }
+    await step(() => ownedChats.assertNoUnobservedErrors());
     teardown.finish();
   });
 
@@ -1347,13 +1419,14 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const harness=createTtyHarness(180,40),tty=process.stdout.isTTY;process.stdout.isTTY=true;
     const sigints=process.listeners('SIGINT'),resizes=process.stdout.listeners('resize');
     try{
-      const program=new Command();registerChatCommands(program);const pending=trackChat(program.parseAsync(['node','xiaok','chat']));
+      const program=new Command();registerChatCommands(program);const pending=trackChat(ownedChats.start(program, ['node','xiaok','chat'], harness));
       await waitForInputTurnReady(harness);expect(harness.screen.text()).toContain(alias);expect(harness.screen.text()).toContain('XIAOK_CONFIG_DIR');
       harness.send('hello\r');await waitFor(()=>adapterCalls.length>0);await waitForInputTurnReady(harness);
       harness.send('/exit\r');await pending;
       expect(harness.output.normalized).not.toMatch(/AggregateError|chat_finalization_unconfirmed|crash report/);
       expect(existsSync(join(target,'sessions'))?readdirSync(join(target,'sessions')).filter(p=>p.endsWith('.json')):[]).toEqual([]);
-    }finally{
+    }catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally{
+      await ownedChats.close(harness);
       for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener)&&isResizeListener(listener))process.stdout.removeListener('resize',listener);
       await settleLateChats(harness); harness.restore();process.stdout.isTTY=tty;attachSpy.mockRestore();
@@ -1386,7 +1459,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         try {
           const program = new Command();
           registerChatCommands(program);
-          const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+          const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
           await waitForInputTurnReady(harness);
           expect(harness.output.normalized).not.toMatch(/这个项目自带了|逐条确认|\[y\/N\]|已开启后台任务跟进/);
           expect(readdirSync(configDir)).not.toContain('project-rule-adoptions.json');
@@ -1395,7 +1468,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           expect(mergeRules(settings).allowRules).toEqual(shared ? rules : []);
           harness.send('/exit\r');
           await pending;
-        } finally {
+        } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
           for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
           for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
             if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
@@ -1404,7 +1478,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           await settleLateChats(harness); harness.restore();
         }
       }
-    } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
+    } finally { ownedChats.assertCanRestoreAndDelete(); process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
   }, 20_000);
 
   it.each([[24, 'ghostty'], [12, 'ghostty'], [24, 'wezterm'], [12, 'wezterm']] as const)('keeps pasted images within the actual chat content margin on a %s-row %s terminal', async (rows, terminal) => {
@@ -1435,7 +1509,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
     try {
       const program = new Command(); registerChatCommands(program);
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
       await waitForInputTurnReady(harness);
       setPastedImagePath(0, file);
       harness.send('inspect [image 0]'); harness.send('\r');
@@ -1461,7 +1535,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
       }
       harness.send('/exit'); harness.send('\r'); await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       process.stdout.isTTY = stdoutIsTTY;
       for (const [key, value] of Object.entries(originalEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
@@ -1483,12 +1558,12 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const {registerChatCommands}=await import('../../src/commands/chat.js');const harness=createTtyHarness(100,24);
     const sigints=process.listeners('SIGINT'),resizes=process.stdout.listeners('resize');
     try{
-      const program=new Command();registerChatCommands(program);const pending=trackChat(program.parseAsync(['node','xiaok','chat','--yolo']));
+      const program=new Command();registerChatCommands(program);const pending=trackChat(ownedChats.start(program, ['node','xiaok','chat','--yolo'], harness));
       await waitForInputTurnReady(harness);harness.send('/help\r');await waitFor(()=>expect(harness.output.normalized).toContain('/settings'));
       harness.send('/settings\r');await waitFor(()=>expect(harness.output.normalized).toContain('defaultProvider'));
       expect(get).not.toHaveBeenCalled();expect(harness.output.normalized).not.toContain('首次使用需要先登录');expect(harness.output.normalized).not.toContain('尚未配置任何 AI provider');expect(harness.output.normalized).not.toContain('locked-canary');expect(harness.output.normalized).not.toContain('app-secret-canary');
       harness.send('/exit\r');await pending;expect(readFileSync(join(configDir,'config.json'),'utf8')).toBe(before);
-    }finally{backend.mockRestore();for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener))process.stdout.removeListener('resize',listener as ()=>void);await settleLateChats(harness);harness.restore();}
+    }catch(error){ownedChats.noteFailure(harness,error);throw error;}finally{await ownedChats.close(harness);backend.mockRestore();for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener))process.stdout.removeListener('resize',listener as ()=>void);await settleLateChats(harness);harness.restore();}
   },20_000);
 
   it.each(['kimi','glm','minimax'])('continues first-run auto chat after selecting %s Coding Plan', async provider => {
@@ -1509,7 +1584,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigint=process.listeners('SIGINT'), resize=process.stdout.listeners('resize');
     try {
       const program=new Command();registerChatCommands(program);
-      const pending=trackChat(program.parseAsync(['node','xiaok','chat','--auto']));
+      const pending=trackChat(ownedChats.start(program, ['node','xiaok','chat','--auto'], harness));
       await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或 provider id'));
       harness.send(provider+'\r');
       await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或服务 id'));
@@ -1520,13 +1595,18 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(harness.output.normalized).not.toContain('test-bootstrap-hidden-key');
       const saved=JSON.parse(readFileSync(join(configDir,'config.json'),'utf8'));
       expect(saved.defaultProvider).toBe(provider);
-      expect(saved.providers[provider].apiKey).toBe('test-bootstrap-hidden-key');
+      expect(saved.providers[provider].apiKey).toBeUndefined();
+      expect(JSON.stringify(saved)).not.toContain('test-bootstrap-hidden-key');
+      const { ProtectedJsonFile } = await import('../../src/utils/protected-json.js');
+      const restored = new ProtectedJsonFile(join(configDir, 'config.json')).read() as { providers: Record<string, { apiKey: string }> };
+      expect(restored.providers[provider].apiKey).toBe('test-bootstrap-hidden-key');
       harness.send('初始化后继续开发\r');
       await waitFor(()=>expect(adapterCalls.some(call=>call.lastUserText==='初始化后继续开发')).toBe(true));
       await waitForInputTurnReady(harness);
       harness.send('/exit\r'); await pending;
       expect(crashSpy).not.toHaveBeenCalled();
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for(const listener of process.listeners('SIGINT'))if(!sigint.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       await settleLateChats(harness); harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
@@ -1551,7 +1631,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const resizeListeners=process.stdout.listeners('resize');
     try {
       const program=new Command(); registerChatCommands(program);
-      const pending=trackChat(program.parseAsync(['node','xiaok','chat','--auto']));
+      const pending=trackChat(ownedChats.start(program, ['node','xiaok','chat','--auto'], harness));
       await waitForInputTurnReady(harness);
       harness.send(`问题输入恢复回归 ${scenario}`); harness.send('\r');
       await waitFor(()=>expect(harness.screen.text()).toContain('方案二'));
@@ -1578,7 +1658,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       await waitFor(()=>expect(adapterCalls.some(c=>c.lastUserText==='下一轮')).toBe(true));
       await waitForInputTurnReady(harness);
       harness.send('/exit');harness.send('\r'); await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for(const listener of process.listeners('SIGINT')) if(!sigintListeners.includes(listener))process.removeListener('SIGINT',listener);
       for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       await settleLateChats(harness); harness.restore();
@@ -1610,7 +1691,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
           const program = new Command();
           registerChatCommands(program);
           const args = ['node','xiaok','chat','--auto', ...(sessionId ? ['--resume',sessionId] : [])];
-          const pending = trackChat(program.parseAsync(args));
+          const pending = trackChat(ownedChats.start(program, args, harness));
           // Surface startup failures immediately instead of hanging on a missing prompt.
           let startupError: unknown;
           void pending.catch(error => {startupError = error;});
@@ -1642,13 +1723,14 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
             expect(JSON.stringify(saved.messages)).toContain(`session release regression ${index}`);
           }
           expect(readdirSync(sessionsDir).filter(entry => entry.endsWith('.json'))).toHaveLength(1);
-        } finally {
+        } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
           for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
           for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
           await settleLateChats(harness); harness.restore();
         }
       }
-    } finally {crashSpy.mockRestore();}
+    } finally {ownedChats.assertCanRestoreAndDelete();crashSpy.mockRestore();}
   }, 20000);
 
   it.skipIf(process.platform==='win32')('retires the activity owner a case started so later cases do not inherit detached owners (#145)', async () => {
@@ -1679,7 +1761,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--auto'], harness));
       await waitForInputTurnReady(harness);
       harness.send('/exit');
       harness.send('\r');
@@ -1699,7 +1781,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
 
       expect(await retireActivityOwnersUnder([rootDir])).toEqual([]);
       expect(() => process.kill(ownerPid!, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
-    } finally {
+    } catch(error) { ownedChats.noteFailure(harness,error); throw error; } finally {
+      await ownedChats.close(harness);
       harness.restore();
     }
   });
@@ -1735,7 +1818,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--auto'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send('/exit');
@@ -1757,7 +1840,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(saved.intentDelegation?.ownership?.state).toBe('released');
       expect(saved.intentDelegation?.ownership?.ownerInstanceId).toBeUndefined();
       expect(saved.intentDelegation?.ownership?.previousOwnerInstanceId).toMatch(/^inst_/);
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -1819,7 +1903,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--auto'], harness));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -1840,7 +1924,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(clonedModels).toContain('gpt-5.4');
       expect(adapterCalls.some((call) => call.lastUserText.includes('执行 skill "fork-research"'))).toBe(true);
       expect(harness.output.normalized).not.toContain('Error:');
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -1894,7 +1979,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -1919,7 +2004,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(clonedModels).toContain('gpt-5.4');
       expect(adapterCalls.some((call) => call.toolNames.includes('subagent') && call.lastUserText.includes('请后台规划'))).toBe(true);
       expect(harness.output.normalized).not.toContain('Error:');
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -1970,7 +2056,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2012,7 +2098,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE;
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2064,7 +2151,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2091,7 +2178,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE;
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2137,7 +2225,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2153,7 +2241,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -2211,7 +2300,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     let pending: Promise<unknown> | undefined;
     try {
       const program = new Command(); registerChatCommands(program);
-      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
       await waitForInputTurnReady(harness);
       harness.send('Check permission draft handoff'); harness.send('\r');
       await waitFor(() => { expect(streamStarted).toBe(true); });
@@ -2234,8 +2323,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect.soft(harness.screen.text()).toContain('retained draft edited');
       harness.send('\x15'); harness.send('/exit'); harness.send('\r');
       await pending; pending = undefined;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
       releaseTool(); releaseAnswer();
+      await ownedChats.close(harness);
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
       for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
       for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) {
@@ -2276,7 +2366,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2324,7 +2414,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -2373,7 +2464,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2397,7 +2488,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_EXTERNAL_FILE_A;
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2457,7 +2549,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2505,7 +2597,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(watchdogEvents).toEqual(expect.arrayContaining(['model_request_started','tool_started','tool_finished']));
       const finishIndex=watchdogEvents.indexOf('tool_finished');
       expect(watchdogEvents.slice(finishIndex+1)).toContain('model_request_started');
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_EXTERNAL_FILE_A;
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2554,7 +2647,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2592,7 +2685,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -2638,7 +2732,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2655,7 +2749,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -2733,7 +2828,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2751,7 +2846,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       chatModule.__setIntentBoundaryResolverFactoryForTests(undefined);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2806,7 +2902,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -2834,7 +2930,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       chatModule.__setIntentBoundaryResolverFactoryForTests(undefined);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -2919,7 +3016,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
       await waitFor(() => {
@@ -2950,7 +3047,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3033,7 +3131,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
       harness.send('resume 继续提问');
@@ -3057,7 +3155,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3102,7 +3201,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -3123,7 +3222,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('\x15');
       harness.send('\x04');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3172,7 +3272,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send('\x1b[Z');
@@ -3215,7 +3315,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('\x15');
       harness.send('\x04');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3252,7 +3353,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
     const { registerChatCommands } = await import('../../src/commands/chat.js');
-    const harness = createTtyHarness(120, 32);
+    const harness = createTtyHarness(120, 48);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
 
@@ -3260,7 +3361,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -3299,7 +3400,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3325,7 +3427,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
     try {
       const program = new Command(); registerChatCommands(program);
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--auto']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--auto'], h));
       await waitForInputTurnReady(h);
       h.send('/mode\r');
       await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：auto）'));
@@ -3346,7 +3448,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       expect(JSON.parse(readFileSync(join(configDir, 'cli-permission-mode.json'), 'utf8')).mode).toBe('auto');
       expectSingleFooter(h.screen.lines());
       h.send('/exit\r'); await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(h, error); throw error; } finally {
+      await ownedChats.close(h);
       for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
       for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) {
             if (!isResizeListener(listener)) throw new TypeError('unexpected non-callable resize listener');
@@ -3387,7 +3490,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -3424,7 +3527,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3470,7 +3574,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send(localPath);
@@ -3485,7 +3589,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3531,7 +3636,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send(`${sourcePath} 生成报告，然后生成幻灯片`);
@@ -3548,7 +3653,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3595,7 +3701,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -3638,7 +3744,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3689,6 +3796,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }, null, 2));
 
     process.env.XIAOK_CONFIG_DIR = configDir;
+    // Establish the real protected credential revision before the public model-only edit.
+    const { ProtectedJsonFile } = await import('../../src/utils/protected-json.js');
+    new ProtectedJsonFile(join(configDir, 'config.json')).read();
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
     mockSelectModel.mockResolvedValue({
       modelId: 'kimi-k2-thinking',
@@ -3711,7 +3821,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         const program = new Command();
         registerChatCommands(program);
 
-        const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+        const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
         await waitForInputTurnReady(harness);
         harness.send('/models');
@@ -3735,7 +3845,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         harness.send('/exit');
         harness.send('\r');
         await pending;
-      } finally {
+      } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
         for (const listener of process.listeners('SIGINT')) {
           if (!sigintListeners.includes(listener)) {
             process.removeListener('SIGINT', listener);
@@ -3759,7 +3870,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         const program = new Command();
         registerChatCommands(program);
 
-        const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+        const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], secondHarness));
 
         await waitForInputTurnReady(secondHarness);
         await waitFor(() => {
@@ -3769,7 +3880,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         secondHarness.send('/exit');
         secondHarness.send('\r');
         await pending;
-      } finally {
+      } catch (error) { ownedChats.noteFailure(secondHarness, error); throw error; } finally {
+      await ownedChats.close(secondHarness);
         for (const listener of process.listeners('SIGINT')) {
           if (!sigintListeners.includes(listener)) {
             process.removeListener('SIGINT', listener);
@@ -3817,6 +3929,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }, null, 2));
 
     process.env.XIAOK_CONFIG_DIR = configDir;
+    // Establish the real protected credential revision before the public model-only edit.
+    const { ProtectedJsonFile } = await import('../../src/utils/protected-json.js');
+    new ProtectedJsonFile(join(configDir, 'config.json')).read();
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
     mockSelectModel.mockResolvedValue({
       modelId: 'kimi-k3',
@@ -3842,7 +3957,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send('/models');
@@ -3872,7 +3987,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         label: 'Kimi K3',
       });
       expect(persistedConfig.models['kimi-k3'].runtimeOptions).toBeUndefined();
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -3936,6 +4052,9 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }, null, 2));
 
     process.env.XIAOK_CONFIG_DIR = configDir;
+    // Establish the real protected credential revision before the public model-only edit.
+    const { ProtectedJsonFile } = await import('../../src/utils/protected-json.js');
+    new ProtectedJsonFile(join(configDir, 'config.json')).read();
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
     const defaultK3 = {
@@ -4019,7 +4138,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--skill-debug']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--skill-debug'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4072,7 +4191,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       promptBuildSpy.mockRestore();
       statusBarUpdateSpy.mockRestore();
       for (const listener of process.listeners('SIGINT')) {
@@ -4119,7 +4239,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4136,7 +4256,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4187,7 +4308,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       chatModule.registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       harness.send('! sudo -v');
@@ -4205,7 +4326,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       chatModule.__setShellEscapeExecutorForTests(undefined);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
@@ -4251,7 +4373,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
       expect(harness.output.normalized).not.toContain('[platform] degraded capabilities detected');
@@ -4304,7 +4426,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4352,7 +4475,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4401,7 +4524,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4450,7 +4574,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4519,7 +4643,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4564,7 +4689,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4610,7 +4735,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4655,7 +4781,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4685,7 +4811,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4730,7 +4857,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4778,7 +4905,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4834,7 +4962,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -4899,7 +5027,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -4963,7 +5092,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5014,7 +5143,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE_A;
       delete process.env.XIAOK_TEST_PROJECT_FILE_B;
       delete process.env.XIAOK_TEST_PROJECT_FILE_C;
@@ -5100,7 +5230,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5141,7 +5271,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -5206,7 +5337,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5238,7 +5369,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE_A;
       delete process.env.XIAOK_TEST_PROJECT_FILE_B;
       delete process.env.XIAOK_TEST_PROJECT_FILE_C;
@@ -5287,7 +5419,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5319,7 +5451,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -5484,7 +5617,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5574,7 +5707,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -5757,7 +5891,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -5818,7 +5952,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE_A;
       delete process.env.XIAOK_TEST_PROJECT_FILE_B;
       delete process.env.XIAOK_TEST_PROJECT_FILE_C;
@@ -6005,7 +6140,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6090,7 +6225,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       delete process.env.XIAOK_TEST_PROJECT_FILE_A;
       delete process.env.XIAOK_TEST_PROJECT_FILE_B;
       delete process.env.XIAOK_TEST_PROJECT_FILE_C;
@@ -6126,7 +6262,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6169,7 +6305,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6202,7 +6339,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6235,7 +6372,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6268,7 +6406,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat', '--resume', sessionId]));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat', '--resume', sessionId], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6292,7 +6430,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
 
       expect(harness.output.normalized).toMatch(/已退出。|再见！/u);
       expect(harness.output.normalized).not.toContain('echo:输出30行');
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6337,7 +6476,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6378,7 +6517,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6423,7 +6563,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6462,7 +6602,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6507,7 +6648,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6534,7 +6675,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6579,7 +6721,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       const program = new Command();
       registerChatCommands(program);
 
-      const pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
       await waitForInputTurnReady(harness);
 
@@ -6612,7 +6754,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
-    } finally {
+    } catch (error) { ownedChats.noteFailure(harness, error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) {
           process.removeListener('SIGINT', listener);
@@ -6662,7 +6805,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     try {
       const program = new Command();
       registerChatCommands(program);
-      pending = trackChat(program.parseAsync(['node', 'xiaok', 'chat']));
+      pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
       await waitForInputTurnReady(harness);
       harness.send('teardown race turn');
       harness.send('\r');
@@ -6692,7 +6835,8 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       // 不能靠重建目录“修好”：transcript 不应把被 teardown 删除的目录写回来。
       expect(existsSync(join(configDir, 'transcripts'))).toBe(false);
       expect(recordSpy.mock.calls.length).toBeGreaterThan(recordsBeforeRemoval);
-    } finally {
+    } catch(error) { ownedChats.noteFailure(harness,error); throw error; } finally {
+      await ownedChats.close(harness);
       for (const listener of process.listeners('SIGINT')) {
         if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
       }
@@ -6704,6 +6848,63 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       recordSpy.mockRestore();
     }
   }, 20_000);
+  it('closes a real owned chat and activity process before restoring a failed startup fixture', async () => {
+    const root = join(tmpdir(), `xiaok-owned-chat-close-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(root, 'config'), projectDir = join(root, 'project');
+    tempDirs.push(root); mkdirSync(configDir, {recursive:true}); mkdirSync(projectDir, {recursive:true});
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{model:'gpt-4o',apiKey:'test',baseUrl:'http://localhost:1/v1'}},defaultMode:'interactive',channels:{}}));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const {registerChatCommands} = await import('../../src/commands/chat.js');
+    let releaseGate!: () => void, reachedGate!: () => void;
+    const gate = new Promise<void>(resolve => {releaseGate=resolve;});
+    const reached = new Promise<void>(resolve => {reachedGate=resolve;});
+    const harness = createTtyHarness(120, 24);
+    let secondHarness: ReturnType<typeof createTtyHarness> | undefined;
+    ownedChats.setNextReadGate(() => {reachedGate();return gate;});
+    try {
+      const program = new Command(); registerChatCommands(program);
+      const pending = ownedChats.start(program, ['node','xiaok','chat'], harness);
+      await reached;
+      await waitFor(() => {
+        const state=ownedChats.snapshot(harness);
+        expect(state.spawnedOwners).toBeGreaterThan(0);
+        expect(state.ownerReadyCount).toBeGreaterThan(0);
+      }, {timeoutMs:3_000});
+      const original = new Error('controlled pre-input fixture assertion');
+      let retained: unknown;
+      try {throw original;} catch(error) {
+        ownedChats.noteFailure(harness,error);
+        const closing = ownedChats.close(harness);
+        releaseGate();
+        await closing;
+        retained=error;
+      }
+      await pending;
+      expect(retained).toBe(original);
+      expect(ownedChats.snapshot(harness)).toMatchObject({pendingSettled:true,closed:true,poisoned:false,liveOwners:0});
+      expect(ownedChats.snapshot(harness).closedOwners).toBeGreaterThan(0);
+      harness.restore();
+      secondHarness = createTtyHarness(120, 24);
+      const second = new Command(); registerChatCommands(second);
+      const next = ownedChats.start(second, ['node','xiaok','chat'], secondHarness);
+      await waitForInputTurnReady(secondHarness);
+      expect(harness.emitter.listenerCount('data')).toBe(0);
+      secondHarness.send('/exit\r');
+      await next;
+      await ownedChats.close(secondHarness);
+      expect(ownedChats.snapshot(secondHarness)).toMatchObject({pendingSettled:true,closed:true,liveOwners:0});
+    } catch(error) {
+      ownedChats.noteFailure(secondHarness ?? harness,error);
+      throw error;
+    } finally {
+      releaseGate();
+      await ownedChats.closeAll();
+      harness.restore();
+      secondHarness?.restore();
+    }
+  }, 20_000);
+
 });
 
 // EventEmitter returns real functions; guard the public callback shape without wrapping identity.

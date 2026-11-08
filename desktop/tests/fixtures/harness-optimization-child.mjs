@@ -15,8 +15,19 @@ function reportReady(payload) {
     process.stdout.write(`${JSON.stringify(payload)}\n`);
   });
 }
+// The fixture owns these resources until EOF or OS-enforced process death.
+const owned = [];
+process.stdin.once('end', async () => {
+  for (const reference of owned) {
+    const resource = reference.deref();
+    if (!resource) continue;
+    if ('dispose' in resource) await resource.dispose();
+    else resource.release();
+  }
+});
 if (phase === 'initializing') {
   const lock = acquireHarnessOwnerLock(dataRoot);
+  owned.push(new WeakRef(lock));
   const prepared = await new HarnessOptimizationLifecycle(lock).prepare();
   // Deliberately no lasting reference to `lock`: the owner-lock module itself must keep the OS lock held.
   reportReady({ ready: true, ownerId: prepared.witness.ownerId });
@@ -27,6 +38,7 @@ if (phase === 'initializing') {
   const host = await createHarnessOptimizationRuntime({ dataRoot, profileId: 'profile', workspaceId: 'workspace',
     authorizeUser: ctx => ctx === actor, manifestLookup: () => manifest, now: () => now });
   globalThis.harnessOptimizationHost = host; // a live owner process retains its runtime, as desktop-services does
+  owned.push(new WeakRef(host));
   const state = await host.api.read();
   if (state.status !== 'ready') throw Error(state.reason);
   manifest = { id: 'manifest', ownerId: state.ownerId, profileId: 'profile', workspaceId: 'workspace',
