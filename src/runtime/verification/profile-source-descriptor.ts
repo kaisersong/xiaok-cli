@@ -23,7 +23,7 @@ export type ProfileSourceDescriptor =
   | Readonly<ProfileSourceBase & { readonly kind: 'goal-file-root'; readonly snapshotFormat: 'goal-file-root-v1' }>
   | Readonly<ProfileSourceBase & {
       readonly kind: 'sqlite-db';
-      readonly snapshotFormat: 'session-sqlite-v1' | 'loop-sqlite-v1' | 'goal-sqlite-v1' | 'writer-lock-sqlite-v1' | 'codex-native-sqlite-v1' | 'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1';
+      readonly snapshotFormat: 'session-sqlite-v1' | 'loop-sqlite-v1' | 'goal-sqlite-v1' | 'writer-lock-sqlite-v1' | 'codex-native-sqlite-v1' | 'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'|'timed-actions-sqlite-v1'|'harness-budget-sqlite-v1';
       readonly database: Readonly<{ readonly basename: string; readonly device: string; readonly inode: string }>;
     }>;
 export interface ProfileSourceDescriptorSet {
