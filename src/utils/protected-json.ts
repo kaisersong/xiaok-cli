@@ -23,7 +23,7 @@ function entries(value:unknown,path:string[]=[]):Array<{path:string[];value:stri
  return Object.entries(value).flatMap(([key,v])=>{if(key===META){if(path.length)throw Error('credential_reserved_input');return [];}const slot=[...path,key];if(isSensitiveCredentialPath(slot)){if(v===undefined||v===null)return [];if(typeof v!=='string')throw Error('credential_invalid_input');return [{path:slot,value:v}];}return entries(v,slot);});
 }
 function parse(raw:string):Record<string,unknown>{try{const v:unknown=JSON.parse(raw);if(!object(v))throw Error();return v;}catch{throw Error('credential_config_corrupt');}}
-/** Sensitive fields are absent on disk; only owner/field-bound credential references remain. */
+/** Sensitive fields are absent from this JSON file; only owner/field-bound credential references remain. */
 export class ProtectedJsonFile {
   readonly file:string;private readonly owner:string;
   constructor(file:string,private readonly backend:CredentialBackend=systemCredentialBackend()){
