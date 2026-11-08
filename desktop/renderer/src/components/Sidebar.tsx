@@ -1,9 +1,10 @@
+import { ASSISTANT_THREAD_ID } from '../lib/assistant-thread';
 import {reportScheduledReadFailure} from '../lib/scheduled-timed-action-error';
 import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal, Workflow, MessagesSquare } from 'lucide-react';
+import { Plus, Search, X, Bolt, CircleDot, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal, Workflow, MessagesSquare } from 'lucide-react';
 import { api, type ThreadResponse } from '../api';
 import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
@@ -68,7 +69,8 @@ interface SidebarDetailsRow {
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const { threads, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
+  const { threads: allThreads, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
+  const threads = allThreads.filter(thread => thread.id !== ASSISTANT_THREAD_ID);
   const [searchQuery, setSearchQuery] = useState('');
   const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -357,6 +359,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       <nav data-testid="sidebar-main-navigation" className="mx-2 mb-3 flex shrink-0 flex-col gap-0.5 border-b border-[var(--c-border)] pb-3">
         {[
           { label: t.sidebarNewTask, path: '/', icon: Plus, tab: 'tasks' as const },
+          { label: t.assistant.title, path: '/assistant', icon: CircleDot },
           { label: t.sidebarAutomations, path: '/automations', icon: Workflow, tab: 'scheduled' as const },
           { label: t.sidebarProjects, path: '/projects', icon: FolderKanban, tab: 'projects' as const },
           { label: t.sidebarCollaboration, path: '/collaboration', icon: MessagesSquare, tab: 'collaboration' as const },

@@ -1,0 +1,1 @@
+export const kimScores={category:{'求助/提问':0.1,'任务/待办':0.8,'决策/结论':0.02,'信息分享':0.02,'讨论观点':0.02,'闲聊寒暄':0.02,'无关/其他':0.02},category_top:'任务/待办' as const,sentiment:{'积极':0.1,'中性':0.8,'消极':0.1},sentiment_top:'中性' as const,importance:{dist:[0,0,0,1,0],expected:4},urgency:{dist:[0,0,0,1,0],expected:4},intensity:{dist:[0,1,0,0,0],expected:2},needs_attention:0.8,has_todo:0.9};

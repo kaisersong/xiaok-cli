@@ -34,7 +34,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('preserves provider default metadata for a legacy non-Kimi explicit model', () => {
+  it('preserves established schema-v1 metadata rather than applying a newly recommended default', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'openai',
@@ -55,7 +55,7 @@ describe('normalizeConfig', () => {
       label: 'GPT-4o',
       capabilities: ['tools'],
     });
-    expect(entry).not.toHaveProperty('runtimeOptions');
+    expect(entry.runtimeOptions).toBeUndefined();
   });
 
   it('inherits deepseek legacy wire capabilities during v1 upgrade instead of the new default', () => {
@@ -115,7 +115,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('pins a schema-v1 Kimi config without a model to the still-served K2.7 generation', () => {
+  it('keeps the official alias for a schema-v1 Kimi config without a model', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'custom',
@@ -132,14 +132,13 @@ describe('normalizeConfig', () => {
     expect(normalized.schemaVersion).toBe(2);
     expect(normalized.defaultModelId).toBe('kimi-default');
     // 原本 pin 的是裸 `kimi-k2.7`，但官方任何 endpoint 都没有这个 ID。
-    // `kimi-for-coding` 就是官方的 Kimi K2.7 Code，既有效又不跨代升级用户。
+    // 官方稳定别名现由 K2.8 Preview 服务。
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
-    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
-    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
+    // Schema-v1 migration preserves the established defaults; new catalog choices opt in explicitly.
+    expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 262_144 });
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
@@ -164,7 +163,7 @@ describe('normalizeConfig', () => {
       provider: 'kimi',
       model: 'kimi-for-coding',
     });
-    // 保留旧 alias 的 256K，不自动启用新 reasoning 默认。
+    // Schema-v1 migration preserves the established defaults; new catalog choices opt in explicitly.
     expect(normalized.models['kimi-default'].runtimeOptions).toEqual({ contextLimit: 262_144 });
     const normalizedModel = normalized.models['kimi-default'];
     expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();

@@ -1,0 +1,5 @@
+import {useEffect,useState} from 'react';
+import {getDesktopApi} from '../../shared/desktop';
+import {useLocale} from '../../contexts/LocaleContext';
+/** Startup owns the one-time legacy frontend handoff; Main acknowledges before removal. */
+export function LegacyMemoryCredentialMigration(){const{t}=useLocale(),[failed,setFailed]=useState(false),[attempt,setAttempt]=useState(0);useEffect(()=>{let active=true;if(!localStorage.getItem('xiaok:memory-config'))return;const api=getDesktopApi();if(!api)return;setFailed(false);void api.memory.getConfig().catch(()=>{if(active)setFailed(true);});return()=>{active=false;};},[attempt]);if(!failed)return null;return <div role="alert" className="fixed bottom-3 right-3 z-[100] max-w-sm rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-xs shadow-lg"><p>{t.secureCredentials.legacyMigrationFailed}</p><button type="button" onClick={()=>setAttempt(n=>n+1)} className="mt-2 text-[var(--c-accent)]">{t.secureCredentials.retryMigration}</button></div>;}

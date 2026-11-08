@@ -1,3 +1,4 @@
+import { parseUiJson, validateA2uiMessages } from '../../a2ui/index.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {getCompoundFinalPublicationBinding,type CompoundFinalPublicationTicket} from '../sol-pi/compound-publication-producer.js';
 import {computeSessionHistoryDigest} from '../../ai/runtime/session-store/store.js';
@@ -68,6 +69,8 @@ export interface TaskRunnerInput {
   persistObservationSnapshot?: (snapshot: AgentSessionSnapshot) => Promise<void>;
   /** Main-only, task/incarnation scoped; never accepted from a renderer draft. */
   executionPersistence?: DesktopExecutionPersistence;
+  /** Main-only input-bound wait port; never read from task creation or IPC data. */
+  askUser?: (input: {prompt:string;choices?:Array<{id:string;label:string}>;validateAnswer?:(answer:string)=>void}, signal?:AbortSignal) => Promise<string>;
   taskId: string;
   sessionId: string;
   prompt: string;
@@ -140,7 +143,7 @@ export interface InProcessTaskRuntimeHostOptions {
   acquireExecutionToken?: (taskId: string) => { release(): void };
   getExecutionPolicy?: (snapshot: TaskSnapshot) => TaskExecutionPolicy;
   authorizePreparation?: (taskId: string, marker: TaskMultiAgentPreparation) => void;
-  assertTaskAdmission?: (snapshot: TaskSnapshot) => Promise<void> | void;
+  assertTaskAdmission?: (snapshot: TaskSnapshot, kind?: 'live_answer') => Promise<void> | void;
   decideCancellation?: (snapshot: TaskSnapshot, reason: string) => Promise<TaskCancellationDecision>;
   /** Fixed main-owned adapter; the exact durable report is the checking ACK. */
   onDeliveryReport?: (report: HostDeliveryReport) => Promise<HostDeliveryReport>;
@@ -149,6 +152,7 @@ export interface InProcessTaskRuntimeHostOptions {
 }
 
 interface LiveSubscription {
+  livePreviews?: boolean;
   push(event: TaskEventRecord): void;
   close(): void;
 }
@@ -306,7 +310,7 @@ export function buildHistoryFromTaskSnapshots(
 
   const pairs: TaskHistoryPair[] = sorted.slice(overTaskBudget).map((snapshot) => ({
     taskId: snapshot.taskId,
-    user: { role: 'user', content: truncateContextText(snapshot.prompt, maxUserChars) },
+    user: { role: 'user', content: truncateContextText([snapshot.prompt,...snapshot.events.flatMap(event=>event.type==='question_resolved'&&event.answerText?[`User answer: ${event.answerText}`]:[])].join('\n'), maxUserChars) },
     assistant: { role: 'assistant', content: truncateContextText(formatAssistantContext(snapshot), maxAssistantChars) },
   }));
 
@@ -409,6 +413,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly sourceCloseFailures: unknown[] = [];
   private readonly sourceClosingExecutions = new Map<string, { promise: Promise<void>; execution?: ActiveExecution }>();
   private readonly questions = new NeedsUserQuestionCorrelator();
+  private readonly liveQuestionAnswers = new Map<string,{question:NeedsUserQuestion;execution:ActiveExecution;ready:boolean;signal:AbortSignal;validateAnswer?:(answer:string)=>void;resolve:(value:string)=>void;reject:(error:unknown)=>void}>();
   private readonly subscribers = new Map<string, Set<LiveSubscription>>();
   private readonly mutationChains = new Map<string, Promise<void>>();
   private readonly cancellingTaskIds = new Set<string>();
@@ -730,10 +735,10 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   async *subscribeTask(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }): AsyncIterable<DesktopTaskEvent> {
-    for await (const record of this.subscribeTaskRecords(taskId, options)) yield record.event;
+    for await (const record of this.subscribeTaskRecords(taskId, { ...options, livePreviews: true })) yield record.event;
   }
 
-  async *subscribeTaskRecords(taskId: string, options: { sinceIndex?: number; signal?: AbortSignal } = {}): AsyncIterable<TaskEventRecord> {
+  async *subscribeTaskRecords(taskId: string, options: { sinceIndex?: number; signal?: AbortSignal; livePreviews?: boolean } = {}): AsyncIterable<TaskEventRecord> {
     const start = options.sinceIndex ?? 0;
     if (!Number.isSafeInteger(start) || start < 0) throw new Error('invalid_task_event_cursor');
     options.signal?.throwIfAborted();
@@ -743,8 +748,25 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     let fault: Error | undefined;
     let snapshot!: TaskSnapshot;
     const subscription: LiveSubscription = {
+      livePreviews: options.livePreviews,
       push(record) {
         if (closed) return;
+        if (record.event.type === 'ui_preview') {
+          const incoming=record.event;
+          for (let i=queue.length-1;i>=0;i--) {
+            const queued=queue[i]!.event;
+            if (queued.type==='ui_preview' && (incoming.toolUseId==='all' || queued.toolUseId===incoming.toolUseId)) queue.splice(i,1);
+          }
+          let bytes=new TextEncoder().encode(incoming.preview?.content ?? '').length;
+          for (let i=queue.length-1;i>=0;i--) {
+            const queued=queue[i]!.event;
+            if (queued.type!=='ui_preview') continue;
+            const size=new TextEncoder().encode(queued.preview?.content ?? '').length;
+            if (bytes+size>2_000_000) queue.splice(i,1); else bytes+=size;
+          }
+          // Preview backpressure must never fault the durable task event stream.
+          if (queue.length>=1000) return;
+        }
         if (queue.length >= 1024) {
           fault = new Error('task_event_subscriber_backpressure');
           closed = true;
@@ -773,6 +795,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         options.signal?.throwIfAborted();
         if (!queue.length) { await new Promise<void>(resolve => { wake = resolve; }); continue; }
         const record = queue.shift()!;
+        if (record.event.type === 'ui_preview') { yield record; continue; }
         if (record.eventIndex < nextIndex) continue;
         if (record.eventIndex !== nextIndex) throw new Error('task_event_cursor_gap');
         nextIndex++;
@@ -790,8 +813,37 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return this.runSourceOperation(() => this.answerQuestionSourceOwned(input));
   }
 
+  private async askExecutionUser(taskId:string,execution:ActiveExecution,input:{prompt:string;choices?:Array<{id:string;label:string}>;validateAnswer?:(answer:string)=>void},outerSignal?:AbortSignal):Promise<string> {
+    const signal=outerSignal?AbortSignal.any([execution.controller.signal,outerSignal]):execution.controller.signal;
+    const current=()=>{if(this.activeExecutions.get(taskId)!==execution||execution.phase!=='runner')throw Error('SOL_PI_DESKTOP_EXECUTION_EXPIRED');signal.throwIfAborted();};
+    current();if(this.liveQuestionAnswers.has(taskId))throw Error('task_question_already_pending');
+    if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>2000||input.choices&&(input.choices.length>8||input.choices.some(c=>!c.id||c.id.length>80||!c.label||c.label.length>300)||new Set(input.choices.map(c=>c.id)).size!==input.choices.length))throw Error('task_question_invalid');
+    const question:NeedsUserQuestion={taskId,questionId:`question_${randomUUID()}`,kind:'freeform',prompt:input.prompt.trim(),...(input.choices?.length?{choices:input.choices.map(c=>({...c}))}:{})};
+    let resolve!:(value:string)=>void,reject!:(error:unknown)=>void;const answer=new Promise<string>((yes,no)=>{resolve=yes;reject=no;});void answer.catch(()=>{});
+    const pending={question,execution,ready:false,signal,validateAnswer:input.validateAnswer,resolve,reject};this.liveQuestionAnswers.set(taskId,pending);this.questions.publish(question);
+    const abort=()=>reject(Error('task_question_aborted'));signal.addEventListener('abort',abort,{once:true});execution.health?.wait(question.questionId);
+    try{await this.flushRuntimeEvents(taskId);current();await this.appendEvent(taskId,{type:'needs_user',question},{runtimeOrigin:true,execution});current();pending.ready=true;return await answer;}
+    finally{signal.removeEventListener('abort',abort);execution.health?.resume(question.questionId);if(this.liveQuestionAnswers.get(taskId)===pending)this.liveQuestionAnswers.delete(taskId);this.questions.clear(taskId,question.questionId);}
+  }
+
   private async answerQuestionSourceOwned(input: { taskId: string; answer: UserAnswer }): Promise<void> {
-    if (this.options.assertTaskAdmission) await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
+    const pending=this.liveQuestionAnswers.get(input.taskId);
+    if (this.options.assertTaskAdmission) {
+      const snapshot=await this.requireSnapshot(input.taskId);
+      if(pending)await this.options.assertTaskAdmission(snapshot,'live_answer');
+      else await this.options.assertTaskAdmission(snapshot);
+    }
+    const currentQuestion=this.questions.getCurrent(input.taskId);
+    if(currentQuestion?.kind==='freeform'&&!pending)throw Error('task_question_execution_not_live');
+    let value:string|undefined;
+    if(pending){
+      if(!pending.ready||this.activeExecutions.get(input.taskId)!==pending.execution||pending.signal.aborted||pending.question.questionId!==input.answer.questionId)throw Error('task_question_stale');
+      if(input.answer.type==='choice'){value=pending.question.choices?.find(c=>c.id===(input.answer as {choiceId:string}).choiceId)?.label;if(value===undefined)throw Error('task_question_invalid_choice');}
+      else if(input.answer.type==='text'&&input.answer.text.trim()&&input.answer.text.length<=12000)value=input.answer.text;
+      else throw Error('task_question_invalid_answer');
+      pending.validateAnswer?.(value!);
+      pending.ready=false;
+    }
     const result = this.questions.answer(input.taskId, input.answer);
     if (result.status === 'not_found') {
       throw new Error(`question not found: ${input.answer.questionId}`);
@@ -799,6 +851,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (result.status === 'stale') {
       throw new Error(`stale question answer: ${input.answer.questionId}`);
     }
+    if(pending){try{await this.appendEvent(input.taskId,{type:'question_resolved',questionId:pending.question.questionId,answerText:value!},{runtimeOrigin:true,execution:pending.execution});pending.signal.throwIfAborted();pending.resolve(value!);}catch(error){pending.reject(error);throw error;}return;}
     if (
       result.question.kind === 'confirm_understanding'
       && input.answer.type === 'choice'
@@ -1291,6 +1344,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         executionScope: snapshot.executionScope,
         emitRuntimeEvent: (event) => this.activeExecutions.get(taskId) === execution ? this.appendRuntimeEvent(taskId, event) : Promise.resolve(),
         emitUsage: (usage) => this.appendUsage(taskId, execution, usage),
+        askUser: (input,signal) => this.askExecutionUser(taskId,execution,input,signal),
       });
       controller.signal.throwIfAborted();
       if (policy?.deliveryRepair === 'explicit' && snapshot.multiAgentPreparation
@@ -1637,6 +1691,19 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
   private async appendRuntimeEvent(taskId: string, event: RuntimeEvent): Promise<void> {
     this.throwRuntimeEventError(taskId);
+    if (event.type === 'ui_preview') {
+      let preview = event.preview;
+      try {
+        if (typeof event.toolUseId !== 'string' || event.toolUseId.length > 256) return;
+        if (preview && (typeof preview.title !== 'string' || preview.title.length > 10000 || !validateA2uiMessages(parseUiJson(preview.content)).ok)) preview=null;
+      } catch { preview=null; }
+      await this.enqueueMutation(taskId, async () => {
+        const snapshot = await this.requireSnapshot(taskId);
+        if (TERMINAL_STATUSES.has(snapshot.status) || !this.activeExecutions.has(taskId)) return;
+        this.pushLiveEvent(taskId,{type:'ui_preview',turnId:event.turnId,toolUseId:event.toolUseId,preview},snapshot.events.length,snapshot.sessionId);
+      });
+      return;
+    }
     const health = this.activeExecutions.get(taskId)?.health;
     if (event.type === 'tool_finished') {health?.resume(`managed:${event.invocationId}`);health?.resume(`tool:${event.invocationId}`);}
     if (event.type === 'approval_required') health?.wait(event.approvalId);
@@ -1873,7 +1940,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       const next: TaskSnapshot = {
         ...snapshot,
-        status: event.type === 'task_cancelled' ? 'cancelled' : snapshot.status,
+        status: event.type === 'task_cancelled' ? 'cancelled' : event.type === 'needs_user' ? 'waiting_user' : event.type === 'question_resolved' && snapshot.status === 'waiting_user' ? 'running' : snapshot.status,
         events: [...snapshot.events, event],
         result: nextResult,
         salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,
@@ -2118,7 +2185,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     const questionEvent = [...snapshot.events]
       .reverse()
       .find((event): event is Extract<DesktopTaskEvent, { type: 'needs_user' }> => event.type === 'needs_user');
-    if (questionEvent) {
+    if (questionEvent && !snapshot.events.some(event=>event.type==='question_resolved'&&event.questionId===questionEvent.question.questionId)) {
       this.questions.publish(questionEvent.question);
     }
   }
@@ -2142,6 +2209,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
   private pushLiveEvent(taskId: string, event: DesktopTaskEvent, eventIndex: number, sourceDataEpoch: string): void {
     for (const subscriber of this.subscribers.get(taskId) ?? []) {
+      if (event.type === 'ui_preview' && !subscriber.livePreviews) continue;
       subscriber.push({ taskId, eventIndex, sourceDataEpoch, event });
     }
   }
@@ -2182,7 +2250,31 @@ function isValidContextSnapshot(snapshot: TaskSnapshot): boolean {
     && typeof snapshot.status === 'string';
 }
 
+// Core and Desktop have separate compile roots; the history test pins this protocol to Desktop's public predicate.
+function isTaskExecutionInterruption(message: unknown): boolean {
+  return message === 'app_shutdown' || message === 'multi_agent_prepare_interrupted';
+}
+
 function formatAssistantContext(snapshot: TaskSnapshot): string {
+  const progress = formatAssistantProgressContext(snapshot);
+  // Recognize only exact persisted interruption codes, not localized or substring matches.
+  const lastError = [...snapshot.events].reverse().find((event): event is Extract<DesktopTaskEvent, {type: 'error'}> => event.type === 'error');
+  if (snapshot.status !== 'failed' || !isTaskExecutionInterruption(lastError?.message)) return progress;
+  const resolved = new Set<string>();
+  for (let index = snapshot.events.length - 1; index >= 0; index--) {
+    const event = snapshot.events[index];
+    if (event.type === 'question_resolved') resolved.add(event.questionId);
+    if (event.type !== 'needs_user') continue;
+    const question = event.question;
+    // Never promote another task's question, an approval, or an older question.
+    if (question.taskId !== snapshot.taskId || question.kind !== 'freeform' || resolved.has(question.questionId)) return progress;
+    return ['上一轮执行已中断，以下问题尚未收到用户回答：', question.prompt,
+      ...(question.choices ?? []).map(choice => `- ${choice.label}`), '此前进展：', progress].join('\n');
+  }
+  return progress;
+}
+
+function formatAssistantProgressContext(snapshot: TaskSnapshot): string {
   const explicitSummary = snapshot.result?.summary?.trim();
   if (explicitSummary) {
     return explicitSummary;

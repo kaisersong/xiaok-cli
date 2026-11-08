@@ -117,13 +117,13 @@ describe('A2UI validator', () => {
   it('reports the unsupported section discriminator and supported kinds', () => {
     const result = validateRenderUiInput({
       title: 'Bad chart',
-      sections: [{ kind: 'chart', points: [] }],
+      sections: [{ kind: 'unknown_chart', points: [] }],
       data: {},
     });
 
     expect(result).toMatchObject({
       ok: false,
-      reason: expect.stringContaining('chart'),
+      reason: expect.stringContaining('unknown_chart'),
     });
     expect(result).toMatchObject({
       ok: false,

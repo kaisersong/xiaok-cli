@@ -20,11 +20,12 @@ const result = z.object({ summary: text, artifacts: z.array(artifact), structure
 const salvage = z.object({ summary: z.array(text), reason: text.optional() }).strict();
 const event = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.object({ type: z.literal(type), ...shape }).strict();
 export const TASK7_EVENT = z.discriminatedUnion('type', [
+  event('ui_preview', {turnId:id,toolUseId:id,preview:z.object({title:text.max(10000),content:text.max(1000000)}).strict().nullable()}),
   event('execution_health', { state: z.enum(['running', 'waiting', 'recovering', 'cleanup_pending']) }),
   event('task_started', { taskId: id }), event('task_execution_started', { taskId: id }), event('task_terminal', { status: terminal }),
   event('understanding_updated', { understanding: TASK7_UNDERSTANDING }), event('plan_updated', { plan: z.array(step) }),
   event('progress', { message: text, stage: text.optional(), eventId: id }), event('assistant_delta', { delta: text, eventId: id }),
-  event('needs_user', { question }), event('question_resolved', { questionId: id }),
+  event('needs_user', { question }), event('question_resolved', { questionId: id, answerText: z.string().max(12000).optional() }),
   event('task_cancelled', { taskId: id, reason: text, partialText: text.optional() }), event('result', { result }),
   event('artifact_recorded', { artifactId: id, kind: text, label: text, filePath: text, previewAvailable: z.boolean(), turnId: id, creator: text.optional(), mimeType: text.optional() }),
   event('salvage', { salvage }), event('error', { message: text }),

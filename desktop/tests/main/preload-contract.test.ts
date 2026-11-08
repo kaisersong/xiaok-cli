@@ -1,3 +1,9 @@
+import {registerKimDecisionIpc} from '../../electron/kim-decision-typed-ipc.js';
+import {registerCredentialInputIpc} from '../../electron/credential-input-ipc.js';
+import { registerAssistantInboxIpc } from '../../electron/assistant-inbox-ipc.js';
+import { registerMailConnectorIpc } from '../../electron/mail-connector-typed-ipc.js';
+import { registerEnterpriseCliIpc } from '../../electron/enterprise-cli-typed-ipc.js';
+import { registerYzjCliAuthIpc } from '../../electron/yzj-cli-auth-typed-ipc.js';
 import { registerGoalPublicationIpc } from '../../electron/goal-publication-typed-ipc.js';
 import { registerComputerUseControlIpc } from '../../electron/computer-use-control-typed-ipc.js';
 import { registerGoalTaskMutationsIpc } from '../../electron/goal-task-mutation-typed-ipc.js';
@@ -112,6 +118,9 @@ describe('preload API contract', () => {
       'updateModelRuntimeOptions',
       // SystemOne（Jev）辅助决策模型：独立于 providers/models 的一组键。
       'getSystemOneConfig',
+      'getKimDecisionConfig',
+      'saveKimDecisionConfig',
+      'testKimDecisionConnection',
       'saveSystemOneConfig',
       'createManagedXiaokAgent',
       'testProviderConnection',
@@ -246,7 +255,21 @@ describe('preload API contract', () => {
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
       'kswarmStartProjectPlanning',
-      'getAssistantOverview',
+      'getPrivateMemorySettings',
+      'savePrivateMemorySettings',
+      'listCredentialInputs',
+      'submitCredentialInput',
+      'cancelCredentialInput',
+      'getAssistantState',
+  'ensureAssistantToday',
+  'refreshAssistantSources',
+  'actOnAssistantItem',
+  'startAssistantItem',
+  'approveAssistantSend',
+  'refuseAssistantSend',
+  'onCredentialInputsChanged',
+  'onAssistantInboxChanged',
+  'getAssistantOverview',
       'activateAssistant',
       'pauseAssistant',
       'resumeAssistant',
@@ -323,6 +346,20 @@ describe('preload API contract', () => {
       'getEmbeddingModels',
       'downloadEmbeddingModel',
       'setEmbeddingModel',
+      'getEnterpriseCliConnectors',
+      'controlEnterpriseCliConnector',
+      'getMailAccounts',
+      'connectMailAccount',
+      'disconnectMailAccount',
+      'setMailAccountAccess',
+      'testMailAccount',
+      'searchMailMessages',
+      'readMailMessage',
+      'getMailOAuthState',
+      'startMailOAuth',
+      'cancelMailOAuth',
+      'getYzjCliAuthState',
+      'controlYzjCliAuth',
       'getConnectorsConfig',
       'getHarnessOptimizationConfig',
       'saveHarnessOptimizationConfig',
@@ -1112,10 +1149,16 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerThreadMetadataIpc({ handle: channel => { channels.add(channel); } });
   registerDesktopSmallConfigIpc({ handle: channel => { channels.add(channel); } });
   registerModelProviderIpc({ handle: channel => { channels.add(channel); } });
+  registerKimDecisionIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerDiagnosticsIpc({ handle: channel => { channels.add(channel); } });
   registerPrinciplesIpc({ handle: channel => { channels.add(channel); } });
   registerKnowledgeIpc({ handle: channel => { channels.add(channel); } });
   registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
+  registerEnterpriseCliIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerMailConnectorIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerCredentialInputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
+  registerAssistantInboxIpc({ handle: channel => { channels.add(channel); } }, {} as never, {} as never, () => false);
+  registerYzjCliAuthIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConnectorsIpc({ handle: channel => { channels.add(channel); } });
   registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });
   registerUpdaterIpc({ handle: channel => { channels.add(channel); } }, new Map(), () => false);

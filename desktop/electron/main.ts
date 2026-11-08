@@ -1,7 +1,24 @@
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
+import {MemoryCredentialSettingsStore} from './memory-credential-settings.js';
+import {createCredentialInputOwner} from './credential-input-consumers.js';
+import {registerCredentialInputIpc} from './credential-input-ipc.js';
+import {readProtectedJson} from '../../src/utils/protected-json-async.js';
+import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
+import {defaultKimDecisionRuntime} from '../../src/ai/kim/runtime.js';
+import {registerKimDecisionIpc} from './kim-decision-typed-ipc.js';
+import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
+import { MailAccountStore } from './mail-account-store.js';
+import { MailConnectorService } from './mail-connector-service.js';
+import { registerMailConnectorIpc } from './mail-connector-typed-ipc.js';
+import { EnterpriseCliConnectorService } from './enterprise-cli-service.js';
+import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
+import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
+import { YzjCliAuthService } from './yzj-cli-auth-service.js';
+import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
@@ -36,7 +53,7 @@ import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js'
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -692,6 +709,8 @@ function createInitialWindow(): Promise<BrowserWindow> {
 
 async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
+  configureBundledYzjCli();
+  configureInstalledEnterpriseClis();
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
@@ -716,6 +735,21 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
+  const assistantCrypto: import('./mail-account-store.js').MailSafeStorage = { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) };
+  let assistantInbox: ReturnType<typeof createDesktopAssistantInbox> | undefined;
+  const mailConnectors = new MailConnectorService({store:new MailAccountStore(app.getPath('userData'),assistantCrypto),openExternal:url=>shell.openExternal(url)});
+  registerMailConnectorIpc(shutdownAwareIpc, mailConnectors, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('mail-connectors', async () => { mailConnectors.dispose(); });
+  const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
+  const enterpriseClis = {
+    dingtalk: new EnterpriseCliConnectorService('dingtalk', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'dingtalk-connection.json') }),
+    feishu: new EnterpriseCliConnectorService('feishu', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'feishu-connection.json') }),
+    wecom: new EnterpriseCliConnectorService('wecom', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'wecom-connection.json') }),
+  };
+  registerEnterpriseCliIpc(shutdownAwareIpc, enterpriseClis, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('enterprise-cli-connectors', async () => { await Promise.all(Object.values(enterpriseClis).map(service => service.dispose())); });
+  registerLifetimeDisposerStep('yzj-cli-auth', () => yzjCliAuth.dispose());
+  registerYzjCliAuthIpc(shutdownAwareIpc, yzjCliAuth, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
@@ -813,6 +847,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
+  await loadConfig();await readProtectedJson(join(dataRoot,'connectors.json'));
+  let credentialInputs:ReturnType<typeof createCredentialInputOwner>|undefined;
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
@@ -823,6 +859,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
+    mailConnectors,
+    assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
+    onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
     harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
@@ -1374,11 +1414,32 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         updatedAt: source.updatedAt,
       })),
   });
+  assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,
+    dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    search:(query,signal)=>services.searchForAssistant(query,signal),
+    launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
+    canLaunch:()=>services.assertAssistantExecutor(),
+    reminders:{create:(item,at)=>timedActionService.createReminder(item.title,at,undefined,{requestSource:'user',ownerKind:'user',ownerId:'desktop-user'}).reminderId,cancel:id=>{timedActionService.cancelReminder(id,{requestSource:'user'});}},
+    changed:()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('desktop:assistantInbox:changed');},
+    internal:()=>assistantContextReader.listMorningSuggestions(),
+    facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
+  });
+  services.bindAssistantTools(assistantInbox.tools,'user');
+  credentialInputs=createCredentialInputOwner({dataRoot,mail:mailConnectors,refreshConnectors:()=>services.refreshConnectorCredentials(),changed:()=>{mainWindow?.webContents.send('desktop:credentialInput:changed');mainWindow?.webContents.send('desktop:assistantInbox:changed');}});
+  registerCredentialInputIpc(shutdownAwareIpc,credentialInputs,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}),new MemoryCredentialSettingsStore(dataRoot));
+  registerLifetimeDisposerStep('credential-inputs',async()=>{credentialInputs?.dispose();});
+  registerKimDecisionIpc(shutdownAwareIpc,defaultKimDecisionRuntime,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  const inboxOwner=assistantInbox;
+  registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
+  desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
     collect: async input => {
+      if(input.kind==='morning')await assistantInbox!.service.ensureToday('scheduler');
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
       return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});

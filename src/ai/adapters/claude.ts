@@ -1,3 +1,4 @@
+import type {AdapterCredentialResolver} from '../providers/model-harness-profile.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -70,6 +71,7 @@ export class ClaudeAdapter implements ModelAdapter {
     baseUrl?: string,
     capabilityOverrides?: Partial<ModelCapabilities>,
     catalogIdentity?: AdapterCatalogIdentity,
+    private readonly credentialResolver?: AdapterCredentialResolver,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
@@ -94,10 +96,12 @@ export class ClaudeAdapter implements ModelAdapter {
       this.baseUrl,
       resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity),
       this.catalogIdentity,
+      this.credentialResolver,
     );
   }
 
   private async getClient(): Promise<Anthropic> {
+    const credentials = this.credentialResolver?.();
     if (this.client) {
       return this.client;
     }
@@ -105,12 +109,13 @@ export class ClaudeAdapter implements ModelAdapter {
     if (!this.clientPromise) {
       this.clientPromise = import('@anthropic-ai/sdk').then(({ default: AnthropicSdk }) => {
         const client = new AnthropicSdk({
-          apiKey: this.apiKey,
+          apiKey: credentials?.apiKey ?? this.apiKey,
           baseURL: this.baseUrl,
           maxRetries: MAX_RETRIES,
-          ...(isKimiCodingEndpoint(this.baseUrl)
-            ? { defaultHeaders: buildKimiCompatHeaders() as Record<string, string> }
-            : {}),
+          defaultHeaders: {
+            ...(credentials?.headers as Record<string,string> ?? {}),
+            ...(isKimiCodingEndpoint(this.baseUrl) ? buildKimiCompatHeaders() as Record<string,string> : {}),
+          },
         });
         this.client = client;
         return client;
@@ -276,7 +281,13 @@ export class ClaudeAdapter implements ModelAdapter {
           yield { type: 'text', delta: delta.text };
         } else if (delta.type === 'input_json_delta') {
           const buf = toolBuffers.get(event.index);
-          if (buf) buf.jsonBuffer += delta.partial_json;
+          if (buf) {
+            buf.jsonBuffer += delta.partial_json;
+            if (buf.name === 'render_ui' && tools.some(tool=>tool.name==='render_ui')) {
+              if (buf.jsonBuffer.length > 1_000_000) throw Error('UI payload limit');
+              if (delta.partial_json.includes('}')) yield { type: 'ui_preview', id: buf.id, input: buf.jsonBuffer };
+            }
+          }
         }
       } else if (event.type === 'content_block_stop') {
         const buf = toolBuffers.get(event.index);

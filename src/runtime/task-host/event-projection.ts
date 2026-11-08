@@ -17,6 +17,7 @@ interface ProjectRuntimeEventsInput {
 
 export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInput): DesktopTaskEvent | null {
   const { event, taskId } = input;
+  if (event.type === 'ui_preview') return {type:'ui_preview',turnId:event.turnId,toolUseId:event.toolUseId,preview:event.preview};
   if (event.type === 'execution_health') return {type:'execution_health',state:event.state};
   if (event.type === 'turn_started') {
     return { type: 'task_started', taskId };

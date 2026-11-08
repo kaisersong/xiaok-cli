@@ -19,6 +19,7 @@
     "package.json"
   ],
   "asarUnpack": [
+    "**/node_modules/@yunzhijia/cli/**",
     "**/node_modules/nodejieba/**",
     "dist/main/desktop/electron/office-parser-worker.mjs",
     "**/node_modules/@firecrawl/anydoc/**",
@@ -26,6 +27,26 @@
     "dist/main/src/runtime/verification/native/**"
   ],
   "extraResources": [
+    {
+      "from": "../data/yzj-cli",
+      "to": "yzj-cli"
+    },
+    {
+      "from": "../data/skills/yzj-cli",
+      "to": "skills/yzj-cli"
+    },
+    {
+      "from": "../data/skills/dingtalk-cli",
+      "to": "skills/dingtalk-cli"
+    },
+    {
+      "from": "../data/skills/feishu-cli",
+      "to": "skills/feishu-cli"
+    },
+    {
+      "from": "../data/skills/wecom-cli",
+      "to": "skills/wecom-cli"
+    },
     {
       "from": "resources/room-workspace-protocol.json",
       "to": "room-workspace-protocol.json"

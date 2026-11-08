@@ -16,7 +16,7 @@ import { resolveModelHarnessProfile, buildOpenAIHarnessContext, resolveKimiHarne
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
 import { isKimiK3DurableModel, assertKimiK3DurableResumeSupported } from '../../../src/ai/runtime/session-store/store.js';
-import type { Config, Message } from '../../../src/types.js';
+import type { Config, ConfigV2Input, Message } from '../../../src/types.js';
 
 const endpoint = 'https://api.kimi.com/coding/v1';
 const wire = 'kimi-for-coding';
@@ -48,6 +48,9 @@ function readSavedConfig(configDir: string): Config {
   return JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8')) as Config;
 }
 
+function config(wire: string): ConfigV2Input {
+  return { schemaVersion: 2, defaultProvider: 'kimi', defaultModelId: `kimi-${wire}`, providers: { kimi: { type: 'first_party', protocol: 'openai_legacy', apiKey: 'fixture', baseUrl: endpoint } }, models: { [`kimi-${wire}`]: { provider: 'kimi', model: wire } }, defaultMode: 'interactive', channels: {} };
+}
 async function collect(stream: AsyncIterable<unknown>) { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks; }
 
 describe('K2.8 Preview', () => {
@@ -78,6 +81,30 @@ describe('K2.8 Preview', () => {
       // The override checks above mutate only the reloaded in-memory config.
       expect(readSavedConfig(configDir)).toEqual(saved);
     });
+  });
+  it('keeps a stored legacy alias unchanged until explicit catalog capabilities opt in', () => {
+    const input = config(wire); const before = structuredClone(input);
+    const binding = resolveRuntimeModelBinding(input);
+    expect(binding.wireModel).toBe(wire);
+    expect(binding.capabilities).toEqual(['tools', 'thinking']);
+    expect(binding.runtimeOptions).toEqual({ contextLimit: 262_144 });
+    expect(input).toEqual(before);
+    // An effort alone is not a new catalog selection (existing issue195 contract).
+    for (const effort of ['low', 'high', 'max'] as const) {
+      input.models[`kimi-${wire}`]!.runtimeOptions = { contextLimit: 1_048_576, reasoningEffort: effort };
+      expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual({ contextLimit: 262_144 });
+    }
+    input.models[`kimi-${wire}`]!.capabilities = ['tools', 'thinking', 'image_in'];
+    expect(resolveRuntimeModelBinding(input)).toMatchObject({
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    });
+    for (const effort of ['low', 'high', 'max'] as const) {
+      input.models[`kimi-${wire}`]!.runtimeOptions = { reasoningEffort: effort };
+      expect(resolveRuntimeModelBinding(input).runtimeOptions?.reasoningEffort).toBe(effort);
+    }
+    input.models[`kimi-${wire}`]!.runtimeOptions = { reasoningEffort: 'none' };
+    expect(() => resolveRuntimeModelBinding(input)).toThrow('reasoningEffort is not allowed');
   });
   it('preserves the generic transport and accepts existing durable assistant history', () => {
     expect(resolveModelHarnessProfile({ ...identity, wireModel: wire }).id).toBe('generic-openai');

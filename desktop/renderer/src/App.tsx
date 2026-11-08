@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { WelcomePage } from './components/WelcomePage';
@@ -11,6 +12,8 @@ import { CollaborationRoomPage } from './components/collaboration/CollaborationR
 import { ScheduledTaskToast } from './components/ScheduledTaskToast';
 import { useScheduledTaskBootstrap } from './hooks/useScheduledTaskBootstrap';
 
+const AssistantPage = lazy(() => import('./components/assistant/AssistantPage').then(module => ({ default: module.AssistantPage })));
+
 export function App() {
   useScheduledTaskBootstrap();
 
@@ -21,6 +24,7 @@ export function App() {
         <Route path="meeting-recorder/:collectionId" element={<KnowledgePage />} />
         <Route element={<AppLayout />}>
           <Route index element={<WelcomePage />} />
+          <Route path="assistant" element={<Suspense fallback={null}><AssistantPage /></Suspense>} />
           <Route path="t/:taskId" element={<ChatShell />} />
           <Route path="scheduled" element={<Navigate to="/automations/schedules" replace />} />
           <Route path="automations" element={<AutomationsPage />} />

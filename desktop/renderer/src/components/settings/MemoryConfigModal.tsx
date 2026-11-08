@@ -1,3 +1,4 @@
+import {SecretInput} from '../security/SecretInput';
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, CheckCircle, XCircle, Search } from 'lucide-react'
 import { Modal } from '../shared'
@@ -804,8 +805,8 @@ export function MemoryConfigModal({ open, onClose, accessToken, memConfig, onCon
             : 30000,
         },
       }
-      await api.memory.setConfig(updatedConfig)
-      onConfigSaved(updatedConfig)
+      const saved=await api.memory.setConfig(updatedConfig as unknown as Record<string,unknown>) as unknown as MemoryConfig
+      onConfigSaved(saved)
       setConfigureResult('ok')
     } catch (error) {
       setBridgeError(error instanceof Error ? error.message : ds.memoryConfigureError)
@@ -879,13 +880,12 @@ export function MemoryConfigModal({ open, onClose, accessToken, memConfig, onCon
                 {ds.memoryNowledgeApiKey}
                 <span className="ml-1 font-normal text-[var(--c-text-muted)]">{ds.memoryNowledgeApiKeyHint}</span>
               </SettingsLabel>
-              <SettingsInput
+              <SecretInput
                 id="nowledge-api-key"
                 value={nowledgeDraft.apiKey ?? ''}
                 onChange={(e) => setNowledgeDraft((prev) => ({ ...prev, apiKey: e.target.value }))}
-                type="password"
                 placeholder="nmem_..."
-                variant="md"
+                className="w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm"
               />
             </div>
 

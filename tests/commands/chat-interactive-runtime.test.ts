@@ -1471,6 +1471,26 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }
   }, 20_000);
 
+  it('keeps local chat commands available without opening the locked credential store', async () => {
+    const root=join(tmpdir(),`xiaok-locked-startup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);const configDir=join(root,'config'),projectDir=join(root,'project');
+    mkdirSync(configDir,{recursive:true});mkdirSync(projectDir,{recursive:true});process.env.XIAOK_CONFIG_DIR=configDir;
+    cwdSpy=vi.spyOn(process,'cwd').mockReturnValue(projectDir);
+    const {saveConfig}=await import('../../src/utils/config.js');const {DEFAULT_CONFIG}=await import('../../src/types.js');
+    const config=structuredClone(DEFAULT_CONFIG);config.providers.anthropic.apiKey='locked-canary';config.devApp={appKey:'app-canary',appSecret:'app-secret-canary'};await saveConfig(config);
+    const before=readFileSync(join(configDir,'config.json'),'utf8');const get=vi.fn(()=>{throw Error('locked');});
+    const backend=vi.spyOn(await import('../../src/utils/system-credentials.js'),'systemCredentialBackend').mockReturnValue({get,put:()=>{throw Error('locked');}});
+    const {registerChatCommands}=await import('../../src/commands/chat.js');const harness=createTtyHarness(100,24);
+    const sigints=process.listeners('SIGINT'),resizes=process.stdout.listeners('resize');
+    try{
+      const program=new Command();registerChatCommands(program);const pending=trackChat(program.parseAsync(['node','xiaok','chat','--yolo']));
+      await waitForInputTurnReady(harness);harness.send('/help\r');await waitFor(()=>expect(harness.output.normalized).toContain('/settings'));
+      harness.send('/settings\r');await waitFor(()=>expect(harness.output.normalized).toContain('defaultProvider'));
+      expect(get).not.toHaveBeenCalled();expect(harness.output.normalized).not.toContain('首次使用需要先登录');expect(harness.output.normalized).not.toContain('尚未配置任何 AI provider');expect(harness.output.normalized).not.toContain('locked-canary');expect(harness.output.normalized).not.toContain('app-secret-canary');
+      harness.send('/exit\r');await pending;expect(readFileSync(join(configDir,'config.json'),'utf8')).toBe(before);
+    }finally{backend.mockRestore();for(const listener of process.listeners('SIGINT'))if(!sigints.includes(listener))process.removeListener('SIGINT',listener);for(const listener of process.stdout.listeners('resize'))if(!resizes.includes(listener))process.stdout.removeListener('resize',listener as ()=>void);await settleLateChats(harness);harness.restore();}
+  },20_000);
+
   it.each(['kimi','glm','minimax'])('continues first-run auto chat after selecting %s Coding Plan', async provider => {
     const rootDir=join(tmpdir(),`xiaok-first-login-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir=join(rootDir,'config'), projectDir=join(rootDir,'project');

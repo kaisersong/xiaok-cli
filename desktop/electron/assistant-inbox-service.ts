@@ -1,0 +1,45 @@
+import { z } from 'zod';
+import {KIM_JUDGMENT_SCHEMA} from '../shared/kim-decision-ipc-contract.js';
+import type {KimWindow} from '../../src/ai/kim/contracts.js';
+import { ATTENTION_START_SCHEMA,assistantLocalDate,assistantUser,assistantSource,type AssistantActor,type AttentionRecord,type AssistantCoverage,type AttentionStart,type AttentionAction,type AttentionItem,type AssistantState,type OutboxDraft } from '../shared/assistant-inbox-contract.js';
+import { AssistantInboxStore,attentionId,type AttentionTaskFact } from './assistant-inbox-store.js';
+export interface AssistantSourceBatch {records:AttentionRecord[];coverage:AssistantCoverage[];kimWindows?:Record<string,KimWindow>}
+export interface AssistantTriageInput extends AttentionRecord {key:string;kimWindow?:KimWindow}
+export const TRIAGE_DECISION_SCHEMA=z.object({sourceKey:z.string().regex(/^[a-f0-9]{64}$/),priority:z.enum(['now','later']),reason:z.string().min(1).max(1000),nextStep:z.string().min(1).max(1000),kimJudgment:KIM_JUDGMENT_SCHEMA.optional()}).strict();
+export type AssistantTriageDecision=z.infer<typeof TRIAGE_DECISION_SCHEMA>;
+export interface AssistantTriageBatch {decisions:AssistantTriageDecision[];failedKeys:string[]}
+export type AssistantTriageOutput=AssistantTriageDecision[]|AssistantTriageBatch;
+interface Dependencies {finalize?:(batch:AssistantSourceBatch,signal:AbortSignal)=>Promise<AssistantSourceBatch>;commitCurrent?:()=>boolean;credentialWaitingTasks?:()=>string[];store:AssistantInboxStore;read(signal:AbortSignal):Promise<AssistantSourceBatch>;triage(records:AssistantTriageInput[],signal:AbortSignal):Promise<AssistantTriageOutput>;profile():{active:boolean;timeZone:string};launch(input:{prompt:string;threadId:string}):Promise<{taskId:string}>;canLaunch?():void;outbox:{list():OutboxDraft[]};validate?:(batch:AssistantSourceBatch,signal:AbortSignal)=>Promise<AssistantSourceBatch>;beforeCommit?:(batch:AssistantSourceBatch)=>AssistantSourceBatch;now?:()=>number;changed?:()=>void;reminders?:{create(item:AttentionItem,at:number):string;cancel(id:string):void}}
+/** Owns scans and handoff projection. Rendering only asks for semantic snapshots. */
+export class AssistantInboxService {
+ private scan?:Promise<AssistantState>;private readonly controller=new AbortController();private closed=false;
+ constructor(private readonly deps:Dependencies){}
+ private now(){return this.deps.now?.()??Date.now();}
+ state():AssistantState{if(this.closed)throw Error('assistant_closed');const snapshot=this.deps.store.snapshot(this.now()),outbox=this.deps.outbox.list(),waiting=new Set([...(this.deps.credentialWaitingTasks?.()??[]),...outbox.filter(d=>d.status==='draft'&&d.taskId).map(d=>d.taskId)]);return {...snapshot,items:snapshot.items.map(item=>item.status==='working'&&item.taskId&&waiting.has(item.taskId)?{...item,status:'needs_input' as const}:item),outbox,active:this.deps.profile().active,scanning:Boolean(this.scan)};}
+ async ensureToday(source:AssistantActor):Promise<AssistantState>{assistantSource(source);const p=this.deps.profile();if(!p.active)return this.state();const date=assistantLocalDate(this.now(),p.timeZone);if(this.deps.store.snapshot(this.now()).briefs.some(b=>b.date===date&&b.timeZone===p.timeZone))return this.state();await this.refresh(source);if(this.closed)throw Error('assistant_closed');if(!this.deps.profile().active||this.deps.profile().timeZone!==p.timeZone)return this.state();this.deps.store.ensureBrief(p.timeZone,date,this.now(),source);this.deps.changed?.();return this.state();}
+ refresh(source:AssistantActor):Promise<AssistantState>{if(!['user','agent','scheduler'].includes(source))throw Error('assistant_source_denied');if(this.closed)return Promise.reject(Error('assistant_closed'));if(source==='scheduler'&&!this.deps.profile().active)return Promise.resolve(this.state());if(this.scan)return this.scan;
+ const operation=(async()=>{let batch:AssistantSourceBatch;try{batch=await this.deps.read(this.controller.signal);}catch{batch={records:[],coverage:[{key:'internal:scan',source:'internal',state:'failed',code:'read_failed',checkedAt:this.now()}]};}this.controller.signal.throwIfAborted();
+ let records:AttentionRecord[]=[];let coverage=batch.coverage;
+ if(batch.records.length){try{
+ const inputs=batch.records.slice(0,100).map(r=>({...r,key:attentionId(r),...(batch.kimWindows?.[attentionId(r)]?{kimWindow:batch.kimWindows[attentionId(r)]}:{})}));
+ const raw=await this.deps.triage(inputs,this.controller.signal);const envelope=Array.isArray(raw)?{decisions:raw,failedKeys:[]}:z.object({decisions:z.array(TRIAGE_DECISION_SCHEMA).max(100),failedKeys:z.array(z.string().regex(/^[a-f0-9]{64}$/)).max(100)}).strict().parse(raw);
+ const results=z.array(TRIAGE_DECISION_SCHEMA).max(100).parse(envelope.decisions),allowed=new Map(inputs.map(r=>[r.key,r]));
+ const all=[...results.map(d=>d.sourceKey),...envelope.failedKeys];if(new Set(all).size!==all.length||all.length!==inputs.length||all.some(k=>!allowed.has(k)))throw Error('assistant_triage_invalid');
+ const failed=new Set(envelope.failedKeys.map(k=>{const r=allowed.get(k)!;return r.source+':'+r.accountKey;}));
+ coverage=coverage.map(c=>failed.has(c.key)?{...c,state:'failed' as const,code:'triage_failed' as const}:c);
+ records=results.map(d=>{const {key,kimWindow,...r}=allowed.get(d.sourceKey)!;return {...r,priority:d.priority,reason:d.reason,nextStep:d.nextStep,...(d.kimJudgment?{kimJudgment:d.kimJudgment}:{})};});
+ if(batch.records.length>100)coverage=coverage.map(c=>c.state==='ok'?{...c,state:'partial' as const,code:'limited' as const}:c);
+ }catch{coverage=coverage.map(c=>c.state==='ok'||c.state==='partial'?{...c,state:'failed' as const,code:'triage_failed' as const}:c);}}
+ if(this.deps.validate){const valid=await this.deps.validate({records,coverage},this.controller.signal);records=valid.records;coverage=valid.coverage;}if(this.deps.finalize){const final=await this.deps.finalize({records,coverage},this.controller.signal);records=final.records;coverage=final.coverage;}this.controller.signal.throwIfAborted();if(this.deps.commitCurrent&&!this.deps.commitCurrent())throw Error('assistant_config_changed');if(source==='scheduler'&&!this.deps.profile().active)return this.state();const commit=this.deps.beforeCommit?.({records,coverage})??{records,coverage};this.deps.store.ingest(commit.records,commit.coverage,source);this.deps.changed?.();return this.state();})();
+ this.scan=operation;void operation.finally(()=>{if(this.scan===operation)this.scan=undefined;this.deps.changed?.();}).catch(()=>{});return operation;
+ }
+ act(input:AttentionAction,source:AssistantActor){assistantUser(source);const previous=this.deps.store.get(input.id);let created:string|undefined;let committed=false;try{const item=this.deps.store.act(input,source,this.now(),this.deps.reminders&&previous?()=>{created=this.deps.reminders!.create(previous,input.until!);return created;}:undefined);committed=true;if(previous?.reminderId&&previous.reminderId!==created)this.deps.reminders?.cancel(previous.reminderId);this.deps.changed?.();return item;}catch(error){if(created&&!committed)this.deps.reminders?.cancel(created);throw error;}}
+ async start(raw:AttentionStart,source:AssistantActor){assistantUser(source);const input=ATTENTION_START_SCHEMA.parse(raw);this.deps.canLaunch?.();const result=this.deps.store.beginWork(input,source,this.now());if(!result.launch)return result.item;this.deps.changed?.();const item=result.item;
+ try{const prompt=[item.title,item.summary,item.nextStep].filter(Boolean).join('\n\n');const task=await this.deps.launch({prompt,threadId:item.threadId!});const current=this.deps.store.get(item.id)!;if(!current.taskId)this.deps.store.projectTask({taskId:task.taskId,status:'understanding',context:{threadId:item.threadId}},'scheduler',this.now());this.deps.changed?.();return this.deps.store.get(item.id)!;}
+ catch{const current=this.deps.store.get(item.id);if(current?.taskId)return current;this.deps.store.markUnknown(item.id,item.attemptId!,'scheduler',this.now());this.deps.changed?.();throw Error('assistant_start_unknown');}
+ }
+ onTask(fact:AttentionTaskFact,source:AssistantActor){assistantSource(source);const changed=this.deps.store.projectTask(fact,source,this.now());if(changed)this.deps.changed?.();return changed;}
+ recover(facts:AttentionTaskFact[],source:AssistantActor){if(source!=='scheduler')throw Error('assistant_source_denied');for(const fact of facts)this.onTask(fact,source);for(const item of this.deps.store.allItems())if(item.status==='working'&&!item.taskId&&item.attemptId)this.deps.store.markUnknown(item.id,item.attemptId,source,this.now());}
+ dispose(){this.closed=true;this.controller.abort();}
+ async drain(){await this.scan?.catch(()=>{});}
+}

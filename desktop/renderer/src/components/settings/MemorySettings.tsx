@@ -827,10 +827,10 @@ export function MemorySettings({ accessToken }: Props) {
 
   const saveConfig = useCallback(async (next: MemoryConfig) => {
     if (!memoryApi) return
-    await memoryApi.setConfig(next)
-    memoryConfigCache = next
-    setMemConfigState(next)
-    void probeHealth(next)
+    const saved=await memoryApi.setConfig(next as unknown as Record<string,unknown>) as unknown as MemoryConfig
+    memoryConfigCache = saved
+    setMemConfigState(saved)
+    void probeHealth(saved)
     void loadData(true)
   }, [loadData, memoryApi, probeHealth])
 

@@ -1,3 +1,8 @@
+import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
+import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
+import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
+import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
+import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
 import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
@@ -95,6 +100,9 @@ export const PRELOAD_API_KEYS = [
   'saveModelConfig',
   'updateModelRuntimeOptions',
   'getSystemOneConfig',
+  'getKimDecisionConfig',
+  'saveKimDecisionConfig',
+  'testKimDecisionConnection',
   'saveSystemOneConfig',
   'createManagedXiaokAgent',
   'testProviderConnection',
@@ -245,6 +253,20 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getPrivateMemorySettings',
+  'savePrivateMemorySettings',
+  'listCredentialInputs',
+  'submitCredentialInput',
+  'cancelCredentialInput',
+  'getAssistantState',
+  'ensureAssistantToday',
+  'refreshAssistantSources',
+  'actOnAssistantItem',
+  'startAssistantItem',
+  'approveAssistantSend',
+  'refuseAssistantSend',
+  'onCredentialInputsChanged',
+  'onAssistantInboxChanged',
   'getAssistantOverview',
   'activateAssistant',
   'pauseAssistant',
@@ -322,6 +344,20 @@ export const PRELOAD_API_KEYS = [
   'getEmbeddingModels',
   'downloadEmbeddingModel',
   'setEmbeddingModel',
+  'getEnterpriseCliConnectors',
+  'controlEnterpriseCliConnector',
+  'getMailAccounts',
+  'connectMailAccount',
+  'disconnectMailAccount',
+  'setMailAccountAccess',
+  'testMailAccount',
+  'searchMailMessages',
+  'readMailMessage',
+  'getMailOAuthState',
+  'startMailOAuth',
+  'cancelMailOAuth',
+  'getYzjCliAuthState',
+  'controlYzjCliAuth',
   'getConnectorsConfig',
   'getHarnessOptimizationConfig',
   'saveHarnessOptimizationConfig',
@@ -439,6 +475,8 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onSkillsChanged',
   'onReminder',
   'onScheduledTaskDue',
+  'onCredentialInputsChanged',
+  'onAssistantInboxChanged',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
   'onMobileRelayStatus',
@@ -505,6 +543,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveModelConfig: 'desktop:saveModelConfig',
   updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
   getSystemOneConfig: 'desktop:getSystemOneConfig',
+  getKimDecisionConfig: 'desktop:getKimDecisionConfig',
+  saveKimDecisionConfig: 'desktop:saveKimDecisionConfig',
+  testKimDecisionConnection: 'desktop:testKimDecisionConnection',
   saveSystemOneConfig: 'desktop:saveSystemOneConfig',
   createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
   testProviderConnection: 'desktop:testProviderConnection',
@@ -612,6 +653,18 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getPrivateMemorySettings:'desktop:credentialInput:memoryGet',
+  savePrivateMemorySettings:'desktop:credentialInput:memorySave',
+  listCredentialInputs: 'desktop:credentialInput:list',
+  submitCredentialInput: 'desktop:credentialInput:submit',
+  cancelCredentialInput: 'desktop:credentialInput:cancel',
+  getAssistantState: 'desktop:assistantInbox:state',
+  ensureAssistantToday: 'desktop:assistantInbox:today',
+  refreshAssistantSources: 'desktop:assistantInbox:refresh',
+  actOnAssistantItem: 'desktop:assistantInbox:act',
+  startAssistantItem: 'desktop:assistantInbox:start',
+  approveAssistantSend: 'desktop:assistantInbox:approve',
+  refuseAssistantSend: 'desktop:assistantInbox:refuse',
   getAssistantOverview: 'desktop:assistant:getOverview',
   activateAssistant: 'desktop:assistant:activate',
   pauseAssistant: 'desktop:assistant:pause',
@@ -685,6 +738,20 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getEmbeddingModels: 'desktop:getEmbeddingModels',
   downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
   setEmbeddingModel: 'desktop:setEmbeddingModel',
+  getEnterpriseCliConnectors: 'desktop:getEnterpriseCliConnectors',
+  controlEnterpriseCliConnector: 'desktop:controlEnterpriseCliConnector',
+  getMailAccounts: 'desktop:mail:list',
+  connectMailAccount: 'desktop:mail:connect',
+  disconnectMailAccount: 'desktop:mail:disconnect',
+  setMailAccountAccess: 'desktop:mail:access',
+  testMailAccount: 'desktop:mail:test',
+  searchMailMessages: 'desktop:mail:search',
+  readMailMessage: 'desktop:mail:read',
+  getMailOAuthState: 'desktop:mail:oauthState',
+  startMailOAuth: 'desktop:mail:oauthStart',
+  cancelMailOAuth: 'desktop:mail:oauthCancel',
+  getYzjCliAuthState: 'desktop:getYzjCliAuthState',
+  controlYzjCliAuth: 'desktop:controlYzjCliAuth',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
   getHarnessOptimizationConfig: 'desktop:getHarnessOptimizationConfig',
   saveHarnessOptimizationConfig: 'desktop:saveHarnessOptimizationConfig',
@@ -1193,6 +1260,9 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
   getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot>;
+  getKimDecisionConfig(): Promise<KimConfigView>;
+  saveKimDecisionConfig(input:KimConfigPatch): Promise<KimConfigView>;
+  testKimDecisionConnection(): Promise<KimHealthView>;
   saveSystemOneConfig(input?: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
   createManagedXiaokAgent(input: ModelProviderDTO.ManagedAgentInput): Promise<ModelProviderDTO.ManagedAgentResult>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
@@ -1330,6 +1400,20 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  getPrivateMemorySettings(legacy?:Record<string,unknown>):Promise<Record<string,unknown>>;
+  savePrivateMemorySettings(input:Record<string,unknown>):Promise<Record<string,unknown>>;
+  listCredentialInputs():Promise<import('../shared/credential-input-contract.js').CredentialRequest[]>;
+  submitCredentialInput(input:import('../shared/credential-input-contract.js').CredentialSubmit):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  cancelCredentialInput(input:{id:string;expectedRevision:number}):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  onCredentialInputsChanged(handler:()=>void):()=>void;
+  getAssistantState(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  ensureAssistantToday(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  refreshAssistantSources(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  actOnAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionAction): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  startAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionStart): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  approveAssistantSend(input: import('../shared/assistant-inbox-contract.js').OutboxApproval): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  refuseAssistantSend(input: {id:string;expectedRevision:number}): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  onAssistantInboxChanged(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
@@ -1406,6 +1490,20 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
+  getEnterpriseCliConnectors(): Promise<EnterpriseCliState[]>;
+  controlEnterpriseCliConnector(provider: EnterpriseCliProvider, action: EnterpriseCliAction): Promise<EnterpriseCliState>;
+  getMailAccounts(): Promise<MailAccountDto[]>;
+  connectMailAccount(input: MailConnectInput): Promise<MailAccountDto>;
+  disconnectMailAccount(input: { id: string; expectedRevision: number }): Promise<{ ok: true }>;
+  setMailAccountAccess(input: { id: string; expectedRevision: number; allowSend: boolean; smtpHost?: string; smtpPort?: number }): Promise<MailAccountDto>;
+  testMailAccount(input: { id: string; expectedRevision: number }): Promise<MailAccountDto>;
+  searchMailMessages(input: MailSearchInput): Promise<MailSearchResult>;
+  readMailMessage(input: MailReadInput): Promise<MailReadResult>;
+  getMailOAuthState(): Promise<MailOAuthState>;
+  startMailOAuth(input: MailOAuthInput): Promise<MailOAuthState>;
+  cancelMailOAuth(operationId?: string): Promise<MailOAuthState>;
+  getYzjCliAuthState(): Promise<YzjCliAuthState>;
+  controlYzjCliAuth(action: YzjCliAuthAction): Promise<YzjCliAuthState>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
   getHarnessOptimizationConfig(): Promise<HarnessOptimizationState>;
   saveHarnessOptimizationConfig(input: Partial<Omit<HarnessOptimizationConfig, 'schemaVersion' | 'enabled' | 'configRevision' | 'publicGeneration' | 'researchGeneration'>>): Promise<HarnessOptimizationState>;
@@ -1575,6 +1673,9 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
     updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,
+    getKimDecisionConfig: () => ipcRenderer.invoke('desktop:getKimDecisionConfig') as ReturnType<DesktopApi['getKimDecisionConfig']>,
+    saveKimDecisionConfig: (input) => ipcRenderer.invoke('desktop:saveKimDecisionConfig',input) as ReturnType<DesktopApi['saveKimDecisionConfig']>,
+    testKimDecisionConnection: () => ipcRenderer.invoke('desktop:testKimDecisionConnection') as ReturnType<DesktopApi['testKimDecisionConnection']>,
     getSystemOneConfig: () => ipcRenderer.invoke('desktop:getSystemOneConfig') as ReturnType<DesktopApi['getSystemOneConfig']>,
     saveSystemOneConfig: (input) => ipcRenderer.invoke('desktop:saveSystemOneConfig', input) as ReturnType<DesktopApi['saveSystemOneConfig']>,
     createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,
@@ -1832,6 +1933,20 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    getPrivateMemorySettings:legacy=>ipcRenderer.invoke('desktop:credentialInput:memoryGet',legacy) as ReturnType<DesktopApi['getPrivateMemorySettings']>,
+    savePrivateMemorySettings:input=>ipcRenderer.invoke('desktop:credentialInput:memorySave',input) as ReturnType<DesktopApi['savePrivateMemorySettings']>,
+    listCredentialInputs:()=>ipcRenderer.invoke('desktop:credentialInput:list') as ReturnType<DesktopApi['listCredentialInputs']>,
+    submitCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:submit',input) as ReturnType<DesktopApi['submitCredentialInput']>,
+    cancelCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:cancel',input) as ReturnType<DesktopApi['cancelCredentialInput']>,
+    onCredentialInputsChanged(handler) {const listener=()=>handler();ipcRenderer.on('desktop:credentialInput:changed',listener);return ()=>ipcRenderer.off('desktop:credentialInput:changed',listener);},
+    getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state') as ReturnType<DesktopApi['getAssistantState']>,
+    ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today') as ReturnType<DesktopApi['ensureAssistantToday']>,
+    refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh') as ReturnType<DesktopApi['refreshAssistantSources']>,
+    actOnAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:act', input) as ReturnType<DesktopApi['actOnAssistantItem']>,
+    startAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:start', input) as ReturnType<DesktopApi['startAssistantItem']>,
+    approveAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:approve', input) as ReturnType<DesktopApi['approveAssistantSend']>,
+    refuseAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:refuse', input) as ReturnType<DesktopApi['refuseAssistantSend']>,
+    onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,
@@ -1971,6 +2086,20 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
+    getEnterpriseCliConnectors: () => ipcRenderer.invoke('desktop:getEnterpriseCliConnectors') as Promise<EnterpriseCliState[]>,
+    controlEnterpriseCliConnector: (provider, action) => ipcRenderer.invoke('desktop:controlEnterpriseCliConnector', provider, action) as Promise<EnterpriseCliState>,
+    getMailAccounts: () => ipcRenderer.invoke('desktop:mail:list') as Promise<MailAccountDto[]>,
+    connectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:connect', input) as Promise<MailAccountDto>,
+    disconnectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:disconnect', input) as Promise<{ ok: true }>,
+    setMailAccountAccess: (input) => ipcRenderer.invoke('desktop:mail:access', input) as Promise<MailAccountDto>,
+    testMailAccount: (input) => ipcRenderer.invoke('desktop:mail:test', input) as Promise<MailAccountDto>,
+    searchMailMessages: (input) => ipcRenderer.invoke('desktop:mail:search', input) as Promise<MailSearchResult>,
+    readMailMessage: (input) => ipcRenderer.invoke('desktop:mail:read', input) as Promise<MailReadResult>,
+    getMailOAuthState: () => ipcRenderer.invoke('desktop:mail:oauthState') as Promise<MailOAuthState>,
+    startMailOAuth: (input) => ipcRenderer.invoke('desktop:mail:oauthStart', input) as Promise<MailOAuthState>,
+    cancelMailOAuth: (operationId) => ipcRenderer.invoke('desktop:mail:oauthCancel', operationId) as Promise<MailOAuthState>,
+    getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState') as Promise<YzjCliAuthState>,
+    controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action) as Promise<YzjCliAuthState>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,
     getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig') as ReturnType<DesktopApi['getHarnessOptimizationConfig']>,
     saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input) as ReturnType<DesktopApi['saveHarnessOptimizationConfig']>,

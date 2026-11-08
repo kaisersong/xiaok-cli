@@ -1,3 +1,4 @@
+import type {AdapterCredentialResolver} from '../providers/model-harness-profile.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -56,6 +57,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     defaultHeaders?: Record<string, string>,
     capabilityOverrides?: Partial<ModelCapabilities>,
     catalogIdentity?: AdapterCatalogIdentity,
+    private readonly credentialResolver?: AdapterCredentialResolver,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
@@ -81,6 +83,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
       this.defaultHeaders,
       resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity),
       this.catalogIdentity,
+      this.credentialResolver,
     );
   }
 
@@ -90,6 +93,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const credentials = this.credentialResolver?.();
     const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
     if (disclosure !== undefined) {
       assertProviderDisclosureActive(disclosure);
@@ -102,7 +106,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
       options?.signal?.throwIfAborted();
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, credentials)) {
           emittedAny = true;
           yield chunk;
         }
@@ -124,6 +128,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     tools: ToolDefinition[],
     systemPrompt: string,
     options?: StreamOptions,
+    credentials?: ReturnType<AdapterCredentialResolver>,
   ): AsyncIterable<StreamChunk> {
     const signal = options?.signal;
     const controller = new AbortController();
@@ -139,9 +144,9 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
       response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${credentials?.apiKey ?? this.apiKey}`,
           'Content-Type': 'application/json',
-          ...(this.defaultHeaders ?? {}),
+          ...(credentials?.headers as Record<string,string> ?? this.defaultHeaders ?? {}),
         },
         body: JSON.stringify({
           model: this.model,

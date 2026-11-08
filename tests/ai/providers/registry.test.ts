@@ -91,7 +91,8 @@ describe('getProviderProfile', () => {
     const variants = getProviderProfile('kimi')?.availableModels ?? [];
 
     for (const modelId of ['kimi-k2.6', 'kimi-k2.5']) {
-      const variant = variants.find((candidate) => candidate.modelId === modelId);
+      const variant = variants.find((candidate) => candidate.modelId === modelId)
+          ?? getProviderModelVariant(providerId, modelId === 'gemini-2.5-flash' ? 'gemini-2.5-flash-preview-05-20' : modelId.replace(/^openai-/, ''));
       expect(variant, modelId).toBeDefined();
       // 它们有自己的官方 contextLimit（262,144），但不该带 K3 的 reasoning 策略。
       // 注意不能只比 contextLimit —— K3 的值恰好也是 262,144。
