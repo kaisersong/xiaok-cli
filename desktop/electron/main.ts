@@ -1,3 +1,4 @@
+import {bindOriginalMainDshBrokerService} from './broker-protected-service-binding.js';
 import {createDefaultDispatchPreparationNativeSource} from './default-dispatch-preparation-native-source.js';
 import {createDefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
 import {createDefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
@@ -1651,6 +1652,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     const composition=await composeOriginalMainDshRuntime({services,sources:dshSources,roomRuntime:roomWorkspaceRuntime,roomDispatcher:collaborationRoomWakeDispatcher,directBridge:dshRuntimeBridge!,materialSource:mainMaterialSource,brokerClient:rawCollaborationRoomBrokerClient});
     const original=readOriginalMainDshRuntimeBinding(services,dshSources,composition);
     await bindOriginalMainDshKSwarmService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    await bindOriginalMainDshBrokerService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
     desktopIngressOwners.push(original.ingress);
     if(!desktopShutdownGate.isOpen){original.ingress.stopAccepting();return window;}
     registerDshSettingsIpc(shutdownAwareIpc,original.controller,mainUserControlSource);

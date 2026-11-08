@@ -193,11 +193,19 @@ describe('actual KSwarm service instance permanent drain', () => {
 
   it('registers the actual service close immediately in Main and retains ordinary stop IPC', () => {
     const source = readFileSync(join(import.meta.dirname, '../../electron/main.ts'), 'utf8');
-    expect(source).toMatch(/const kswarmService = createDesktopKSwarmService\(desktopShutdownCoordinator, desktopFinalLifetimeSteps, \{ activityOwnerPending: process\.env\.XIAOK_CONVERSATION_ACTIVITY !== '0' \}\);\s*if \(!kswarmService\) return window;/);
     const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
-    const declarations: ts.VariableDeclaration[] = [];
-    const collect = (node: ts.Node): void => { if (ts.isVariableDeclaration(node)) declarations.push(node); ts.forEachChild(node, collect); };
+    const declarations: ts.VariableDeclaration[] = [], guards:ts.IfStatement[]=[];
+    const collect = (node: ts.Node): void => { if (ts.isVariableDeclaration(node)) declarations.push(node);if(ts.isIfStatement(node))guards.push(node); ts.forEachChild(node, collect); };
     collect(ast);
+    const service = declarations.find(node=>node.name.getText(ast)==='kswarmService')!.initializer as ts.CallExpression;
+    expect(service.expression.getText(ast)).toBe('createDesktopKSwarmService');
+    expect(service.arguments.slice(0,2).map(node=>node.getText(ast))).toEqual(['desktopShutdownCoordinator','desktopFinalLifetimeSteps']);
+    const serviceOptions=service.arguments[2] as ts.ObjectLiteralExpression;
+    const delegated=serviceOptions.properties.find(node=>ts.isPropertyAssignment(node)&&node.name.getText(ast)==='activityOwnerPending') as ts.PropertyAssignment;
+    expect(delegated.initializer.getText(ast)).toBe("!dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0'");
+    const unavailable=guards.find(node=>node.expression.getText(ast)==='!kswarmService')!.thenStatement as ts.Block;
+    const returning=unavailable.statements[unavailable.statements.length-1] as ts.ReturnStatement;
+    expect(ts.isReturnStatement(returning)).toBe(true);expect(returning.expression!.getText(ast)).toBe('window');
     const facade = declarations.find(node => node.name.getText(ast) === 'runtimeActions')!.initializer as ts.CallExpression;
     expect(facade.expression.getText(ast)).toBe('createDesktopRuntimeActionService');
     const ops = facade.arguments[0] as ts.ObjectLiteralExpression;

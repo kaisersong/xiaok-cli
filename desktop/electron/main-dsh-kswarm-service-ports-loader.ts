@@ -5,7 +5,7 @@ import type * as OriginalProcessSdk from './main-dsh-kswarm-service-ports.js';
 const apply = Reflect.apply, descriptor = Object.getOwnPropertyDescriptor, keys = Reflect.ownKeys;
 const create = Object.create, define = Object.defineProperty, freeze = Object.freeze, own = Object.hasOwn;
 const NativePromise = Promise, nativeThen = Promise.prototype.then, isProxy = types.isProxy;
-const exportNames = ['readOriginalMainDshServicesBinding','prepareOriginalMainDshSourceKSwarmChild'] as const;
+const exportNames = ['readOriginalMainDshServicesBinding','prepareOriginalMainDshSourceKSwarmChild','prepareOriginalMainDshSourceBrokerChild'] as const;
 const consumeExports = () => { };
 /** The original Services operation already owns its proof and invocation.
  * Only this fixed two-export module can be loaded; no caller URL/verifier. */
@@ -60,7 +60,7 @@ export async function loadOriginalKSwarmServicePorts(): Promise<typeof OriginalP
             const name = names[i]!, row = descriptor(namespace, name);
             if (!row)
                 throw Error('KSWARM_SERVICE_PORTS_IMPORT_IMPORT_UNCONFIRMED');
-            if (name === exportNames[0] || name === exportNames[1]) {
+            if (name === exportNames[0] || name === exportNames[1] || name === exportNames[2]) {
                 // A real ESM namespace uses data exports. esbuild's fixed module shell uses
                 // its own getters. Read only these exact SDK export slots as SDK operations,
                 // box the raw function before Promise resolution, and scan its own graph.
