@@ -229,9 +229,9 @@ NODE_MODULE_INIT(){
 #ifdef NR_ADMISSION_NAMESPACE_BRIDGE
  nr_install_admission_namespace_exports(context,exports);
 #endif
- for(const auto& pair:{std::pair{"adoptOriginalBudgetWorker",adopt},std::pair{"retireOriginalBudgetWorker",retire},std::pair{"commitOriginalBudgetWorkerNamespace",commit_namespace},std::pair{"prepareOriginalBudgetWorker",prepare_original},std::pair{"publishOriginalBudgetWorker",publish_original},std::pair{"assertOriginalBudgetWorkerIoClosed",assert_closed},
+ for(const auto& pair:{std::pair{"adoptOriginalBudgetWorker",&adopt},std::pair{"retireOriginalBudgetWorker",&retire},std::pair{"commitOriginalBudgetWorkerNamespace",&commit_namespace},std::pair{"prepareOriginalBudgetWorker",&prepare_original},std::pair{"publishOriginalBudgetWorker",&publish_original},std::pair{"assertOriginalBudgetWorkerIoClosed",&assert_closed},
 #if defined(MI_FIXTURE_BUILD) && defined(NR_ROOT_IO_COMPONENT)
- std::pair{"componentPrepareBudgetWorker",component_prepare},std::pair{"componentPublishBudgetWorker",component_publish},std::pair{"componentCloseBudgetWorker",component_close},
+ std::pair{"componentPrepareBudgetWorker",&component_prepare},std::pair{"componentPublishBudgetWorker",&component_publish},std::pair{"componentCloseBudgetWorker",&component_close},
 #endif
  }){Local<Function> fn;if(!Function::New(context,pair.second).ToLocal(&fn)||!exports->CreateDataProperty(context,text(i,pair.first),fn).FromMaybe(false))return;}
  BUDGET_PHASE("BUDGET_NATIVE_MODULE_INIT_RETURNED");

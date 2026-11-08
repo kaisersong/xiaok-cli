@@ -58,15 +58,23 @@ vi.mock('node:worker_threads', async original => {
   }
   return { ...actual, Worker };
 });
+let nativeWorkerSetup: Promise<void> | undefined;
 beforeAll(async () => {
-  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
-  const protection = await compileProtectionWorkerEntry();
-  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
-});
-afterAll(() => {
-  try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
-  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
-});
+  nativeWorkerSetup = (async () => {
+    Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+    const protection = await compileProtectionWorkerEntry();
+    nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+  })();
+  await nativeWorkerSetup;
+}, 60_000);
+afterAll(async () => {
+  // Join the original preparation before removing any of its output roots.
+  try { await nativeWorkerSetup; }
+  finally {
+    try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
+    finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
+  }
+}, 60_000);
 
 
 describe('CUA mutation sources and reconnect intent', () => {
