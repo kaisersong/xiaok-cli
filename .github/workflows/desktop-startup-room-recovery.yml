@@ -32,6 +32,10 @@ on:
       - 'native/main-installation/**'
       - 'scripts/build-main-installation-artifacts.mjs'
       - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/main-root-enrollment-*.test.mjs'
+      - 'tests/native/fixtures/main-enrollment-*'
+      - 'src/runtime/verification/main-root-enrollment-codec.ts'
+      - 'src/runtime/verification/main-root-activation-claim.ts'
       - 'tests/native/fixtures/main-installation-*'
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
@@ -68,6 +72,10 @@ on:
       - 'native/main-installation/**'
       - 'scripts/build-main-installation-artifacts.mjs'
       - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/main-root-enrollment-*.test.mjs'
+      - 'tests/native/fixtures/main-enrollment-*'
+      - 'src/runtime/verification/main-root-enrollment-codec.ts'
+      - 'src/runtime/verification/main-root-activation-claim.ts'
       - 'tests/native/fixtures/main-installation-*'
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
@@ -248,6 +256,12 @@ jobs:
         run: |
           npm run build:main --prefix desktop
           node --test tests/native/root-ledger-source-desktop.test.mjs
+
+      - name: Original MainRoot enrollment codecs and negative consumption (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run build
+          node --test --test-concurrency=1 tests/native/main-root-enrollment-codec.test.mjs tests/native/main-root-enrollment-consume.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
