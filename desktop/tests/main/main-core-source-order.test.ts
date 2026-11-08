@@ -2,6 +2,7 @@
 // Actual Source lifecycle with instrumented dependencies; no Native/OS grant.
 import {beforeEach,expect,it,vi} from 'vitest';
 const f=vi.hoisted(()=>({events:[] as string[],scope:{profileId:'profile',workspaceId:'workspace'},user:{} as object,realm:{seal(){f.events.push('realm-seal');}},core:{} as object,runtime:{} as object,qualified:true,coreFault:false}));
+vi.mock('../../electron/main-dsh-source-component.js',()=>({joinOriginalMainDshServiceComponent:async()=>{},assertOptionalOriginalMainDshServiceComponent:()=>null}));
 vi.mock('../../electron/root-resource-production-qualification.js',()=>({ORIGINAL_PRODUCTION_ROOT_RESOURCE_QUALIFIED:false,readOriginalProductionRootResourceQualification:()=>({qualified:f.qualified})}));
 vi.mock('../../electron/main-dsh-bootstrap-authority.js',()=>({createMainDshBootstrapAuthority:()=>f.realm,
  prepareOriginalMainDshCoreInfrastructure(realm:object){expect(realm).toBe(f.realm);f.events.push('core-prepare');return f.core;},

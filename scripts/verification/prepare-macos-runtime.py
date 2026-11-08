@@ -202,7 +202,7 @@ def prepare(archive_dir, output, lock_path):
     copy_file(sqlite_source.parents[1] / 'LICENSE', output / 'licenses/source-custody/better-sqlite3-LICENSE')
     # The complete copied amalgamation retains SQLite's own public-domain notice.
     subprocess.run(['/usr/bin/cc', *sqlite_flags, '-c', str(sqlite_source / 'sqlite3.c'), '-o', str(sqlite_object)], check=True)
-    for helper in ['process-observation', 'secure-read', 'socket-peer', 'socket-audit-peer', 'broker-user-reader', 'broker-authorize', 'broker-enroll-authorize', 'broker-mainroot-enroll-authorize', 'broker-publish-authorize', 'broker-archive-authorize', 'broker-application-authorize', 'broker-source-authorize', 'broker-source-lock-custody', 'broker-source-cleanup', 'broker-source-sqlite-custody', 'continuous-clock', 'account-generation']:
+    for helper in ['process-observation', 'secure-read', 'socket-peer', 'socket-audit-peer', 'broker-user-reader', 'broker-authorize', 'broker-enroll-authorize', 'broker-mainroot-enroll-authorize', 'broker-publish-authorize', 'broker-archive-authorize', 'broker-application-authorize', 'broker-source-authorize', 'broker-source-lock-custody', 'broker-source-cleanup', 'broker-source-sqlite-custody', 'broker-root-nmp-custody', 'continuous-clock', 'account-generation']:
         extension = '.m' if helper == 'account-generation' else '.c'
         source = pathlib.Path(__file__).resolve().parents[2] / ('src/runtime/verification/native/' + helper + extension)
         copy_file(source, output / 'native' / (helper + extension))
@@ -212,6 +212,8 @@ def prepare(archive_dir, output, lock_path):
         subprocess.run(['/usr/bin/cc', '-O2', '-Wall', '-Wextra', '-Werror', str(source), *libraries, '-o', str(output / 'bin' / helper)], check=True)
     for panel_source in ['review-panel.h', 'review-panel.m', 'source-lock-custody.c', 'source-sqlite-custody.c', 'source-custody-channel.h', 'source-directory-capture.h', 'source-session-locks.h']:
         copy_file(source.with_name(panel_source), output / 'native' / panel_source)
+    source_root = pathlib.Path(__file__).resolve().parents[2]
+    subprocess.run(['node', str(source_root / 'scripts/verification/build-root-ledger-source.mjs'), '--output', str(output / 'app/native/darwin-universal/root_resource_ledger_source.node')], check=True)
     (output / 'empty').mkdir()
     (output / 'lib' / 'qemu').mkdir(exist_ok=True)
     copy_file(lock_path, output / 'runtime-sources.json')

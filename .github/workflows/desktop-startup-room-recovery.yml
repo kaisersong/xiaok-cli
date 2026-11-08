@@ -10,6 +10,10 @@ on:
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'src/runtime/verification/**'
+      - 'tests/native/root-nmp-custody*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-custody*'
+      - 'tests/native/helpers/root-nmp-custody-fixture.mjs'
       - 'tests/native/root-ledger-source-artifact.test.mjs'
       - 'tests/native/root-ledger-source-desktop.test.mjs'
       - 'scripts/verification/build-root-ledger-source.mjs'
@@ -40,6 +44,19 @@ on:
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
@@ -50,6 +67,10 @@ on:
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
       - 'tests/native/protected-core-model-sdk.test.mjs'
       - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'src/runtime/verification/**'
+      - 'tests/native/root-nmp-custody*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-custody*'
+      - 'tests/native/helpers/root-nmp-custody-fixture.mjs'
       - 'tests/native/root-ledger-source-artifact.test.mjs'
       - 'tests/native/root-ledger-source-desktop.test.mjs'
       - 'scripts/verification/build-root-ledger-source.mjs'
@@ -80,6 +101,19 @@ on:
       - 'tests/native/helpers/main-installed-fixture.mjs'
       - 'native/root-resource-authority/**'
       - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   workflow_dispatch: {}
@@ -121,6 +155,10 @@ jobs:
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+      - name: Prepare current client Node headers for Native components (macOS)
+        if: runner.os == 'macOS'
+        id: dsh_client_headers
+        uses: ./.github/actions/node-headers
       - name: Original client and independent KSwarm Node executable probes
         working-directory: desktop
         run: >-
@@ -188,16 +226,25 @@ jobs:
           tests/main/loop-owned-sql-population.test.ts
           tests/main/windows-source-absence-fixture.test.ts
           tests/main/loop-database-birth-custody.test.ts
+          tests/main/main-service-component-core.test.ts
+          tests/main/main-service-component-sources.test.ts
+          tests/main/main-core-source-order.test.ts
+          tests/main/main-dsh-service-sources.test.ts
+          tests/main/main-dsh-bootstrap-authority.test.ts
+          tests/main/main-core-split-boundaries.test.ts
+          tests/main/main-core-kswarm-port.test.ts tests/main/main-core-broker-port.test.ts tests/main/main-core-broker-dual-custody.test.ts tests/main/main-source-broker-core-bridge.test.ts tests/main/broker-protected-service-binding.test.ts tests/main/broker-protected-main-wiring.test.ts tests/main/main-core-broker-platform.test.ts
+          tests/main/main-source-kswarm-core-bridge.test.ts
+          tests/main/main-admission-database-selection.test.ts
 
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
+          git -C ../intent-broker fetch --depth 1 origin 726f3ad82a37814eeb540e343ae5a58510f24516
           git -C ../intent-broker checkout --detach FETCH_HEAD
           npm ci --ignore-scripts --omit=dev --prefix ../kswarm
           npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
@@ -249,6 +296,8 @@ jobs:
           node --test --test-concurrency=1
           tests/native/root-ledger-source-artifact.test.mjs
           tests/native/root-nmp-ledger-reader.test.mjs
+          tests/native/root-nmp-custody-hold.test.mjs
+          tests/native/root-nmp-custody-entry.test.mjs
           tests/native/root-nmp-ledger-main.test.mjs
 
       - name: Actual Desktop cold ledger build resource in Node and genuine Main (macOS)
@@ -256,6 +305,22 @@ jobs:
         run: |
           npm run build:main --prefix desktop
           node --test tests/native/root-ledger-source-desktop.test.mjs
+
+      - name: Fixed Native Source and CPP port boundaries (macOS)
+        if: runner.os == 'macOS'
+        env:
+          XIAOK_NATIVE_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_BROKER_TEST_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_MAIN_COMPONENT_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/broker-authority-child.test.mjs
+          tests/native/broker-authority-node.test.mjs
+          tests/native/broker-parent-port.test.mjs
+          tests/native/broker-protected-child-source.test.mjs
+          tests/native/broker-protected-callback-source.test.mjs tests/native/kswarm-protected-child-source.test.mjs tests/native/kswarm-protected-callback-metadata.test.mjs tests/native/broker-authority-resources.test.mjs tests/native/broker-resource-platform.test.mjs tests/native/sqlite-api-unavailable.test.mjs
+          tests/native/kswarm-authority-child.test.mjs
+          tests/native/main-service-component-boundary.test.mjs
 
       - name: Original MainRoot enrollment codecs and negative consumption (macOS)
         if: runner.os == 'macOS'
@@ -288,10 +353,10 @@ jobs:
         shell: bash
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
+          git -C ../intent-broker fetch --depth 1 origin 726f3ad82a37814eeb540e343ae5a58510f24516
           git -C ../intent-broker checkout --detach FETCH_HEAD
           npm ci --ignore-scripts --omit=dev --prefix ../kswarm
           npm ci --ignore-scripts --omit=dev --prefix ../intent-broker

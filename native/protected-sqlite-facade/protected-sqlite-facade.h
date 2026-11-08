@@ -1,6 +1,7 @@
 #ifndef XIAOK_PROTECTED_SQLITE_FACADE_H
 #define XIAOK_PROTECTED_SQLITE_FACADE_H
 #include "root-store-io.h"
+#include "sqlite-api-availability.h"
 #include <node_api.h>
 #ifdef __cplusplus
 extern "C" {

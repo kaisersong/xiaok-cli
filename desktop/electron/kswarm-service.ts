@@ -1,3 +1,7 @@
+import {hasOriginalProtectedBrokerService,createOriginalProtectedBrokerServiceChild,closeOriginalProtectedBrokerService,sealOriginalProtectedBrokerServiceStartup,assertOriginalProtectedBrokerServiceCurrent} from './broker-protected-service-binding.js';
+import {createOriginalBrokerServiceEnvironment} from './broker-protected-startup-data.js';
+import {hasOriginalProtectedKSwarmService,createOriginalProtectedKSwarmServiceChild,closeOriginalProtectedKSwarmService} from './kswarm-protected-service-binding.js';
+import {getConfigDir} from '../../src/utils/config.js';
 import {hasDesktopWriterRelay,callDesktopWriterRelay,drainDesktopWriterRelay,getDesktopDispatchBusinessTransport,getDesktopPreparationTransport,readDesktopPreparationAcceptedWorkBinding} from './activity-owner-writer-launcher.js';
 import {createIntrinsicSet,settleIntrinsicOperations,appendIntrinsic,aggregateIntrinsicErrors} from '../../src/runtime/verification/intrinsic-async-collection.js';
 import {createKSwarmOwnedControl,type KSwarmOwnedControlAdmission,type KSwarmOwnedControlContext,type KSwarmOwnedControlOperation} from './kswarm-owned-control.js';
@@ -945,6 +949,23 @@ export function sealAndDrainKSwarmServiceInstance(service: KSwarmService): Promi
   return close();
 }
 
+const protectedKSwarmStartups=new WeakMap<object,Readonly<{service:object;environment:Readonly<Record<string,string>>}>>();
+const protectedBrokerStartups=new WeakMap<object,Readonly<{service:object;environment:Readonly<Record<string,string>>}>>();
+const protectedServiceFates=new WeakMap<object,Readonly<{waitPhysicalKnown():Promise<void>;assertPhysicalKnown():void}>>();
+export function readOriginalKSwarmServicePhysicalFate(service:unknown):Readonly<{waitPhysicalKnown():Promise<void>;assertPhysicalKnown():void}>{
+ const view=businessApply(preparationWeakGet,protectedServiceFates,[service]) as Readonly<{waitPhysicalKnown():Promise<void>;assertPhysicalKnown():void}>|undefined;
+ if(!view)throw Error('KSWARM_ORIGINAL_SERVICE_PHYSICAL_REQUIRED');return view;
+}
+/** Fixed original start-frame membership, never caller environment authority. */
+export function readOriginalKSwarmProtectedStartup(service:unknown,ticket:unknown):Readonly<Record<string,string>> {
+ const row=businessApply(preparationWeakGet,protectedKSwarmStartups,[ticket]) as Readonly<{service:object;environment:Readonly<Record<string,string>>}>|undefined;
+ if(!row||row.service!==service)throw Error('KSWARM_ORIGINAL_STARTUP_REQUIRED');return row.environment;
+}
+/** Exact original Broker business frame only; no environment/role supplied by callers. */
+export function readOriginalBrokerProtectedStartup(service:unknown,ticket:unknown):Readonly<Record<string,string>>{
+ const row=businessApply(preparationWeakGet,protectedBrokerStartups,[ticket]) as Readonly<{service:object;environment:Readonly<Record<string,string>>}>|undefined;
+ if(!row||row.service!==service)throw Error('BROKER_ORIGINAL_STARTUP_REQUIRED');return row.environment;
+}
 export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): KSwarmService {
   if(!options||typeof options!=='object'||preparationProxy(options))throw Error('DISPATCH_PREPARATION_FIXED_SOURCE_REQUIRED');
   const sourceOption=businessDescriptor(options,'ownedPreparationSource'),admissionOption=businessDescriptor(options,'ownedPreparationAdmission');
@@ -1055,6 +1076,13 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   const assertMetadataCleanupKnown=()=>{if(metadataCleanupObligations.size){const rows=metadataCleanupObligations.snapshot(),errors:unknown[]=[];for(let i=0;i<rows.length;i++)appendIntrinsic(errors,rows[i]!.error);throw aggregateIntrinsicErrors(errors,'kswarm_metadata_cleanup_unconfirmed');}};
   let permanentlySealed = false;
   let closing: Promise<void> | undefined;
+  let physicalCloseFinished=false,legacyCloseUnknown=false;
+  const physicalCloseStocks=createIntrinsicSet<RoomTurnCustody>(),physicalJoinStock=createRoomTurnCustody();
+  function closeSdk<T>(fn:Function,receiver:unknown,args:unknown[]):Promise<T>{if(!hasOriginalProtectedKSwarmService(service)&&!hasOriginalProtectedBrokerService(service))return businessApply(fn,receiver,args) as Promise<T>;const stock=createRoomTurnCustody();physicalCloseStocks.add(stock);return stock.sdk<T>(fn,receiver,args);}
+  function assertServicePhysical():void{
+    if((!hasOriginalProtectedKSwarmService(service)&&!hasOriginalProtectedBrokerService(service))||!physicalCloseFinished||legacyCloseUnknown||metadataCleanupObligations.size||businessJoinUnknown.size||businessCalls.size)throw Error('KSWARM_ORIGINAL_SERVICE_PHYSICAL_UNCONFIRMED');
+    const stocks=physicalCloseStocks.snapshot();for(let index=0;index<stocks.length;index++)stocks[index]!.assertPhysicalKnown();physicalJoinStock.assertPhysicalKnown();
+  }
   const spawnProcess = options.spawnProcess ?? spawn;
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
   let activityOwner: ConversationActivityOwnerClient | undefined;
@@ -1428,7 +1456,31 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     await startingPromise;
   }
 
+  let protectedBrokerStarting:Promise<boolean>|undefined;
   async function ensureBroker(): Promise<boolean> {
+    if(hasOriginalProtectedBrokerService(service)){
+      assertOriginalProtectedBrokerServiceCurrent(service);
+      if(activityDelegated||activityOwner)throw Error('BROKER_ORIGINAL_CHILD_DELEGATION_DENIED');
+      if(protectedBrokerStarting)return protectedBrokerStarting;
+      let yes!:(ready:boolean)=>void,no!:(raw:unknown)=>void;
+      protectedBrokerStarting=new Promise<boolean>((resolve,reject)=>{yes=resolve;no=reject;});
+      const run=(async()=>{
+        if(stopping||permanentlySealed)throw Error('BROKER_ORIGINAL_SERVICE_CLOSED');
+        const ticket=preparationFreeze(businessCreate(null)) as object;
+        const environment=createOriginalBrokerServiceEnvironment(desktopRoomToken,kswarmRoomToken);
+        businessApply(preparationWeakSet,protectedBrokerStartups,[ticket,preparationFreeze({service,environment})]);
+        const owned=await createOriginalProtectedBrokerServiceChild(service,ticket);
+        brokerChild=owned;ownedChildren.track(owned,3_000);
+        if(stopping||permanentlySealed)throw Error('BROKER_ORIGINAL_SERVICE_CLOSED');
+        for(let i=0;i<10;i++){
+          if(stopping||permanentlySealed)throw Error('BROKER_ORIGINAL_SERVICE_CLOSED');
+          if(await brokerHealthCheck())return true;
+          await new Promise(resolve=>setTimeout(resolve,300));
+        }
+        return false;
+      })();void run.then(yes,no);return protectedBrokerStarting;
+    }
+
     if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
     // Check if broker is already running
     if (await brokerHealthCheck()) {
@@ -1543,6 +1595,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function spawnServer(): Promise<void> {
+    const protectedSource=hasOriginalProtectedKSwarmService(service);
+    if(protectedSource&&(activityDelegated||activityOwner))throw Error('KSWARM_ORIGINAL_CHILD_DELEGATION_DENIED');
     if (activityDelegated || activityOwner) {
       if (!activityOwner) throw new Error('activity_owner_initializing');
       // Delegation precedes every local stale/incompatible-listener path.
@@ -1567,11 +1621,13 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       restartCount = 0; healthFailureCount = 0; startHealthCheck(); notifyListeners(); return;
     }
     if (child) return;
+    let serverPath:string|null=null,brokerReady=false;
+    if(!protectedSource&&!hasOriginalProtectedBrokerService(service)){
     const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
     if (stopping) return;
     const existingHealthy = existingHealth.ok;
     const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
-    const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
+    serverPath = resolveServicePath('kswarm', 'src/server/index.js');
     const expectedSourceHash = computeKSwarmServiceSourceHash(serverPath);
     const serviceIdentity = checkKSwarmHealthServiceIdentity(existingHealth.body, serverPath, expectedSourceHash);
     const serviceIdentityMatches = serviceIdentity.compatible;
@@ -1597,7 +1653,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       }
     }
 
-    let brokerReady = await brokerHealthCheck();
+    brokerReady = await brokerHealthCheck();
     if (stopping) return;
     if (existingHealthy && serviceIdentity.warning) {
       const warning = formatServiceIdentityWarning(serviceIdentity);
@@ -1673,6 +1729,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       return;
     }
 
+    }else serverPath=resolveServicePath('kswarm','src/server/index.js');
     if (!serverPath) {
       lastError = 'kswarm server entry not found';
       console.error('[kswarm-service]', lastError);
@@ -1714,7 +1771,16 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       `spawn command=${nodeRuntime.command} entryPath=${serverPath}`,
     );
     assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
-    const serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildKSwarmServerSpawnOptions({env:nodeRuntime.env}));
+    let serverChild:ChildProcess;
+    if(protectedSource){
+      const ticket=preparationFreeze(businessCreate(null)) as object;
+      // Same original startup data as ordinary spawn, with explicit config/root
+      // before the child's first business import. No executable or IO path is sent.
+      const projected=buildSidecarEnv(nodeRuntime.env);delete projected.XIAOK_NODE_CMD;
+      const environment=preparationFreeze({...projected,XIAOK_CONFIG_DIR:getConfigDir(),KSWARM_DATA_ROOT:nodeRuntime.env.KSWARM_DATA_ROOT||join(homedir(),'.kswarm')});
+      businessApply(preparationWeakSet,protectedKSwarmStartups,[ticket,preparationFreeze({service,environment})]);
+      serverChild=await createOriginalProtectedKSwarmServiceChild(service,ticket);
+    }else serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildKSwarmServerSpawnOptions({env:nodeRuntime.env}));
     ownedChildren.track(serverChild, 5_000);
     child = serverChild;
     if(scope&&(ownedBusinessAdmission||ownedPreparationSource||ownedDshAdmission)){
@@ -2170,6 +2236,11 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     if (activityDelegated || activityOwner) throw new Error('activity_source_stop_delegated');
     const ownedChild = child;
     const retirementErrors=businessClients.size?await drainBusinessRecords():[];
+    if(hasOriginalProtectedKSwarmService(service)){
+      let first:{raw:unknown}|undefined;try{await closeOriginalProtectedKSwarmService(service);}catch(raw){first={raw};}
+      if(child===ownedChild)child=null;
+      if(first)throw first.raw;if(retirementErrors.length)throw aggregateIntrinsicErrors(retirementErrors,'kswarm_business_retirement_failed');return;
+    }
     if (!ownedChild) {if(retirementErrors.length)throw aggregateIntrinsicErrors(retirementErrors,'kswarm_business_retirement_failed');return;}
     suppressedServerExits.add(ownedChild);
     let onExit!: () => void;
@@ -2211,6 +2282,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function stopOwnedBroker(): Promise<void> {
+    if(hasOriginalProtectedBrokerService(service)){await closeOriginalProtectedBrokerService(service);brokerChild=null;return;}
     if (activityDelegated || activityOwner) throw new Error('activity_source_stop_delegated');
     if (!brokerChild) return;
     const ownedBroker = brokerChild;
@@ -2339,20 +2411,28 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     permanentlySealed = true;
     sealOwnedControl();
     const readPort=workflowReadPorts.get(service);
-    const readDrain=readPort?closeNativeWorkflowReadPort(readPort.port):Promise.resolve();
-    const drains = [readDrain, ingress.close(), background.close()];
+    const readDrain=readPort?closeSdk(closeNativeWorkflowReadPort,undefined,[readPort.port]):Promise.resolve();
+    const brokerStartup=hasOriginalProtectedBrokerService(service)?closeSdk(sealOriginalProtectedBrokerServiceStartup,undefined,[service]):Promise.resolve();
+    const drains = [brokerStartup, readDrain, closeSdk(ingress.close,ingress,[]), closeSdk(background.close,background,[])];
     void Promise.allSettled(drains).then(async outcomes => {
-      const errors:unknown[]=[];for(let i=0;i<outcomes.length;i++){const outcome=outcomes[i]!;if(outcome.status==='rejected')appendIntrinsic(errors,outcome.reason);}
+      const errors:unknown[]=[];for(let i=0;i<outcomes.length;i++){const outcome=outcomes[i]!;if(outcome.status==='rejected'){legacyCloseUnknown=true;appendIntrinsic(errors,outcome.reason);}}
       const obligations=metadataCleanupObligations.snapshot();for(let i=0;i<obligations.length;i++){const obligation=obligations[i]!;let found=false;for(let n=0;n<errors.length;n++)if(errors[n]===obligation.error)found=true;if(!found)appendIntrinsic(errors,obligation.error);}
       stopping = true;
-      if(businessClients.size){const businessErrors=await drainBusinessRecords(true);for(let i=0;i<businessErrors.length;i++)appendIntrinsic(errors,businessErrors[i]);}
-      try { await ownedChildren.closeAll(); } catch (error) { appendIntrinsic(errors,error); }
-      try{await drainDesktopWriterRelay(service);}catch(error){appendIntrinsic(errors,error);}
-      const controlOutcomes=await settleIntrinsicOperations(ownedControls.snapshot(),control=>control.sealAndDrainTransport());
-      for(let index=0;index<controlOutcomes.length;index++){const outcome=controlOutcomes[index]!;if(outcome.status==='rejected')appendIntrinsic(errors,outcome.reason);}
+      if(businessClients.size){const businessErrors=await closeSdk<unknown[]>(drainBusinessRecords,undefined,[true]);if(businessErrors.length)legacyCloseUnknown=true;for(let i=0;i<businessErrors.length;i++)appendIntrinsic(errors,businessErrors[i]);}
+      const sourceClosers:Function[]=[];
+      if(hasOriginalProtectedKSwarmService(service))appendIntrinsic(sourceClosers,closeOriginalProtectedKSwarmService);
+      if(hasOriginalProtectedBrokerService(service))appendIntrinsic(sourceClosers,closeOriginalProtectedBrokerService);
+      const sourceOutcomes=await settleIntrinsicOperations(sourceClosers,fn=>closeSdk(fn,undefined,[service]));
+      for(let i=0;i<sourceOutcomes.length;i++){const outcome=sourceOutcomes[i]!;if(outcome.status==='rejected')appendIntrinsic(errors,outcome.reason);}
+      try { await closeSdk(ownedChildren.closeAll,ownedChildren,[]); } catch (error) { legacyCloseUnknown=true;appendIntrinsic(errors,error); }
+      try{await closeSdk(drainDesktopWriterRelay,undefined,[service]);}catch(error){legacyCloseUnknown=true;appendIntrinsic(errors,error);}
+      const controlOutcomes=await settleIntrinsicOperations(ownedControls.snapshot(),control=>closeSdk(control.sealAndDrainTransport,control,[]));
+      for(let index=0;index<controlOutcomes.length;index++){const outcome=controlOutcomes[index]!;if(outcome.status==='rejected'){legacyCloseUnknown=true;appendIntrinsic(errors,outcome.reason);}}
       executionReadIncarnation=Object.freeze({}); running = false;
       healthFailureCount = 0;
       notifyListeners();
+      const joins=await settleIntrinsicOperations(physicalCloseStocks.snapshot(),stock=>stock.waitPhysicalKnown());for(let index=0;index<joins.length;index++){const result=joins[index]!;if(result.status==='rejected'){legacyCloseUnknown=true;appendIntrinsic(errors,result.reason);}}
+      physicalCloseFinished=true;
       if (errors.length) throw aggregateIntrinsicErrors(errors, 'kswarm_service_close_unconfirmed');
     }).then(resolveClosing,rejectClosing);
     // Publish the cached Promise before abort listeners can reenter.
@@ -2614,6 +2694,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     };
     return preparationFreeze({kind:'kswarm_service_identity_v1' as const,ownedChild:!!capturedChild&&running&&!stopping&&!permanentlySealed,scope:scope??null,constructorId:constructorIdentity,assertCurrent,assertLocal});
   }]);
+  businessApply(preparationWeakSet,protectedServiceFates,[service,preparationFreeze({assertPhysicalKnown:assertServicePhysical,async waitPhysicalKnown(){
+    if(!closing)throw Error('KSWARM_ORIGINAL_SERVICE_PHYSICAL_UNCONFIRMED');physicalJoinStock.inventory(closing);
+    try{await closing;}catch(raw){physicalJoinStock.inventory(raw);}await physicalJoinStock.waitPhysicalKnown();assertServicePhysical();
+  }})]);
   instanceClosers.set(service, sealAndDrain);
   workflowReadPorts.set(service,{port:createNativeWorkflowReadPort(),request:service.request});
   return service;

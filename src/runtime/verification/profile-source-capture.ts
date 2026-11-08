@@ -28,6 +28,7 @@ const hash=(value:unknown)=>createHash('sha256').update(json(value)).digest('hex
  * substitute for a child. The root broker must separately bind original review,
  * principal, deadline, full registry membership and writer drain. */
 export async function startProfileSourceCapture(input:{uid:number;directoryHelper:string;sqliteHelper:string;sources:readonly ProfileCaptureSource[];signal:AbortSignal;maximumCaptureBytes?:number;maximumMetadataBytes?:number}){
+ if(input.sources.some(s=>s.kind==='sqlite-db'&&s.snapshotFormat==='root-nmp-ledger-v1'))throw Error('profile_capture_root_nmp_specialized_required');
  const {uid,directoryHelper,sqliteHelper,signal}=input;const captureLimit=input.maximumCaptureBytes??LIMIT;const metadataLimit=input.maximumMetadataBytes??LIMIT;if(!Number.isSafeInteger(metadataLimit)||metadataLimit<0||metadataLimit>LIMIT)throw Error('profile_capture_metadata_limit');if(!Number.isSafeInteger(captureLimit)||captureLimit<1||captureLimit>LIMIT)throw Error('profile_capture_limit');
  if(!Number.isSafeInteger(uid)||uid<1||!Array.isArray(input.sources)||!input.sources.length)throw Error('profile_capture_arguments');
  const sources=structuredClone(input.sources).sort((a,b)=>a.sourceId<b.sourceId?-1:a.sourceId>b.sourceId?1:0),identities=new Set<string>(),namespaces=new Set<string>(),directoryPaths=new Set<string>(),ids=new Set<string>();

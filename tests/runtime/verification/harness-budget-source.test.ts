@@ -17,10 +17,7 @@ it.skipIf(process.platform==='win32')('discovers the original persistent budget 
  try{await store.ready;const facts=readOrdinaryProfileSources();const found=facts?.sources.find(s=>s.database?.basename===basename(input.dbPath)&&s.directory.canonicalPath===dirname(input.dbPath));expect(found?.snapshotFormat).toBe('harness-budget-sqlite-v1');expect(found!.database!.inode).toBe(String(statSync(input.dbPath,{bigint:true}).ino));expect(facts!.legacyInventoryRequired).toBe(true);expect(facts).not.toHaveProperty('enumerationComplete');}finally{await store.dispose();}
  const before=readOrdinaryProfileSources();store=new HarnessOptimizationStore(data(directory,false),()=>{});try{await store.ready;expect(await store.call('read')).toMatchObject({ownerId:'original-owner'});expect(readOrdinaryProfileSources()!.generation).toBe(before!.generation);}finally{await store.dispose();}
 });
-it.each(['protected','unavailable'])('refuses ordinary budget Worker on %s routing before its constructor',async route=>{
- const directory=join(root,route);mkdirSync(directory);const input=data(directory);scope.route=route;let store:HarnessOptimizationStore|undefined;
- try{expect(()=>{store=new HarnessOptimizationStore(input,()=>{});}).toThrow('ordinary_source_route');}finally{scope.route='ordinary';if(store){await store.ready.catch(()=>{});await store.dispose();}}
-});
+
 
 it('keeps one physical close Promise and only reports the actual original Worker terminated',async()=>{
  const directory=join(root,'fate');mkdirSync(directory);const store=new HarnessOptimizationStore(data(directory),()=>{});await store.ready;
@@ -76,4 +73,18 @@ it.skipIf(!posix)('independently rejects omission of a raw budget semantic cell 
 it('keeps the existing Windows ordinary absence branch without publishing POSIX budget inventory',async()=>{
  const descriptor=Object.getOwnPropertyDescriptor(process,'platform')!,directory=join(root,'windows');mkdirSync(directory);const before=readOrdinaryProfileSources();Object.defineProperty(process,'platform',{...descriptor,value:'win32'});let store:HarnessOptimizationStore|undefined;
  try{store=new HarnessOptimizationStore(data(directory),()=>{});await store.ready;expect(readOrdinaryProfileSources()).toEqual(before);}finally{await store?.dispose();Object.defineProperty(process,'platform',descriptor);}
+});
+
+// Keep fresh-process module isolation after the original mapper identity cases.
+it.each(['protected','unavailable'])('refuses ordinary budget Worker on %s routing before its constructor',async route=>{
+ const directory=join(root,route);mkdirSync(directory);const input=data(directory);
+ // A separate module population models a fresh account process. Production
+ // retirement has no reset API; restoring the route must not revive that owner.
+ vi.resetModules();const isolated=await import('../../../desktop/electron/harness-optimization-store.js');scope.route=route;
+ let first:unknown;
+ try{
+  try{new isolated.HarnessOptimizationStore(input,()=>{});throw Error('expected route rejection');}catch(raw){first=raw;}
+  expect(first).toBeInstanceOf(Error);expect((first as Error).message).toBe('budget_source_writer_retired');expect((first as Error).cause).toBeInstanceOf(Error);expect(((first as Error).cause as Error).message).toBe('ordinary_source_route');
+  scope.route='ordinary';expect(()=>new isolated.HarnessOptimizationStore(input,()=>{})).toThrow(first as Error);
+ }finally{scope.route='ordinary';}
 });

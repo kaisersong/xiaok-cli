@@ -9,7 +9,7 @@ export function assertProfileSourceNamespace(source:Source):void{
  const path=paths(source.directory.canonicalPath);
  if(source.kind!=='sqlite-db'){
   if(path.basename(source.directory.canonicalPath)==='.canonical-session-aliases'&&source.kind!=='session-alias-holder')throw Error('profile_source_namespace');
- }else {const base=source.database.basename,main=base.replace(/-(?:journal|wal|shm)$/,'');if(main!==base&&isWriterLockSourceName(source.directory.canonicalPath,main))throw Error('profile_source_namespace');if(isWriterLockSourceName(source.directory.canonicalPath,base)&&source.snapshotFormat!=='writer-lock-sqlite-v1')throw Error('profile_source_namespace');}
+ }else {const base=source.database.basename;if(source.snapshotFormat==='root-nmp-ledger-v1'&&base!=='root-resource-v1.sqlite'||/^root-resource-v1\.sqlite(?:-journal|-wal|-shm)?$/.test(base)&&source.snapshotFormat!=='root-nmp-ledger-v1')throw Error('profile_source_namespace');const main=base.replace(/-(?:journal|wal|shm)$/,'');if(main!==base&&isWriterLockSourceName(source.directory.canonicalPath,main))throw Error('profile_source_namespace');if(isWriterLockSourceName(source.directory.canonicalPath,base)&&source.snapshotFormat!=='writer-lock-sqlite-v1')throw Error('profile_source_namespace');}
 }
 /** Declared descendants cannot replace original fixed producer namespaces. */
 export function assertProfileReferenceNamespace(parent:Source,relativePath:string,target:Source,physicalSuffix?:string):void{

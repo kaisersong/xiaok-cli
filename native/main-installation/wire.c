@@ -38,7 +38,7 @@ int mi_birth_decode(const unsigned char in[MI_BIRTH_BYTES],mi_birth *b){
  b->helper_pid=get32(in+12);b->child_pid=get32(in+16);b->uid=get32(in+20);memcpy(b->nonce,in+24,32);memcpy(b->seed,in+56,32);return b->helper_pid&&b->child_pid&&b->uid;
 }
 int mi_derive_key(const mi_birth *b,uint8_t domain,unsigned char out[32]){
- if(!b||(domain!=MI_ROOT_IO&&domain!=MI_DISPATCH))return 0;
+ if(!b||(domain!=MI_ROOT_IO&&domain!=MI_DISPATCH&&domain!=MI_KSWARM_IO&&domain!=MI_BROKER_IO))return 0;
 #ifdef __APPLE__
  unsigned char prk[32],info[64];const char *label="xiaok-main-installation-v1";size_t n=strlen(label);
  CCHmac(kCCHmacAlgSHA256,b->nonce,32,b->seed,32,prk);memcpy(info,label,n);info[n++]=(unsigned char)MI_BUILD_KIND;info[n++]=domain;
@@ -59,8 +59,8 @@ int mi_finalize_key(const mi_birth *b,uint8_t domain,const unsigned char client_
  (void)b;(void)domain;(void)client_nonce;(void)server_nonce;(void)release;(void)out;return 0;
 #endif
 }
-static int operation(uint16_t op){op&=(uint16_t)~MI_RESPONSE;return op>=MI_HELLO&&op<=MI_AUTHORITY_RELEASE;}
-static int fixed_header(const unsigned char *p){return !memcmp(p,"XMIO",4)&&get16(p+4)==MI_PROTOCOL_VERSION&&p[6]==MI_BUILD_KIND&&(p[7]==MI_ROOT_IO||p[7]==MI_DISPATCH)&&operation(get16(p+8))&&get16(p+10)<=MI_ISSUER_LOCK&&get32(p+32)<=MI_MAX_PAYLOAD&&get32(p+36)<=MI_MAX_PAYLOAD;}
+static int operation(uint16_t op){op&=(uint16_t)~MI_RESPONSE;return (op>=MI_HELLO&&op<=MI_KSWARM_RETIRE)||(op>=MI_BROKER_PREPARE&&op<=MI_BROKER_RETIRE);}
+static int fixed_header(const unsigned char *p){return !memcmp(p,"XMIO",4)&&get16(p+4)==MI_PROTOCOL_VERSION&&p[6]==MI_BUILD_KIND&&(p[7]==MI_ROOT_IO||p[7]==MI_DISPATCH||p[7]==MI_KSWARM_IO||p[7]==MI_BROKER_IO)&&operation(get16(p+8))&&get16(p+10)<=MI_ISSUER_LOCK&&get32(p+32)<=MI_MAX_PAYLOAD&&get32(p+36)<=MI_MAX_PAYLOAD;}
 static int mac(const unsigned char key[32],const unsigned char *p,size_t n,unsigned char out[32]){
 #ifdef __APPLE__
  CCHmacContext c;CCHmacInit(&c,kCCHmacAlgSHA256,key,32);CCHmacUpdate(&c,p,72);if(n>MI_HEADER_BYTES)CCHmacUpdate(&c,p+MI_HEADER_BYTES,n-MI_HEADER_BYTES);CCHmacFinal(&c,out);mi_zero(&c,sizeof(c));return 1;
@@ -69,7 +69,7 @@ static int mac(const unsigned char key[32],const unsigned char *p,size_t n,unsig
 #endif
 }
 int mi_frame_encode(const unsigned char key[32],const mi_frame *f,const unsigned char *payload,unsigned char *out,size_t capacity,size_t *n){
- if(!f||capacity<MI_HEADER_BYTES+f->payload_length||f->payload_length>MI_MAX_PAYLOAD||f->amount>MI_MAX_PAYLOAD||!operation(f->operation)||f->slot>MI_ISSUER_LOCK||(f->domain!=MI_ROOT_IO&&f->domain!=MI_DISPATCH)||(f->payload_length&&!payload))return 0;
+ if(!f||capacity<MI_HEADER_BYTES+f->payload_length||f->payload_length>MI_MAX_PAYLOAD||f->amount>MI_MAX_PAYLOAD||!operation(f->operation)||f->slot>MI_ISSUER_LOCK||(f->domain!=MI_ROOT_IO&&f->domain!=MI_DISPATCH&&f->domain!=MI_KSWARM_IO&&f->domain!=MI_BROKER_IO)||(f->payload_length&&!payload))return 0;
  memset(out,0,MI_HEADER_BYTES);memcpy(out,"XMIO",4);put16(out+4,MI_PROTOCOL_VERSION);out[6]=MI_BUILD_KIND;out[7]=f->domain;put16(out+8,f->operation);put16(out+10,f->slot);put32(out+12,f->status);put64(out+16,f->sequence);put64(out+24,f->offset);put32(out+32,f->payload_length);put32(out+36,f->amount);memcpy(out+40,f->nonce,32);
  if(f->payload_length)memcpy(out+MI_HEADER_BYTES,payload,f->payload_length);*n=MI_HEADER_BYTES+f->payload_length;return mac(key,out,*n,out+72);
 }

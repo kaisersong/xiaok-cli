@@ -56,6 +56,7 @@ struct ps_udf {
 static _Thread_local ps_namespace *namespaces;
 
 #include "protected-sqlite-lifecycle.h"
+#include "protected-sqlite-change-count.h"
 
 static int bind_value(napi_env e, sqlite3_stmt *s, int index, napi_value v) {
   napi_valuetype type;
@@ -178,6 +179,9 @@ static napi_value row(ps_statement *s) {
   return out;
 }
 static napi_value statement_read(napi_env e, napi_callback_info i, int mode) {
+  // Check before any step; the helper uses Clang's supported positive guard.
+  if (!ps_sqlite_api_available())
+    return fail(e, "ERR_SQLITE_API_UNAVAILABLE", "protected SQLite API unavailable");
   call c;
   if (!arguments(e, i, &c))
     return NULL;
@@ -223,7 +227,13 @@ static napi_value statement_read(napi_env e, napi_callback_info i, int mode) {
   }
   if (mode == 2 && rc == SQLITE_DONE) {
     napi_create_object(e, &out);
-    napi_value changes = integer_value(e, sqlite3_changes64(d->sql), s->read_big),
+    sqlite3_int64 count;
+    if (!read_change_count(d, &count)) {
+      sqlite3_reset(s->sql);
+      d->busy = 0;
+      return NULL;
+    }
+    napi_value changes = integer_value(e, count, s->read_big),
                id = integer_value(e, sqlite3_last_insert_rowid(d->sql), s->read_big);
     if (!changes || !id || !data(e, out, "changes", changes) ||
         !data(e, out, "lastInsertRowid", id))
@@ -537,6 +547,8 @@ static int method_record(napi_env e, napi_value target, const char *name, napi_v
   return data(e, target, name, record);
 }
 napi_value ps_create_original_namespace(napi_env e, nr_root_store_io *io) {
+  if (!ps_sqlite_api_available())
+    return fail(e, "ERR_SQLITE_API_UNAVAILABLE", "protected SQLite API unavailable");
   for (ps_namespace *n = namespaces; n; n = n->next)
     if (n->io == io)
       return fail(e, "ERR_SQLITE_ERROR", "original IO namespace is one use");

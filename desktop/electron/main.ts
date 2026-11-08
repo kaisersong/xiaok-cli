@@ -1,3 +1,4 @@
+import {bindOriginalMainDshBrokerService} from './broker-protected-service-binding.js';
 import {createDefaultDispatchPreparationNativeSource} from './default-dispatch-preparation-native-source.js';
 import {createDefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
 import {createDefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
@@ -44,6 +45,7 @@ import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {registerUnavailableDshSettingsIpc,registerDshSettingsIpc} from './dsh-settings-typed-ipc.js';
 import {readOriginalProductionRootResourceQualification} from './root-resource-production-qualification.js';
 import {createOriginalMainDshServiceSources,prepareOriginalMainDshServiceSources,readOriginalMainDshPreparedSources,closeOriginalMainDshStartupSources} from './main-dsh-service-sources.js';
+import {bindOriginalMainDshKSwarmService} from './kswarm-protected-service-binding.js';
 import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOriginalMainDshRuntimePolling,rejectOriginalMainDshRuntimeStartup} from './main-dsh-runtime-composition.js';
 import {createMainDshControlSource} from './main-dsh-control-source.js';
 import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
@@ -810,7 +812,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const writerSource=createKSwarmWriterControlSource({getWindow:()=>mainWindow,getScope:writerScope,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, {
-    activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    activityOwnerPending: !dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
     ...(dshPrepared?{ownedDshAdmission:dshPrepared.businessSource.admission}:{}),
     desktopProjectScope:writerScope(),ownedControlAdmission:writerSource.admission,ownedBusinessAdmission:defaultDispatchController.businessAdmission,ownedPreparationSource:preparationOwner.transportSource,ownedPreparationAdmission:preparationOwner.transportAdmission,
   });
@@ -927,7 +929,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
   const startMainKSwarm = () => startDesktopKSwarmService(desktopShutdownGate, kswarmService,
-    process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    !dshSources && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
     dshSources?undefined:error => {
       const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
       console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
@@ -1649,6 +1651,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if(dshSources){
     const composition=await composeOriginalMainDshRuntime({services,sources:dshSources,roomRuntime:roomWorkspaceRuntime,roomDispatcher:collaborationRoomWakeDispatcher,directBridge:dshRuntimeBridge!,materialSource:mainMaterialSource,brokerClient:rawCollaborationRoomBrokerClient});
     const original=readOriginalMainDshRuntimeBinding(services,dshSources,composition);
+    await bindOriginalMainDshKSwarmService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    await bindOriginalMainDshBrokerService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
     desktopIngressOwners.push(original.ingress);
     if(!desktopShutdownGate.isOpen){original.ingress.stopAccepting();return window;}
     registerDshSettingsIpc(shutdownAwareIpc,original.controller,mainUserControlSource);
