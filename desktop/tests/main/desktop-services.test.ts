@@ -74,6 +74,26 @@ function mockKSwarmService(): KSwarmService {
 }
 
 describe('CUA mutation sources and reconnect intent', () => {
+  it('activates the live macOS 0.41.2 ABI and dispatches all changed operations', async () => {
+    const root = join(tmpdir(), `cua-native-041-${Date.now()}`);
+    const log = join(root, 'calls.jsonl');
+    const catalogPath = join(process.cwd(), '..', 'tests', 'fixtures', 'cua-macos-0.41.2', 'catalog.json');
+    const { services } = createCuaFixtureServices(root, { CUA_MCP_MACOS_CATALOG: catalogPath, CUA_MCP_CALL_LOG_PATH: log });
+    try {
+      expect(await services.enableComputerUse({ requestSource: 'user' })).toMatchObject({ state: 'ready' });
+      for (const action of ['double_click', 'right_click', 'set_value']) {
+        expect(await services.executeTool('xiaok_computer_use', {
+          action, pid: 123, window_id: '456', snapshot_id: 's00000001', element_index: '2',
+          ...(action === 'set_value' ? { value: 'hello' } : {}),
+        })).toContain('"ok":true');
+        const call = readJsonLineLog(log).find(event => event.name === action);
+        expect(call?.input).toEqual({ pid: 123, window_id: 456, element_token: 's00000001:2', ...(action === 'set_value' ? { value: 'hello' } : {}) });
+      }
+    } finally {
+      await services.disableComputerUse({ requestSource: 'user' });
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  }, 15_000);
   it('dispatches macOS legacy indices as native tokens through the actual Desktop service', async () => {
     const root = join(tmpdir(), `cua-native-token-${Date.now()}`);
     const log = join(root, 'calls.jsonl');

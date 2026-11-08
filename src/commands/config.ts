@@ -1,3 +1,4 @@
+import {defaultKimDecisionRuntime} from '../ai/kim/runtime.js';
 import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
 import type { Command } from 'commander';
 import type { ModelConfigEntry, ProviderConfig, ProviderModelVariant } from '../ai/providers/types.js';
@@ -238,6 +239,8 @@ export function registerConfigCommands(program: Command): void {
       console.log(`已为 ${provider} 设置 API Key${switched ? `，并切换为默认提供商` : ''}`);
     });
 
+  configSet.command('kim-enabled <enabled>').description('Enable or disable local K-IM group-message judgments').action(async(value:string)=>{if(!['true','false'].includes(value))throw Error('kim_enabled_requires_boolean');await defaultKimDecisionRuntime.save({enabled:value==='true'},'user');console.log('K-IM '+(value==='true'?'enabled':'disabled'));});
+  configSet.command('kim-base-url <url>').description('Set the local K-IM service origin').action(async(baseUrl:string)=>{const result=await defaultKimDecisionRuntime.save({baseUrl},'user');console.log('K-IM '+result.baseUrl);});
   // System One（Jev）是辅助决策模型，不走 providers/models，单独一组命令。
   configSet
     .command('system-one-api-key <key>')

@@ -1,3 +1,4 @@
+import {registerKimDecisionIpc} from '../../electron/kim-decision-typed-ipc.js';
 import {registerCredentialInputIpc} from '../../electron/credential-input-ipc.js';
 import { registerAssistantInboxIpc } from '../../electron/assistant-inbox-ipc.js';
 import { registerMailConnectorIpc } from '../../electron/mail-connector-typed-ipc.js';
@@ -117,6 +118,9 @@ describe('preload API contract', () => {
       'updateModelRuntimeOptions',
       // SystemOne（Jev）辅助决策模型：独立于 providers/models 的一组键。
       'getSystemOneConfig',
+      'getKimDecisionConfig',
+      'saveKimDecisionConfig',
+      'testKimDecisionConnection',
       'saveSystemOneConfig',
       'createManagedXiaokAgent',
       'testProviderConnection',
@@ -1145,6 +1149,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerThreadMetadataIpc({ handle: channel => { channels.add(channel); } });
   registerDesktopSmallConfigIpc({ handle: channel => { channels.add(channel); } });
   registerModelProviderIpc({ handle: channel => { channels.add(channel); } });
+  registerKimDecisionIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerDiagnosticsIpc({ handle: channel => { channels.add(channel); } });
   registerPrinciplesIpc({ handle: channel => { channels.add(channel); } });
   registerKnowledgeIpc({ handle: channel => { channels.add(channel); } });

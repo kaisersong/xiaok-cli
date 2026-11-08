@@ -238,6 +238,8 @@ export interface Config {
   };
   /** TypeSafe System One（Jev）辅助决策模型配置。 */
   systemOne?: SystemOneConfig;
+  /** Dedicated local K-IM judgment service; separate from chat providers. */
+  kimDecision?: { enabled?: boolean; baseUrl?: string; attentionThreshold?: number; revision?: string };
   meeting?: {
     asr?: {
       defaultProvider?: 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
