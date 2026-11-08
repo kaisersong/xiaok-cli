@@ -43,12 +43,13 @@ export function buildSidecarEnv(parent: NodeJS.ProcessEnv, platform = process.pl
   )) as Record<string, string>;
 }
 
-/** Child readers have a different PID/discovery file; pass selected ports as defaults.
- * Explicit user configuration (including the broker alias) keeps its priority. */
+/** Child readers have a different PID/discovery file. Publish the ports Main
+ * actually selected; requested ports have already been resolved by discovery. */
 export function buildDesktopServiceEnv(parent: NodeJS.ProcessEnv, ports: DesktopServicePorts): NodeJS.ProcessEnv {
   return {
     ...parent,
-    XIAOK_DESKTOP_PORT: parent.XIAOK_DESKTOP_PORT ?? parent.INTENT_BROKER_PORT ?? String(ports.broker),
-    KSWARM_PORT: parent.KSWARM_PORT ?? String(ports.kswarm),
+    XIAOK_DESKTOP_PORT: String(ports.broker),
+    INTENT_BROKER_PORT: String(ports.broker),
+    KSWARM_PORT: String(ports.kswarm),
   };
 }
