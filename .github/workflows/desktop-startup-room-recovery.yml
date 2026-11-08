@@ -103,6 +103,10 @@ jobs:
           tests/main/kswarm-execution-clock.test.ts
           tests/main/desktop-tool-loop-recovery.test.ts
 
+      - name: Prepare locked Windows absence helper at the source reader layout
+        if: runner.os == 'Windows'
+        run: node desktop/tests/support/prepare-windows-source-absence.mjs
+
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop
         run: >-
@@ -125,6 +129,10 @@ jobs:
           tests/main/loop-runtime-source-registration-failure.test.ts
           tests/main/loop-sqlite-autocommit-compat.test.ts
           tests/main/loop-transaction-rollback.test.ts
+          tests/main/loop-observed-writer.test.ts
+          tests/main/loop-sqlite-bindings.test.ts
+          tests/main/loop-owned-sql-population.test.ts
+          tests/main/windows-source-absence-fixture.test.ts
 
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'

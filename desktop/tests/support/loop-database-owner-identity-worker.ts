@@ -1,5 +1,10 @@
-import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';import {strict as assert} from 'node:assert';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import fs from 'node:fs';import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';import {strict as assert} from 'node:assert';import {join} from 'node:path';import {tmpdir} from 'node:os';
 const root=fs.mkdtempSync(join(tmpdir(),'loop-zero-inode-')),original=fs.statSync,descriptor=Object.getOwnPropertyDescriptor(fs,'statSync')!;let calls=0;
+const account=fs.realpathSync(root),home=join(account,'account'),config=join(home,'config'),priorConfig=process.env.XIAOK_CONFIG_DIR;
+fs.mkdirSync(config,{recursive:true,mode:0o700});process.env.XIAOK_CONFIG_DIR=config;
+const userDescriptor=Object.getOwnPropertyDescriptor(os,'userInfo')!,homeDescriptor=Object.getOwnPropertyDescriptor(os,'homedir')!,originalUserInfo=os.userInfo;
+Object.defineProperty(os,'userInfo',{...userDescriptor,value:((...args:Parameters<typeof os.userInfo>)=>({...originalUserInfo(...args),homedir:home})) as typeof os.userInfo});
+Object.defineProperty(os,'homedir',{...homeDescriptor,value:()=>home});
 Object.defineProperty(fs,'statSync',{...descriptor,value:((...args:Parameters<typeof fs.statSync>)=>{const result=original(...args);if(result&&typeof result.ino==='bigint'){calls++;result.ino=0n;result.dev=0n;}return result;}) as typeof fs.statSync});syncBuiltinESMExports();
 try{
  const {createLoopDatabaseOwnerGroup,openLoopDatabase}=await import('../../electron/loop-database-owner.js');
@@ -22,4 +27,4 @@ try{
   }
  }else throw Error('worker mode');
  process.stdout.write(JSON.stringify({ok:true,maskedStatCalls:calls})+'\n');
-}finally{Object.defineProperty(fs,'statSync',descriptor);syncBuiltinESMExports();fs.rmSync(root,{recursive:true,force:true});}
+}finally{Object.defineProperty(os,'userInfo',userDescriptor);Object.defineProperty(os,'homedir',homeDescriptor);if(priorConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=priorConfig;Object.defineProperty(fs,'statSync',descriptor);syncBuiltinESMExports();fs.rmSync(root,{recursive:true,force:true});}

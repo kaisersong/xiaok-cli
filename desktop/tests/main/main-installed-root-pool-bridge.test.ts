@@ -1,12 +1,13 @@
 // @vitest-environment node
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 
+const nativeFixturePath=vi.hoisted(()=>((name:string)=>/[\\/]main_bootstrap\.node$/.test(name)));
 const facts=vi.hoisted(()=>({events:[] as string[],issuer:{} as object,session:{} as object,store:{} as object,connectFault:false,rootFault:false,closeFault:false,connectOverride:undefined as {value:unknown}|undefined,onConnect:undefined as (()=>void)|undefined,connectError:undefined as unknown,rootError:undefined as unknown}));
 vi.mock('node:module',async importOriginal=>{
  const actual=await importOriginal<typeof import('node:module')>();
  return {...actual,createRequire:(url:string|URL)=>{
   const original=actual.createRequire(url);
-  return (name:string)=>name.endsWith('/main_bootstrap.node')?{
+  return (name:string)=>nativeFixturePath(name)?{
    createOriginalMainIssuer(){facts.events.push('birth');return facts.issuer;},
    assertOriginalMainIssuerCurrent(){facts.events.push('current');},
    revokeOriginalMainIssuer(){facts.events.push('revoke');},
@@ -177,4 +178,10 @@ it('started-Core lookup never downgrades a closing Core to legacy absence',async
  expect(lookup).toBeTypeOf('function');const {realm,core}=coreSetup();realm.bindStore(facts.store);
  await api.startOriginalMainDshCoreInfrastructure(core);const closing=api.closeOriginalMainDshCoreInfrastructure(core);
  expect(()=>lookup(realm,facts.store)).toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');await closing;
+});
+
+it('recognizes only the fixed Native fixture basename with either host separator',()=>{
+ expect(nativeFixturePath('C:\\repo\\desktop\\electron\\main_bootstrap.node')).toBe(true);
+ expect(nativeFixturePath('/repo/desktop/electron/main_bootstrap.node')).toBe(true);
+ for(const name of ['main_bootstrap.node.evil','/repo/other.node','/repo/notmain_bootstrap.node'])expect(nativeFixturePath(name)).toBe(false);
 });
