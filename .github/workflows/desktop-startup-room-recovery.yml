@@ -8,6 +8,9 @@ on:
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/fixtures/protected-core-model-sdk.cjs'
+      - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
       - 'tests/native/fixtures/accepted-root-binding-entry.ts'
       - 'tests/native/helpers/accepted-root-candidate-observation.*'
@@ -26,6 +29,9 @@ on:
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
       - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/fixtures/protected-core-model-sdk.cjs'
+      - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
       - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
       - 'tests/native/fixtures/accepted-root-binding-entry.ts'
       - 'tests/native/helpers/accepted-root-candidate-observation.*'
@@ -136,6 +142,10 @@ jobs:
           node --test --test-concurrency=1
           tests/native/main-installation-certificate.test.mjs
           tests/native/main-installation-helper.test.mjs
+
+      - name: Genuine Main protected Core model SDK fresh and restored (macOS)
+        if: runner.os == 'macOS'
+        run: node --test tests/native/protected-core-model-sdk.test.mjs
 
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
