@@ -817,6 +817,9 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   let startingPromise: Promise<void> | null = null;
   let stopPromise: Promise<void> | null = null;
   let healthFailureCount = 0;
+  let brokerHealthFailureCount = 0;
+  let brokerRecoveryAttempts = 0;
+  let brokerRecoveryPromise: Promise<void> | null = null;
   let terminalDegraded = false;
   let persistenceFailStopCount = 0;
   let lastPersistenceFailStop: string | null = null;
@@ -975,6 +978,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       if (!running || stopping) return;
       const ok = await healthCheck();
       healthFailureCount = nextHealthFailureCount(healthFailureCount, ok);
+      if (ok) {
+        await recoverBrokerAfterHealthFailures();
+        return;
+      }
       if (!ok && !shouldRestartAfterHealthFailures(healthFailureCount)) {
         console.warn(`[kswarm-service] Health check failed (${healthFailureCount}/${HEALTH_FAILURE_RESTART_THRESHOLD}), will retry before restart`);
         return;
@@ -993,6 +1000,27 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       }
       }).catch(error => { console.error('[kswarm-service] Health loop failed:', error); });
     }, HEALTH_INTERVAL_MS);
+  }
+
+  async function recoverBrokerAfterHealthFailures(): Promise<void> {
+    if (stopping || permanentlySealed || brokerRecoveryPromise) return;
+    const healthy = await brokerHealthCheck();
+    if (stopping || permanentlySealed || brokerRecoveryPromise) return;
+    brokerHealthFailureCount = nextHealthFailureCount(brokerHealthFailureCount, healthy);
+    if (healthy) {
+      brokerRecoveryAttempts = 0;
+      if (lastError?.startsWith('intent-broker')) { lastError = null; notifyListeners(); }
+      return;
+    }
+    if (!shouldRestartAfterHealthFailures(brokerHealthFailureCount) || brokerRecoveryAttempts >= MAX_RESTART_ATTEMPTS) return;
+    brokerHealthFailureCount = 0;
+    brokerRecoveryAttempts++;
+    try { await recoverBroker(false); }
+    catch (error) {
+      lastError = `intent-broker recovery failed: ${error instanceof Error ? error.message : String(error)}`;
+      logKSwarmServiceLine('broker', 'lifecycle', lastError);
+      notifyListeners();
+    }
   }
 
   function stopHealthCheck() {
@@ -1141,9 +1169,12 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function ensureBroker(): Promise<boolean> {
+    if (stopping || permanentlySealed) return false;
     if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
     // Check if broker is already running
-    if (await brokerHealthCheck()) {
+    const healthy = await brokerHealthCheck();
+    if (stopping || permanentlySealed) return false;
+    if (healthy) {
       // A stale token can belong to an external installation. Authentication
       // failure is not permission to kill the listener or take over its data.
       if (stopping) return false;
@@ -1723,17 +1754,38 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     });
   }
 
+  function recoverBroker(restartHealthy: boolean): Promise<void> {
+    if (brokerRecoveryPromise) return brokerRecoveryPromise;
+    const pending = (async () => {
+      if (stopping || permanentlySealed) throw new Error('intent_broker_recovery_stopped');
+      if (activityDelegated || activityOwner) {
+        if (!activityOwner) throw new Error('activity_owner_initializing');
+        const healthy = restartHealthy && await brokerHealthCheck();
+        if (stopping || permanentlySealed) throw new Error('intent_broker_recovery_stopped');
+        // A vanished external service cannot be stopped. Let its existing owner
+        // ensure availability; healthy services still use the owned restart.
+        await activityOwner.request(healthy ? 'sourceRestart' : 'sourceEnsure', { name: 'broker', ownerEpoch: activityOwner.ownerEpoch });
+      } else {
+        if (restartHealthy) await stopOwnedBroker();
+        if (stopping || permanentlySealed) throw new Error('intent_broker_recovery_stopped');
+        if (!await ensureBroker()) throw new Error('intent_broker_restart_failed');
+      }
+      if (!await brokerHealthCheck()) throw new Error('intent_broker_restart_failed');
+      brokerHealthFailureCount = 0;
+      brokerRecoveryAttempts = 0;
+      if (lastError?.startsWith('intent-broker')) lastError = null;
+      notifyListeners();
+    })().finally(() => { if (brokerRecoveryPromise === pending) brokerRecoveryPromise = null; });
+    brokerRecoveryPromise = pending;
+    return pending;
+  }
+
   async function restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void> {
     if (serviceId === 'kswarm') {
       await restart();
       return;
     }
-    await stopOwnedBroker();
-    const ok = await ensureBroker();
-    if (!ok) {
-      throw new Error('intent_broker_restart_failed');
-    }
-    notifyListeners();
+    await recoverBroker(true);
   }
 
   async function activityOwnerConfig() {
