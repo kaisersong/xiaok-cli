@@ -181,7 +181,7 @@ test('the actual production-compiled missing-migration and missing-restore branc
         ], { encoding: 'utf8' });
         console.log(JSON.stringify({ kind: 'owned-production-deny-compile', pid: built.pid, status: built.status }));
         assert.equal(built.status, 0, built.stderr);
-        for (const [mode, reason] of [['migration', 'MI_MIGRATION_NOT_IMPLEMENTED'], ['restore', 'MI_CONSUME_RESTORE_MISSING']]) {
+        for (const [mode, reason] of [['migration', 'MI_MIGRATION_NOT_IMPLEMENTED'], ['restore', 'MI_CONSUME_RESTORE_MISSING'], ['planned-migration', 'MI_MIGRATION_NOT_IMPLEMENTED'], ['planned-restore', 'MI_CONSUME_RESTORE_MISSING']]) {
             const r = spawnSync(bin, [metadata, mode], { encoding: 'utf8' });
             console.log(JSON.stringify({ kind: 'owned-production-deny-driver', pid: r.pid, status: r.status, mode, stdout: r.stdout, stderr: r.stderr }));
             assert.equal(r.status, 0, r.stderr);
