@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {ASSISTANT_CALENDAR_EVENT_SCHEMA} from './assistant-calendar-contract.js';
 import {KIM_JUDGMENT_SCHEMA} from './kim-decision-ipc-contract.js';
 export const ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111111';
 export const isAssistantThread = (id: unknown): id is string => typeof id === 'string' && (id === ASSISTANT_CHAT_THREAD || /^a0c22222-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id));
@@ -23,7 +24,8 @@ export type AttentionStart=z.infer<typeof ATTENTION_START_SCHEMA>;
 export function assistantUser(source:AssistantActor|undefined):void {if(source!=='user')throw Error('assistant_user_only');}
 export function assistantSource(source:AssistantActor|undefined):void {if(!['user','scheduler'].includes(source??''))throw Error('assistant_source_denied');}
 export function assistantLocalDate(now:number,timeZone:string):string {const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);return ['year','month','day'].map(k=>parts.find(p=>p.type===k)!.value).join('-');}
-export const OUTBOX_DRAFT_SCHEMA=z.object({id:z.string().uuid(),revision:z.number().int().positive(),channel:z.enum(['mail','yzj']),taskId:id.optional(),recipient:z.string().max(1000),to:z.array(z.string().email()).max(20).optional(),subject:z.string().max(200).optional(),text:z.string().min(1).max(30000),status:z.enum(['draft','submitting','accepted','refused','failed','unknown']),createdAt:time,errorCode:z.string().max(80).optional()}).strict();
+export const OUTBOX_STATUS_SCHEMA=z.enum(['draft','submitting','accepted','refused','failed','unknown']);
+export const OUTBOX_DRAFT_SCHEMA=z.object({id:z.string().uuid(),revision:z.number().int().positive(),channel:z.enum(['mail','yzj','calendar']),taskId:id.optional(),recipient:z.string().max(1000),to:z.array(z.string().email()).max(20).optional(),subject:z.string().max(200).optional(),text:z.string().min(1).max(30000),status:OUTBOX_STATUS_SCHEMA,createdAt:time,errorCode:z.string().max(80).optional(),calendar:ASSISTANT_CALENDAR_EVENT_SCHEMA.optional(),calendarEventId:z.string().min(1).max(256).optional()}).strict().superRefine((v,c)=>{if(v.channel==='calendar'){if(!v.calendar||v.to||v.subject||v.status==='accepted'&&!v.calendarEventId)c.addIssue({code:'custom',message:'calendar_draft_invalid'});}else if(v.calendar||v.calendarEventId)c.addIssue({code:'custom',message:'calendar_draft_invalid'});});
 export type OutboxDraft=z.infer<typeof OUTBOX_DRAFT_SCHEMA>;
 export const OUTBOX_APPROVE_SCHEMA=z.object({id:z.string().uuid(),expectedRevision:z.number().int().positive(),text:z.string().min(1).max(30000),to:z.array(z.string().email()).min(1).max(20).optional(),subject:z.string().min(1).max(200).regex(/^[^\r\n]+$/).optional()}).strict();
 export type OutboxApproval=z.infer<typeof OUTBOX_APPROVE_SCHEMA>;

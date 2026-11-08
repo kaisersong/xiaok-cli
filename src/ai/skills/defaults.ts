@@ -21,3 +21,12 @@ export function getBuiltinSkillRoots(): string[] {
 
   return [join(__dirname, '../../../data/skills')];
 }
+
+/** Packaged/source-owned skill roots; never consult the process working directory. */
+export function getBundledSkillRoots(): string[] {
+  return [
+    ...((process as NodeJS.Process & {resourcesPath?:string}).resourcesPath
+      ? [join((process as NodeJS.Process & {resourcesPath:string}).resourcesPath,'skills')] : []),
+    join(__dirname,'../../../data/skills'),join(__dirname,'../../../../data/skills'),
+  ].filter((candidate,index,all)=>existsSync(candidate)&&all.indexOf(candidate)===index);
+}

@@ -5,6 +5,8 @@ import { ensureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { redactSecrets } from '../../src/shared/stream-safety/redact.js';
 import { assistantLocalDate,type AttentionRecord,type AssistantCoverage } from '../shared/assistant-inbox-contract.js';
 import type { AssistantSourceBatch } from './assistant-inbox-service.js';
+import {assistantUser,type AssistantActor} from '../shared/assistant-inbox-contract.js';
+import {normalizeAssistantCalendarEvent,ASSISTANT_CALENDAR_RANGE_SCHEMA,type AssistantCalendarEvent} from '../shared/assistant-calendar-contract.js';
 const object=(x:unknown):Record<string,unknown>=>x&&typeof x==='object'&&!Array.isArray(x)?x as Record<string,unknown>:{};
 const list=(x:unknown):Record<string,unknown>[]=>Array.isArray(x)?x.map(object):[];
 const text=(x:unknown,max=1000)=>redactSecrets(typeof x==='string'?x:'').text.slice(0,max);
@@ -13,7 +15,23 @@ export class AssistantYzjClient {
  private readonly run:(args:string[],signal?:AbortSignal)=>Promise<unknown>;
  constructor(deps:{run?:(args:string[],signal?:AbortSignal)=>Promise<unknown>}={}){this.run=deps.run??runAssistantYzj;}
  private async data(args:string[],signal?:AbortSignal){const result=object(await this.run(args,signal));if(result.success!==true)throw Error('assistant_source_failed');return object(result.data);}
- async identity(signal?:AbortSignal):Promise<string>{const data=await this.data(['whoami'],signal);if(typeof data.openId!=='string'||typeof data.orgId!=='string'||data.tokenStatus==='expired')throw Error('assistant_account_changed');return createHash('sha256').update(JSON.stringify([data.orgId,data.openId])).digest('hex');}
+ private async actor(signal?:AbortSignal){const data=await this.data(['whoami'],signal);if(typeof data.openId!=='string'||!data.openId||data.openId.length>256||data.openId.includes('\0')||typeof data.orgId!=='string'||!data.orgId||data.tokenStatus==='expired')throw Error('assistant_account_changed');return {openId:data.openId,identity:createHash('sha256').update(JSON.stringify([data.orgId,data.openId])).digest('hex')};}
+ async identity(signal?:AbortSignal):Promise<string>{return (await this.actor(signal)).identity;}
+ async listCalendar(raw:unknown,signal?:AbortSignal){const range=ASSISTANT_CALENDAR_RANGE_SCHEMA.parse(raw),identity=await this.identity(signal);const data=await this.data(['calendar','event','list',`--start=${range.startDate}`,`--end=${range.endDate}`],signal);if(!Array.isArray(data.list))throw Error('assistant_source_failed');let partial=data.list.length>100||data.more===true||Number(data.count)>100;const items: Array<AssistantCalendarEvent&{id:string}>=[];for(const row of list(data.list).slice(0,100)){if(row.cancelReason||Number(row.cancelDate)>0)continue;try{const id=text(row.id,256);if(!id)throw Error('missing_id');const event=normalizeAssistantCalendarEvent({title:text(row.title,100),startAt:new Date(Number(row.startDate)).toISOString(),endAt:new Date(Number(row.endDate)).toISOString(),description:text(row.content,4000)});items.push({id,...event});}catch{partial=true;}}signal?.throwIfAborted();if(await this.identity(signal)!==identity)throw Error('assistant_account_changed');return {items,partial};}
+ async createCalendar(raw:unknown,expectedIdentity:string,requestSource?:AssistantActor):Promise<{eventId:string}>{
+  assistantUser(requestSource);const event=normalizeAssistantCalendarEvent(raw),actor=await this.actor();
+  if(actor.identity!==expectedIdentity)throw Error('assistant_account_changed');
+  // One fixed official CLI invocation; no model-selected identity, profile, endpoint or attendees.
+  const response=object(await this.run(['calendar','event','create',`--title=${event.title}`,`--start=${event.startAt}`,`--end=${event.endAt}`,`--meet-organizer-open-ids=${actor.openId}`,...(event.description?[`--description=${event.description}`]:[])]));
+  if(response.success!==true)throw Error('assistant_calendar_write_unknown');
+  const data=object(response.data),id=typeof response.data==='string'?response.data:data.id??data.eventId??data.eid;
+  if(typeof id!=='string'||!id||id.length>256||id.includes('\0'))throw Error('assistant_calendar_write_unknown');
+  const verified=await this.data(['calendar','event','get',`--id=${id}`]);
+  if(verified.id!==id||verified.title!==event.title||Number(verified.startDate)!==Date.parse(event.startAt)||Number(verified.endDate)!==Date.parse(event.endAt)||(verified.content??'')!==event.description||verified.cancelReason||Number(verified.cancelTime)>0||Number(verified.cancelDate)>0)throw Error('assistant_calendar_write_unknown');
+  // Detect external login changes; separate CLI invocations cannot provide atomic account binding.
+  if(await this.identity()!==expectedIdentity)throw Error('assistant_calendar_write_unknown');
+  return {eventId:id};
+ }
  async read(now:number,timeZone:string,signal:AbortSignal):Promise<AssistantSourceBatch>{let identity:string;try{identity=await this.identity(signal);}catch{return {records:[],coverage:[{key:'yzj_message:none',source:'yzj_message',state:'unavailable',code:'not_connected',checkedAt:now},{key:'yzj_calendar:none',source:'yzj_calendar',state:'unavailable',code:'not_connected',checkedAt:now}]};}
  const records:AttentionRecord[]=[],coverage:AssistantCoverage[]=[],kimWindows:NonNullable<AssistantSourceBatch['kimWindows']>={};const today=assistantLocalDate(now,timeZone),tomorrow=assistantLocalDate(now+86400000,timeZone);
  await Promise.allSettled([

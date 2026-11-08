@@ -1,4 +1,5 @@
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
+import {createDesktopAssistantInbox} from '../../electron/desktop-assistant-inbox.js';
 import * as atomicUserFile from '../../../src/utils/atomic-file.js';
 import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
 import { types } from 'node:util';
@@ -264,6 +265,24 @@ describe('desktop services', () => {
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
     delete process.env.XIAOK_CONFIG_DIR;
+  });
+
+  it('loads the curated assistant Skill and exposes the closed tools to the actual model adapter', async () => {
+    const services=createDesktopServices({dataRoot:join(rootDir,'data'),kswarmService:mockKSwarmService()});
+    const inbox=createDesktopAssistantInbox({dataRoot:join(rootDir,'data'),crypto:{isEncryptionAvailable:()=>true,encryptString:(s:string)=>Buffer.from(s),decryptString:(b:Buffer)=>b.toString()},mail:{list:()=>[]} as never,llm:{complete:vi.fn()},profile:()=>({active:true,timeZone:'UTC'}),search:async()=>'',launch:async()=>({taskId:'unused'}),canLaunch:()=>{},changed:()=>{},internal:async()=>[],facts:()=>[],reminders:{create:()=>'',cancel:()=>{}}});
+    services.bindAssistantTools(inbox.tools,'user');
+    await services.saveModelConfig({providerId:'kimi',apiKey:'sk-fixture'},undefined,'user');
+    const captured:Array<{prompt:string;names:string[]}>=[];
+    const stream=vi.spyOn(OpenAIAdapter.prototype,'stream').mockImplementation(async function*(_messages,tools,prompt){captured.push({prompt,names:tools.map(tool=>tool.name)});yield {type:'text',delta:'Ready'};yield {type:'done'};});
+    try {
+      const created=await services.createTask({prompt:'判断这些群消息是否需要关注',materials:[],context:{threadId:'a0c11111-1111-4111-8111-111111111111'}});
+      await waitFor(async()=>['completed','failed'].includes((await services.recoverTask(created.taskId)).snapshot.status));
+      expect(captured).toHaveLength(1);
+      expect(captured[0].prompt).toContain('内置技能：小K助理');
+      expect(captured[0].prompt).toContain('assistant_prepare_calendar_event');
+      expect(captured[0].names).toEqual(expect.arrayContaining(['kim_judge_messages','kim_model_status','ask_user','assistant_list_calendar_events','assistant_prepare_calendar_event']));
+      for(const forbidden of ['tool_search','bash','spawn_agent','skill','install_skill'])expect(captured[0].names).not.toContain(forbidden);
+    } finally {stream.mockRestore();inbox.dispose();await inbox.drain();inbox.close();}
   });
 
   it('hashes the physical app.asar and restores Electron ASAR handling', () => {
