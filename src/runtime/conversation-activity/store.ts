@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { activityReadonlyNeedsSnapshot, createActivityReadonlySnapshot } from './readonly-snapshot.js';
 import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
@@ -42,7 +43,7 @@ const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(
 interface ActivityStoreCleanupDiagnostic {
   readonly sequence: number;
   readonly phase: 'begin' | 'commit' | 'rollback' | 'secure-sidecars' | 'readonly-close' | 'data-close' | 'owner-close';
-  readonly stage: 'constructor-cleanup' | 'begin-threw' | 'body-failed' | 'commit-threw' | 'commit-returned';
+  readonly stage: 'constructor-cleanup' | 'begin-threw' | 'body-failed' | 'commit-threw' | 'commit-returned' | 'readonly-cleanup';
   readonly relation: 'secondary' | 'primary-after-commit' | 'primary-state-unknown';
 }
 const activityStoreCleanupDiagnostics: Readonly<ActivityStoreCleanupDiagnostic>[] = [];
@@ -86,6 +87,7 @@ export class ConversationActivityStore {
   private readonly db: DatabaseSync;
   private readonly owner?: DatabaseSync;
   private readonly readOnly: boolean;
+  private readonly readonlySnapshot?: ReturnType<typeof createActivityReadonlySnapshot>;
   private readonly now: () => number;
   private readonly maxSourceEvents: number;
   private closed = false;
@@ -123,15 +125,25 @@ export class ConversationActivityStore {
     this.file = file;
     if (this.readOnly) {
       // SQLite may create missing WAL sidecars even for a read-only connection.
-      // An offline database needs immutable mode; a live WAL requires both existing
-      // sidecars so this reader never creates files in the owner's storage.
+      // Live WAL reads require both existing sidecars. Offline reads use immutable
+      // URI mode where supported, or an owner-locked private snapshot on old Node.
       const hasWal = existsSync(`${file}-wal`);
       if (hasWal && !existsSync(`${file}-shm`)) throw new Error('conversation_activity_readonly_sidecars_missing');
-      this.db = new DatabaseSync(hasWal ? file : `${pathToFileURL(file).href}?immutable=1`, { readOnly: true });
+      if (!hasWal && activityReadonlyNeedsSnapshot) {
+        this.readonlySnapshot = createActivityReadonlySnapshot(file, maximumBytes, retainedActivityStoreConstructions,
+          () => recordActivityStoreCleanupFailure('readonly-close', 'readonly-cleanup'));
+        this.db = this.readonlySnapshot.db;
+      } else this.db = new DatabaseSync(hasWal ? file : `${pathToFileURL(file).href}?immutable=1`, { readOnly: true });
       try {
         const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
         if (![4,5].includes(version)) throw new Error('conversation_activity_schema_unsupported');
-      } catch (error) { closeFailedActivityStoreConstruction(this.db, undefined, 'readonly-close'); throw error; }
+      } catch (error) {
+        if (this.readonlySnapshot) {
+          try { this.readonlySnapshot.close(); }
+          catch { recordActivityStoreCleanupFailure('readonly-close', 'constructor-cleanup'); }
+        } else closeFailedActivityStoreConstruction(this.db, undefined, 'readonly-close');
+        throw error;
+      }
       return;
     }
     try {
@@ -935,9 +947,10 @@ export class ConversationActivityStore {
   }
 
   close(): void {
-    if (this.closed) return;
+    if (this.closed) { this.readonlySnapshot?.close(); return; }
     this.closed = true;
     this.nativeDeliveries=new WeakMap();
+    if (this.readonlySnapshot) { this.readonlySnapshot.close(); return; }
     this.db.close(); this.owner?.close();
   }
 }
