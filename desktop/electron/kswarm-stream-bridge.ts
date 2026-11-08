@@ -26,18 +26,20 @@ export class KSwarmStreamBridge {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private wsUrl: string;
+  private wsUrl: string | (() => string);
   private disposed = false;
+  private started = false;
 
   private static readonly RECONNECT_DELAY = 3000;
   private static readonly MAX_RECONNECT_DELAY = 60_000;
 
-  constructor(wsUrl: string) {
+  constructor(wsUrl: string | (() => string)) {
     this.wsUrl = wsUrl;
   }
 
   start(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.started) return;
+    this.started = true;
     this.connect();
   }
 
@@ -86,7 +88,7 @@ export class KSwarmStreamBridge {
     this.setConnectionStatus('reconnecting');
 
     try {
-      const ws = new WebSocket(this.wsUrl);
+      const ws = new WebSocket(typeof this.wsUrl === 'function' ? this.wsUrl() : this.wsUrl);
       this.ws = ws;
 
       ws.onopen = () => {
@@ -175,4 +177,17 @@ export class KSwarmStreamBridge {
       sub.webContents.send('desktop:kswarm:connectionStatus', { status });
     }
   }
+}
+
+/** A failed first bootstrap must not prevent streaming after recovery. */
+export function startKSwarmStreamWhenReady(service: {
+  getStatus(): { running: boolean; lastError: string | null };
+  onStatusChange(cb: (status: { running: boolean; lastError: string | null }) => void): () => void;
+}, bridge: Pick<KSwarmStreamBridge, 'start'>): () => void {
+  const ready = (status: { running: boolean; lastError: string | null }) => {
+    if (status.running && !status.lastError) bridge.start();
+  };
+  const stop = service.onStatusChange(ready);
+  ready(service.getStatus());
+  return stop;
 }

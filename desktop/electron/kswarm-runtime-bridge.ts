@@ -1,3 +1,4 @@
+import { desktopServiceUrl } from './desktop-service-discovery.js';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
@@ -286,7 +287,7 @@ export interface KSwarmWorkflowNodeResultBrokerInput {
 }
 
 export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResultBrokerInput): Promise<Response> {
-  const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
+  const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? desktopServiceUrl('broker'));
   const fetchImpl = input.fetchImpl ?? fetch;
   const logicalParticipantId = asNonEmptyString(input.logicalParticipantId) || input.participantId;
   const isHosted = logicalParticipantId !== input.participantId;
@@ -323,7 +324,7 @@ export async function submitKSwarmRuntimeResultToBroker(input: KSwarmRuntimeResu
 }
 
 export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkflowNodeResultBrokerInput): Promise<Response> {
-  const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? 'http://127.0.0.1:4318');
+  const brokerUrl = normalizeBrokerUrl(input.brokerUrl ?? desktopServiceUrl('broker'));
   const fetchImpl = input.fetchImpl ?? fetch;
   const logicalParticipantId = asNonEmptyString(input.logicalParticipantId) || input.participantId;
   const isHosted = logicalParticipantId !== input.participantId;
@@ -362,7 +363,7 @@ export async function submitKSwarmWorkflowNodeResultToBroker(input: KSwarmWorkfl
 }
 
 export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBridgeBrokerClientOptions) {
-  const brokerUrl = normalizeBrokerUrl(options.brokerUrl ?? 'http://127.0.0.1:4318');
+  const brokerUrl = normalizeBrokerUrl(options.brokerUrl ?? desktopServiceUrl('broker'));
   const fetchImpl = options.fetchImpl ?? fetch;
   const WebSocketImpl = options.WebSocketImpl ?? (globalThis.WebSocket as unknown as WebSocketConstructor | undefined);
   let socket: WebSocketLike | null = null;

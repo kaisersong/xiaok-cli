@@ -132,3 +132,17 @@ npm run desktop:install
 只有明确审查存量变化后才运行 `npm run lint:baseline` / `npm run architecture:baseline`，并审查 diff；CI 不执行这些更新命令。不得用更新 baseline、删扫描路径、减少另一条问题来掩盖新增问题。最小 policy 管三层 import 边界、shared 转发和动态加载，未承诺全面模块拆分或任意第三方依赖的安全审计。
 
 回归运行 `npm run test:governance`；IPC 相关变更还需 Desktop 的 file-ipc-schema、ipc-handler、preload、shutdown 及对应业务 suites。
+
+### 本地服务端口与发现文件
+
+Desktop 的 Intent Broker 默认端口为 `4318`，可用 `XIAOK_DESKTOP_PORT`
+（兼容 `INTENT_BROKER_PORT`）指定；KSwarm 默认端口为 `4400`，可用
+`KSWARM_PORT` 指定。取值必须为 `1`–`65535` 的整数。首选端口被占用时，
+Desktop 自动选择系统分配的空闲端口，不结束占用端口的旧进程。
+
+实际端口写入 `${XIAOK_CONFIG_DIR}/desktop-services-<Desktop PID>.json`
+（未设置配置目录时使用 `~/.xiaok`），内容为 `{ "broker": <port>, "kswarm": <port> }`，
+不包含凭证。需要指定发现文件位置时使用 `XIAOK_DESKTOP_DISCOVERY_FILE`；
+不同实例应使用不同文件。Desktop 的 HTTP/WS 客户端读取该文件连接实际端口。
+同一 profile 已有通过认证的后台 owner 时复用其端点；若显式配置与其端口不同，
+需要先退出该 profile 的后台服务再修改。发现、绑定或启动失败会记录日志并显示错误对话框。

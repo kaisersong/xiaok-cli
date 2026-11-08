@@ -1,3 +1,4 @@
+import {desktopServiceUrl} from '../../utils/desktop-service-discovery.js';
 import {createHash} from 'node:crypto';
 import {lstatSync, mkdirSync, readFileSync, realpathSync, statSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
@@ -44,7 +45,7 @@ async function get(port:NativeWorkflowReadPort,path:string):Promise<Record<strin
  const timer=setTimeout(()=>controller.abort(),30_000);
  const task=Promise.resolve().then(async()=>{
   let response:Response|undefined;let lastError:unknown;
-  for(const base of ['http://127.0.0.1:4400','http://localhost:4400']){
+  for(const base of [desktopServiceUrl('kswarm')]){
    assertNativeWorkflowReadPort(port);controller.signal.throwIfAborted();
    try{response=await fetch(base+path,{method:'GET',redirect:'error',signal:controller.signal});break;}
    catch(error){lastError=error;assertNativeWorkflowReadPort(port);controller.signal.throwIfAborted();}

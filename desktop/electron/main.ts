@@ -1,3 +1,5 @@
+import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
+import { desktopServiceUrl } from './desktop-service-discovery.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
@@ -34,7 +36,7 @@ import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js'
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -141,7 +143,7 @@ import {
   submitKSwarmWorkflowNodeResultToBroker,
 } from './kswarm-runtime-bridge.js';
 import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
-import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
+import { startKSwarmStreamWhenReady, KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 import { registerKSwarmProxy } from './kswarm-ipc-proxy.js';
 import { configureDefaultRemoteDebugging } from './remote-debugging.js';
 import {
@@ -794,8 +796,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
 
-  const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
-  kswarmStreamBridge.start();
+  const kswarmStreamBridge = new KSwarmStreamBridge(() => `${desktopServiceUrl('kswarm').replace(/^http/, 'ws')}/ws`);
+  const stopStreamReadiness = startKSwarmStreamWhenReady(kswarmService, kswarmStreamBridge);
+  registerLifetimeDisposerStep('kswarm-stream-readiness', async () => stopStreamReadiness());
+
   let dispatchWorkspaceProject: (projectId: string, body?: unknown) => Promise<Record<string, unknown> | null> = async () => { throw new Error('workspace_initializing'); };
   registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService, {
     dispatchProject: (projectId, body) => dispatchWorkspaceProject(projectId, body),
@@ -871,7 +875,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
       activityOwnerNoticeOnce(code);
     },
-  ).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
+  ).then(() => {
+    const status = kswarmService.getStatus();
+    if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
+  }).catch(error => {
+    const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
+    console.error('[main] Service bootstrap refused:', message);
+    dialog.showErrorBox('xiaok — 服务启动失败 / Service startup failed', message);
+  });
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
@@ -1395,8 +1406,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     kswarmService,
     teamService: kswarmTeamService,
   });
+  const brokerReady = createDesktopServiceReadiness(() => kswarmStartPromise, () => kswarmService.getStatus());
   const rawCollaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
     token: kswarmService.getIntentBrokerRoomToken(),
+    ready: brokerReady,
   });
   // design §6.2 RoomHistoryReadCapability：getRoomMessagesPage 工具（进程级
   // 单例，desktop-services.ts 创建时已注册）需要延迟绑定这个 broker
@@ -1414,7 +1427,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   // macOS volume device ids drift across OS updates; without this sweep every
   // room binding would fail verifyRoot as "identity changed" after an update.
   void roomWorkspaceStore.healBindingRoots().then(healed => { if (healed.length) debugMain('room-workspace:identity-healed', healed); }).catch(() => undefined);
-  const rawRoomWorkspaceBroker = createRoomWorkspaceBrokerClient({ token: kswarmService.getIntentBrokerRoomToken(), isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true });
+  const rawRoomWorkspaceBroker = createRoomWorkspaceBrokerClient({ ready: brokerReady, token: kswarmService.getIntentBrokerRoomToken(), isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true });
   const scopedRoomClients = createRoomProjectScopeGuard({
     roomClient: rawCollaborationRoomBrokerClient, workspaceBroker: rawRoomWorkspaceBroker,
     kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
@@ -1622,7 +1635,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    void kswarmStartPromise.then(async () => {
+    void brokerReady().then(async () => {
       if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const { loadConfig } = await import('../../src/utils/config.js');
       if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
@@ -1630,7 +1643,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
-      const brokerUrl = 'http://127.0.0.1:4318';
+      const brokerUrl = desktopServiceUrl('broker');
       const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
       const runtimeBridge = {
         ...createKSwarmRuntimeBridge({
@@ -1679,8 +1692,15 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
           console.warn('[main] Failed to start kswarm runtime bridge client:', (error as Error).message);
         });
       }
+    }).catch(error => {
+      if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
+      console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
     });
   };
+  const stopRuntimeReadiness = kswarmService.onStatusChange(status => {
+    if (status.running && !status.lastError) startRuntimeBridge();
+  });
+  registerLifetimeDisposerStep('runtime-bridge-readiness', async () => stopRuntimeReadiness());
   restartRuntimeBridgeService = async () => {
     await stopRuntimeBridge();
     startRuntimeBridge();
@@ -1691,7 +1711,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2_000);
     try {
-      await fetch(`http://127.0.0.1:4400${path}`, {
+      await brokerReady();
+      await fetch(`${desktopServiceUrl('kswarm')}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,

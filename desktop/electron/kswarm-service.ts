@@ -1,5 +1,7 @@
+import { activeOwnerServicePorts } from './active-owner-service-ports.js';
+import { configuredDesktopServicePorts, writeDesktopServicePorts, prepareDesktopServicePorts, desktopServiceDiscoveryFile, readDesktopServicePorts } from './desktop-service-discovery.js';
 import {createNativeWorkflowReadPort,closeNativeWorkflowReadPort,assertNativeWorkflowReadPort,readNativeWorkflowRun,type NativeWorkflowReadPort} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
-import { buildSidecarEnv } from './sidecar-env.js';
+import { buildDesktopServiceEnv, buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
@@ -34,7 +36,7 @@ import {
   getDevelopmentServiceCandidates,
   type ServiceLaunchSpec,
 } from './kswarm-service-paths.js';
-import { loadConfig } from '../../src/utils/config.js';
+import { getConfigDir, loadConfig } from '../../src/utils/config.js';
 import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload, diffManagedXiaokAgentPatch } from './managed-xiaok-agent.js';
 import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 
@@ -360,6 +362,7 @@ export function buildKSwarmHealthDiagnosticInput(options: {
     expectedSourceHash: options.expectedSourceHash ?? null,
     spawnEntryExists: Boolean(options.expectedEntryPath),
     managerRunning: options.status.running,
+    ...(options.status.port !== 4400 ? { servicePort: options.status.port } : {}),
     port: {
       listening,
       pid: options.status.pid,
@@ -621,6 +624,7 @@ export interface KSwarmService {
 
 export interface CreateKSwarmServiceOptions {
   activityOwnerPending?: boolean;
+  activityOwnerDataRoot?: string;
   spawnProcess?: typeof spawn;
   findPortOwner?: typeof findPidOnPort;
   killStalePortOwner?: typeof killStaleServiceOnPort;
@@ -742,6 +746,41 @@ export function sealAndDrainKSwarmServiceInstance(service: KSwarmService): Promi
 
 export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): KSwarmService {
   assertRoomWorkspaceStartupProtocol();
+  const discoveryFile = desktopServiceDiscoveryFile();
+  let BROKER_PORT = 4318, KSWARM_PORT = 4400;
+  let discoveredLiveOwner = false;
+  let KSWARM_REQUEST_BASE_URLS = [`http://127.0.0.1:${KSWARM_PORT}`, `http://localhost:${KSWARM_PORT}`];
+  let KSWARM_HEALTH_URLS = KSWARM_REQUEST_BASE_URLS.map(url => `${url}/health`);
+  let BROKER_HEALTH_URLS = [`http://127.0.0.1:${BROKER_PORT}/health`, `http://localhost:${BROKER_PORT}/health`];
+  let portsPromise: Promise<void> | undefined;
+  function preparePorts(): Promise<void> {
+    return portsPromise ??= (async () => {
+      const requested = configuredDesktopServicePorts();
+      const live = options.activityOwnerPending
+        ? await activeOwnerServicePorts(options.activityOwnerDataRoot ?? getConfigDir('desktop')) : undefined;
+      if (live) {
+        discoveredLiveOwner = true;
+        if ((process.env.XIAOK_DESKTOP_PORT !== undefined || process.env.INTENT_BROKER_PORT !== undefined) && live.broker !== requested.broker
+          || process.env.KSWARM_PORT !== undefined && live.kswarm !== requested.kswarm) throw new Error('Configured ports differ from the active Desktop profile; stop that profile before changing ports');
+        writeDesktopServicePorts(discoveryFile, live);
+      } else await prepareDesktopServicePorts(discoveryFile);
+    })().then(() => {
+      const ports = readDesktopServicePorts(discoveryFile);
+      BROKER_PORT = ports.broker; KSWARM_PORT = ports.kswarm;
+      Object.assign(process.env, buildDesktopServiceEnv(process.env, ports));
+      KSWARM_REQUEST_BASE_URLS = [`http://127.0.0.1:${KSWARM_PORT}`, `http://localhost:${KSWARM_PORT}`];
+      KSWARM_HEALTH_URLS = KSWARM_REQUEST_BASE_URLS.map(url => `${url}/health`);
+      BROKER_HEALTH_URLS = [`http://127.0.0.1:${BROKER_PORT}/health`, `http://localhost:${BROKER_PORT}/health`];
+    }).catch(error => {
+      portsPromise = undefined;
+      lastError = (error as Error).message;
+      console.error('[kswarm-service]', lastError);
+      logKSwarmServiceLine('server', 'lifecycle', lastError);
+      notifyListeners();
+      throw error;
+    });
+  }
+
   const ingress = createLocalSourceWriterLifetime('kswarm_service');
   const background = createLocalSourceWriterLifetime('kswarm_service_background');
   const ownedChildren = createOwnedServiceChildCloseTracker();
@@ -762,7 +801,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       if (pid && activityOwner) await activityOwner.request('sourceProtected', { pid });
       return false;
     }
-    return (options.killStalePortOwner ?? killStaleServiceOnPort)(port, context);
+    // A freshly selected endpoint can be grabbed between probe and spawn.
+    // Never terminate an unowned listener in the production manager.
+    if (!options.killStalePortOwner) return false;
+    return options.killStalePortOwner(port, context);
   };
   let child: ChildProcess | null = null;
   let brokerChild: ChildProcess | null = null;
@@ -1092,7 +1134,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       await startingPromise;
       return;
     }
-    startingPromise = spawnServer().finally(() => {
+    startingPromise = preparePorts().then(() => { if (!stopping && !permanentlySealed) return spawnServer(); }).finally(() => {
       startingPromise = null;
     });
     await startingPromise;
@@ -1147,7 +1189,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     }
 
     const brokerEnv = buildIntentBrokerServiceEnv({
-      baseEnv: buildSidecarEnv(process.env),
+      baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
@@ -1358,7 +1400,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
     const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
-        ...buildSidecarEnv(process.env),
+        ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
@@ -1459,7 +1501,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       await reconcileSeedAgents();
       if (stopping || child !== serverChild) return;
       running = true;
-      lastError = null;
+      lastError = brokerReady ? null : `Intent Broker startup failed on port ${BROKER_PORT}; inspect broker logs`;
       restartCount = 0; // Reset on successful start
       healthFailureCount = 0;
       terminalDegraded = transitionKSwarmTerminalDegraded(terminalDegraded, 'ready');
@@ -1695,16 +1737,17 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function activityOwnerConfig() {
+      await preparePorts();
       const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
       const brokerLaunch = resolveBrokerLaunchSpec();
       if (!serverPath || !brokerLaunch) throw new Error('activity_source_entry_unavailable');
       assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
       assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
       mkdirSync(brokerLaunch.cwd, { recursive: true });
-      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(process.env), cwd: brokerLaunch.cwd, port: BROKER_PORT,
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
       const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
-      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(process.env), KSWARM_PORT: String(KSWARM_PORT),
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
@@ -1757,6 +1800,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     bindActivityOwner: client => ingress.runSync(() => bindActivityOwner(client)),
     releaseActivityOwnerDelegation: () => ingress.runSync(() => {
       if (activityOwner) return;
+      if (discoveredLiveOwner) throw new Error('Active Desktop profile cannot be attached; refusing duplicate services');
       activityDelegated = false; activityFallback = true;
     }),
     getStatus, onStatusChange,
