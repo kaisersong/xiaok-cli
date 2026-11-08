@@ -19,8 +19,9 @@ static int retain_imported_file(imported_store *r,nr_root_store_file *p){
  imported_store_file *f=calloc(1,sizeof(*f));if(!f)return 0;f->original=p;f->next=r->files;r->files=f;return 1;
 }
 int nm_installed_import_root_store(const nm_root_store_dispatch *ops,nr_root_store_io *io){
- if(!ops||!io)return 0;
+ if(!ops||!io||ops->magic!=NR_STORE_DISPATCH_MAGIC||ops->version!=NR_STORE_DISPATCH_VERSION||ops->bytes!=sizeof(*ops))return 0;
  imported_store *prior=imported_io(io);if(prior)return prior->ops==ops;
+ if(!ops->read_adoption_kind||!ops->claim_adopted||!ops->read_adoption)return 0;
  if(!ops->read_identity)return 0;
  if(!ops->claim_fresh)return 0;
  if(!ops->read_claim)return 0;
@@ -169,7 +170,7 @@ int nr_root_store_claim_fresh(nr_root_store_io *io,const nr_root_bootstrap_claim
  if(!store_member(io))return 0;
  NM_CLIENT_GUARD(io->client,0);
  if(!out||!store_association(io)||io->unknown||io->client->close_requested)return 0;
- if(io->claim.valid){*out=&io->claim;return store_alive(io,0);}
+ if(io->claim.valid){if(io->claim.kind!=1)return 0;*out=&io->claim;return store_alive(io,0);}
  if(io->identity.birth_state!=NR_CREATED)return 0;
  unsigned char bytes[NR_ROOT_IDENTITY_WIRE_BYTES];mi_frame reply={0};nr_root_store_identity next;
  if(!store_request(io,MI_CLAIM_FRESH,MI_SLOT_NONE,0,NULL,0,0,&reply,bytes,sizeof(bytes))||reply.offset||reply.amount||
@@ -180,14 +181,14 @@ int nr_root_store_claim_fresh(nr_root_store_io *io,const nr_root_bootstrap_claim
     !nr_io_fact_same(&next.issuer_lock,&io->identity.issuer_lock)||next.main_principal_uid!=io->identity.main_principal_uid||
     next.file_owner_uid!=io->identity.file_owner_uid||next.receipt_sequence<=io->identity.receipt_sequence||
     (io->family&&(io->client->ks_role?memcmp(next.pool_id,io->client->ks_pool,32):(!io->client->root_store||memcmp(next.pool_id,io->client->root_store->identity.pool_id,32)))))return store_failed(io,EPROTO);
- io->identity=next;io->claim.io=io;io->claim.identity=next;io->claim.valid=1;*out=&io->claim;return 1;
+ io->identity=next;io->claim.io=io;io->claim.identity=next;io->claim.valid=1;io->claim.kind=1;*out=&io->claim;return 1;
 }
 int nr_root_store_read_claim(nr_root_store_io *io,const nr_root_bootstrap_claim *claim,nr_root_store_identity *out){
  imported_store *remote=imported_io(io);if(remote){if(claim!=remote->claim)return 0;return remote->ops->read_claim(io,claim,out);}
 
  if(!store_member(io))return 0;
  NM_CLIENT_GUARD(io->client,0);
- if(!out||!store_association(io)||claim!=&io->claim||!io->claim.valid||io->claim.io!=io)return 0;
+ if(!out||!store_association(io)||claim!=&io->claim||!io->claim.valid||io->claim.kind!=1||io->claim.io!=io)return 0;
  *out=io->claim.identity;return 1;
 }
 int nr_root_store_bind_bootstrap(nr_root_store_io *io,enum nr_root_bind_mode mode,
@@ -196,9 +197,10 @@ int nr_root_store_bind_bootstrap(nr_root_store_io *io,enum nr_root_bind_mode mod
 
  if(!store_member(io))return 0;
  NM_CLIENT_GUARD(io->client,0);
- if(!verified||!store_association(io)||io->unknown||(mode!=NR_FRESH_COMMIT&&mode!=NR_RECOVER_COMMITTED)||
+ if(!verified||!store_association(io)||io->unknown||(mode!=NR_FRESH_COMMIT&&mode!=NR_RECOVER_COMMITTED&&mode!=NR_ADOPTION_COMMITTED)||
     !nr_io_identity_same(&io->identity,verified)||io->identity.birth_state<NR_CLAIMED||
-    (mode==NR_FRESH_COMMIT&&(claim!=&io->claim||!io->claim.valid))||(mode==NR_RECOVER_COMMITTED&&claim))return 0;
+    (mode==NR_FRESH_COMMIT&&(claim!=&io->claim||!io->claim.valid||io->claim.kind!=1))||
+    (mode==NR_ADOPTION_COMMITTED&&(claim!=&io->claim||!io->claim.valid||io->claim.kind!=2))||(mode==NR_RECOVER_COMMITTED&&claim))return 0;
  unsigned char body[164],bytes[NR_ROOT_IDENTITY_WIRE_BYTES];mi_frame reply={0};nr_root_store_identity next;
  nr_io_put32(body,(uint32_t)mode);memcpy(body+4,verified->namespace_id,32);memcpy(body+36,verified->pool_id,32);
  memcpy(body+68,verified->claim_id,32);memcpy(body+100,verified->anchor_digest,32);memcpy(body+132,verified->profile_digest,32);
@@ -207,3 +209,5 @@ int nr_root_store_bind_bootstrap(nr_root_store_io *io,enum nr_root_bind_mode mod
     next.receipt_sequence<io->identity.receipt_sequence)return store_failed(io,EPROTO);
  io->identity=next;return 1;
 }
+
+#include "root-store-adopted-claim-private.h"

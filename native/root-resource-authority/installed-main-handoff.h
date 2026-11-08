@@ -8,9 +8,9 @@
 /* This table is held only in an original issuer's V8 Private capsule. It is
  * neither an N-API argument nor a caller callback/registration interface.
  * Every entry first checks the producing DSO's private capsule membership. */
-#define NM_HANDOFF_VERSION 5u
-#define NM_HANDOFF_MAGIC UINT64_C(0x584b4d48414e4435)
-#define NM_HANDOFF_PRIVATE "xiaok.original.native.main.installation.handoff.v5"
+#define NM_HANDOFF_VERSION 6u
+#define NM_HANDOFF_MAGIC UINT64_C(0x584b4d48414e4436)
+#define NM_HANDOFF_PRIVATE "xiaok.original.native.main.installation.handoff.v6"
 typedef struct nm_installation_handoff nm_installation_handoff;
 struct nm_installation_handoff {
  uint64_t magic;uint32_t version,size,build_kind;
