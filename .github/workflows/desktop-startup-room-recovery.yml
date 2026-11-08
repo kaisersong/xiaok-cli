@@ -47,6 +47,8 @@ on:
       - 'native/kswarm-authority-source/**'
       - 'native/broker-authority-source/**'
       - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
       - 'tests/native/broker-*.test.mjs'
       - 'tests/native/kswarm-*.test.mjs'
       - 'tests/native/main-service-component-boundary.test.mjs'
@@ -102,6 +104,8 @@ on:
       - 'native/kswarm-authority-source/**'
       - 'native/broker-authority-source/**'
       - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
       - 'tests/native/broker-*.test.mjs'
       - 'tests/native/kswarm-*.test.mjs'
       - 'tests/native/main-service-component-boundary.test.mjs'
@@ -228,7 +232,7 @@ jobs:
           tests/main/main-dsh-service-sources.test.ts
           tests/main/main-dsh-bootstrap-authority.test.ts
           tests/main/main-core-split-boundaries.test.ts
-          tests/main/main-core-kswarm-port.test.ts
+          tests/main/main-core-kswarm-port.test.ts tests/main/main-core-broker-port.test.ts tests/main/main-core-broker-dual-custody.test.ts tests/main/main-source-broker-core-bridge.test.ts tests/main/broker-protected-service-binding.test.ts tests/main/broker-protected-main-wiring.test.ts tests/main/main-core-broker-platform.test.ts
           tests/main/main-source-kswarm-core-bridge.test.ts
           tests/main/main-admission-database-selection.test.ts
 
@@ -314,6 +318,7 @@ jobs:
           tests/native/broker-authority-node.test.mjs
           tests/native/broker-parent-port.test.mjs
           tests/native/broker-protected-child-source.test.mjs
+          tests/native/broker-protected-callback-source.test.mjs tests/native/kswarm-protected-child-source.test.mjs tests/native/kswarm-protected-callback-metadata.test.mjs tests/native/broker-authority-resources.test.mjs tests/native/broker-resource-platform.test.mjs tests/native/sqlite-api-unavailable.test.mjs
           tests/native/kswarm-authority-child.test.mjs
           tests/native/main-service-component-boundary.test.mjs
 
