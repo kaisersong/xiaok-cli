@@ -9,7 +9,7 @@ struct KSwarmParentPort {
 static KSwarmParentPort* kswarm_parent_ports;
 static bool KSwarmPortContext(KSwarmParentPort* row,v8::Isolate* isolate){
  if(!row||!row->owner||row->owner->isolate!=isolate)return false;
- const auto thread=uv_thread_self();return uv_thread_equal(&thread,&row->thread)&&row->context.Get(isolate)==isolate->GetCurrentContext()&&node::GetCurrentEnvironment(isolate->GetCurrentContext())==row->environment;
+ const auto thread=uv_thread_self();return uv_thread_equal(&thread,&row->thread)&&row->context.Get(isolate)==isolate->GetCurrentContext()&&row->context.Get(isolate)==isolate->GetEnteredOrMicrotaskContext()&&node::GetCurrentEnvironment(isolate->GetCurrentContext())==row->environment;
 }
 static KSwarmParentPort* KSwarmPort(const v8::FunctionCallbackInfo<v8::Value>& args){
  if(!args.Data()->IsExternal())return nullptr;auto* candidate=static_cast<KSwarmParentPort*>(args.Data().As<v8::External>()->Value());
