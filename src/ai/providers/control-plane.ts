@@ -77,18 +77,18 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     && providerConfig.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );
-  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
+  // New catalog selections copy K2.8 vision metadata as well as runtime options.
+  // An effort alone is not an opt-in: master ignored saved alias options (issue195).
+  const legacyCodingAlias = providerId === 'kimi' && wireModel === 'kimi-for-coding'
+    && !modelEntry.capabilities?.includes('image_in');
+  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions && !legacyCodingAlias
     ? modelEntry.runtimeOptions
     : undefined;
-  // Existing alias bindings did not opt into the K2.8 defaults. New selections
-  // persist catalog runtimeOptions explicitly; never infer that opt-in from wire alone.
-  const legacyCodingAlias = providerId === 'kimi' && wireModel === 'kimi-for-coding'
-    && modelEntry.runtimeOptions?.reasoningEffort === undefined;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol: providerConfig.protocol,
     baseUrl: transport.baseUrl,
     wireModel,
-    catalogOptions: legacyCodingAlias && catalogRuntimeModel
+    catalogOptions: legacyCodingAlias && catalogModel
       ? { contextLimit: 262_144 }
       : catalogRuntimeModel?.runtimeOptions,
     catalogConstraints: catalogRuntimeModel?.runtimeConstraints,

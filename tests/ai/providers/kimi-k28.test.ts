@@ -11,8 +11,10 @@ import type { ConfigV2Input, Message } from '../../../src/types.js';
 const endpoint = 'https://api.kimi.com/coding/v1';
 const wire = 'kimi-for-coding';
 const identity = { providerId: 'kimi', providerType: 'first_party' as const, protocol: 'openai_legacy' as const, canonicalBaseUrl: endpoint, capabilities: ['tools', 'thinking', 'image_in'] };
+// Mirrors the desktop/CLI selection path, which persists catalog capabilities and runtimeOptions.
+function catalogEntry(wire: string) { return getProviderProfile('kimi')!.availableModels!.find(m => m.model === wire)!; }
 function config(wire: string): ConfigV2Input {
-  return { schemaVersion: 2, defaultProvider: 'kimi', defaultModelId: `kimi-${wire}`, providers: { kimi: { type: 'first_party', protocol: 'openai_legacy', apiKey: 'fixture', baseUrl: endpoint } }, models: { [`kimi-${wire}`]: { provider: 'kimi', model: wire, runtimeOptions: { ...getProviderProfile('kimi')!.availableModels!.find(m => m.model === wire)!.runtimeOptions } } }, defaultMode: 'interactive', channels: {} };
+  return { schemaVersion: 2, defaultProvider: 'kimi', defaultModelId: `kimi-${wire}`, providers: { kimi: { type: 'first_party', protocol: 'openai_legacy', apiKey: 'fixture', baseUrl: endpoint } }, models: { [`kimi-${wire}`]: { provider: 'kimi', model: wire, capabilities: [...catalogEntry(wire).capabilities!], runtimeOptions: { ...catalogEntry(wire).runtimeOptions } } }, defaultMode: 'interactive', channels: {} };
 }
 async function collect(stream: AsyncIterable<unknown>) { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks; }
 

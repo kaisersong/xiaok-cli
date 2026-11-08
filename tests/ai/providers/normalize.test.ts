@@ -353,7 +353,7 @@ describe('normalizeConfig', () => {
 });
 
 
-describe('CTO 1.6.3 keeps existing users unchanged', () => {
+describe('master compatibility for legacy Kimi and o3 configurations', () => {
   it.each(['https://api.kimi.com/coding/v1', 'https://api.kimi.com:443/coding/v1'])('preserves all implicit legacy Kimi metadata at %s', baseUrl => {
     const input: LegacyConfig = { schemaVersion: 1, defaultModel: 'custom', models: { custom: { apiKey: 'fixture', baseUrl } }, defaultMode: 'interactive', channels: {} };
     const normalized = normalizeConfig(input);
@@ -367,11 +367,24 @@ describe('CTO 1.6.3 keeps existing users unchanged', () => {
     expect(normalizeConfig(input).models['openai-default']).toEqual({ provider: 'openai', model: 'o3', label: 'GPT-4o', capabilities: ['tools'] });
     expect(resolveRuntimeModelBinding(input)).toMatchObject({ wireModel: 'o3', capabilities: ['tools'], runtimeOptions: { contextLimit: 200_000 } });
   });
-  it.each([undefined, { contextLimit: 131_072 }, { contextLimit: 524_288, reasoningEffort: 'max' as const }])('keeps schema2 saved Kimi values %j', runtimeOptions => {
+  it.each([undefined, { contextLimit: 131_072 }, { contextLimit: 524_288, reasoningEffort: 'max' as const }])('preserves schema2 saved fields but uses master Kimi runtime defaults for %j', runtimeOptions => {
     const input = { schemaVersion: 2 as const, defaultProvider: 'kimi', defaultModelId: 'saved', providers: { kimi: { type: 'first_party' as const, protocol: 'openai_legacy' as const, apiKey: 'fixture', baseUrl: 'https://api.kimi.com/coding/v1' } }, models: { saved: { provider: 'kimi', model: 'kimi-for-coding', label: 'Saved label', capabilities: ['tools'], ...(runtimeOptions ? { runtimeOptions } : {}) } }, defaultMode: 'interactive' as const, channels: {} };
     const before = structuredClone(input);
     expect(normalizeConfig(input).models).toEqual(input.models);
-    expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual(runtimeOptions ?? { contextLimit: 262_144 });
+    // master ignores custom alias options; forwarding them is deferred to issue195.
+    expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual({ contextLimit: 262_144 });
+    expect(input).toEqual(before);
+  });
+  it.each([
+    { capabilities: undefined, baseUrl: 'https://api.kimi.com/coding/v1', protocol: 'openai_legacy' as const },
+    { capabilities: ['tools', 'thinking'], baseUrl: 'https://api.kimi.com:443/coding/v1/', protocol: 'openai_legacy' as const },
+    { capabilities: ['tools'], baseUrl: 'https://legacy.example/v1', protocol: 'openai_legacy' as const },
+    { capabilities: ['tools'], baseUrl: 'https://api.kimi.com/coding/v1', protocol: 'openai_responses' as const },
+  ])('ignores old alias custom options across saved metadata and transports: %j', ({ capabilities, baseUrl, protocol }) => {
+    const input = { schemaVersion: 2 as const, defaultProvider: 'kimi', defaultModelId: 'saved', providers: { kimi: { type: 'first_party' as const, protocol, apiKey: 'fixture', baseUrl } }, models: { saved: { provider: 'kimi', model: 'kimi-for-coding', capabilities, runtimeOptions: { contextLimit: 524_288, reasoningEffort: 'max' as const } } }, defaultMode: 'interactive' as const, channels: {} };
+    const before = structuredClone(input);
+    expect(normalizeConfig(input).models).toEqual(input.models);
+    expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual({ contextLimit: 262_144 });
     expect(input).toEqual(before);
   });
 });
@@ -384,5 +397,20 @@ describe('saved o3 configuration', () => {
     expect(normalizeConfig(input).models).toEqual(input.models);
     expect(resolveRuntimeModelBinding(input)).toMatchObject({ capabilities: ['tools'], runtimeOptions: { contextLimit: 64_000 } });
     expect(input).toEqual(before);
+  });
+});
+
+
+describe('new Kimi catalog selection', () => {
+  it('retains the explicitly selected K2.8 catalog 1M/high options', () => {
+    const variant = getProviderProfile('kimi')!.availableModels!.find(model => model.model === 'kimi-for-coding')!;
+    const input = { schemaVersion: 2 as const, defaultProvider: 'kimi', defaultModelId: 'selected', providers: { kimi: { type: 'first_party' as const, protocol: 'openai_legacy' as const, apiKey: 'fixture', baseUrl: 'https://api.kimi.com/coding/v1' } }, models: { selected: { provider: 'kimi', model: variant.model, label: variant.label, capabilities: [...variant.capabilities!], runtimeOptions: { ...variant.runtimeOptions } } }, defaultMode: 'interactive' as const, channels: {} };
+    const before = structuredClone(input);
+    expect(resolveRuntimeModelBinding(input).runtimeOptions).toEqual({ contextLimit: 1_048_576, reasoningEffort: 'high' });
+    expect(input).toEqual(before);
+    const unsupported = structuredClone(input);
+    unsupported.providers.kimi.baseUrl = 'https://legacy.example/v1';
+    unsupported.models.selected.runtimeOptions = { contextLimit: 524_288, reasoningEffort: 'max' };
+    expect(resolveRuntimeModelBinding(unsupported)).not.toHaveProperty('runtimeOptions');
   });
 });
