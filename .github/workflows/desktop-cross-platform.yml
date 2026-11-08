@@ -177,6 +177,14 @@ jobs:
           tests/renderer/model-recommendations.test.ts
           tests/main/desktop-services-model-catalog.test.ts
 
+      - name: Desktop services and model recommendation tests
+        run: >-
+          cd desktop && npm run test -- --run
+          tests/main/desktop-services-pure-node-import.test.ts
+          tests/main/desktop-services-scheduled-task-authority.test.ts
+          tests/renderer/model-recommendations.test.ts
+          tests/main/desktop-services-model-catalog.test.ts
+
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'
         run: cd desktop && npm run test -- --run tests/main/activity-owner-attach-retry.test.ts
