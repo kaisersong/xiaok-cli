@@ -149,6 +149,7 @@ jobs:
           tests/main/loop-sqlite-bindings.test.ts
           tests/main/loop-owned-sql-population.test.ts
           tests/main/windows-source-absence-fixture.test.ts
+          tests/main/loop-database-birth-custody.test.ts
 
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'

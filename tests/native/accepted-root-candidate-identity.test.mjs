@@ -57,6 +57,8 @@ const sourceFiles=[
 ];
 const hashes=()=>Object.fromEntries(sourceFiles.map(file=>[file,digest(readFileSync(join(repo,file)))]));
 for(const kind of ['direct','room'])test(`actual Native ${kind} candidate identity, cross-kind rejection and lifetime`,{skip:process.platform!=='darwin',timeout:90000},async()=>{
+ const {instrumentOriginalCandidateServices}=await import('./helpers/accepted-root-candidate-observation.mjs');
+ instrumentOriginalCandidateServices(readFileSync(join(repo,'desktop/electron/desktop-services.ts')),pathToFileURL(join(tmpdir(),'accepted-root-candidate-observation.mjs')).href);
  const root=mkdtempSync(join(tmpdir(),`xiaok-candidate-${kind}-`)),domain=join(root,'domain'),addon=join(root,'root_resource_authority_main.node'),bundle=join(root,'component.mjs'),observer=join(root,'accepted-root-candidate-observation.mjs');
  mkdirSync(domain,{mode:0o700});const sources=hashes(),profileBefore=realProfile();
  writeFileSync(join(root,'before.json'),JSON.stringify({sources,realProfile:profileBefore},null,2));
