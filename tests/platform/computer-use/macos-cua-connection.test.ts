@@ -6,6 +6,7 @@ import { createComputerUseTool } from '../../../src/ai/tools/computer-use.js';
 import { CuaConnectionManager } from '../../../src/platform/mcp/cua-connection-manager.js';
 
 const catalog = JSON.parse(readFileSync(new URL('../../fixtures/cua-macos-0.33.1/catalog.json', import.meta.url), 'utf8'));
+const currentCatalog = JSON.parse(readFileSync(new URL('../../fixtures/cua-macos-0.41.2/catalog.json', import.meta.url), 'utf8'));
 const result = { text: 'ok', summary: 'ok', images: [], isError: false };
 function fixture(ops = catalog) {
   const raw = { callToolResult: vi.fn(async (_name: string, _input: Record<string, unknown>, _options?: { signal?: AbortSignal }) => result), dispose: vi.fn() };
@@ -13,6 +14,54 @@ function fixture(ops = catalog) {
 }
 
 describe('macOS native connection compatibility', () => {
+  it('selects the complete live 0.41.2 ABI without weakening the legacy profile', () => {
+    expect(selectMacosCuaAbiProfile(currentCatalog).id).toBe('macos-0.41.2');
+    expect(selectMacosCuaAbiProfile(catalog).id).toBe('macos-0.33.1');
+  });
+  it.each(['mixed', 'unknown-required', 'type', 'enum', 'missing', 'partial'])('refuses 0.41.2 %s drift', drift => {
+    const broken = structuredClone(currentCatalog);
+    const double = broken.find((op: { name: string }) => op.name === 'double_click');
+    if (drift === 'mixed') double.required = ['pid'];
+    if (drift === 'unknown-required') double.required = ['new_required_field'];
+    if (drift === 'type') double.properties.pid.type = 'string';
+    if (drift === 'enum') double.properties.delivery_mode.enum.push('unrestricted');
+    if (drift === 'missing') delete double.properties.element_token;
+    if (drift === 'partial') double.properties.snapshot_id = { type: 'string' };
+    expect(() => selectMacosCuaAbiProfile(broken)).toThrow(/ABI/);
+  });
+  it.each(['double_click', 'right_click', 'set_value'])('dispatches %s through the public wrapper on 0.41.2, including replacement', async action => {
+    const initial = fixture(currentCatalog);
+    const replacement = fixture(currentCatalog);
+    const factory = vi.fn(async () => replacement.connection);
+    const manager = new CuaConnectionManager(factory, { initialConnection: initial.connection });
+    const tool = createComputerUseTool({ callToolResult: (name, input, options) => manager.callToolResult(name, input, options) });
+    try {
+      const input = { action, pid: 12, window_id: '34', element_index: '2', snapshot_id: 's00000001', ...(action === 'set_value' ? { value: 'hello' } : {}) };
+      expect(JSON.parse(await tool.execute(input) as string).ok).toBe(true);
+      expect(initial.raw.callToolResult).toHaveBeenLastCalledWith(action, {
+        pid: 12, window_id: 34, element_token: 's00000001:2', ...(action === 'set_value' ? { value: 'hello' } : {}),
+      }, undefined);
+      initial.raw.callToolResult.mockRejectedValueOnce(new Error('transport closed'));
+      expect(JSON.parse(await tool.execute({ action: 'list_apps' }) as string).ok).toBe(true);
+      expect(factory).toHaveBeenCalledOnce();
+      expect(JSON.parse(await tool.execute(input) as string).ok).toBe(true);
+      expect(replacement.raw.callToolResult).toHaveBeenLastCalledWith(action, expect.objectContaining({ element_token: 's00000001:2' }), undefined);
+    } finally { await manager.dispose(); }
+  });
+  it.each(['double_click', 'right_click', 'set_value'])('retains host pid requirement for %s on 0.41.2', async action => {
+    const { raw, connection } = fixture(currentCatalog);
+    await expect(connection.callToolResult(action, { element_token: 's00000001:2', value: 'hello' })).rejects.toThrow(/requires pid/);
+    expect(raw.callToolResult).not.toHaveBeenCalled();
+  });
+  it.each([
+    { element_index: 2, window_id: 34 },
+    { element_token: 's00000001:2', x: 1, y: 2 },
+    { element_token: 'foreign' },
+  ])('retains native addressing checks on 0.41.2: %j', async input => {
+    const { raw, connection } = fixture(currentCatalog);
+    await expect(connection.callToolResult('click', input)).rejects.toThrow();
+    expect(raw.callToolResult).not.toHaveBeenCalled();
+  });
   it('reproduces the 16 legacy failures but selects the frozen live 0.33.1 profile', () => {
     const old = verifyBackendAbi(catalog);
     expect(old.ok).toBe(false);
