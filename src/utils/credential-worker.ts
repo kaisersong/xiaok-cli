@@ -1,6 +1,6 @@
 import {parentPort,workerData} from 'node:worker_threads';
 import {ProtectedJsonFile,protectedJsonDigest} from './protected-json.js';
-const allowed=new Set(['credential_invalid_input','credential_store_unavailable','credential_missing','credential_binding_invalid','credential_path_unsafe','credential_config_busy','credential_config_corrupt','credential_reserved_input','credential_config_changed','credential_cancelled']);
+const allowed=new Set(['credential_invalid_input','credential_store_unavailable','credential_missing','credential_binding_invalid','credential_path_unsafe','credential_config_busy','credential_config_corrupt','credential_reserved_input','credential_config_changed','credential_cancelled','credential_store_full','credential_worker_required']);
 try {
   const data=workerData as {file:string;operation:'read'|'save';value?:unknown;expectedHash?:string;state:SharedArrayBuffer};const state=new Int32Array(data.state),store=new ProtectedJsonFile(data.file);
   const commit=()=>{if(Atomics.compareExchange(state,0,0,2)!==0)throw Error('credential_cancelled');};
