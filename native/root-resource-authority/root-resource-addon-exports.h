@@ -42,6 +42,8 @@ NAPI_MODULE_INIT(){
 #endif
   {"adoptOriginalMainInstallation",NULL,adopt_main_installation,NULL,NULL,NULL,napi_default,addon},
 #ifdef NR_FIXTURE_BUILD
+  {"fixtureSeedMigrationPhysicalHistory",NULL,fixture_seed_migration_physical_history,NULL,NULL,NULL,napi_default,addon},
+  {"fixtureValidateOrdinaryV7History",NULL,fixture_validate_ordinary_v7_history,NULL,NULL,NULL,napi_default,addon},
   {"fixtureHoldSchemaReference",NULL,fixture_hold_schema_reference,NULL,NULL,NULL,napi_default,addon},
   {"armPoolBootstrapFailure",NULL,arm_pool_bootstrap_failure,NULL,NULL,NULL,napi_default,addon},
 #endif

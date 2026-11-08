@@ -41,7 +41,7 @@ function main(){
  const targetArchitectures=run('/usr/bin/lipo',['-archs',binary]).trim().split(/\s+/);
  const architecture=process.arch==='arm64'?'arm64':process.arch==='x64'?'x86_64':fail('ARCHITECTURE_UNAVAILABLE');
  if(targetArchitectures.length!==1||targetArchitectures[0]!==architecture)fail('TARGET_ARCHITECTURE_UNSUPPORTED');
- const sources=['main-installation-helper.c','main-installation-entry.c','main-installation-certifier.c','wire.c','wire.h','protocol.h','root-store-state.h','root-store-io.h','authority-family-io.h','installation-closure.h','installation-release.h','installation-certificate.h'];
+ const sources=['main-installation-helper.c','main-installation-entry.c','main-installation-certifier.c','wire.c','wire.h','protocol.h','root-store-state.h','root-store-io.h','root-store-receipts.h','authority-family-io.h','installation-closure.h','installation-release.h','installation-certificate.h'];
  const source=join(repo,'native/main-installation'),sourceHashes=Object.fromEntries(sources.map(name=>[name,hash(readFileSync(join(source,name)))]));
  // mkdir is the one exclusive output reservation; partial failures are retained.
  mkdirSync(out,{mode:0o700});

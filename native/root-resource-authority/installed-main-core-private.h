@@ -22,7 +22,7 @@ struct nr_root_store_file {
  unsigned char ticket[32];
 };
 struct nr_root_bootstrap_claim {
- nr_root_store_io *io;nr_root_store_identity identity;int valid;
+ nr_root_store_io *io;nr_root_store_identity identity;nr_original_pool_history history;int valid,kind;
 };
 struct nr_root_store_io {
  struct nr_root_store_io *next;nm_installed_client *client;
@@ -30,7 +30,7 @@ struct nr_root_store_io {
  uint32_t family;unsigned char authority_token[32],scope[32];int authority_hold;
  nr_root_store_identity identity;nr_root_store_file *files;
  nr_root_store_file *database,*journal_owner;
- struct nr_root_bootstrap_claim claim;
+ struct nr_root_bootstrap_claim claim;int adoption_checked;enum nr_root_adoption_kind adoption_kind;nr_original_pool_history adoption_history;
 };
 static _Thread_local nr_root_store_io *root_stores;
 static _Thread_local nr_root_store_io *worker_store;

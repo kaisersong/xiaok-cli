@@ -22,7 +22,12 @@ static napi_value component_bootstrap_installed_root_store(napi_env env,napi_cal
    * No algorithm/SQL is reimplemented by the component. */
   napi_value fn,receiver,result;if(napi_create_function(env,"originalInstallFresh",NAPI_AUTO_LENGTH,install_fresh,NULL,&fn)!=napi_ok||napi_get_undefined(env,&receiver)!=napi_ok||napi_call_function(env,receiver,fn,1,&private_session,&result)!=napi_ok)return NULL;
  }
- if(!nr_pool_graph(env,s)||!nr_pool_bind_protected(s,count==0?NR_FRESH_COMMIT:NR_RECOVER_COMMITTED))return fail(env,"COMPONENT_ROOT_IO_GRAPH_UNCONFIRMED");
+ int migrated=0;
+ if(count!=0&&!floor_valid(s)&&floor_match(s,NR_PROFILE,NR_DIGEST,NR_GUARD,NR_SCHEMA_VERSION)){
+  if(!nr_pool_migrate_original_v7(env,s))return NULL;
+  migrated=1;
+ }
+ if(!nr_pool_graph(env,s)||(!migrated&&(count==0?!nr_pool_bind_protected(s,NR_FRESH_COMMIT):!nr_pool_restore_protected_binding(s))))return fail(env,"COMPONENT_ROOT_IO_GRAPH_UNCONFIRMED");
 
 #ifdef MI_FIXTURE_AUTHORITY_SCOPES
  nr_root_store_io *other=NULL;unsigned char scope[32];memset(scope,0x11,sizeof(scope));
@@ -37,9 +42,20 @@ static napi_value component_bootstrap_installed_root_store(napi_env env,napi_cal
  if(sqlite3_exec(other_db,"CREATE TABLE IF NOT EXISTS component_evidence(id INTEGER PRIMARY KEY);INSERT OR IGNORE INTO component_evidence VALUES(1);",NULL,NULL,NULL)!=SQLITE_OK)return fail(env,"COMPONENT_AUTHORITY_SQL_UNCONFIRMED");
  if(nr_original_root_vfs_close(other_vfs,&other_db)!=NR_SQL_FILES_CLOSED)return fail(env,"COMPONENT_AUTHORITY_CLOSE_UNCONFIRMED");
 #endif
+ enum nr_root_adoption_kind adopted_kind;
+ if(!nr_root_store_read_adoption_kind(s->root_io,&adopted_kind))return fail(env,"COMPONENT_ADOPTION_KIND_UNCONFIRMED");
+ if(adopted_kind==NR_ROOT_ADOPTED_BINDING){
+  const nr_root_bootstrap_claim *wrong=NULL;nr_root_store_identity rejected;nr_original_pool_history history;
+  if(nr_root_store_claim_fresh(s->root_io,&wrong)||nr_root_store_read_claim(s->root_io,s->io_claim,&rejected)||
+     nr_root_store_read_adoption(s->root_io,(const nr_root_bootstrap_claim *)s,&history,&rejected))return fail(env,"COMPONENT_ADOPTION_FOREIGN_ACCEPTED");
+ }
  nr_root_store_identity identity=s->io_identity;char pool[65];nr_hex32(identity.pool_id,pool);
  napi_value out=object(env);if(!out||!text(env,out,"poolId",pool)||!text(env,out,"profile",nr_profile(s))||!number(env,out,"schemaVersion",nr_schema_version(s))||!boolean(env,out,"fresh",count==0)||!boolean(env,out,"restored",count!=0)||!boolean(env,out,"productionQualified",0))return fail(env,"COMPONENT_ROOT_IO_METADATA_UNCONFIRMED");
  if(!release(s)||!nm_installed_close_owned(client))return fail(env,"COMPONENT_ROOT_IO_CLOSE_UNCONFIRMED");
+ if(adopted_kind==NR_ROOT_ADOPTED_BINDING){
+  nr_original_pool_history history;nr_root_store_identity rejected;enum nr_root_adoption_kind kind;
+  if(nr_root_store_read_adoption_kind(s->root_io,&kind)||nr_root_store_read_adoption(s->root_io,s->io_claim,&history,&rejected))return fail(env,"COMPONENT_ADOPTION_RELEASED_ACCEPTED");
+ }
  nm_installed_fate fate;if(!nm_installed_fate_read(client,&fate)||!fate.root_files_closed||fate.unknown)return fail(env,"COMPONENT_ROOT_IO_CLOSE_UNCONFIRMED");
 #ifdef MI_FIXTURE_AUTHORITY_SCOPES
  boolean(env,out,"rootCloseBeforeSqlBusy",1);boolean(env,out,"rootSameSqlHandleAfterBusy",1);boolean(env,out,"authorityPhysicallyClosed",1);

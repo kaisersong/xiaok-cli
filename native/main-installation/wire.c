@@ -59,7 +59,7 @@ int mi_finalize_key(const mi_birth *b,uint8_t domain,const unsigned char client_
  (void)b;(void)domain;(void)client_nonce;(void)server_nonce;(void)release;(void)out;return 0;
 #endif
 }
-static int operation(uint16_t op){op&=(uint16_t)~MI_RESPONSE;return (op>=MI_HELLO&&op<=MI_KSWARM_RETIRE)||(op>=MI_BROKER_PREPARE&&op<=MI_BROKER_RETIRE);}
+static int operation(uint16_t op){op&=(uint16_t)~MI_RESPONSE;return (op>=MI_HELLO&&op<=MI_KSWARM_RETIRE)||(op>=MI_BROKER_PREPARE&&op<=MI_BROKER_RETIRE)||op==MI_CLAIM_ADOPTED;}
 static int fixed_header(const unsigned char *p){return !memcmp(p,"XMIO",4)&&get16(p+4)==MI_PROTOCOL_VERSION&&p[6]==MI_BUILD_KIND&&(p[7]==MI_ROOT_IO||p[7]==MI_DISPATCH||p[7]==MI_KSWARM_IO||p[7]==MI_BROKER_IO)&&operation(get16(p+8))&&get16(p+10)<=MI_ISSUER_LOCK&&get32(p+32)<=MI_MAX_PAYLOAD&&get32(p+36)<=MI_MAX_PAYLOAD;}
 static int mac(const unsigned char key[32],const unsigned char *p,size_t n,unsigned char out[32]){
 #ifdef __APPLE__

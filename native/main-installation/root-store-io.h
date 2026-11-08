@@ -4,6 +4,17 @@
 #define STORE_RECEIPTS "birth.receipts"
 #define STORE_ANCHOR "namespace.bin"
 #define STORE_MAX_RECORDS UINT64_C(1048576)
+#ifdef MI_ORIGINAL_ADOPTION_ENTRY
+static int store_adoption_reply(state *,mi_store_lease *,mi_frame *,unsigned char *);
+static int store_adoption_bind(state *,mi_store_lease *,const unsigned char *);
+static int store_adoption_close_entry(state *,mi_store_lease *);
+#endif
+static int store_adoption_presence(state *s,mi_store_lease *l){
+ struct stat fact;
+ if(!fstatat(l->authority,"adoption.bin",&fact,AT_SYMLINK_NOFOLLOW))return 1;
+ if(errno==ENOENT)return 0;
+ l->unknown=1;s->unknown=1;return -1;
+}
 static int close_file_lease(state *s);
 static void store_lease_init(mi_store_lease *l){memset(l,0,sizeof(*l));l->authority=l->parent=l->anchor_fd=l->validation_fd=l->store.receipt_fd=-1;for(int i=0;i<4;i++)l->files[i]=-1;for(int i=0;i<2;i++)l->ancestors[i]=-1;}
 static void store_mark_unknown(state *s,mi_store_lease *l){(void)s;l->unknown=1;if(l==&s->root_store)s->unknown=1;}
@@ -39,39 +50,7 @@ static void store_identity(state *s,mi_store_lease *l,unsigned char out[MI_STORE
  memcpy(out+248,q->anchor+176,32);st_fact(out+280,&l->file_identity[MI_DATABASE]);st_fact(out+312,&l->file_identity[MI_ISSUER_LOCK]);st_p64(out+344,q->generation);st_p32(out+352,(uint32_t)q->journal_state);st_p32(out+356,q->journal_state?1u:0u);
  if(q->journal_state){memcpy(out+360,st_nonzero(q->ticket,32)?q->ticket:q->audit_ticket,32);st_fact(out+392,&l->file_identity[MI_JOURNAL]);}
 }
-/* Complete records only. No prefix repair or truncation on a damaged tail. */
-static int store_apply(state *s,mi_store_lease *l,const unsigned char b[512]){(void)s;
- mi_store_state *q=&l->store;unsigned char digest[32];st_hash(b,480,digest);uint32_t type=st_u32(b+12),phase=st_u32(b+248);uint64_t seq=st_u64(b+16),gen=st_u64(b+252);
- if(memcmp(b,"XMRCP002",8)||st_u32(b+8)!=2||type<1||type>7||seq!=q->sequence+1||seq>STORE_MAX_RECORDS||memcmp(b+24,q->head,32)||memcmp(digest,b+480,32)||memcmp(b+56,q->namespace_id,32)||memcmp(b+88,q->birth_id,32)||memcmp(b+184,q->anchor_digest,32)||memcmp(b+216,q->profile,32)||st_nonzero(b+420,60)||st_u32(b+336)||st_u32(b+332)!=s->birth.uid||!st_nonzero(b+388,32))return 0;
- if(type==1){if(q->sequence||phase!=1||st_nonzero(b+120,64)||gen||st_nonzero(b+260,64))return 0;}
- else if(type==2){if(q->phase!=1||phase!=2||gen||!st_nonzero(b+120,32)||!st_nonzero(b+152,32)||st_nonzero(b+260,64))return 0;memcpy(q->pool_id,b+120,32);memcpy(q->claim_id,b+152,32);memcpy(q->claim_nonce,b+356,32);q->claim_pid=st_u32(b+328);}
- else{
-  if(q->phase<2||memcmp(b+120,q->pool_id,32)||memcmp(b+152,q->claim_id,32))return 0;
-  if(type==3){if(q->phase!=2||phase!=3||gen!=q->generation)return 0;}
-  else{
-   if(phase!=(uint32_t)q->phase||!gen||!st_nonzero(b+260,32))return 0;
-   struct stat fact;if(!st_decode_fact(b+292,&fact,l->file_identity[MI_DATABASE].st_uid))return 0;
-   if(type==4){if(q->journal_state||q->generation==UINT64_MAX||gen!=q->generation+1)return 0;q->journal_state=1;q->generation=gen;l->file_identity[MI_JOURNAL]=fact;}
-   else{if(!q->journal_state||gen!=q->generation||!identity(&fact,&l->file_identity[MI_JOURNAL]))return 0;if(type==5){if(q->journal_state!=1)return 0;}else if(type==6){if(q->journal_state!=1)return 0;q->journal_state=2;memcpy(q->operation,b+388,32);}else{if(q->journal_state!=2||memcmp(q->operation,b+388,32))return 0;q->journal_state=0;}}
-   memcpy(q->audit_ticket,b+260,32);
-  }
- }
- q->phase=(int)phase;q->sequence=seq;memcpy(q->head,digest,32);return 1;
-}
-static int store_append(state *s,mi_store_lease *l,uint32_t type,uint32_t phase){(void)s;
- mi_store_state *q=&l->store;if(q->receipt_fd<0||q->sequence>=STORE_MAX_RECORDS)return 0;l->io_entered=1;
- unsigned char b[512]={0};memcpy(b,"XMRCP002",8);st_p32(b+8,2);st_p32(b+12,type);st_p64(b+16,q->sequence+1);memcpy(b+24,q->head,32);memcpy(b+56,q->namespace_id,32);memcpy(b+88,q->birth_id,32);memcpy(b+120,q->pool_id,32);memcpy(b+152,q->claim_id,32);memcpy(b+184,q->anchor_digest,32);memcpy(b+216,q->profile,32);st_p32(b+248,phase);st_p64(b+252,type==4?q->generation+1:q->generation);
- if(q->journal_state||type>=4){memcpy(b+260,st_nonzero(q->ticket,32)?q->ticket:q->audit_ticket,32);st_fact(b+292,&l->file_identity[MI_JOURNAL]);}
- st_p32(b+324,(uint32_t)getpid());st_p32(b+328,(uint32_t)s->child);st_p32(b+332,s->birth.uid);
- st_p64(b+340,(uint64_t)s->child_identity.pbi_start_tvsec);st_p64(b+348,(uint64_t)s->child_identity.pbi_start_tvusec);memcpy(b+356,s->birth.nonce,32);
- if(type==6||type==7)memcpy(b+388,q->operation,32);else if(!st_nonce(b+388))return 0;
- st_hash(b,480,b+480);off_t at=(off_t)(q->sequence*512);size_t wrote=0;
- while(wrote<512){ssize_t n=pwrite(q->receipt_fd,b+wrote,512-wrote,at+(off_t)wrote);if(n>0)wrote+=(size_t)n;else if(n<0&&errno==EINTR)continue;else{store_mark_unknown(s,l);return 0;}}
- if(fsync(q->receipt_fd)){store_mark_unknown(s,l);return 0;}
- /* Live state updates occur only after the original append has been synced. */
- if(!store_apply(s,l,b)){store_mark_unknown(s,l);return 0;}
- return !fstat(q->receipt_fd,&q->receipt_identity);
-}
+#include "root-store-receipts.h"
 static int store_delete_pending(state *s,mi_store_lease *l){(void)s;
  mi_store_state *q=&l->store;l->io_entered=1;struct stat named;int result=fstatat(l->authority,l->journal_name,&named,AT_SYMLINK_NOFOLLOW);
  if(!result){if(!identity(&named,&l->file_identity[MI_JOURNAL])||unlinkat(l->authority,l->journal_name,0))return 0;}else if(errno!=ENOENT)return 0;
@@ -134,8 +113,27 @@ static int store_journal_close(state *s,mi_store_lease *l){(void)s;
 static int store_reply_identity(state *s,mi_store_lease *l,mi_frame *r,unsigned char *output){(void)s;store_identity(s,l,output);r->payload_length=424;r->amount=0;r->offset=0;return 1;}
 static int store_io(state *s,mi_store_lease *l,const mi_frame *f,const unsigned char *input,mi_frame *r,unsigned char *output){(void)s;
  mi_store_state *q=&l->store;if(f->status||(f->operation&MI_RESPONSE)||f->operation==MI_HELLO||f->offset>INT64_MAX)return 0;r->payload_length=r->amount=0;r->offset=f->offset;
- if(f->operation==MI_PING||f->operation==MI_CLOSE){if(f->slot||f->payload_length||f->amount||f->offset)return 0;if(f->operation==MI_CLOSE&&f->domain==MI_ROOT_IO&&!close_file_lease(s))r->status=(uint32_t)(errno?errno:EIO);return 1;}
+ if(f->operation==MI_PING||f->operation==MI_CLOSE){if(f->slot||f->payload_length||f->amount||f->offset)return 0;if(f->operation==MI_CLOSE&&f->domain==MI_ROOT_IO){
+ int good=1,first=0;
+#ifdef MI_ORIGINAL_ADOPTION_ENTRY
+ if(!store_adoption_close_entry(s,l)){good=0;first=errno;}
+#endif
+ if(!close_file_lease(s)){if(good)first=errno;good=0;}
+ if(!good)r->status=(uint32_t)(first?first:EIO);
+}return 1;}
  if(f->domain!=MI_ROOT_IO)return 0;
+ if(f->operation==MI_CLAIM_ADOPTED){
+  if(l!=&s->root_store||f->slot||f->payload_length||f->amount||f->offset)return 0;
+  int adoption=store_adoption_presence(s,l);
+  if(adoption<0)return 0;
+  if(!adoption)return store_reply_identity(s,l,r,output);
+#ifdef MI_ORIGINAL_ADOPTION_ENTRY
+  return store_adoption_reply(s,l,r,output);
+#else
+  /* No Entry/transport producer is linked in this original helper build. */
+  return 0;
+#endif
+ }
  if(f->operation==MI_STORE_IDENTITY){if(f->slot||f->payload_length||f->amount||f->offset)return 0;return store_reply_identity(s,l,r,output);}
  if(f->operation==MI_CLAIM_FRESH){
   if(f->slot||f->payload_length||f->amount||f->offset||q->phase!=1)return 0;
@@ -143,6 +141,15 @@ static int store_io(state *s,mi_store_lease *l,const mi_frame *f,const unsigned 
  }
  if(f->operation==MI_BIND_BOOTSTRAP){
   if(f->slot||f->payload_length!=164||f->amount||f->offset||q->phase<2)return 0;uint32_t mode=st_u32(input);
+  int adoption=store_adoption_presence(s,l);
+  if(adoption<0||((mode==1||mode==2)&&adoption))return 0;
+  if(mode==3){
+#ifdef MI_ORIGINAL_ADOPTION_ENTRY
+   return adoption&&store_adoption_bind(s,l,input)&&store_reply_identity(s,l,r,output);
+#else
+   return 0;
+#endif
+  }
   if((mode!=1&&mode!=2)||memcmp(input+4,q->namespace_id,32)||memcmp(input+36,q->pool_id,32)||memcmp(input+68,q->claim_id,32)||memcmp(input+100,q->anchor_digest,32)||memcmp(input+132,q->profile,32)||(mode==1&&(q->claim_pid!=(uint32_t)s->child||memcmp(q->claim_nonce,s->birth.nonce,32))))return 0;
   if(q->phase==2&&!store_append(s,l,3,3))return 0;return store_reply_identity(s,l,r,output);
  }
