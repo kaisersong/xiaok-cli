@@ -127,10 +127,41 @@ describe('packaged upgrade smoke contract', () => {
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
-import { prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';
+import { configuredDesktopServicePorts, prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';
 import { createCollaborationRoomBrokerClient } from '../../electron/collaboration-room-broker-client.js';
 
 describe('Desktop service port discovery (#168)', () => {
+  it.each(['desktop', 'broker-alias', 'desktop-precedence'] as const)(
+    'honors configured service ports from environment (%s)', async (source) => {
+      const names = ['XIAOK_DESKTOP_PORT', 'INTENT_BROKER_PORT', 'KSWARM_PORT'] as const;
+      const original = names.map(name => process.env[name]);
+      const probes = [createServer(), createServer()];
+      try {
+        for (const server of probes) {
+          await new Promise<void>((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolve);
+          });
+        }
+        const [a, b] = probes.map(server => (server.address() as { port: number }).port);
+        for (const name of names) delete process.env[name];
+        process.env.KSWARM_PORT = String(b);
+        if (source === 'broker-alias') process.env.INTENT_BROKER_PORT = String(a);
+        else {
+          process.env.XIAOK_DESKTOP_PORT = String(a);
+          if (source === 'desktop-precedence') process.env.INTENT_BROKER_PORT = String(b);
+        }
+        expect(configuredDesktopServicePorts()).toEqual({ broker: a, kswarm: b });
+      } finally {
+        names.forEach((name, i) => {
+          if (original[i] === undefined) delete process.env[name];
+          else process.env[name] = original[i];
+        });
+        await Promise.all(probes.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+      }
+    },
+  );
+
   it('keeps free default ports and publishes them', async (context) => {
     const probes = [createServer(), createServer()];
     try {
