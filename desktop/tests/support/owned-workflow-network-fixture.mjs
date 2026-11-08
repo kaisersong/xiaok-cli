@@ -1,3 +1,4 @@
+import {createOwnedKSwarmNodeRuntime} from './owned-kswarm-node-runtime.mjs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
@@ -22,8 +23,9 @@ const {initProjectWorkspace}=await import(resolve(siblingRoot,'kswarm','src/serv
 // Characterize actual persisted issuer -> actual HTTP GET, without model/network
 // command demonstrations or an invented successful GET response body.
 /** @param {{toolCategories?:string[],deniedCommandIds?:string[],deniedCommands?:string[]}|null} permissions
- * @param {{issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string,tasks?:import('./owned-workflow-network-fixture.mjs').OwnedWorkflowTaskInput[]}} options */
+ * @param {{nodeExecutable?:string,issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string,tasks?:import('./owned-workflow-network-fixture.mjs').OwnedWorkflowTaskInput[]}} options */
 export async function createOwnedWorkflowNetworkFixture(permissions=null,options={}){
+const nodeRuntime=await createOwnedKSwarmNodeRuntime(options.nodeExecutable,repositoryRoot);
 const nativeFetch=globalThis.fetch,liveWorkflowDispatch=options.liveWorkflowDispatch===true;
 const root=realpathSync(mkdtempSync(join(tmpdir(),'workflow-real-get-')));
 const data=join(root,'data');mkdirSync(data);mkdirSync(join(root,'config'));
@@ -130,7 +132,8 @@ try{
   await once(recipient,'open');
  }
  async function startOwnedServer(){
- child=spawn(process.execPath,['--import',fileURLToPath(new URL('./owned-workflow-child-account-preload.mjs',import.meta.url)),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:options.desktopMutationToken??'temporary-test-token',KSWARM_DESKTOP_PROFILE_ID:options.desktopProjectScope?.profileId??'',KSWARM_DESKTOP_WORKSPACE_ID:options.desktopProjectScope?.workspaceId??'',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
+ child=spawn(nodeRuntime.executable,['--import',fileURLToPath(new URL('./owned-workflow-child-account-preload.mjs',import.meta.url)),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:options.desktopMutationToken??'temporary-test-token',KSWARM_DESKTOP_PROFILE_ID:options.desktopProjectScope?.profileId??'',KSWARM_DESKTOP_WORKSPACE_ID:options.desktopProjectScope?.workspaceId??'',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
+ nodeRuntime.recordChild(child);
  childClosed=new Promise(resolve=>child.once('close',resolve));
  // Own child is unconditionally stopped before existing 8s recovery/worker timer.
  let logs='';child.stdout.on('data',bytes=>{logs+=bytes.toString();});child.stderr.on('data',bytes=>{logs+=bytes.toString();});

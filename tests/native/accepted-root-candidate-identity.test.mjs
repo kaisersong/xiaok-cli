@@ -50,6 +50,7 @@ const sourceFiles=[
  'tests/native/fixtures/accepted-root-candidate-identity.cjs','tests/native/fixtures/accepted-root-binding-entry.ts',
  'tests/native/helpers/accepted-root-candidate-observation.mjs','tests/native/helpers/accepted-root-candidate-observation.ts',
  'desktop/tests/support/owned-workflow-child-account-preload.mjs','desktop/tests/support/owned-workflow-network-fixture.mjs',
+ 'desktop/tests/support/owned-kswarm-node-runtime.mjs',
  'desktop/electron/desktop-services.ts','desktop/electron/kswarm-runtime-bridge.ts','desktop/electron/room-workspace-runtime.ts',
  'desktop/electron/main-room-root-admission.ts','native/root-resource-authority/main-bootstrap.cc',
  'native/root-resource-authority/root_resource_authority.c',
