@@ -2,7 +2,7 @@
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 
 const nativeFixturePath=vi.hoisted(()=>((name:string)=>/[\\/]main_bootstrap\.node$/.test(name)));
-const facts=vi.hoisted(()=>({events:[] as string[],issuer:{} as object,session:{} as object,store:{} as object,connectFault:false,rootFault:false,closeFault:false,connectOverride:undefined as {value:unknown}|undefined,onConnect:undefined as (()=>void)|undefined,connectError:undefined as unknown,rootError:undefined as unknown}));
+const facts=vi.hoisted(()=>({events:[] as string[],issuer:{} as object,session:{} as object,store:{} as object,connectFault:false,rootFault:false,closeFault:false,connectOverride:undefined as {value:unknown}|undefined,onConnect:undefined as (()=>void)|undefined,connectError:undefined as unknown,rootError:undefined as unknown,ledgerRaw:undefined as unknown,ledgerView:Object.freeze({metadataOnly:true}) as object,onLedger:undefined as (()=>void)|undefined}));
 vi.mock('node:module',async importOriginal=>{
  const actual=await importOriginal<typeof import('node:module')>();
  return {...actual,createRequire:(url:string|URL)=>{
@@ -16,6 +16,7 @@ vi.mock('node:module',async importOriginal=>{
   }:original(name);
  }};
 });
+vi.mock('../../../src/runtime/verification/original-root-nmp-ledger.js',()=>({decodeOriginalRootNmpLedger(raw:unknown){expect(raw).toBe(facts.ledgerRaw);facts.events.push('decode-ledger');return facts.ledgerView;}}));
 vi.mock('../../electron/harness-protected-budget-worker.js',()=>({
  prepareOriginalProtectedAdmissionDatabase(value:object){expect(value).toBe(facts.issuer);facts.events.push('admission-prepare');return Object.freeze({closeOwned(){facts.events.push('admission-close');}});},
  prepareOriginalProtectedBudgetWorker(){throw Error('unexpected budget Worker in lifecycle-only fixture');},
@@ -25,13 +26,14 @@ vi.mock('../../../src/runtime/verification/original-main-native-loader.js',()=>(
  openOriginalInstalledMainIssuer(value:object){expect(value).toBe(facts.issuer);facts.events.push('root-open');if(facts.rootFault)throw facts.rootError;return facts.session;},
  bootstrapOriginalMainPool(value:object){expect(value).toBe(facts.session);facts.events.push('core-bootstrap');return 'fresh';},
  readOriginalMainPoolBootstrap(value:object){expect(value).toBe(facts.session);facts.events.push('read-bootstrap');return Object.freeze({kind:'original_main_pool_bootstrap_v1',bootstrap:'fresh',profile:'ordinary_runtime_root_resource_reservation_writer_v8_protected_io',schemaVersion:4,semanticDigest:'a'.repeat(64),businessSealed:false});},
+ readOriginalRootPoolLedger(value:object){expect(value).toBe(facts.session);facts.events.push('read-ledger');facts.onLedger?.();return facts.ledgerRaw;},
  sealOriginalMainRootBusiness(value:object){expect(value).toBe(facts.session);facts.events.push('business-seal');},
  close(value:object){expect(value).toBe(facts.session);facts.events.push('root-close');if(facts.closeFault)throw Error('actual busy');},
 };}}));
 let api:Record<string,any>;
 beforeEach(async()=>{
  vi.resetModules();facts.events.length=0;facts.issuer={};facts.session={};facts.store={};facts.connectFault=false;facts.rootFault=false;facts.closeFault=false;facts.connectOverride=undefined;facts.onConnect=undefined;
- facts.connectError=undefined;facts.rootError=undefined;
+ facts.connectError=undefined;facts.rootError=undefined;facts.ledgerRaw=Object.freeze({metadataOnly:true});facts.ledgerView=Object.freeze({metadataOnly:true});facts.onLedger=undefined;
  const actual=process;
  vi.stubGlobal('process',{...actual,platform:'darwin',versions:{...actual.versions,electron:'39.8.10',modules:'140'}});
  api=await import('../../electron/main-dsh-bootstrap-authority.js');
@@ -184,4 +186,24 @@ it('recognizes only the fixed Native fixture basename with either host separator
  expect(nativeFixturePath('C:\\repo\\desktop\\electron\\main_bootstrap.node')).toBe(true);
  expect(nativeFixturePath('/repo/desktop/electron/main_bootstrap.node')).toBe(true);
  for(const name of ['main_bootstrap.node.evil','/repo/other.node','/repo/notmain_bootstrap.node'])expect(nativeFixturePath(name)).toBe(false);
+});
+
+it('fixed full-ledger consumer requires the exact started Core without exposing its session',async()=>{
+ const {core}=coreSetup();let traps=0;const proxy=new Proxy({},{get(){traps++;throw 0;},ownKeys(){traps++;throw 0;}});
+ await expect(api.readOriginalMainDshRootNmpLedger(proxy)).rejects.toThrow('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');
+ await expect(api.readOriginalMainDshRootNmpLedger(core)).rejects.toThrow('DSH_MAIN_CORE_NOT_STARTED');expect(traps).toBe(0);
+ await api.startOriginalMainDshCoreInfrastructure(core);expect(await api.readOriginalMainDshRootNmpLedger(core)).toBe(facts.ledgerView);
+ expect(facts.events.filter(x=>x==='read-ledger')).toHaveLength(1);await api.closeOriginalMainDshCoreInfrastructure(core);
+});
+it('accepted Core history remains readable after business Source seal and closes through its original negative path',async()=>{
+ const {realm,core}=coreSetup();await api.startOriginalMainDshCoreInfrastructure(core);realm.seal();
+ expect(await api.readOriginalMainDshRootNmpLedger(core)).toBe(facts.ledgerView);
+ await api.closeOriginalMainDshCoreInfrastructure(core);expect(facts.events).toContain('root-close');expect(facts.events).toContain('installation-close');
+ await expect(api.readOriginalMainDshRootNmpLedger(core)).rejects.toThrow('DSH_MAIN_CORE_NOT_STARTED');
+});
+it('reentrant Core close joins the accepted ledger stock before actual SQLite close',async()=>{
+ const {core}=coreSetup();await api.startOriginalMainDshCoreInfrastructure(core);let close:Promise<void>|undefined;
+ facts.onLedger=()=>{close=api.closeOriginalMainDshCoreInfrastructure(core);};
+ expect(await api.readOriginalMainDshRootNmpLedger(core)).toBe(facts.ledgerView);await close;
+ expect(facts.events.indexOf('decode-ledger')).toBeLessThan(facts.events.indexOf('root-close'));
 });

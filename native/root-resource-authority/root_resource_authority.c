@@ -43,8 +43,13 @@ static int nr_leaf_can_settle(struct nr_leaf*);
 #include "reservation-ops.h"
 typedef struct nr_session {
  struct nr_session *next;
+ struct nr_ledger_source *ledger_source;
  napi_env owner_env;
- sqlite3 *db;
+ sqlite3 *db,*schema_reference;
+#ifdef NR_FIXTURE_BUILD
+ sqlite3_stmt *fixture_schema_statement;int fixture_schema_busy;
+#endif
+ pid_t birth_pid;int ledger_reading,ledger_failure_code;
  int bootstrap_status,business_sealed;
  int directory,lock_fd,created_lock,created_db,bootstrap_attempted,closed,unknown,installing,fresh_owner,writing,fixture_commit_failure,fixture_cell_mismatch,fixture_process_write,fixture_bootstrap_failure,leaf_pending;
  nr_write writes[NR_MAX_WRITES];size_t write_count;
@@ -94,7 +99,15 @@ static int directory_path(const char *path,int create){
   if(next<0){close(fd);return -1;}close(fd);fd=next;
  }return fd;
 }
+
+#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
+static int nr_ledger_existing_current(nr_session *s);
+#endif
 static int current(nr_session *s){
+
+#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
+ if(s->ledger_source)return nr_ledger_existing_current(s);
+#endif
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
  if(s->root_io){nr_root_store_identity identity;
   return nr_root_store_read_identity(s->root_io,&identity)&&nr_io_identity_same(&s->io_identity,&identity)&&
@@ -110,7 +123,11 @@ static int current(nr_session *s){
  return 1;
 }
 static int release(nr_session *s){
- int good=1;
+ int good=1;if(s->ledger_reading)return 0;
+ #ifdef NR_FIXTURE_BUILD
+ if(s->fixture_schema_statement){if(sqlite3_finalize(s->fixture_schema_statement)!=SQLITE_OK){s->unknown=1;return 0;}s->fixture_schema_statement=NULL;}
+ #endif
+ if(s->schema_reference){int rc=sqlite3_close(s->schema_reference);if(rc!=SQLITE_OK){if(!s->ledger_failure_code)s->ledger_failure_code=rc;s->unknown=1;good=0;}else s->schema_reference=NULL;}
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
  if(s->leaf_pending){s->unknown=1;return 0;}
 #if defined(MI_FIXTURE_BUILD) && defined(NR_ROOT_IO_COMPONENT)
@@ -129,6 +146,7 @@ static int release(nr_session *s){
  }else
 #endif
  if(s->db){int rc=sqlite3_close(s->db);if(rc!=SQLITE_OK){s->unknown=1;return 0;}s->db=NULL;}
+ if(s->schema_reference)return 0;
  if(s->lock_fd>=0){if(close(s->lock_fd))good=0;s->lock_fd=-1;}
  if(s->directory>=0){if(close(s->directory))good=0;s->directory=-1;}
  s->closed=1;if(!good)s->unknown=1;return good;
@@ -197,6 +215,7 @@ static nr_session *session(napi_env env,napi_value candidate,int allow_closed){
  if(napi_typeof(env,candidate,&type)!=napi_ok||napi_get_null(env,&null_value)!=napi_ok||napi_strict_equals(env,candidate,null_value,&is_null)!=napi_ok)return NULL;
  if(type!=napi_object||is_null){fail(env,"ROOT_RESOURCE_SESSION_REQUIRED");return NULL;}
  if(napi_check_object_type_tag(env,candidate,&session_tag,&tagged)!=napi_ok||!tagged||napi_unwrap(env,candidate,(void**)&s)!=napi_ok||!s||!owns(env,s)){fail(env,"ROOT_RESOURCE_SESSION_REQUIRED");return NULL;}
+ if(s->ledger_reading){fail(env,"ROOT_RESOURCE_LEDGER_READING");return NULL;}
  if(!allow_closed){if(s->closed){fail(env,"ROOT_RESOURCE_SESSION_CLOSED");return NULL;}if(s->unknown||!current(s)){s->unknown=1;fail(env,"ROOT_RESOURCE_SESSION_UNCONFIRMED");return NULL;}}return s;
 }
 /* Birth is private to this original open, never inferred from empty contents. */
@@ -207,7 +226,7 @@ static int open_birth_file(int dir,const char *name,int *created){
  return openat(dir,name,O_RDWR|O_CLOEXEC|O_NOFOLLOW);
 }
 static napi_value open_original_kernel(napi_env env){
- int stage=0;nr_session *s=calloc(1,sizeof(*s));if(!s)return fail(env,"ROOT_RESOURCE_NATIVE_ALLOCATION_FAILED");s->directory=s->lock_fd=-1;
+ int stage=0;nr_session *s=calloc(1,sizeof(*s));if(!s)return fail(env,"ROOT_RESOURCE_NATIVE_ALLOCATION_FAILED");s->directory=s->lock_fd=-1;s->birth_pid=getpid();
 #ifdef NR_FIXTURE_BUILD
  if(snprintf(s->path,sizeof(s->path),"%s",NR_FIXTURE_ROOT)>=(int)sizeof(s->path))goto unavailable;
 #else
@@ -241,152 +260,13 @@ static napi_value open_original(napi_env env,napi_callback_info info){
  napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
  return open_original_kernel(env);
 }
-#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
-typedef struct {napi_env env;nr_main_bridge *bridge;napi_ref model_sdk_shape,installation_adopt;} nr_main_addon;
-static napi_value main_failure(napi_env env,nr_main_result result){
- if(result==NR_MAIN_EXCEPTION_PENDING)return NULL;
- switch(result){
-  case NR_MAIN_ROLE_UNAVAILABLE:return fail(env,"ROOT_RESOURCE_MAIN_ROLE_UNAVAILABLE");
-  case NR_MAIN_ALREADY_ATTEMPTED:return fail(env,"ROOT_RESOURCE_MAIN_ALREADY_ATTEMPTED");
-  case NR_MAIN_REVOKED:return fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REVOKED");
-  case NR_MAIN_CONTEXT_REQUIRED:return fail(env,"ROOT_RESOURCE_MAIN_CONTEXT_REQUIRED");
-  default:return fail(env,"ROOT_RESOURCE_MAIN_UNCONFIRMED");
- }
-}
-static nr_main_addon *main_addon(napi_env env,napi_callback_info info){
- void *raw=NULL;size_t count=0;
- if(napi_get_cb_info(env,info,&count,NULL,NULL,&raw)!=napi_ok||!raw)return NULL;
- nr_main_addon *addon=raw;return addon->env==env?addon:NULL;
-}
-static void main_env_cleanup(void *raw){
- nr_main_addon *addon=raw;nr_main_bridge_env_close(addon->bridge);
- nr_main_bridge_release(addon->bridge);if(addon->model_sdk_shape)napi_delete_reference(addon->env,addon->model_sdk_shape);if(addon->installation_adopt)napi_delete_reference(addon->env,addon->installation_adopt);free(addon);
-}
-static napi_value adopt_main_installation(napi_env env,napi_callback_info info);
-static napi_value open_main_issuer(napi_env env,napi_callback_info info){
- napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_main_addon *addon=main_addon(env,info);if(!addon)return fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REQUIRED");
- nr_main_result result=nr_main_bridge_birth(addon->bridge,env,addon);
- if(result!=NR_MAIN_OK)return main_failure(env,result);
- nr_main_bridge_retain(addon->bridge);
- napi_value out=open_original_kernel(env);
- if(!out){nr_main_bridge_revoke(addon->bridge,env,addon);nr_main_bridge_release(addon->bridge);return NULL;}
- nr_session *s=session(env,out,1);
- if(!s){nr_main_bridge_revoke(addon->bridge,env,addon);nr_main_bridge_release(addon->bridge);return NULL;}
- s->main_bridge=addon->bridge;s->main_cookie=addon;
- result=nr_main_bridge_current(addon->bridge,env,addon);
- if(result!=NR_MAIN_OK){s->unknown=1;release(s);return main_failure(env,result);}
- return out;
-}
-/* Fixed installed entry. Its first SQLite connection is the original
- * non-default RootIO family, after same-capsule adoption and durable CLAIM.
- * No caller path, VFS name, SQL or callback is accepted. */
-static napi_value open_installed_main_issuer(napi_env env,napi_callback_info info){
- napi_value args[2];
- if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_main_addon *addon=main_addon(env,info);if(!addon)return fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REQUIRED");
- nr_main_result role=nr_main_bridge_birth(addon->bridge,env,addon);
- if(role!=NR_MAIN_OK)return main_failure(env,role);
-#if !defined(NR_FIXTURE_BUILD) || !defined(MI_FIXTURE_BUILD)
- /* Product genesis/canonical prior-resource provenance remains a separate
-  * missing qualification. An empty protected namespace cannot mint it. */
- return fail(env,"ROOT_RESOURCE_INSTALLED_GENESIS_UNCONFIRMED");
-#else
- napi_value fn,receiver,ignored;
- nr_session *s=calloc(1,sizeof(*s));if(!s)return fail(env,"ROOT_RESOURCE_NATIVE_ALLOCATION_FAILED");
- s->directory=s->lock_fd=-1;s->owner_env=env;s->main_bridge=addon->bridge;s->main_cookie=addon;
- nr_main_bridge_retain(addon->bridge);s->next=sessions;sessions=s;
- if(!addon->installation_adopt||napi_get_reference_value(env,addon->installation_adopt,&fn)!=napi_ok||
-    napi_get_undefined(env,&receiver)!=napi_ok){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");}
- uint64_t call=0;if(nr_main_bridge_adoption_enter(s->main_bridge,env,addon,&call)!=NR_MAIN_OK){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");}
- napi_status invoked=napi_call_function(env,receiver,fn,1,args,&ignored);
- nr_main_result left=nr_main_bridge_adoption_leave(s->main_bridge,env,addon,call);
- if(invoked!=napi_ok||left!=NR_MAIN_OK){s->unknown=1;bool pending=false;
-  if(invoked!=napi_ok&&napi_is_exception_pending(env,&pending)==napi_ok&&pending)return NULL;
-  return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");
- }
- if(!nr_main_bridge_borrow_root_store(s->main_bridge,env,addon,&s->root_io)||
-    !nr_root_store_read_identity(s->root_io,&s->io_identity)){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLED_IDENTITY_UNCONFIRMED");}
- if(s->io_identity.birth_state==NR_CREATED){
-  if(!nr_root_store_claim_fresh(s->root_io,&s->io_claim)||!nr_root_store_read_claim(s->root_io,s->io_claim,&s->io_identity)){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLED_CLAIM_UNCONFIRMED");}
-  s->created_db=s->created_lock=1;
- }
- if(nr_original_root_vfs_create(s->root_io,&s->root_vfs)!=SQLITE_OK||
-    nr_original_root_vfs_open(s->root_vfs,&s->db)!=SQLITE_OK||!current(s)){
-  s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLED_OPEN_UNCONFIRMED");
- }
- if(sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK||
-    sqlite3_db_config(s->db,SQLITE_DBCONFIG_TRUSTED_SCHEMA,0,NULL)!=SQLITE_OK||
-    sqlite3_create_function_v2(s->db,nr_guard_name(s),-1,SQLITE_UTF8|SQLITE_INNOCUOUS,s,guard,NULL,NULL,NULL)!=SQLITE_OK||
-    !execute(s,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0; PRAGMA temp_store=MEMORY; PRAGMA synchronous=FULL")||
-    sqlite3_set_authorizer(s->db,authorizer,s)!=SQLITE_OK){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLED_OPEN_UNCONFIRMED");}
- napi_value out=object(env);
- if(!out||napi_type_tag_object(env,out,&session_tag)!=napi_ok||napi_wrap(env,out,s,finalize,NULL,NULL)!=napi_ok||napi_object_freeze(env,out)!=napi_ok){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLED_PROJECTION_UNCONFIRMED");}
- return out;
-#endif
-}
-/* Pure original Main-session membership precedes any role or filesystem SDK.
- * This helper cannot upgrade openOriginal() or accept a JS owner/verifier. */
-static nr_session *main_session_member(napi_env env,napi_callback_info info,napi_value candidate){
- nr_session *s=session(env,candidate,1);if(!s)return NULL;
- nr_main_addon *addon=main_addon(env,info);
- if(!addon||!s->main_bridge||s->main_bridge!=addon->bridge||s->main_cookie!=addon){fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REQUIRED");return NULL;}
- return s;
-}
-static int main_session_current(napi_env env,nr_session *s){
- if(s->closed){fail(env,"ROOT_RESOURCE_SESSION_CLOSED");return 0;}
- if(s->unknown){fail(env,"ROOT_RESOURCE_SESSION_UNCONFIRMED");return 0;}
- nr_main_result result=nr_main_bridge_current(s->main_bridge,env,s->main_cookie);
- if(result!=NR_MAIN_OK){main_failure(env,result);return 0;}
- if(s->unknown||!current(s)){s->unknown=1;fail(env,"ROOT_RESOURCE_SESSION_UNCONFIRMED");return 0;}
- return 1;
-}
-/* Sole adoption glue. Existing NMP SQL/floor/queue algorithms are unchanged. */
-static napi_value adopt_main_installation(napi_env env,napi_callback_info info){
- napi_value args[3],fn,receiver,out;
- if(!arguments(env,info,2,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_session *s=main_session_member(env,info,args[0]);if(!s)return NULL;
- if(!main_session_current(env,s))return NULL;
- nr_main_addon *addon=main_addon(env,info);
- if(!addon||!addon->installation_adopt||napi_get_reference_value(env,addon->installation_adopt,&fn)!=napi_ok||
-    napi_get_undefined(env,&receiver)!=napi_ok)return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");
- uint64_t call=0;
- if(nr_main_bridge_adoption_enter(s->main_bridge,env,s->main_cookie,&call)!=NR_MAIN_OK)return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");
- napi_value input[]={args[1]};
- napi_status status=napi_call_function(env,receiver,fn,1,input,&out);
- nr_main_result left=nr_main_bridge_adoption_leave(s->main_bridge,env,s->main_cookie,call);
- if(left!=NR_MAIN_OK)s->unknown=1;
- if(status!=napi_ok){
-  bool pending=false;
-  if(napi_is_exception_pending(env,&pending)==napi_ok&&pending)return NULL; /* Preserve the original exception. */
-  s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");
- }
- if(left!=NR_MAIN_OK)return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNCONFIRMED");
- return out;
-}
-static napi_value assert_main_issuer(napi_env env,napi_callback_info info){
- napi_value args[2];if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_session *s=session(env,args[0],1);if(!s)return NULL;
- nr_main_addon *addon=main_addon(env,info);
- if(!addon||!s->main_bridge||s->main_bridge!=addon->bridge||s->main_cookie!=addon)return fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REQUIRED");
- nr_main_result result=nr_main_bridge_current(addon->bridge,env,addon);if(result!=NR_MAIN_OK)return main_failure(env,result);
- if(s->closed)return fail(env,"ROOT_RESOURCE_SESSION_CLOSED");
- if(s->unknown||!current(s)){s->unknown=1;return fail(env,"ROOT_RESOURCE_SESSION_UNCONFIRMED");}
- napi_value out;napi_get_undefined(env,&out);return out;
-}
-static napi_value revoke_main_issuer(napi_env env,napi_callback_info info){
- napi_value args[2];if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nr_session *s=session(env,args[0],1);if(!s)return NULL;
- nr_main_addon *addon=main_addon(env,info);
- if(!addon||!s->main_bridge||s->main_bridge!=addon->bridge||s->main_cookie!=addon)return fail(env,"ROOT_RESOURCE_MAIN_ISSUER_REQUIRED");
- nr_main_bridge_revoke(addon->bridge,env,addon);napi_value out;napi_get_undefined(env,&out);return out;
-}
-#endif
+#include "root-main-session.h"
 /* New positive facts from a Main-bound session require its original local
  * role lifetime. Metadata/negative settlement keep their existing session
  * health/member checks and cannot use this helper to revive an effect. */
 static nr_session *effect_session(napi_env env,napi_value candidate){
  nr_session *s=session(env,candidate,1);if(!s)return NULL;
+ if(s->ledger_reading){fail(env,"ROOT_RESOURCE_LEDGER_READING");return NULL;}
  if(s->business_sealed){fail(env,"ROOT_RESOURCE_BUSINESS_SEALED");return NULL;}
  if(s->closed){fail(env,"ROOT_RESOURCE_SESSION_CLOSED");return NULL;}
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
@@ -398,103 +278,18 @@ static nr_session *effect_session(napi_env env,napi_value candidate){
 #endif
  return s;
 }
-static const char *schema=
- "CREATE TABLE root_pool_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),identity_version INTEGER NOT NULL,pool_id TEXT NOT NULL,owner_uid INTEGER NOT NULL,directory_device INTEGER NOT NULL,directory_inode INTEGER NOT NULL,directory_mode INTEGER NOT NULL,lock_device INTEGER NOT NULL,lock_inode INTEGER NOT NULL,lock_mode INTEGER NOT NULL,database_device INTEGER NOT NULL,database_inode INTEGER NOT NULL,database_mode INTEGER NOT NULL);"
- "CREATE TABLE root_resource_floor(singleton INTEGER PRIMARY KEY CHECK(singleton=1),profile TEXT NOT NULL,schema_version INTEGER NOT NULL,semantic_digest TEXT NOT NULL,guard_abi TEXT NOT NULL,issuer_epoch INTEGER NOT NULL);"
- "CREATE TABLE root_resource_policy(singleton INTEGER PRIMARY KEY CHECK(singleton=1),owner_digest TEXT NOT NULL,issuer_json TEXT NOT NULL,capacity INTEGER NOT NULL,queue_limit INTEGER NOT NULL,next_seq INTEGER NOT NULL,human_burst INTEGER NOT NULL,claim_seq INTEGER NOT NULL);"
- "CREATE TABLE root_resources(record_id TEXT PRIMARY KEY,execution_key TEXT UNIQUE NOT NULL,metadata_json TEXT NOT NULL,metadata_digest TEXT NOT NULL,enqueue_seq INTEGER UNIQUE NOT NULL,revision INTEGER NOT NULL,generation INTEGER NOT NULL,issuer_epoch INTEGER NOT NULL,state TEXT NOT NULL,claim_token TEXT,attempt_id TEXT);"
- "CREATE INDEX root_resources_pending ON root_resources(state,enqueue_seq);"
- "CREATE TABLE root_launch_outbox(record_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,state TEXT NOT NULL,FOREIGN KEY(record_id) REFERENCES root_resources(record_id));"
- "CREATE TABLE root_resource_receipts(record_id TEXT NOT NULL,kind TEXT NOT NULL,binding_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,PRIMARY KEY(record_id,kind),FOREIGN KEY(record_id) REFERENCES root_resources(record_id));" NR_PHYSICAL_SCHEMA;
-static const char *schema_io_binding=
- "CREATE TABLE root_pool_io_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),binding_version INTEGER NOT NULL,pool_id TEXT NOT NULL,namespace_id TEXT NOT NULL,birth_id TEXT NOT NULL,claim_id TEXT NOT NULL,anchor_digest TEXT NOT NULL,profile_digest TEXT NOT NULL,file_owner_uid INTEGER NOT NULL,directory_nlink INTEGER NOT NULL,lock_nlink INTEGER NOT NULL,database_nlink INTEGER NOT NULL,FOREIGN KEY(singleton) REFERENCES root_pool_identity(singleton));";
-static napi_value install_fresh(napi_env env,napi_callback_info info){
- napi_value args[2];if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");nr_session *s=effect_session(env,args[0]);if(!s)return NULL;
- sqlite3_int64 count;if(!scalar(s->db,"SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",&count))return fail(env,"ROOT_RESOURCE_SCHEMA_UNCONFIRMED");if(count)return fail(env,"ROOT_RESOURCE_FRESH_REQUIRED");
- if(!s->created_lock||!s->created_db)return fail(env,"ROOT_RESOURCE_FRESH_BIRTH_REQUIRED");
- s->installing=1;s->writing=1;int began=execute(s,"BEGIN IMMEDIATE"),good=began;
- if(good)good=current(s)&&scalar(s->db,"SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",&count)&&count==0&&execute(s,schema)&&(!nr_protected(s)||execute(s,schema_io_binding));
- if(good)good=nr_create_guards(s)&&nr_install_rows(s);
- if(good)good=nr_verify_frame(s)&&floor_valid(s)&&current(s);
- if(good){good=execute(s,"COMMIT");if(!good)s->unknown=1;
-#ifdef NR_FIXTURE_BUILD
-  /* Actual COMMIT precedes this controlled SDK wrapper failure. */
-  if(good&&s->fixture_bootstrap_failure==6){s->fixture_bootstrap_failure=0;s->unknown=1;good=0;}
-#endif
- }
- else if(began&&!execute(s,"ROLLBACK"))s->unknown=1;
- s->installing=0;nr_clear_frame(s);
- if(!good||!current(s)){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALL_UNCONFIRMED");}
- napi_value out=object(env);if(!out||!boolean(env,out,"installed",1)||s->unknown||s->closed||!current(s)){s->unknown=1;return fail(env,"ROOT_RESOURCE_INSTALL_UNCONFIRMED");}s->fresh_owner=1;return out;
-}
-static napi_value read_policy(napi_env env,napi_callback_info info){
- napi_value args[2];if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");nr_session *s=session(env,args[0],0);if(!s)return NULL;if(!floor_valid(s))return fail(env,"ROOT_RESOURCE_FLOOR_REQUIRED");
- sqlite3_stmt *stmt=NULL;int good=sqlite3_prepare_v2(s->db,"SELECT capacity,queue_limit,next_seq,claim_seq,human_burst FROM root_resource_policy WHERE singleton=1",-1,&stmt,NULL)==SQLITE_OK;
- if(good)good=sqlite3_step(stmt)==SQLITE_ROW;
- napi_value out=object(env);const char *names[]={"capacity","queueLimit","enqueueSeq","claimSeq","humanBurst"};
- for(int i=0;good&&i<5;i++){sqlite3_int64 n=sqlite3_column_int64(stmt,i);good=sqlite3_column_type(stmt,i)==SQLITE_INTEGER&&n>=0&&n<=9007199254740991LL;if(good)number(env,out,names[i],n);}
- if(good)good=sqlite3_step(stmt)==SQLITE_DONE;if(stmt&&sqlite3_finalize(stmt)!=SQLITE_OK)good=0;
- if(!good||s->unknown||s->closed||!floor_valid(s)||!current(s)){s->unknown=1;return fail(env,"ROOT_RESOURCE_POLICY_UNCONFIRMED");}number(env,out,"issuerEpoch",1);if(s->unknown||s->closed||!current(s)){s->unknown=1;return fail(env,"ROOT_RESOURCE_POLICY_UNCONFIRMED");}return out;
-}
-static napi_value close_session(napi_env env,napi_callback_info info){
- napi_value args[2],out;if(!arguments(env,info,1,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");nr_session *s=session(env,args[0],1);if(!s)return NULL;
- if(!release(s))return fail(env,"ROOT_RESOURCE_CLOSE_UNCONFIRMED");napi_get_undefined(env,&out);return out;
-}
+#include "root-pool-native-operations.h"
 #define NR_RESERVATION_IMPLEMENTATION
 #include "reservation-ops.h"
 #ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
 #include "model-sdk-bridge.h"
 #include "root-pool-bootstrap.h"
+#include "root-pool-ledger-reader.h"
+#include "root-pool-ledger-source.h"
 #include "fixture-physical-snapshot.h"
 #if defined(MI_FIXTURE_BUILD) && defined(NR_ROOT_IO_COMPONENT)
-static napi_value component_bootstrap_installed_root_store(napi_env env,napi_callback_info info){
- napi_value args[1];if(!arguments(env,info,0,args))return fail(env,"ROOT_RESOURCE_ARGUMENT_INVALID");
- nm_installed_client *client=nm_installed_create();nr_session *s=calloc(1,sizeof(*s));
- if(!client||!s)return fail(env,"ROOT_RESOURCE_NATIVE_ALLOCATION_FAILED");
- s->directory=s->lock_fd=-1;s->owner_env=env;s->component_client=client;s->next=sessions;sessions=s;
- if(!nm_installed_connect(client)||!nm_installed_borrow_root_store(client,&s->root_io)||
-    !nr_root_store_read_identity(s->root_io,&s->io_identity))return fail(env,"COMPONENT_ROOT_IO_BIRTH_UNCONFIRMED");
- int original_birth=s->io_identity.birth_state;
- if(original_birth==NR_CREATED){
-  if(!nr_root_store_claim_fresh(s->root_io,&s->io_claim)||!nr_root_store_read_claim(s->root_io,s->io_claim,&s->io_identity))return fail(env,"COMPONENT_ROOT_IO_CLAIM_UNCONFIRMED");
-  s->created_db=s->created_lock=1;
- }
- if(nr_original_root_vfs_create(s->root_io,&s->root_vfs)!=SQLITE_OK||nr_original_root_vfs_open(s->root_vfs,&s->db)!=SQLITE_OK||!current(s))return fail(env,"COMPONENT_ROOT_IO_OPEN_UNCONFIRMED");
- if(sqlite3_db_config(s->db,SQLITE_DBCONFIG_DEFENSIVE,1,NULL)!=SQLITE_OK||sqlite3_db_config(s->db,SQLITE_DBCONFIG_TRUSTED_SCHEMA,0,NULL)!=SQLITE_OK||
-    sqlite3_create_function_v2(s->db,nr_guard_name(s),-1,SQLITE_UTF8|SQLITE_INNOCUOUS,s,guard,NULL,NULL,NULL)!=SQLITE_OK||
-    !execute(s,"PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0; PRAGMA temp_store=MEMORY; PRAGMA synchronous=FULL")||sqlite3_set_authorizer(s->db,authorizer,s)!=SQLITE_OK)return fail(env,"COMPONENT_ROOT_IO_SQL_UNCONFIRMED");
- napi_value private_session=object(env);if(!private_session||napi_type_tag_object(env,private_session,&session_tag)!=napi_ok||napi_wrap(env,private_session,s,finalize,NULL,NULL)!=napi_ok)return fail(env,"COMPONENT_ROOT_IO_PRIVATE_SESSION_UNCONFIRMED");
- sqlite3_int64 count=-1;if(!scalar(s->db,"SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",&count))return fail(env,"COMPONENT_ROOT_IO_SCHEMA_UNCONFIRMED");
- if(count==0){
-  if(!s->io_claim)return fail(env,"COMPONENT_ROOT_IO_NO_FRESH_CLAIM");
-  /* Invoke the actual production callback with a real N-API callback frame.
-   * No algorithm/SQL is reimplemented by the component. */
-  napi_value fn,receiver,result;if(napi_create_function(env,"originalInstallFresh",NAPI_AUTO_LENGTH,install_fresh,NULL,&fn)!=napi_ok||napi_get_undefined(env,&receiver)!=napi_ok||napi_call_function(env,receiver,fn,1,&private_session,&result)!=napi_ok)return NULL;
- }
- if(!nr_pool_graph(env,s)||!nr_pool_bind_protected(s,count==0?NR_FRESH_COMMIT:NR_RECOVER_COMMITTED))return fail(env,"COMPONENT_ROOT_IO_GRAPH_UNCONFIRMED");
+#include "root-io-component-fixture.h"
 
-#ifdef MI_FIXTURE_AUTHORITY_SCOPES
- nr_root_store_io *other=NULL;unsigned char scope[32];memset(scope,0x11,sizeof(scope));
- if(!nm_fixture_borrow_authority_store(client,MI_FAMILY_ADMISSION,scope,&other))return fail(env,"COMPONENT_AUTHORITY_BIRTH_UNCONFIRMED");
- nr_root_store_identity other_identity;const nr_root_bootstrap_claim *other_claim=NULL;
- if(!nr_root_store_read_identity(other,&other_identity))return fail(env,"COMPONENT_AUTHORITY_IDENTITY_UNCONFIRMED");
- if(other_identity.birth_state==NR_CREATED&&(!nr_root_store_claim_fresh(other,&other_claim)||!nr_root_store_read_claim(other,other_claim,&other_identity)))return fail(env,"COMPONENT_AUTHORITY_CLAIM_UNCONFIRMED");
- nr_original_root_vfs *other_vfs=NULL;sqlite3 *other_db=NULL;
- if(nr_original_root_vfs_create(other,&other_vfs)!=SQLITE_OK||nr_original_root_vfs_open(other_vfs,&other_db)!=SQLITE_OK)return fail(env,"COMPONENT_AUTHORITY_OPEN_UNCONFIRMED");
- sqlite3 *same=s->db;sqlite3_int64 floor_count=0;
- if(release(s)||s->db!=same||s->closed||s->unknown||!scalar(s->db,"SELECT count(*) FROM root_resource_floor",&floor_count)||floor_count!=1)return fail(env,"COMPONENT_ROOT_CLOSED_BEFORE_AUTHORITY");
- if(sqlite3_exec(other_db,"CREATE TABLE IF NOT EXISTS component_evidence(id INTEGER PRIMARY KEY);INSERT OR IGNORE INTO component_evidence VALUES(1);",NULL,NULL,NULL)!=SQLITE_OK)return fail(env,"COMPONENT_AUTHORITY_SQL_UNCONFIRMED");
- if(nr_original_root_vfs_close(other_vfs,&other_db)!=NR_SQL_FILES_CLOSED)return fail(env,"COMPONENT_AUTHORITY_CLOSE_UNCONFIRMED");
-#endif
- nr_root_store_identity identity=s->io_identity;char pool[65];nr_hex32(identity.pool_id,pool);
- napi_value out=object(env);if(!out||!text(env,out,"poolId",pool)||!text(env,out,"profile",nr_profile(s))||!number(env,out,"schemaVersion",nr_schema_version(s))||!boolean(env,out,"fresh",count==0)||!boolean(env,out,"restored",count!=0)||!boolean(env,out,"productionQualified",0))return fail(env,"COMPONENT_ROOT_IO_METADATA_UNCONFIRMED");
- if(!release(s)||!nm_installed_close_owned(client))return fail(env,"COMPONENT_ROOT_IO_CLOSE_UNCONFIRMED");
- nm_installed_fate fate;if(!nm_installed_fate_read(client,&fate)||!fate.root_files_closed||fate.unknown)return fail(env,"COMPONENT_ROOT_IO_CLOSE_UNCONFIRMED");
-#ifdef MI_FIXTURE_AUTHORITY_SCOPES
- boolean(env,out,"rootCloseBeforeSqlBusy",1);boolean(env,out,"rootSameSqlHandleAfterBusy",1);boolean(env,out,"authorityPhysicallyClosed",1);
-#endif
- boolean(env,out,"rootFilesClosed",fate.root_files_closed);boolean(env,out,"unknown",fate.unknown);return out;
-}
 #endif
 
 #endif
@@ -509,106 +304,4 @@ static napi_value open_original(napi_env env,napi_callback_info info){(void)info
 #define read_resource open_original
 #define cancel_queued_resource open_original
 #endif
-#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
-napi_value nr_init_resource_authority(napi_env env,napi_value exports){
-#else
-NAPI_MODULE_INIT(){
-#endif
- const napi_property_descriptor methods[]={
-  {"buildInfo",NULL,build_info,NULL,NULL,NULL,napi_default,NULL},
-  {"openOriginal",NULL,open_original,NULL,NULL,NULL,napi_default,NULL},
-  {"installFresh",NULL,install_fresh,NULL,NULL,NULL,napi_default,NULL},
-  {"readPolicy",NULL,read_policy,NULL,NULL,NULL,napi_default,NULL},
-  {"close",NULL,close_session,NULL,NULL,NULL,napi_default,NULL},
-  {"enqueue",NULL,enqueue_resource,NULL,NULL,NULL,napi_default,NULL},
-  {"claimNext",NULL,claim_resource,NULL,NULL,NULL,napi_default,NULL},
-  {"consumeLaunch",NULL,consume_resource,NULL,NULL,NULL,napi_default,NULL},
-  {"finishOriginalRoot",NULL,finish_original_root,NULL,NULL,NULL,napi_default,NULL},
-  {"readRecord",NULL,read_resource,NULL,NULL,NULL,napi_default,NULL},
-  {"cancelQueued",NULL,cancel_queued_resource,NULL,NULL,NULL,napi_default,NULL},
-#if defined(__APPLE__) && defined(NR_FIXTURE_BUILD) && defined(NR_FIXTURE_FACTS_HEADER)
-  {"fixtureSubject",NULL,fixture_subject,NULL,NULL,NULL,napi_default,NULL},
-  {"armCommitWrapperFailure",NULL,arm_commit_wrapper_failure,NULL,NULL,NULL,napi_default,NULL},
-#ifdef NR_MAIN_BOOTSTRAP_EMBEDDED
-  {"armProcessIntentWriteFailure",NULL,arm_process_intent_write_failure,NULL,NULL,NULL,napi_default,NULL},
-#endif
-  {"armPhysicalWriteMismatch",NULL,arm_physical_write_mismatch,NULL,NULL,NULL,napi_default,NULL},
-#endif
- };
- if(napi_define_properties(env,exports,sizeof(methods)/sizeof(*methods),methods)!=napi_ok)return fail(env,"ROOT_RESOURCE_EXPORT_UNAVAILABLE");
-#if defined(__APPLE__) && defined(NR_MAIN_BOOTSTRAP_EMBEDDED)
- nr_main_addon *addon=calloc(1,sizeof(*addon));if(!addon)return fail(env,"ROOT_RESOURCE_NATIVE_ALLOCATION_FAILED");
- addon->env=env;
- napi_value shape;napi_valuetype shape_type;
- if(napi_get_named_property(env,exports,"__originalModelSdkPortShape",&shape)!=napi_ok||
-    napi_typeof(env,shape,&shape_type)!=napi_ok||shape_type!=napi_function||
-    napi_create_reference(env,shape,1,&addon->model_sdk_shape)!=napi_ok){free(addon);return fail(env,"ROOT_RESOURCE_MODEL_BRIDGE_SHAPE_UNAVAILABLE");}
- if(napi_get_named_property(env,exports,"__originalMainInstallationAdopt",&shape)!=napi_ok||napi_typeof(env,shape,&shape_type)!=napi_ok||shape_type!=napi_function||napi_create_reference(env,shape,1,&addon->installation_adopt)!=napi_ok){napi_delete_reference(env,addon->model_sdk_shape);free(addon);return fail(env,"ROOT_RESOURCE_INSTALLATION_ADOPTION_UNAVAILABLE");}
- addon->bridge=nr_main_bridge_create(env,addon);
- if(!addon->bridge){napi_delete_reference(env,addon->model_sdk_shape);napi_delete_reference(env,addon->installation_adopt);free(addon);return fail(env,"ROOT_RESOURCE_MAIN_BRIDGE_UNAVAILABLE");}
- if(napi_add_env_cleanup_hook(env,main_env_cleanup,addon)!=napi_ok){main_env_cleanup(addon);return fail(env,"ROOT_RESOURCE_MAIN_CLEANUP_UNAVAILABLE");}
- const napi_property_descriptor main_methods[]={
-#if defined(MI_FIXTURE_BUILD) && defined(NR_ROOT_IO_COMPONENT)
-  {"componentBootstrapInstalledRootStore",NULL,component_bootstrap_installed_root_store,NULL,NULL,NULL,napi_default,addon},
-#endif
-  {"adoptOriginalMainInstallation",NULL,adopt_main_installation,NULL,NULL,NULL,napi_default,addon},
-#ifdef NR_FIXTURE_BUILD
-  {"armPoolBootstrapFailure",NULL,arm_pool_bootstrap_failure,NULL,NULL,NULL,napi_default,addon},
-#endif
-  {"readOriginalMainPoolBootstrap",NULL,read_original_main_pool_bootstrap,NULL,NULL,NULL,napi_default,addon},
-  {"sealOriginalMainRootBusiness",NULL,seal_original_main_root_business,NULL,NULL,NULL,napi_default,addon},
-  {"bootstrapOriginalMainPool",NULL,bootstrap_original_main_pool,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalModelSdkBridgeKey",NULL,take_model_sdk_bridge_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalModelSdkBridge",NULL,assert_model_sdk_bridge,NULL,NULL,NULL,napi_default,addon},
-  {"openOriginalInstalledMainIssuer",NULL,open_installed_main_issuer,NULL,NULL,NULL,napi_default,addon},
-  {"openOriginalMainIssuer",NULL,open_main_issuer,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalMainIssuerCurrent",NULL,assert_main_issuer,NULL,NULL,NULL,napi_default,addon},
-  {"revokeOriginalMainIssuer",NULL,revoke_main_issuer,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalRoomTurnSubject",NULL,import_room_subject,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalRoomDiscussionSourceKey",NULL,take_room_discussion_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalRoomDiscussionSourceKey",NULL,assert_room_discussion_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalRoomProjectSourceKey",NULL,take_room_project_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalRoomProjectSourceKey",NULL,assert_room_project_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalKSwarmDirectSourceKey",NULL,take_kswarm_direct_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalKSwarmDirectSourceKey",NULL,assert_kswarm_direct_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalDshDraftSourceKey",NULL,take_dsh_draft_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalDshDraftSourceKey",NULL,assert_dsh_draft_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalMainTurnSourceKey",NULL,take_main_turn_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalGoalTurnSourceKey",NULL,take_goal_turn_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalAdmissionProbeSourceKey",NULL,take_admission_probe_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalLivePreviewSourceKey",NULL,take_live_preview_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalNestedSubagentSourceKey",NULL,take_nested_subagent_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalSnapshotPrepSourceKey",NULL,take_snapshot_prep_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalToolWorkerSourceKey",NULL,take_tool_worker_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalMaterialTurnSourceKey",NULL,take_material_turn_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalCanvasTurnSourceKey",NULL,take_canvas_turn_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalPhysicalContext",NULL,import_physical_context,NULL,NULL,NULL,napi_default,addon},
-#ifdef NR_HAS_FIXTURE_FACTS
-  {"fixtureReadPhysicalSnapshot",NULL,fixture_physical_snapshot,NULL,NULL,NULL,napi_default,addon},
-#endif
-  {"enqueueOriginalModel",NULL,enqueue_original_model,NULL,NULL,NULL,napi_default,addon},
-  {"claimOriginalModel",NULL,claim_original_model,NULL,NULL,NULL,napi_default,addon},
-  {"settleOriginalModel",NULL,settle_original_model,NULL,NULL,NULL,napi_default,addon},
-  {"enqueueOriginalProcess",NULL,enqueue_original_process,NULL,NULL,NULL,napi_default,addon},
-  {"enqueueOriginalWorkflowVmProcess",NULL,enqueue_original_workflow_vm_process,NULL,NULL,NULL,napi_default,addon},
-  {"claimOriginalProcess",NULL,claim_original_process,NULL,NULL,NULL,napi_default,addon},
-  {"prepareOriginalReadonlyLeaf",NULL,prepare_original_readonly_leaf,NULL,NULL,NULL,napi_default,addon},
-  {"waitOriginalReadonlyLeafReady",NULL,wait_original_readonly_leaf_ready,NULL,NULL,NULL,napi_default,addon},
-  {"bindOriginalReadonlyLeaf",NULL,bind_original_readonly_leaf,NULL,NULL,NULL,napi_default,addon},
-  {"goOriginalReadonlyLeaf",NULL,go_original_readonly_leaf,NULL,NULL,NULL,napi_default,addon},
-  {"cancelOriginalReadonlyLeaf",NULL,cancel_original_readonly_leaf,NULL,NULL,NULL,napi_default,addon},
-  {"waitOriginalReadonlyLeafClosed",NULL,wait_original_readonly_leaf_closed,NULL,NULL,NULL,napi_default,addon},
-  {"readOriginalProcessIntent",NULL,read_original_process_intent,NULL,NULL,NULL,napi_default,addon},
-  {"readOriginalProcessHistory",NULL,read_original_process_history,NULL,NULL,NULL,napi_default,addon},
-  {"settleOriginalProcess",NULL,settle_original_process,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalKSwarmTaskSubject",NULL,import_kswarm_task_subject,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalRoomProjectSubject",NULL,import_room_project_subject,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalWorkflowRootSubject",NULL,import_workflow_root_subject,NULL,NULL,NULL,napi_default,addon},
-  {"importOriginalDshDraftSubject",NULL,import_dsh_subject,NULL,NULL,NULL,napi_default,addon},
-  {"takeOriginalWorkflowRootSourceKey",NULL,take_workflow_root_source_key,NULL,NULL,NULL,napi_default,addon},
-  {"assertOriginalWorkflowRootSourceKey",NULL,assert_workflow_root_source_key,NULL,NULL,NULL,napi_default,addon}
- };
- if(napi_define_properties(env,exports,sizeof(main_methods)/sizeof(*main_methods),main_methods)!=napi_ok)return fail(env,"ROOT_RESOURCE_EXPORT_UNAVAILABLE");
-#endif
- return exports;
-}
+#include "root-resource-addon-exports.h"

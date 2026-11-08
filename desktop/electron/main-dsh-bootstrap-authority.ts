@@ -1,3 +1,4 @@
+import {decodeOriginalRootNmpLedger,type OriginalRootNmpLedger} from '../../src/runtime/verification/original-root-nmp-ledger.js';
 import {ORIGINAL_PRODUCTION_ROOT_RESOURCE_QUALIFIED} from './root-resource-production-qualification.js';
 import type {OriginalAdmissionDatabaseBundle} from './protected-authority-database-types.js';
 import {readOriginalGithubProviderDateFact,type GithubProviderDateFact} from './dsh-github-source-session.js';
@@ -42,7 +43,7 @@ export interface MainDshBootstrapAuthority {
 export interface MainDshKernelClockCut {readonly kind:'main_kernel_clock_cut_v1';readonly domainId:string;readonly continuousLowerNs:string;readonly continuousUpperNs:string;readonly wallMs:number}
 interface State {startedCore():object|null;readAdmission():OriginalAdmissionDatabaseBundle|null;prepareInstalled(core?:boolean):object;observeClock(fact:GithubProviderDateFact):void;clockView():MainDshClockView;clock():Readonly<MainDshKernelClockCut>|null;authority:MainDshBootstrapAuthority;store?:object;current():void;local():void;references(proof:object,purpose:string):DshOriginalReferences}
 const realms=new NativeWeakMap<object,State>();let singleton:MainDshBootstrapAuthority|undefined,birthAttempted=false,birthFailure:unknown;
-interface InstalledPool {assertReadyForOwner():void;open():Promise<object>;close():Promise<void>;startCore():Promise<void>;returnOwner():Promise<void>;readBootstrap(session:unknown):Promise<'fresh'|'restored'>;prepareBudgetWorker(prepared:unknown):Promise<object>;readAdmission():OriginalAdmissionDatabaseBundle|null}
+interface InstalledPool {readLedger():Promise<OriginalRootNmpLedger>;assertReadyForOwner():void;open():Promise<object>;close():Promise<void>;startCore():Promise<void>;returnOwner():Promise<void>;readBootstrap(session:unknown):Promise<'fresh'|'restored'>;prepareBudgetWorker(prepared:unknown):Promise<object>;readAdmission():OriginalAdmissionDatabaseBundle|null}
 const installedPools=new NativeWeakMap<object,InstalledPool>();
 const NativePromise=Promise,nativeThen=Promise.prototype.then;
 const originalProtectedLifecyclePrepare=HarnessOptimizationLifecycle.prototype.prepareProtectedStorage;
@@ -91,6 +92,13 @@ export function prepareOriginalMainDshBudgetWorker(lease:unknown,prepared:unknow
  const row=apply(get,installedPools,[lease]) as InstalledPool|undefined;
  if(arguments.length!==2||!row)return rejected(new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED'));
  return row.prepareBudgetWorker(prepared);
+}
+/** Complete historical accounting from this Core's original private connection.
+ * The projection carries no session, capability, FD-closure or enrollment grant. */
+export function readOriginalMainDshRootNmpLedger(lease:unknown):Promise<OriginalRootNmpLedger>{
+ const row=apply(get,installedPools,[lease]) as InstalledPool|undefined;
+ if(arguments.length!==1||!row)return rejected(new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED'));
+ return row.readLedger();
 }
 /** Passive same-Core readiness. No raw Native session/API is disclosed. */
 export function assertOriginalMainDshCoreReady(lease:unknown):void{
@@ -178,7 +186,7 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
    if(installedLease){if(core&&!installedCore)denied();return installedLease;}
    local();
    installedCore=core;
-   const lease=freeze(create(null)),stock=createRoomTurnCustody(),negativeStock=createRoomTurnCustody(),ownerCleanup=createRoomTurnCustody();
+   const lease=freeze(create(null)),stock=createRoomTurnCustody(),negativeStock=createRoomTurnCustody(),ownerCleanup=createRoomTurnCustody(),ledgerStock=createRoomTurnCustody();
    let opening:Promise<object>|undefined,closing:Promise<void>|undefined,connectEntered=false,connected:object|undefined,rootSession:object|undefined,rootApi:object|undefined;
    let rootClose:Function|undefined,installationClose:Function|undefined;
    let coreStarting:Promise<void>|undefined,ownerOpening:Promise<object>|undefined,ownerReturning:Promise<void>|undefined,ownerBorrowed=false;
@@ -223,6 +231,15 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
     if(view.businessSealed)denied();return view.bootstrap;
    };
    const state:InstalledPool={
+    readLedger(){
+     if(!installedCore||!coreReady||!rootApi||!rootSession||closing)return rejected(new NativeError('DSH_MAIN_CORE_NOT_STARTED'));
+     // Accepted historical IO is independent of business revoke. Native still
+     // checks the same original environment/PID/connection/physical identity.
+     return ledgerStock.root(async()=>{
+      const raw=await ledgerStock.sdk(fixedMethod(rootApi!,'readOriginalRootPoolLedger'),rootApi,[rootSession]);
+      return decodeOriginalRootNmpLedger(raw);
+     });
+    },
     assertReadyForOwner(){progress();if(!installedCore||!coreReady||ownerReturning)denied();},
     readAdmission(){progress();if(!installedCore)return null;if(!coreReady||!admissionBundle)denied();return admissionBundle;},
     prepareBudgetWorker(prepared){
@@ -289,6 +306,7 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
       if(coreStarting)try{await coreStarting;}catch{/* Preserve Core startup's original first value. */}
       if(ownerBorrowed)await ownerReturned;
       if(admissionBundle){const raw=await negativeStock.sdk(admissionClose!,admissionBundle,[]);if(raw!==undefined)denied();}
+      await ledgerStock.waitPhysicalKnown();
       // A failed/BUSY Root close must never reach infrastructure close.
       if(rootSession){const raw=await stock.consumeResource(rootClose!,rootSession,[rootSession]);if(raw!==undefined)denied();}
       if(connectEntered){
