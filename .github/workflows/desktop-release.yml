@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.5.11)'
+        description: 'Tag to release (e.g. desktop-v1.6.3)'
         required: true
-        default: 'desktop-v1.5.11'
+        default: 'desktop-v1.6.3'
 
 permissions:
   contents: write
@@ -18,26 +18,45 @@ env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: desktop-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.identity.outputs.sha }}
     steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Validate selected release tag
+        run: node -e 'if(!/^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(process.env.RELEASE_TAG||""))process.exit(1)'
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Resolve one immutable release source
+        id: identity
+        run: node scripts/desktop-release-identity.mjs resolve
       - name: Fail when cross-platform and release sibling pins drift
         run: node scripts/check-desktop-sibling-pins.mjs
       - name: Create Draft GitHub Release
-        run: gh release view "${{ env.RELEASE_TAG }}" >/dev/null 2>&1 || gh release create "${{ env.RELEASE_TAG }}" --title "Xiaok CLI & Desktop ${RELEASE_TAG#desktop-v}" --generate-notes --draft
+        run: node scripts/desktop-release-identity.mjs draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.identity.outputs.sha }}
 
   build-mac:
     needs: create-release
     runs-on: macos-15
+    env:
+      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -73,13 +92,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
@@ -159,21 +178,7 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-        run: |
-          missing=()
-          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_API_KEY_P8_BASE64; do
-            if [[ -z "${!name:-}" ]]; then
-              missing+=("$name")
-            fi
-          done
-          if (( ${#missing[@]} )); then
-            printf 'Missing macOS signing secret(s): %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-          if [[ "$APPLE_TEAM_ID" != "Y9YR86UG94" ]]; then
-            printf 'APPLE_TEAM_ID must be Y9YR86UG94 for com.xiaok.desktop\n' >&2
-            exit 1
-          fi
+        run: bash --noprofile --norc -e -o pipefail .github/scripts/check-macos-signing-secrets.sh
 
       - name: Write Apple notarization API key
         shell: bash
@@ -264,15 +269,20 @@ jobs:
           xcrun stapler validate "$app_path"
 
       - name: Upload to GitHub Release
-        run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.dmg desktop/release/*-mac.zip desktop/release/latest-mac.yml --clobber
+        run: node scripts/desktop-release-identity.mjs upload-mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     needs: create-release
     runs-on: windows-2022
+    env:
+      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -311,13 +321,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
@@ -412,27 +422,24 @@ jobs:
           node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
 
       - name: Upload to GitHub Release
-        run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.exe desktop/release/latest.yml --clobber
+        run: node scripts/desktop-release-identity.mjs upload-windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   verify-release:
-    needs: [build-mac, build-windows]
+    needs: [create-release, build-mac, build-windows]
     runs-on: ubuntu-latest
+    env:
+      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          ref: ${{ needs.create-release.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
       - name: Verify draft desktop updater release assets
-        run: node scripts/verify-desktop-release.mjs "${{ env.RELEASE_TAG }}" --prepublish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish GitHub Release as latest
-        run: gh release edit "${{ env.RELEASE_TAG }}" --draft=false --latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify published desktop updater release assets
-        run: node scripts/verify-desktop-release.mjs "${{ env.RELEASE_TAG }}"
+        run: node scripts/desktop-release-identity.mjs verify-draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
