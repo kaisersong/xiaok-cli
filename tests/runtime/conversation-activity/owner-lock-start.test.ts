@@ -107,8 +107,7 @@ it('retains an undefined post-acquisition failure and actually closes the failed
   expect(dataOpened).toBe(false);
 });
 
-it('attaches both callers to one real canonical owner across repeated fresh concurrent startup', async () => {
-  for (let round = 0; round < 12; round++) {
+it.each(Array.from({ length: 12 }, (_, round) => round))('attaches both callers to one real canonical owner at fresh concurrent startup round %i', async (round) => {
     const path = root(), sessions = join(path, 'sessions'); mkdirSync(sessions);
     const ready: ChildProcess[] = [];
     const config = { schemaVersion: 1 as const, dataRoot: path, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: sessions } };
@@ -134,5 +133,4 @@ it('attaches both callers to one real canonical owner across repeated fresh conc
       for (const { child } of group) { child.ref(); if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); }
       await Promise.all(group.map(value => value.done));
     }
-  }
 }, 15_000);

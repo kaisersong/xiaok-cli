@@ -66,11 +66,19 @@ describe('original Native pending approval inventory', () => {
     expect(() => s.service.assertApprovalInventoryCurrent(user, frame)).toThrow(/inventory/);
     s.service.beginShutdown(); expect(() => s.service.readApprovalInventory(user, s.id)).toThrow(/inventory/);
   });
-  it('rejects the old inventory after actual timeout without reconnecting or manufacturing a new owner', async () => {
-    const s = await setup(25); const pending = s.clients[0].request(1); const frame = s.service.readApprovalInventory(user, s.id);
-    expect(await pending).toEqual({ decision: 'decline' });
-    expect(() => s.service.assertApprovalInventoryCurrent(user, frame)).toThrow(/inventory/);
-    expect(s.service.readApprovalInventory(user, s.id).questions).toEqual([]); expect(s.clients).toHaveLength(1);
+  it('rejects the old inventory when the original timeout fires without reconnecting or manufacturing a new owner', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const s = await setup(25); const pending = s.clients[0].request(1); const frame = s.service.readApprovalInventory(user, s.id);
+      let resolved = false; void pending.then(() => { resolved = true; });
+      expect(frame.questions).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(24);
+      expect(resolved).toBe(false); s.service.assertApprovalInventoryCurrent(user, frame);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await pending).toEqual({ decision: 'decline' });
+      expect(() => s.service.assertApprovalInventoryCurrent(user, frame)).toThrow(/inventory/);
+      expect(s.service.readApprovalInventory(user, s.id).questions).toEqual([]); expect(s.clients).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
   });
   it('fails closed on over-budget complete collection instead of returning the first page', async () => {
     const s = await setup(); const pending = Array.from({ length: 33 }, (_, i) => s.clients[0].request(i));
