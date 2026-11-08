@@ -41,9 +41,7 @@ export class CliConversationActivities {
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
     this.profileId = profileId;
     this.stopDisconnect = options.ownerClient?.onDisconnect(epoch => {
-      void probeReplacementOwner(root, epoch, () => this.disposed).then(replaced => {
-        if (replaced && !this.disposed) options.onOwnerReplaced?.();
-      });
+      void handleOwnerDisconnect(() => probeReplacementOwner(root, epoch, () => this.disposed), () => this.disposed, options);
     });
     this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
@@ -115,19 +113,37 @@ export class CliConversationActivities {
   }
 }
 
+/**
+ * Fire-and-forget reaction to an owner disconnect. Neither the probe, the replacement
+ * callback nor the diagnostics callback may turn it into an unhandled rejection (#145):
+ * a throwing onOwnerReplaced goes to onError, and a throwing onError is dropped.
+ */
+export function handleOwnerDisconnect(
+  probe: () => Promise<boolean>, disposed: () => boolean,
+  callbacks: { onOwnerReplaced?(): void; onError?(error: unknown): void },
+): Promise<void> {
+  return Promise.resolve().then(probe)
+    .then(replaced => { if (replaced && !disposed()) callbacks.onOwnerReplaced?.(); })
+    .catch(error => { try { callbacks.onError?.(error); } catch {} });
+}
+
 /** A short, read-only attachment provides positive evidence of replacement. */
 export async function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled: () => boolean = () => false): Promise<boolean> {
   const deadline = Date.now() + 1500;
   while (!cancelled() && Date.now() < deadline) {
-    const client = new ConversationActivityOwnerClient(dataRoot, 'producer');
+    // Constructing the client re-validates the data root; if that throws (root removed or
+    // no longer private while the owner went away) it must count as "no successor", not
+    // escape as an unhandled rejection from the fire-and-forget disconnect handler (#145).
+    let client: ConversationActivityOwnerClient | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      client = new ConversationActivityOwnerClient(dataRoot, 'producer');
       const status = await Promise.race([
         client.request<{ ownerEpoch?: string; ready?: boolean }>('status'),
         new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); }),
       ]);
       if (status?.ownerEpoch && status.ready !== false) return status.ownerEpoch !== disconnectedEpoch;
-    } catch {} finally { clearTimeout(timer); client.dispose(); }
+    } catch {} finally { clearTimeout(timer); client?.dispose(); }
     if (!cancelled() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
   }
   return false;

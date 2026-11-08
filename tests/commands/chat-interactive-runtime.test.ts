@@ -1,11 +1,14 @@
-import { chmodSync, existsSync, symlinkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, symlinkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { freemem, tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
+import { createTeardownSteps } from '../support/teardown-steps.js';
+import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners, teardownOverrunError } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
@@ -983,24 +986,6 @@ async function settleLateChats(harness: ReturnType<typeof createTtyHarness>): Pr
   }
 }
 
-async function removeTempDirWithRetry(dir: string): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(200 * (attempt + 1), 1_000)));
-    }
-  }
-  // POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
-  // 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
-  // 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，
-  // 由 CI 机器回收。
-  process.stderr.write(`[chat-interactive-runtime] 未能清理临时目录 ${dir}: ${String(lastError)}\n`);
-}
-
 function normalizeAssistantLine(line: string): string {
   const trimmed = line.trim();
   return trimmed.startsWith('● ') ? trimmed.slice(2) : trimmed;
@@ -1229,12 +1214,21 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const diagnosticReports = new Set<string>();
   const diagnosticReadFailures: unknown[] = [];
   let diagnosticCase = 0;
+  const ownerEntryScript = fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js', import.meta.url));
+  // 诊断不得改变被测行为：ps 不可用（EAGAIN、精简镜像）时降级为说明文字，不抛错。
+  const countLiveActivityOwners = (): number | string => {
+    if (process.platform === 'win32') return 'UNKNOWN_NOT_MEASURED_ON_WINDOWS';
+    try { return listActivityOwnerProcesses(ownerEntryScript).length; } catch (error) { return `ps_unavailable:${(error as NodeJS.ErrnoException).code ?? 'error'}`; }
+  };
   const reportWorkerResources = (stage: string): void => {
     const resourceTypes: Record<string, number> = {};
     for (const type of process.getActiveResourcesInfo()) resourceTypes[type] = (resourceTypes[type] ?? 0) + 1;
     diagnosticWrite(`[fixture-worker-resources] ${JSON.stringify({ stage, caseOrdinal: diagnosticCase,
       knownFixtureRoots: diagnosticRoots.size, workerActiveResourcesOnly: resourceTypes,
-      liveDetachedProcessCount: 'UNKNOWN_NOT_MEASURED' })}\n`);
+      // #145：全机口径——进程表里入口是本构建 owner-entry.js 的存活 owner 数（含同一 job 里更早的文件留下的），
+      // 不是本用例的增量；用来看累积曲线。Windows 未测。另附主机空闲内存，供 CI 日志对照。
+      liveDetachedProcessCount: countLiveActivityOwners(),
+      hostFreeMemMB: Math.round(freemem() / 1048576) /* macOS 的 freemem 不含 inactive/purgeable，只作粗略参考 */ })}\n`);
   };
   const retainOwnCrashReports = (): void => {
     for (const root of tempDirs) diagnosticRoots.add(root);
@@ -1296,34 +1290,50 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   });
 
   afterEach(async () => {
-    observeOwnCrashReports();
-    cwdSpy?.mockRestore();
-    cwdSpy = undefined;
-    if (originalConfigDir === undefined) {
-      delete process.env.XIAOK_CONFIG_DIR;
-    } else {
-      process.env.XIAOK_CONFIG_DIR = originalConfigDir;
-    }
-    if (originalHome === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
-    }
-    if (originalDisableGlobalPlugins === undefined) {
-      delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
-    } else {
-      process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
-    }
+    // #145（codex M2）：每一步独立收尾，任何一步抛错都不能跳过后面的删目录 / resetModules / clearAllMocks /
+    // resetAdapterState，否则会污染之后的用例；所有错误最后汇总抛出。
+    // 整个收尾共用一个注入的截止时刻（TEARDOWN_BUDGET_MS = 8s，加上之后 1s 余量仍严格小于仓库里最小的 hookTimeout 10s；
+    // 阶段划分见 activity-owner-teardown.ts），各阶段只用到自己的截止时刻。
+    const teardownStartedAt = Date.now();
+    const teardownDeadline = teardownStartedAt + TEARDOWN_BUDGET_MS;
+    const teardown = createTeardownSteps('用例收尾（#145）');
+    const step = teardown.step;
+    await step(() => observeOwnCrashReports());
+    await step(() => { cwdSpy?.mockRestore(); cwdSpy = undefined; });
+    await step(() => {
+      if (originalConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = originalConfigDir;
+      if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+      if (originalDisableGlobalPlugins === undefined) delete process.env.XIAOK_DISABLE_GLOBAL_PLUGINS;
+      else process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
+    });
 
-    for (const dir of tempDirs.splice(0)) {
-      await removeTempDirWithRetry(dir);
-    }
+    const caseDirs = tempDirs.splice(0);
+    // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
+    // 一个文件跑完累积几十个常驻进程。还在启动中的 owner 先等它的 status 落盘再收；收不掉的按原因判本用例失败（闸门）。
+    // 删目录之后按删除前算好的前缀（原始路径 + realpath）再扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出）。
+    // 编排、合并与报告规则见 teardownCaseOwners / reclaimAndReport（有单测）。回收扫描之后才拉起的 owner 认领不到，这是收尾无法闭合的窗口。
+    // Windows：产品的身份校验不支持（retireOutdatedOwner 恒为 kept_unverified），不收也不判，只删目录，PR 中列为未覆盖项。
+    const report = await teardownCaseOwners({
+      dirs: caseDirs, deadline: teardownDeadline, posix: process.platform !== 'win32', step,
+      removeDir: (dir, deadline) => removeTempDirWithRetry(dir, deadline),
+    });
+    if (report.reclaimFailed) teardown.fail(report.error);
+    const ownerSurvivors = report.survivors;
 
-    vi.resetModules();
-    vi.clearAllMocks();
-    resetAdapterState();
-    // 放在清理之后：迟到失败要报出来，但不能让临时目录和 mock 漏清。
-    expect(lateChatFailures.splice(0)).toEqual([]);
+    await step(() => vi.resetModules());
+    await step(() => vi.clearAllMocks());
+    await step(() => resetAdapterState());
+    // #128（master）：收尾期间才以失败结束的会话在这里断言；放在清理步骤之后，迟到失败要报出来但不能让临时目录和 mock 漏清。
+    await step(() => expect(lateChatFailures.splice(0)).toEqual([]));
+    // 第 9/10 轮 DS：核对实际总耗时，越过“预算 + 余量”时报可读的失败（上面三步是同步重置，只能事后核对）。
+    const overrun = teardownOverrunError(Date.now() - teardownStartedAt);
+    if (overrun) teardown.fail(overrun);
+    if (ownerSurvivors.length) {
+      // kept_pending/kept_unknown 是产品按策略保留（有未结束的 watch / 待办无法确认），其余是收不掉；
+      // 两类都会在用例之间累积，所以都判失败，但原因分开写清楚以便定位（kept_unverified 含“3s 内未退”）。
+      teardown.fail(new Error(`用例收尾发现未按产品入口正常退休的 activity owner（#145）：${ownerSurvivors.map((owner) => `pid=${owner.pid} reason=${owner.reason}${owner.budget === undefined ? '' : ` budget=${owner.budget}`}${owner.reclaimed === undefined ? '' : ` reclaimed=${owner.reclaimed}`}${owner.error === undefined ? '' : ` error=${owner.error instanceof Error ? owner.error.message : String(owner.error)}`} config=${owner.configPath}`).join('; ')}`));
+    }
+    teardown.finish();
   });
 
   it.skipIf(process.platform==='win32')('starts without session persistence when the config link is unsafe', async () => {
@@ -1620,6 +1630,59 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       }
     } finally {crashSpy.mockRestore();}
   }, 20000);
+
+  it.skipIf(process.platform==='win32')('retires the activity owner a case started so later cases do not inherit detached owners (#145)', async () => {
+    // 用符号链接别名作为用例根目录：macOS 的 tmpdir 是 /var → /private/var，owner 的 argv
+    // 是 realpath 后的路径；teardown 必须按 realpath 认领，否则在 macOS 上收不掉。
+    // owner 入口是编译产物（与 owner-process.test 相同，需在 .test-dist 下跑：npm run test:sandbox）；
+    // 源码 runner 下入口不存在、owner 起不来，这里明确报出而不是让闸门空转。
+    expect(existsSync(ownerEntryScript), `owner 入口不存在：${ownerEntryScript}（请用 npm run test:sandbox 在 .test-dist 下运行）`).toBe(true);
+    const realRoot = join(tmpdir(), `xiaok-chat-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const rootDir = `${realRoot}-alias`;
+    mkdirSync(realRoot, { recursive: true });
+    symlinkSync(realRoot, rootDir, 'dir');
+    tempDirs.push(realRoot, rootDir);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } },
+      defaultMode: 'interactive', contextBudget: 4000, channels: {},
+    }, null, 2));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    let ownerPid: number | undefined;
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+
+      // chat 退出后 owner 仍按设计常驻（空闲 20 分钟才退）：这正是会在用例之间累积的进程。
+      const activityDir = join(configDir, 'conversation-activity');
+      // owner 在 listen 之后才写 status 文件：显式等待该状态，而不是假设它已落盘。
+      await waitFor(() => readdirSync(activityDir, { withFileTypes: true }).some((entry) => entry.isDirectory() && existsSync(join(activityDir, entry.name, 'activity-owner.status.json'))));
+      const dataRoots = readdirSync(activityDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join(activityDir, entry.name));
+      expect(dataRoots).toHaveLength(1);
+      ownerPid = (JSON.parse(readFileSync(join(dataRoots[0], 'activity-owner.status.json'), 'utf8')) as { pid: number }).pid;
+      const owners = listActivityOwnerProcesses().filter((owner) => owner.pid === ownerPid);
+      expect(owners).toHaveLength(1);
+      expect(owners[0].configPath.startsWith(join(realpathSync(realRoot), 'config') + '/')).toBe(true);
+      expect(owners[0].configPath.startsWith(rootDir + '/')).toBe(false);
+
+      expect(await retireActivityOwnersUnder([rootDir])).toEqual([]);
+      expect(() => process.kill(ownerPid!, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    } finally {
+      harness.restore();
+    }
+  });
 
   it('releases session ownership when exiting with slash exit', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-exit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -6586,6 +6649,11 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       await waitFor(() => expect(adapterCalls.some((call) => call.lastUserText === 'teardown race turn')).toBe(true));
       await waitForInputTurnReady(harness);
 
+      // 合入 #146 后：用例模拟的是“teardown 删目录”，而 #146 的 teardown 删目录前会先按产品入口收掉 activity owner。
+      // 这里按同样顺序来：owner 写出 status 后先退休它，再删目录；否则 owner 留着被删的 dataRoot，被 #145 收尾闸门判成 data_root_gone。
+      const activityDir = join(configDir, 'conversation-activity');
+      await waitFor(() => expect(existsSync(activityDir) && readdirSync(activityDir, { withFileTypes: true }).some((entry) => entry.isDirectory() && existsSync(join(activityDir, entry.name, 'activity-owner.status.json')))).toBe(true));
+      expect(await retireActivityOwnersUnder([rootDir])).toEqual([]);
       rmSync(rootDir, { recursive: true, force: true });
       expect(existsSync(rootDir)).toBe(false);
       const recordsBeforeRemoval = recordSpy.mock.calls.length;
