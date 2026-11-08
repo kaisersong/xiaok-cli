@@ -267,6 +267,7 @@ export const PRELOAD_API_KEYS = [
   'refuseAssistantSend',
   'onCredentialInputsChanged',
   'onAssistantInboxChanged',
+  'onAssistantInboxFocus',
   'getAssistantOverview',
   'activateAssistant',
   'pauseAssistant',
@@ -477,6 +478,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onScheduledTaskDue',
   'onCredentialInputsChanged',
   'onAssistantInboxChanged',
+  'onAssistantInboxFocus',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
   'onMobileRelayStatus',
@@ -1414,6 +1416,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   approveAssistantSend(input: import('../shared/assistant-inbox-contract.js').OutboxApproval): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
   refuseAssistantSend(input: {id:string;expectedRevision:number}): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
   onAssistantInboxChanged(handler:()=>void): ()=>void;
+  onAssistantInboxFocus(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
@@ -1947,6 +1950,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     approveAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:approve', input) as ReturnType<DesktopApi['approveAssistantSend']>,
     refuseAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:refuse', input) as ReturnType<DesktopApi['refuseAssistantSend']>,
     onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
+    onAssistantInboxFocus(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.off('desktop:assistantInbox:focus', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,

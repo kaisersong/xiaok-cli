@@ -1,0 +1,15 @@
+import {afterEach,beforeEach,it,expect,vi} from 'vitest';
+import {render,screen,fireEvent,cleanup,waitFor} from '@testing-library/react';
+import {MemoryRouter} from 'react-router-dom';
+import {AssistantPage} from '../../renderer/src/components/assistant/AssistantPage';
+import {LocaleProvider} from '../../renderer/src/contexts/LocaleContext';
+const h=vi.hoisted(()=>({status:'active',error:false,create:vi.fn(),thread:vi.fn(),ensure:vi.fn()}));
+vi.mock('../../renderer/src/api',()=>({api:{ensureAssistantThread:h.ensure,getThread:h.thread,createTask:h.create,getObservationTaskStatus:vi.fn(async()=>({mode:'off'})),getObservationPreconditions:vi.fn(async()=>({ready:false})),subscribeTask:()=>()=>{},updateThreadTitle:vi.fn(),updateThreadTaskId:vi.fn()}}));
+vi.mock('../../renderer/src/hooks/useAssistantWorkspace',()=>({useAssistantWorkspace:()=>({overview:{profile:{status:h.status,timeZone:'Asia/Shanghai'},suggestions:[{id:'run:0',title:'核对今天的会议安排',summary:'internal_reason'}]},errors:{assistant:h.error},refresh:vi.fn()})}));
+vi.mock('../../renderer/src/hooks/useAssistantInbox',()=>({useAssistantInbox:()=>({state:{items:[],briefs:[],outbox:[],coverage:[]},busy:false,initializing:false,read:vi.fn()})}));
+vi.mock('../../renderer/src/components/security/AssistantSecureInputs',()=>({AssistantSecureInputs:()=>null}));
+vi.mock('../../renderer/src/components/ChatInput',()=>({ChatInput:({value}: {value:string})=><textarea aria-label="composer" readOnly value={value}/> }));
+vi.mock('../../renderer/src/layouts/AppLayout',()=>({useSidebarCollapse:()=>({collapsed:false,setCollapsed:vi.fn()}),AppLayout:()=>null}));
+beforeEach(()=>{localStorage.clear();localStorage.setItem('xiaok:locale','zh');h.status='active';h.error=false;h.create.mockReset();h.ensure.mockResolvedValue({id:'a0c11111-1111-4111-8111-111111111111'});h.thread.mockResolvedValue({id:'a0c11111-1111-4111-8111-111111111111',title:'Assistant',status:'idle',mode:'work',createdAt:1,updatedAt:1,currentTaskId:null,taskIds:[]});});afterEach(cleanup);
+it('shows only-morning suggestions through the real AssistantPage, ChatShell and ChatView empty state',async()=>{render(<MemoryRouter initialEntries={['/assistant']}><LocaleProvider><AssistantPage/></LocaleProvider></MemoryRouter>);expect(await screen.findByText('核对今天的会议安排')).toBeVisible();expect(screen.getByText('最近一次晨间建议')).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'准备处理'}));await waitFor(()=>expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('核对今天的会议安排'));expect(h.create).not.toHaveBeenCalled();expect(screen.queryByText('internal_reason')).toBeNull();});
+it.each(['paused','unavailable'])('does not expose stale suggestions when %s',async reason=>{if(reason==='paused')h.status='paused';else h.error=true;render(<MemoryRouter><LocaleProvider><AssistantPage/></LocaleProvider></MemoryRouter>);await waitFor(()=>expect(h.thread).toHaveBeenCalled());expect(screen.queryByTestId('assistant-morning-suggestions')).toBeNull();});

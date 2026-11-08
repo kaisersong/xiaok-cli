@@ -57,8 +57,9 @@ export function useAssistantWorkspace() {
     const owner: Owner = { active: true, busy: false, queued: false, revision: 0 };
     life.current = owner; refresh();
     const stop = getDesktopApi()?.onScheduledTaskDue?.(() => refresh());
+    const stopAssistant = getDesktopApi()?.onAssistantInboxChanged?.(refresh);
     window.addEventListener('xiaok:scheduled-tasks-updated', refresh);
-    return () => { owner.active = false; owner.queued = false; stop?.(); window.removeEventListener('xiaok:scheduled-tasks-updated', refresh); };
+    return () => { owner.active = false; owner.queued = false; stop?.(); stopAssistant?.(); window.removeEventListener('xiaok:scheduled-tasks-updated', refresh); };
   }, [refresh]);
 
   const mutate = useCallback(async (action: () => Promise<unknown>) => {

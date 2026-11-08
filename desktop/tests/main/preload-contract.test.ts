@@ -269,6 +269,7 @@ describe('preload API contract', () => {
   'refuseAssistantSend',
   'onCredentialInputsChanged',
   'onAssistantInboxChanged',
+  'onAssistantInboxFocus',
   'getAssistantOverview',
       'activateAssistant',
       'pauseAssistant',

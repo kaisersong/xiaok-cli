@@ -359,6 +359,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   approveAssistantSend: input => ipcRenderer.invoke('desktop:assistantInbox:approve', input),
   refuseAssistantSend: input => ipcRenderer.invoke('desktop:assistantInbox:refuse', input),
   onAssistantInboxChanged: handler => { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.removeListener('desktop:assistantInbox:changed', listener); },
+  onAssistantInboxFocus: handler => { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.removeListener('desktop:assistantInbox:focus', listener); },
   getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview'),
   activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate'),
   pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause'),

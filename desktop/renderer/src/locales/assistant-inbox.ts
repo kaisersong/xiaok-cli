@@ -1,5 +1,6 @@
 import type { AssistantSource,AttentionItem,AssistantCoverage } from '../../../shared/assistant-inbox-contract';
 export interface AssistantInboxLabels {
+ morningSuggestionsTitle:string;
  calendarDraft:string;calendarTitle:string;calendarStart:string;calendarEnd:string;calendarZone:string;calendarDescription:string;calendarDestination:string;calendarCreate:string;calendarRefuse:string;calendarAccepted:string;calendarRefused:string;calendarFailed:string;calendarUnknown:string;calendarSubmitting:string;
  title:string;now:string;later:string;working:string;brief:string;calendar:string;coverage:string;incomplete:string;unavailable:string;refresh:string;refreshing:string;empty:string;allDone:string;
  start:string;open:string;hide:string;resolve:string;snooze:string;retry:string;showAll:string;needsInput:string;ready:string;unknownTask:string;
@@ -12,6 +13,7 @@ export interface AssistantInboxLabels {
  coverageReasons:Record<NonNullable<AssistantCoverage['code']>,string>;
 }
 export const assistantInboxZh:AssistantInboxLabels={
+ morningSuggestionsTitle:'最近一次晨间建议',
  calendarDraft:'确认创建云之家日程',calendarTitle:'日程标题',calendarStart:'开始时间',calendarEnd:'结束时间',calendarZone:'显示时区',calendarDescription:'日程说明',calendarDestination:'将创建到当前登录人的云之家主日历。',calendarCreate:'确认创建日程',calendarRefuse:'不创建',calendarAccepted:'日程已创建并回读核验。',calendarRefused:'本次日程未创建。',calendarFailed:'日程未能创建，请检查连接后重新准备。',calendarUnknown:'创建结果待核对。请先查看云之家日历，不要重复创建。',calendarSubmitting:'正在创建日程…',
  briefUnavailable:'今日简报未能生成',briefPartial:'已检查部分来源，暂未发现需要你处理的事项。',
  coverageStates:{ok:'已检查',partial:'仅检查了部分内容',unavailable:'本次未能检查',failed:'本次检查未完成',stale:'检查结果已过期，请刷新来源。'},
@@ -23,6 +25,7 @@ export const assistantInboxZh:AssistantInboxLabels={
  errors:{assistant_stale_item:'事项已更新，请刷新后再操作。',assistant_user_only:'这项操作需要你在界面中确认。',assistant_start_unknown:'交办回执尚未确认，请先核对原任务，不要重复交办。',assistant_send_unknown:'发送结果未知，请先核对发件箱或原会话。',assistant_stale_draft:'草稿已更新，请核对最新内容后确认。',assistant_draft_conflict:'这份草稿已经处理，请查看最新状态。',assistant_send_failed:'发送未完成，请检查连接和发送权限。',mail_send_denied:'请先在邮箱连接设置中开启发送权限。',mail_stale_account:'邮箱设置已改变，请重新准备发送草稿。',assistant_executor_unavailable:'当前模型暂不支持该操作，请切换模型后重试。',failed:'操作未完成，请刷新确认最新状态。'}
 };
 export const assistantInboxEn:AssistantInboxLabels={
+ morningSuggestionsTitle:'Latest morning suggestions',
  calendarDraft:'Confirm CloudHub calendar event',calendarTitle:'Event title',calendarStart:'Start time',calendarEnd:'End time',calendarZone:'Display time zone',calendarDescription:'Description',calendarDestination:'Create in the signed-in user’s primary CloudHub calendar.',calendarCreate:'Create event',calendarRefuse:'Do not create',calendarAccepted:'Calendar event created and verified.',calendarRefused:'This event was not created.',calendarFailed:'The event could not be created. Check the connection and prepare it again.',calendarUnknown:'The creation result is unknown. Check the calendar before trying again.',calendarSubmitting:'Creating the calendar event…',
  briefUnavailable:'Today’s brief could not be prepared',briefPartial:'Some sources were checked; no items needing you were found in that scope.',
  coverageStates:{ok:'Checked',partial:'Partially checked',unavailable:'Could not check this time',failed:'Check did not finish',stale:'Check results are out of date. Refresh sources.'},

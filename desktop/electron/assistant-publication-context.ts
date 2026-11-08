@@ -1,3 +1,4 @@
+import {validateMorningBriefing} from './assistant-llm.js';
 import {readInstalledCurrentOwner} from '../../src/runtime/verification/installed-owner-state.js';
 import {completionConsumerOwner} from '../../src/runtime/verification/completion-consumer-owner.js';
 import {canonicalVerificationJson as json} from '../../src/runtime/verification/protocol.js';
@@ -58,6 +59,16 @@ export function createAssistantPublicationContextReader(options:{
      return member?.status==='pending'?[{id:member.id,kind:member.kind,title:member.title}]:[];
     }),
    });
+  },
+  async readMorningRun(runId:string){
+   if(store.getLoopRun(runId)?.loopId!==ASSISTANT_MORNING_LOOP_ID)return undefined;
+   const observation=await read(runId,'scheduler');if(!observation?.current())return undefined;
+   try{let output:unknown;let evidenceJson:string|undefined;
+    if(observation.kind==='protected'){if(observation.output.body.kind!=='assistant-morning')return undefined;output=observation.output.body;}
+    else {const rows=evidenceStore.listEvidenceForOwner('loop_run',runId);evidenceJson=json(JSON.parse(JSON.stringify(rows)));output=rows.find(e=>e.metadata.assistantKind==='morning')?.metadata.output;}
+    const parsed=validateMorningBriefing(output);if(!observation.current())return undefined;
+    return {titles:parsed.recommendations.map(r=>r.title),current:()=>{try{return observation.current()&&(evidenceJson===undefined||json(JSON.parse(JSON.stringify(evidenceStore.listEvidenceForOwner('loop_run',runId))))===evidenceJson);}catch{return false;}}};
+   }catch{return undefined;}
   },
   async listMorningSuggestions(){
    const run=store.listLoopRuns(ASSISTANT_MORNING_LOOP_ID,10).find(candidate=>candidate.status==='success');if(!run)return [];
