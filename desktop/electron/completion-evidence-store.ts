@@ -1,4 +1,4 @@
-import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
+import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { validateCompletionEvidence } from '../../src/runtime/guards/completion-evidence.js';
@@ -70,7 +70,7 @@ export class CompletionEvidenceStore {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try{this.applySchema();this.connection.recordComponent('completion');}catch(error){this.connection.close();throw error;}
+    try{this.applySchema();this.connection.recordComponent('completion');}catch(error){try{this.connection.close();}catch{/* Owner-held cleanup must not replace the construction error. */}throw error;}
   }
 
   close(): void {
@@ -83,7 +83,7 @@ export class CompletionEvidenceStore {
     const expectedKindsJson = JSON.stringify(input.expectedKinds);
     const metadataJson = JSON.stringify(input.metadata ?? {});
 
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_expectations (
         id, schema_version, owner_kind, owner_id, expected_kinds_json, source, confidence,
         metadata_json, created_at, updated_at
@@ -97,7 +97,7 @@ export class CompletionEvidenceStore {
         confidence = excluded.confidence,
         metadata_json = excluded.metadata_json,
         updated_at = excluded.updated_at
-    `).run({
+    `, {
       id,
       ownerKind: input.ownerKind,
       ownerId: input.ownerId,
@@ -121,7 +121,7 @@ export class CompletionEvidenceStore {
     const id = input.id ?? randomUUID();
     const metadataJson = JSON.stringify(input.metadata ?? {});
 
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_evidence (
         id, schema_version, owner_kind, owner_id, kind, summary, uri, metadata_json,
         created_at, orphaned_at
@@ -129,7 +129,7 @@ export class CompletionEvidenceStore {
         @id, 1, @ownerKind, @ownerId, @kind, @summary, @uri, @metadataJson,
         @createdAt, null
       )
-    `).run({
+    `, {
       id,
       ownerKind: input.ownerKind,
       ownerId: input.ownerId,
@@ -188,11 +188,11 @@ export class CompletionEvidenceStore {
   }
 
   markEvidenceOrphaned(evidenceId: string, now: number): boolean {
-    const result = this.db.prepare(`
+    const result = this.connection.runWrite(`
       update completion_evidence
       set orphaned_at = ?
       where id = ?
-    `).run(now, evidenceId);
+    `, now, evidenceId);
     return result.changes === 1;
   }
 
@@ -232,7 +232,7 @@ export class CompletionEvidenceStore {
   }
 
   private insertCompletionRecord(record: CompletionValidationRecord): CompletionValidationRecord {
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_records (
         id, owner_kind, owner_id, status, ok, failure_kind, message,
         expectation_id, evidence_ids_json, created_at
@@ -240,7 +240,7 @@ export class CompletionEvidenceStore {
         @id, @ownerKind, @ownerId, @status, @ok, @failureKind, @message,
         @expectationId, @evidenceIdsJson, @createdAt
       )
-    `).run({
+    `, {
       id: record.id,
       ownerKind: record.ownerKind,
       ownerId: record.ownerId,
@@ -264,7 +264,7 @@ export class CompletionEvidenceStore {
   }
 
   private applySchema(): void {
-    this.db.exec(`
+    this.connection.execWrite(`
       create table if not exists completion_expectations (
         id text primary key,
         schema_version integer not null,
@@ -318,14 +318,15 @@ export class CompletionEvidenceStore {
 
   private transaction<T>(fn: () => T): T {
     const rollbackDatabase = this.db;
-    rollbackDatabase.exec('begin immediate');
+    this.connection.execWrite('begin immediate');
     try {
       const result = fn();
-      this.db.exec('commit');
+      this.connection.execWrite('commit');
       return result;
     } catch (error) {
+      retainOriginalLoopDatabaseFailure(this.connection,rollbackDatabase,error);
       try {
-        rollbackDatabase.exec('rollback');
+        rollbackOriginalLoopDatabase(this.connection,rollbackDatabase);
       } catch { /* ignore rollback errors */ }
       throw error;
     }
