@@ -916,17 +916,54 @@ function findReadyPromptIndex(lines: string[]): number {
 }
 
 async function waitForInputTurnReady(harness: ReturnType<typeof createTtyHarness>): Promise<void> {
-  await waitFor(() => {
-    expectPromptVisible(harness);
-    expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
-    const lines = harness.screen.lines();
-    const hasLiveActivity = lines.some((line) => {
-      const trimmed = line.trim();
-      return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
-    });
-    expect(hasLiveActivity).toBe(false);
-  }, { timeoutMs: 3_000 });
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  const startedAt = performance.now();
+  let phase: 'prompt-visible' | 'data-listener' | 'idle-activity' | 'settle' = 'prompt-visible';
+  try {
+    await waitFor(() => {
+      phase = 'prompt-visible';
+      expectPromptVisible(harness);
+      phase = 'data-listener';
+      expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+      phase = 'idle-activity';
+      const lines = harness.screen.lines();
+      const hasLiveActivity = lines.some((line) => {
+        const trimmed = line.trim();
+        return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
+      });
+      expect(hasLiveActivity).toBe(false);
+    }, { timeoutMs: 3_000 });
+    phase = 'settle';
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } catch (raw) {
+    try {
+      const lines = harness.screen.lines();
+      const firstRow = Math.max(0, lines.length - 24);
+      // Closed chrome facts only: never print row text, credentials or transcript.
+      const screen = lines.slice(firstRow).map((line, index) => ({
+        row: firstRow + index,
+        codeUnits: line.length,
+        blank: line.trim() === '',
+        prompt: line.includes('❯'),
+        asciiPrompt: /^\s*>\s*/.test(line),
+        welcome: line.includes('欢迎使用 xiaok code!'),
+        activity: /Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context/u.test(line),
+        inputPlaceholder: line.includes('Type your message...'),
+        busyPlaceholder: line.includes('Finishing response...'),
+        status: line.includes('project') && line.includes('%'),
+        questionHint: line.includes('1-6 select'),
+      }));
+      rawStderrWrite(`[fixture-input-ready-failure] ${JSON.stringify({
+        kind: 'fixture_input_ready_failure_v1',
+        phase,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        dataListeners: harness.emitter.listenerCount('data'),
+        endListeners: harness.emitter.listenerCount('end'),
+        frameRows: lines.length,
+        screen,
+      })}\n`);
+    } catch { /* Diagnostics must not replace the original failure, including undefined. */ }
+    throw raw;
+  }
 }
 
 function findLineIndex(lines: string[], pattern: string | RegExp): number {
