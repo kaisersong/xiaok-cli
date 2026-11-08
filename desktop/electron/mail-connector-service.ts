@@ -54,6 +54,7 @@ export class MailConnectorService {
  read(raw:MailReadInput,source:MailRequestSource):Promise<MailReadResult>{const input=MAIL_READ_SCHEMA.parse(raw);return this.use(input.accountId,source,async a=>MAIL_READ_RESULT_SCHEMA.parse(await this.reader.read(a,input)));}
  async setAccess(raw:{id:string;expectedRevision:number;allowSend:boolean;smtpHost?:string;smtpPort?:number},source:MailRequestSource):Promise<MailAccountDto>{requireMailUser(source);const input=MAIL_ACCESS_SCHEMA.parse(raw),a=this.account(input.id,'user');if(a.revision!==input.expectedRevision)throw Error('mail_stale_account');if(input.allowSend&&a.auth.kind==='oauth'&&!a.auth.sendAuthorized)throw Error('mail_send_reauthorize');if(input.allowSend&&a.provider==='imap'&&!(input.smtpHost??a.smtpHost))throw Error('mail_invalid_input');this.deps.store.put({...a,allowSend:input.allowSend,...(input.smtpHost?{smtpHost:input.smtpHost,smtpPort:input.smtpPort??465}:{}),revision:a.revision+1},a.revision,'user');this.invalidate(a.id);return this.list().find(row=>row.id===a.id)!;}
  async send(raw:MailSendInput,source:MailRequestSource):Promise<MailSendResult>{
+  if(source!=='user')throw Error('mail_send_denied');
   let input:MailSendInput;try{input=MAIL_SEND_SCHEMA.parse(raw);}catch{throw Error('mail_invalid_input');}
   const account=this.account(input.accountId,source);if(!account.allowSend)throw Error('mail_send_denied');if(account.auth.kind==='oauth'&&!account.auth.sendAuthorized)throw Error('mail_send_reauthorize');
   const begin=this.deps.store.beginSend,finish=this.deps.store.finishSend;if(!begin||!finish)throw Error('mail_store_unavailable');
@@ -64,6 +65,7 @@ export class MailConnectorService {
   try{const result=MAIL_SEND_RESULT_SCHEMA.parse({...await this.sender.send(account,input,assertSubmission),requestId:input.requestId});finish.call(this.deps.store,input.requestId,payloadHash,'accepted',source,result);return result;}
   catch(error){const uncertain=submitted&&!(error instanceof MailSubmissionRejected);try{finish.call(this.deps.store,input.requestId,payloadHash,uncertain?'unknown':'rejected',source);}catch{throw Error('mail_send_unknown');}if(uncertain)throw Error('mail_send_unknown');throw mailError(error);}
  }
+ getSendReceipt(requestId:string,source:MailRequestSource){requireMailUser(source);return this.deps.store.getSendReceipt?.(requestId);}
  getOAuthState(){return this.oauth.getState();}
  beginOAuth(raw:MailOAuthInput,source:MailRequestSource){requireMailUser(source);const input=MAIL_OAUTH_INPUT_SCHEMA.parse(raw);if(input.accountId&&this.account(input.accountId,'user').revision!==input.expectedRevision)throw Error('mail_stale_account');return this.oauth.start(input,'user');}
  cancelOAuth(operationId:string|undefined,source:MailRequestSource){requireMailUser(source);return this.oauth.cancel(operationId,'user');}

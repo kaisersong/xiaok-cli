@@ -68,6 +68,8 @@ export interface TaskRunnerInput {
   persistObservationSnapshot?: (snapshot: AgentSessionSnapshot) => Promise<void>;
   /** Main-only, task/incarnation scoped; never accepted from a renderer draft. */
   executionPersistence?: DesktopExecutionPersistence;
+  /** Main-only input-bound wait port; never read from task creation or IPC data. */
+  askUser?: (input: {prompt:string;choices?:Array<{id:string;label:string}>}, signal?:AbortSignal) => Promise<string>;
   taskId: string;
   sessionId: string;
   prompt: string;
@@ -306,7 +308,7 @@ export function buildHistoryFromTaskSnapshots(
 
   const pairs: TaskHistoryPair[] = sorted.slice(overTaskBudget).map((snapshot) => ({
     taskId: snapshot.taskId,
-    user: { role: 'user', content: truncateContextText(snapshot.prompt, maxUserChars) },
+    user: { role: 'user', content: truncateContextText([snapshot.prompt,...snapshot.events.flatMap(event=>event.type==='question_resolved'&&event.answerText?[`User answer: ${event.answerText}`]:[])].join('\n'), maxUserChars) },
     assistant: { role: 'assistant', content: truncateContextText(formatAssistantContext(snapshot), maxAssistantChars) },
   }));
 
@@ -409,6 +411,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly sourceCloseFailures: unknown[] = [];
   private readonly sourceClosingExecutions = new Map<string, { promise: Promise<void>; execution?: ActiveExecution }>();
   private readonly questions = new NeedsUserQuestionCorrelator();
+  private readonly liveQuestionAnswers = new Map<string,{question:NeedsUserQuestion;execution:ActiveExecution;ready:boolean;signal:AbortSignal;resolve:(value:string)=>void;reject:(error:unknown)=>void}>();
   private readonly subscribers = new Map<string, Set<LiveSubscription>>();
   private readonly mutationChains = new Map<string, Promise<void>>();
   private readonly cancellingTaskIds = new Set<string>();
@@ -790,8 +793,32 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return this.runSourceOperation(() => this.answerQuestionSourceOwned(input));
   }
 
+  private async askExecutionUser(taskId:string,execution:ActiveExecution,input:{prompt:string;choices?:Array<{id:string;label:string}>},outerSignal?:AbortSignal):Promise<string> {
+    const signal=outerSignal?AbortSignal.any([execution.controller.signal,outerSignal]):execution.controller.signal;
+    const current=()=>{if(this.activeExecutions.get(taskId)!==execution||execution.phase!=='runner')throw Error('SOL_PI_DESKTOP_EXECUTION_EXPIRED');signal.throwIfAborted();};
+    current();if(this.liveQuestionAnswers.has(taskId))throw Error('task_question_already_pending');
+    if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>2000||input.choices&&(input.choices.length>8||input.choices.some(c=>!c.id||c.id.length>80||!c.label||c.label.length>300)||new Set(input.choices.map(c=>c.id)).size!==input.choices.length))throw Error('task_question_invalid');
+    const question:NeedsUserQuestion={taskId,questionId:`question_${randomUUID()}`,kind:'freeform',prompt:input.prompt.trim(),...(input.choices?.length?{choices:input.choices.map(c=>({...c}))}:{})};
+    let resolve!:(value:string)=>void,reject!:(error:unknown)=>void;const answer=new Promise<string>((yes,no)=>{resolve=yes;reject=no;});void answer.catch(()=>{});
+    const pending={question,execution,ready:false,signal,resolve,reject};this.liveQuestionAnswers.set(taskId,pending);this.questions.publish(question);
+    const abort=()=>reject(Error('task_question_aborted'));signal.addEventListener('abort',abort,{once:true});execution.health?.wait(question.questionId);
+    try{await this.flushRuntimeEvents(taskId);current();await this.appendEvent(taskId,{type:'needs_user',question},{runtimeOrigin:true,execution});current();pending.ready=true;return await answer;}
+    finally{signal.removeEventListener('abort',abort);execution.health?.resume(question.questionId);if(this.liveQuestionAnswers.get(taskId)===pending)this.liveQuestionAnswers.delete(taskId);this.questions.clear(taskId,question.questionId);}
+  }
+
   private async answerQuestionSourceOwned(input: { taskId: string; answer: UserAnswer }): Promise<void> {
     if (this.options.assertTaskAdmission) await this.options.assertTaskAdmission(await this.requireSnapshot(input.taskId));
+    const pending=this.liveQuestionAnswers.get(input.taskId);
+    const currentQuestion=this.questions.getCurrent(input.taskId);
+    if(currentQuestion?.kind==='freeform'&&!pending)throw Error('task_question_execution_not_live');
+    let value:string|undefined;
+    if(pending){
+      if(!pending.ready||this.activeExecutions.get(input.taskId)!==pending.execution||pending.signal.aborted||pending.question.questionId!==input.answer.questionId)throw Error('task_question_stale');
+      if(input.answer.type==='choice'){value=pending.question.choices?.find(c=>c.id===(input.answer as {choiceId:string}).choiceId)?.label;if(value===undefined)throw Error('task_question_invalid_choice');}
+      else if(input.answer.type==='text'&&input.answer.text.trim()&&input.answer.text.length<=12000)value=input.answer.text;
+      else throw Error('task_question_invalid_answer');
+      pending.ready=false;
+    }
     const result = this.questions.answer(input.taskId, input.answer);
     if (result.status === 'not_found') {
       throw new Error(`question not found: ${input.answer.questionId}`);
@@ -799,6 +826,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (result.status === 'stale') {
       throw new Error(`stale question answer: ${input.answer.questionId}`);
     }
+    if(pending){try{await this.appendEvent(input.taskId,{type:'question_resolved',questionId:pending.question.questionId,answerText:value!},{runtimeOrigin:true,execution:pending.execution});pending.signal.throwIfAborted();pending.resolve(value!);}catch(error){pending.reject(error);throw error;}return;}
     if (
       result.question.kind === 'confirm_understanding'
       && input.answer.type === 'choice'
@@ -1291,6 +1319,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         executionScope: snapshot.executionScope,
         emitRuntimeEvent: (event) => this.activeExecutions.get(taskId) === execution ? this.appendRuntimeEvent(taskId, event) : Promise.resolve(),
         emitUsage: (usage) => this.appendUsage(taskId, execution, usage),
+        askUser: (input,signal) => this.askExecutionUser(taskId,execution,input,signal),
       });
       controller.signal.throwIfAborted();
       if (policy?.deliveryRepair === 'explicit' && snapshot.multiAgentPreparation
@@ -1873,7 +1902,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       const next: TaskSnapshot = {
         ...snapshot,
-        status: event.type === 'task_cancelled' ? 'cancelled' : snapshot.status,
+        status: event.type === 'task_cancelled' ? 'cancelled' : event.type === 'needs_user' ? 'waiting_user' : event.type === 'question_resolved' && snapshot.status === 'waiting_user' ? 'running' : snapshot.status,
         events: [...snapshot.events, event],
         result: nextResult,
         salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,
@@ -2118,7 +2147,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     const questionEvent = [...snapshot.events]
       .reverse()
       .find((event): event is Extract<DesktopTaskEvent, { type: 'needs_user' }> => event.type === 'needs_user');
-    if (questionEvent) {
+    if (questionEvent && !snapshot.events.some(event=>event.type==='question_resolved'&&event.questionId===questionEvent.question.questionId)) {
       this.questions.publish(questionEvent.question);
     }
   }

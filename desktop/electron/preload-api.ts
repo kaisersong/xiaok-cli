@@ -247,6 +247,14 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getAssistantState',
+  'ensureAssistantToday',
+  'refreshAssistantSources',
+  'actOnAssistantItem',
+  'startAssistantItem',
+  'approveAssistantSend',
+  'refuseAssistantSend',
+  'onAssistantInboxChanged',
   'getAssistantOverview',
   'activateAssistant',
   'pauseAssistant',
@@ -454,6 +462,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onSkillsChanged',
   'onReminder',
   'onScheduledTaskDue',
+  'onAssistantInboxChanged',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
   'onMobileRelayStatus',
@@ -627,6 +636,13 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getAssistantState: 'desktop:assistantInbox:state',
+  ensureAssistantToday: 'desktop:assistantInbox:today',
+  refreshAssistantSources: 'desktop:assistantInbox:refresh',
+  actOnAssistantItem: 'desktop:assistantInbox:act',
+  startAssistantItem: 'desktop:assistantInbox:start',
+  approveAssistantSend: 'desktop:assistantInbox:approve',
+  refuseAssistantSend: 'desktop:assistantInbox:refuse',
   getAssistantOverview: 'desktop:assistant:getOverview',
   activateAssistant: 'desktop:assistant:activate',
   pauseAssistant: 'desktop:assistant:pause',
@@ -1358,6 +1374,14 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  getAssistantState(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  ensureAssistantToday(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  refreshAssistantSources(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  actOnAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionAction): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  startAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionStart): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  approveAssistantSend(input: import('../shared/assistant-inbox-contract.js').OutboxApproval): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  refuseAssistantSend(input: {id:string;expectedRevision:number}): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  onAssistantInboxChanged(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
@@ -1873,6 +1897,14 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state') as ReturnType<DesktopApi['getAssistantState']>,
+    ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today') as ReturnType<DesktopApi['ensureAssistantToday']>,
+    refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh') as ReturnType<DesktopApi['refreshAssistantSources']>,
+    actOnAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:act', input) as ReturnType<DesktopApi['actOnAssistantItem']>,
+    startAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:start', input) as ReturnType<DesktopApi['startAssistantItem']>,
+    approveAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:approve', input) as ReturnType<DesktopApi['approveAssistantSend']>,
+    refuseAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:refuse', input) as ReturnType<DesktopApi['refuseAssistantSend']>,
+    onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,

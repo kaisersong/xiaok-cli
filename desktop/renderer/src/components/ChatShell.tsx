@@ -1,3 +1,5 @@
+import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
+import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
@@ -252,10 +254,12 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, emptyContent, conversationHeader, draftRequest, hideObservationControls }: {
+export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, draftRequest, hideObservationControls }: {
   threadId?: string;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
+  assistantContent?: React.ReactNode;
+  assistantHasMessages?: boolean;
   draftRequest?: { id: number; text: string };
   hideObservationControls?: boolean;
 } = {}) {
@@ -407,7 +411,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
       source.release?.();
       return;
     }
-    if (!live && (event.type === 'progress' || event.type === 'needs_user' || event.type === 'task_started')) return;
+    if (!live && (event.type === 'progress' || event.type === 'needs_user' || event.type === 'question_resolved' || event.type === 'task_started')) return;
 
     const eventTaskKey = sourceTaskId ?? taskId ?? '';
     if (event.type !== 'error' || lastLiveErrorRef.current?.taskKey !== eventTaskKey) {
@@ -650,11 +654,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
         break;
       }
       case 'question_resolved': {
+        if(event.answerText){const id=`${source.sourceTaskId}:answer:${event.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'user',content:event.answerText!}]);}
         setCurrentQuestion(question => question?.questionId === event.questionId ? null : question);
         setStatus('running');
         break;
       }
       case 'needs_user': {
+        const id=`${source.sourceTaskId}:question:${event.question.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'assistant',content:event.question.prompt}]);
         setCurrentQuestion((event as { type: 'needs_user'; question: NeedsUserQuestion }).question);
         setStatus('waiting_user');
         break;
@@ -960,6 +966,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
       for (const ev of snapshot.events) {
+        if(ev.type==='needs_user'||ev.type==='question_resolved'){
+          if(accumulated){msgs.push({id:`${snapshot.taskId}:before-question:${msgs.length}`,role:'assistant',content:accumulated});accumulated='';}
+          if(ev.type==='needs_user')msgs.push({id:`${snapshot.taskId}:question:${ev.question.questionId}`,role:'assistant',content:ev.question.prompt});
+          else if(ev.answerText)msgs.push({id:`${snapshot.taskId}:answer:${ev.questionId}`,role:'user',content:ev.answerText});
+          continue;
+        }
         if (ev.type === 'task_terminal') {
           terminalSeen = true;
           continue;
@@ -1396,6 +1408,15 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
       return false;
     }
 
+    if(currentQuestion?.kind==='freeform'&&files?.length){setLoadError(t.assistantInbox.answerFilesUnsupported);return false;}
+    if(currentQuestion?.kind==='freeform'&&thread?.currentTaskId&&!files?.length){
+      const source=displaySourceRef.current;if(!source||!acceptsSource(source))return false;
+      admissionPending.current=renderScope;
+      try{await api.answerQuestion({taskId:thread.currentTaskId,answer:{questionId:currentQuestion.questionId,type:'text',text}});if(!acceptsSource(source))return false;setCurrentQuestion(null);setStatus('running');setPrompt('');return true;}
+      catch{setLoadError(t.chatShell.taskCreateFailed);return false;}
+      finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
+    }
+
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
       queuePrompt(text, files ?? []);
@@ -1498,6 +1519,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
     if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
+    try {
     await api.answerQuestion({
       taskId: thread.currentTaskId,
       answer: { questionId: currentQuestion.questionId, type: 'choice', choiceId },
@@ -1505,6 +1527,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
     if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
+    } catch { if (acceptsSource(source)) setLoadError(t.chatShell.taskCreateFailed); }
   };
 
   const updateComputerUseActionMessage = (messageId: string, patch: Partial<ComputerUseActionData>) => {
@@ -1882,6 +1905,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, draftReq
       <ChatView
         emptyContent={emptyContent}
         conversationHeader={conversationHeader}
+        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
+        assistantHasMessages={assistantHasMessages}
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}

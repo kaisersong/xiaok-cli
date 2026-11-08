@@ -1,9 +1,11 @@
+import { assistantInboxZh } from './assistant-inbox';
 import {loopPublicationZh} from './loop-publication';
 import type { LocaleStrings } from "./index";
 import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  assistantInbox: assistantInboxZh,
   mailConnectors: {
     smtpHost:'SMTP 服务器',smtpPort:'SMTP 端口',smtpHelp:'使用同一邮箱账号与授权码。465 使用 TLS；其他端口必须支持 STARTTLS。',
     authCodeTitle:'如何获取授权码？',authCodeHint:'请填写邮箱服务商生成的客户端授权码，不是邮箱登录密码。',openWebmail:(name:string)=>`打开${name}网页版`,authGuides:{qq:['登录 QQ 邮箱网页版，进入“设置 → 账号”或“账号与安全 → 安全设置”。','找到 POP3/IMAP/SMTP 服务，开启 IMAP/SMTP；已开启则点击“管理服务 → 生成授权码”。','按页面提示完成身份验证，复制生成的授权码，粘贴到上方输入框。'],netease163:['登录 163 邮箱网页版，进入“设置 → POP3/SMTP/IMAP”（部分版本在“常规设置”内）。','开启 IMAP/SMTP 服务；已开启则在“授权密码管理”中点击“新增授权密码”。','按页面提示完成身份验证，复制生成的授权密码，粘贴到上方输入框。']},

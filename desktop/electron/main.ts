@@ -1,3 +1,5 @@
+import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
+import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
 import { MailAccountStore } from './mail-account-store.js';
 import { MailConnectorService } from './mail-connector-service.js';
 import { registerMailConnectorIpc } from './mail-connector-typed-ipc.js';
@@ -720,7 +722,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
-  const mailConnectors = new MailConnectorService({ store: new MailAccountStore(app.getPath('userData'), { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) }), openExternal: url => shell.openExternal(url) });
+  const assistantCrypto: import('./mail-account-store.js').MailSafeStorage = { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) };
+  let assistantInbox: ReturnType<typeof createDesktopAssistantInbox> | undefined;
+  const mailConnectors = new MailConnectorService({store:new MailAccountStore(app.getPath('userData'),assistantCrypto),openExternal:url=>shell.openExternal(url)});
   registerMailConnectorIpc(shutdownAwareIpc, mailConnectors, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   registerLifetimeDisposerStep('mail-connectors', async () => { mailConnectors.dispose(); });
   const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
@@ -839,6 +843,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
     mailConnectors,
+    assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
+    onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
     harnessOptimizationUserActor: harnessUserActor,
     dataRoot,
     kswarmService,
@@ -1383,11 +1389,28 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         updatedAt: source.updatedAt,
       })),
   });
+  assistantInbox = createDesktopAssistantInbox({
+    dataRoot,crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    search:(query,signal)=>services.searchForAssistant(query,signal),
+    launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
+    canLaunch:()=>services.assertAssistantExecutor(),
+    reminders:{create:(item,at)=>timedActionService.createReminder(item.title,at,undefined,{requestSource:'user',ownerKind:'user',ownerId:'desktop-user'}).reminderId,cancel:id=>{timedActionService.cancelReminder(id,{requestSource:'user'});}},
+    changed:()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('desktop:assistantInbox:changed');},
+    internal:()=>assistantContextReader.listMorningSuggestions(),
+    facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
+  });
+  services.bindAssistantTools(assistantInbox.tools,'user');
+  registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  const inboxOwner=assistantInbox;
+  registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
+  desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
     collect: async input => {
+      if(input.kind==='morning')await assistantInbox!.service.ensureToday('scheduler');
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
       return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});

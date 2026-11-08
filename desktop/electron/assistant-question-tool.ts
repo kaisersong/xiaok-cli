@@ -1,0 +1,6 @@
+import {z} from 'zod';
+import type{Tool}from'../../src/types.js';
+import type{TaskRunnerInput}from'../../src/runtime/task-host/task-runtime-host.js';
+const schema=z.object({question:z.string().trim().min(1).max(2000),options:z.array(z.object({label:z.string().min(1).max(300)}).strict()).max(8).optional()}).strict();
+/** The lookup key is host-supplied ToolExecutionContext, never model input. */
+export function createAssistantQuestionTool(ports:ReadonlyMap<string,NonNullable<TaskRunnerInput['askUser']>>):Tool{return {permission:'safe',executionPolicy:{waitsForUser:true},definition:{name:'ask_user',description:'当推进事项必须由用户决定时，提出一个问题并等待用户回答后继续同一次执行。严禁将回答视为邮件或消息发送批准；外发仍须专门的内容确认。',inputSchema:{type:'object',properties:{question:{type:'string',minLength:1,maxLength:2000},options:{type:'array',maxItems:8,items:{type:'object',properties:{label:{type:'string',minLength:1,maxLength:300}},required:['label'],additionalProperties:false}}},required:['question'],additionalProperties:false}},execute:async(raw,context)=>{const input=schema.parse(raw);const ask=context?.taskId?ports.get(context.taskId):undefined;if(!ask)throw Error('task_question_execution_not_live');return ask({prompt:input.question,...(input.options?{choices:input.options.map((o,i)=>({id:`option_${i}`,label:o.label}))}:{})},context?.signal);}};}
