@@ -170,6 +170,10 @@ static napi_value sql_error(ps_database *d, int rc, const char *override) {
   return NULL;
 }
 static int enter(ps_database *d) {
+  if (d && !ps_sqlite_api_available()) {
+    fail(d->ns->env, "ERR_SQLITE_API_UNAVAILABLE", "protected SQLite API unavailable");
+    return 0;
+  }
   if (!d || !d->sql || d->closed || d->sealed || d->busy || d->unknown) {
     if (d)
       sql_error(d, SQLITE_MISUSE, "protected SQLite database unavailable or busy");
@@ -296,6 +300,8 @@ static int authorize(void *raw, int action, const char *a, const char *b, const 
 }
 
 static napi_value db_constructor(napi_env e, napi_callback_info i) {
+  if (!ps_sqlite_api_available())
+    return fail(e, "ERR_SQLITE_API_UNAVAILABLE", "protected SQLite API unavailable");
   call c;
   if (!arguments(e, i, &c))
     return NULL;

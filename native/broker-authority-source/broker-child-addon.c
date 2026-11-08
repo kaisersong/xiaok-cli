@@ -21,6 +21,7 @@ static napi_value failed_birth(napi_env env,const char *message){
 static napi_value consume(napi_env env,napi_callback_info info){
  if(!no_arguments(env,info)||failed||(original_env&&original_env!=env))return error(env,"original fixed birth required");
  if(original){napi_value result;if(napi_get_reference_value(env,original,&result)!=napi_ok)return NULL;return result;}
+ if(!ps_sqlite_api_available()){napi_throw_error(env,"BROKER_ORIGINAL_API_UNAVAILABLE","protected SQLite requires macOS 12.3 or newer");return NULL;}
  if(entered)return error(env,"original birth is one use");entered=1;original_env=env;client=nm_installed_create();
  nr_root_store_identity identity;const nr_root_bootstrap_claim *claim=NULL;
  if(!client||!nm_installed_connect_broker_child(client,&io)||!nr_root_store_read_identity(io,&identity)||(identity.birth_state==NR_CREATED&&(!nr_root_store_claim_fresh(io,&claim)||!nr_root_store_read_claim(io,claim,&identity))))return failed_birth(env,"original child IO birth unconfirmed");

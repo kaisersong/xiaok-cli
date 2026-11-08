@@ -164,6 +164,14 @@
     {
       "from": "THIRD_PARTY_NOTICES.md",
       "to": "THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "from": "../native/broker-authority-source/build/Release",
+      "to": "services/intent-broker/runtime",
+      "filter": [
+        "xiaok-source-runtime.cjs",
+        "source-runtime-manifest.json"
+      ]
     }
   ],
   "publish": {
@@ -201,6 +209,20 @@
       {
         "from": "../native/kswarm-authority-source/build/Release/kswarm-child-launcher",
         "to": "native/kswarm-child-launcher"
+      },
+      {
+        "from": "../native/broker-authority-source/build/Release",
+        "to": "services/intent-broker/runtime",
+        "filter": [
+          "protected_sqlite.node",
+          "index.cjs",
+          "original-authority-sqlite.cjs",
+          "artifact-manifest.json"
+        ]
+      },
+      {
+        "from": "../native/broker-authority-source/build/Release/broker-child-launcher",
+        "to": "native/broker-child-launcher"
       }
     ]
   },

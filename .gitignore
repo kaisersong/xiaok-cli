@@ -101,3 +101,6 @@ docs/skill-observability-design.md
 /data/verification/windows/**/*.obj
 
 /native/root-resource-authority/build/
+
+# Generated fixed Broker Native and portable runtime resources.
+native/broker-authority-source/build/

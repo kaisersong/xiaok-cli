@@ -12,6 +12,7 @@ static nm_broker_child_birth *broker_birth_member(nm_broker_child_birth *candida
 int nm_installed_prepare_core_broker_child(nm_installed_client *client,nm_broker_child_birth **out){
  NM_CLIENT_GUARD(client,0);
  if(!out||!nm_installed_current(client)||client->core_broker_attempted||!client->root_store||client->root_store->identity.birth_state!=NR_BOUND)return 0;
+ if(!ps_sqlite_api_available())return 0;
  client->core_broker_attempted=1;
  nm_broker_child_birth *birth=calloc(1,sizeof(*birth));if(!birth){unknown(client,ENOMEM);return 0;}
  birth->client=client;birth->ipc=birth->stdout_fd=birth->stderr_fd=-1;birth->pid=getpid();birth->thread=pthread_self();birth->next=broker_births;broker_births=birth;
