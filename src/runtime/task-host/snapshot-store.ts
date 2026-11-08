@@ -483,7 +483,10 @@ export class FileTaskSnapshotStore {
   async #closeAndDrain():Promise<void> {
     this.#writerClosed = true;
     await this.#writerQueue;
+    let physicalFailure:{error:unknown}|undefined;
+    try{await this.#capturePhysicalCut().waitKnown();}catch(error){physicalFailure=sdkFailure(error);}
     if(this.#unconfirmedSyncHandles.size||this.#ownedSyncRaws.size)throw Error('TASK_SNAPSHOT_SYNC_CLOSE_UNCONFIRMED',{cause:this.#sourceSdkFailure?this.#sourceSdkFailure.error:this.#syncCloseFailure});
+    if(physicalFailure)throw physicalFailure.error;
   }
 
   /** The same Store owns reservations, original raws and any visible child

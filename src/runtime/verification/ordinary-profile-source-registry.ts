@@ -10,11 +10,14 @@ import {writeFileAtomicallySync,syncDirectoryTreeStrict} from '../../utils/atomi
 import {readInstalledCurrentProfile} from './migration-markers.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
+const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1'] as const;
+type OrdinarySQLiteFormat=typeof ordinarySqliteFormats[number];
+
 /** Ordinary host discovery only. No snapshot hash, completeness, quota grant,
  * custody or activation capability can be obtained from this registry. */
 export type OrdinaryProfileSourceInput =
  |{kind:'session-root'|'task-root'|'goal-file-root'|'session-alias-holder';directory:string}
- |{kind:'sqlite-db';directory:string;databaseBasename:string;snapshotFormat:'session-sqlite-v1'|'loop-sqlite-v1'|'goal-sqlite-v1'|'codex-native-sqlite-v1'|'codex-routes-sqlite-v1'|'artifact-workspace-sqlite-v1'|'kswarm-state-sqlite-v1'|'multi-agent-groups-sqlite-v1'};
+ |{kind:'sqlite-db';directory:string;databaseBasename:string;snapshotFormat:OrdinarySQLiteFormat};
 export type OrdinarySQLiteComponent = 'loop'|'completion'|'artifactScanner'|'healthScanner';
 export interface OrdinarySQLiteLayout {readonly version:1;readonly components:readonly OrdinarySQLiteComponent[];readonly layoutRevision:number;readonly layoutHash:string}
 export interface OrdinarySQLiteComponentHistory {readonly historyUnknown:true;readonly components:readonly OrdinarySQLiteComponent[];readonly observations:readonly OrdinarySQLiteLayout[]}
@@ -57,7 +60,7 @@ function source(input:OrdinaryProfileSourceInput):Readonly<OrdinaryProfileSource
  if(input.kind==='sqlite-db'){
   const name=input.databaseBasename;if(typeof name!=='string'||!name||basename(name)!==name||name.includes('\\')||name.includes('\0')||name==='.'||name==='..')fail('identity');
   const stat=lstatSync(join(dir.canonicalPath,name),{bigint:true});if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1n)fail('identity');
-  if(!['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1'].includes(input.snapshotFormat))fail('schema');snapshotFormat=input.snapshotFormat;
+  if(!ordinarySqliteFormats.includes(input.snapshotFormat))fail('schema');snapshotFormat=input.snapshotFormat;
   database=Object.freeze({basename:name,device:String(stat.dev),inode:String(stat.ino)});
  }else{if(!['session-root','task-root','goal-file-root','session-alias-holder'].includes(input.kind))fail('schema');snapshotFormat=input.kind+'-v1';}
  const namespaceId=digest([dir.canonicalPath,input.kind,database?.basename??null]);
@@ -105,7 +108,7 @@ function parseExpandedOrdinaryProfileSources(raw:unknown,uid:number):Readonly<Or
   shape(row.directory,['canonicalPath','device','inode']);const dir=row.directory;
   if(typeof dir.canonicalPath!=='string'||!isAbsolute(dir.canonicalPath)||resolve(dir.canonicalPath)!==dir.canonicalPath||dir.canonicalPath.includes('\0')||!decimal(dir.device)||!decimal(dir.inode))fail('schema');
   let db:Record<string,unknown>|undefined;
-  if(row.kind==='sqlite-db'){shape(row.database,['basename','device','inode']);db=row.database;if(typeof db.basename!=='string'||!db.basename||basename(db.basename)!==db.basename||db.basename.includes('\\')||db.basename.includes('\0')||['.','..'].includes(db.basename)||!decimal(db.device)||!decimal(db.inode)||!['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1'].includes(row.snapshotFormat as string))fail('schema');}
+  if(row.kind==='sqlite-db'){shape(row.database,['basename','device','inode']);db=row.database;if(typeof db.basename!=='string'||!db.basename||basename(db.basename)!==db.basename||db.basename.includes('\\')||db.basename.includes('\0')||['.','..'].includes(db.basename)||!decimal(db.device)||!decimal(db.inode)||!ordinarySqliteFormats.includes(row.snapshotFormat as OrdinarySQLiteFormat))fail('schema');}
   else if(!['session-root','task-root','goal-file-root','session-alias-holder'].includes(row.kind as string)||row.snapshotFormat!==row.kind+'-v1')fail('schema');
   if(row.kind==='session-alias-holder'&&basename(dir.canonicalPath as string)!=='.canonical-session-aliases')fail('identity');
   if(row.sourceId!==digest([row.kind,dir.device,dir.inode,db??null])||row.namespaceId!==digest([dir.canonicalPath,row.kind,db?.basename??null])||seen.has(row.sourceId as string)||names.has(row.namespaceId as string))fail('schema');

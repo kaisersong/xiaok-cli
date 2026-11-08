@@ -1,3 +1,4 @@
+import {openTimedActionSource,completeTimedActionSource,failTimedActionSource} from './timed-action-source-lifecycle.js';
 import {createHash} from 'node:crypto';
 import {decodeStoredRoomScheduledExecutor} from './room-scheduled-target.js';
 import {SCHEDULED_DELIVERY_REPLAY_LIMIT, type ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
@@ -5,8 +6,6 @@ import {canonicalVerificationJson as completionJson} from '../../src/runtime/ver
 import {freezeProjection} from './loop-business-projection.js';
 import {consumeLoopTimedCompletion,type LoopTimedReceipt} from './loop-timed-completion.js';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { dirname } from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import {
   computeInitialDueAt,
@@ -91,11 +90,14 @@ export class TimedActionStore {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec('pragma journal_mode = WAL');
-    this.db.exec('pragma busy_timeout = 5000');
-    this.applySchema();
+    const birth=openTimedActionSource(dbPath);
+    this.db=birth.database;
+    try {
+      this.db.exec('pragma journal_mode = WAL');
+      this.db.exec('pragma busy_timeout = 5000');
+      this.applySchema();
+      completeTimedActionSource(birth);
+    } catch(raw) {failTimedActionSource(birth,raw);}
   }
 
   close(): void {

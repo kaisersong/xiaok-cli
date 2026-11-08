@@ -43,14 +43,20 @@ vi.mock('node:worker_threads', async original => {
   const actual = await original<typeof import('node:worker_threads')>();
   const deliverySource = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
   const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  class Worker extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === deliverySource, protectionMapped = String(filename) === protectionSource;
       if (mapped && !nativeWorker.output || protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh fixed Worker required');
       super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
       if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => nativeWorker.exits++); }
     }
-  } };
+  }
+  // Preserve the exact native stream getters on the real Worker subclass.
+  // The production SDK captures own descriptors and calls the native receiver.
+  for (const name of ['stdout', 'stderr', 'stdin'] as const) {
+    Object.defineProperty(Worker.prototype, name, Object.getOwnPropertyDescriptor(actual.Worker.prototype, name)!);
+  }
+  return { ...actual, Worker };
 });
 beforeAll(async () => {
   Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
