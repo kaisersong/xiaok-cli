@@ -4,6 +4,7 @@ import {KSWARM_STATE_SOURCE_SCHEMA as SCHEMA,KSWARM_STATE_TABLES as TABLES,type 
 import {freezeCapturedData,parseCapturedSourceJson} from './captured-source-json.js';
 import {canonicalVerificationJson} from './protocol.js';
 import type {CapturedSqliteCell as Cell} from './source-sqlite-cell.js';
+import {expectedKSwarmStateSchema} from './kswarm-state-profile.js';
 type Counts=Readonly<Record<Table,number>>;
 type Summary=Readonly<{sourceId:string;snapshotHash:string;counts:Counts}>;
 type Reference=Readonly<{column:'entity_key'|'project_id';domain:string;value:Cell;referenceState:'declared'|'uninterpreted'}>;
@@ -12,7 +13,7 @@ export type KSwarmStateSourceEvent=
  |Readonly<{kind:'row';sourceId:string;table:Table;rowid:string;record:Readonly<Record<string,Cell>>;references:readonly Reference[]}>
  |Readonly<{kind:'source-end';sourceId:string;counts:Counts}>
  |Readonly<{kind:'complete';sources:readonly Summary[];digest:string}>;
-const COLLECTIONS=new Set(['project','board','workflowRun','workflowProposal','finalDeliverable','reviewGateDecision','reviewCondition','humanAction']);
+const COLLECTIONS=new Set(['project','board','workflowRun','workflowProposal','finalDeliverable','reviewGateDecision','reviewCondition','humanAction','protocolReceipt','protocolHead']);
 function fail(reason:string):never{throw Error('captured_kswarm_state_'+reason);}
 function references(table:Table,record:Readonly<Record<string,Cell>>):Reference[]{
  if(table==='state_meta')return [];
@@ -29,8 +30,8 @@ export function* iterateCapturedSQLiteKSwarmStateSources(owner:object,token:obje
  function emit(event:Exclude<KSwarmStateSourceEvent,{kind:'complete'}>):KSwarmStateSourceEvent{const raw=canonicalVerificationJson(event);hash.update(String(Buffer.byteLength(raw,'utf8'))).update(':').update(raw,'utf8');return freezeCapturedData(event);}
  for(const entry of [...capture.sources].sort((a,b)=>a.source.sourceId<b.source.sourceId?-1:a.source.sourceId>b.source.sourceId?1:0)){
   const {source,snapshotHash}=entry;if(source.kind!=='sqlite-db'||source.snapshotFormat!=='kswarm-state-sqlite-v1')continue;
-  const actual=readProfileSqliteSchema(owner,token,source.sourceId);
-  if(actual.length!==SCHEMA.length||actual.some((row,i)=>{const expected=SCHEMA[i]!;return row.type!==expected.type||row.name!==expected.name||row.tbl_name!==expected.tbl_name||(typeof row.sql==='string'?row.sql.replace(/\s+/g,' ').trim():row.sql)!==expected.sql;}))fail('schema');
+  const actual=readProfileSqliteSchema(owner,token,source.sourceId),expectedSchema=expectedKSwarmStateSchema(SCHEMA,readProfileSqliteLosslessRows(owner,token,source.sourceId,'state_meta'));
+  if(actual.length!==expectedSchema.length||actual.some((row,i)=>{const expected=expectedSchema[i]!;return row.type!==expected.type||row.name!==expected.name||row.tbl_name!==expected.tbl_name||(typeof row.sql==='string'?row.sql.replace(/\s+/g,' ').trim():row.sql)!==expected.sql;}))fail('schema');
   assertProfileSqliteIntegrity(owner,token,source.sourceId);
   const counts:Record<Table,number>={state_entities:0,state_entity_history:0,state_meta:0};
   yield emit({kind:'source-start',sourceId:source.sourceId,snapshotHash,format:'kswarm-state-sqlite-v1'});
