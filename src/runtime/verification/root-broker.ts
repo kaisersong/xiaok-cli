@@ -1,3 +1,4 @@
+import {authorizeMainRootFamilyEnrollmentPending} from './main-root-family-enrollment-authorization.js';
 import {createApplicationReviewRegistry} from './application-review-registry.js';
 import {applicationBindingReviewBytes} from './application-binding-review.js';
 import {createProfileSourceCustodyRegistry} from './profile-source-custody-registry.js';
@@ -38,11 +39,12 @@ export async function startInstalledMacRootBroker():Promise<{close():Promise<voi
  const helper=(name:string)=>{const path=join(releaseRoot,'bin',name);assertRootProtectedExecutable(path);return path;};
  const peerHelper=helper('socket-audit-peer'),reader=helper('broker-user-reader'),authorizer=helper('broker-authorize'),clock=createInstalledLocalContinuousClock(helper('continuous-clock'));assertRootProtectedExecutable('/bin/launchctl');
  const root=join(base,'broker');if(!existsSync(root))mkdirSync(root,{mode:0o700});const rootStat=lstatSync(root);if(!rootStat.isDirectory()||rootStat.isSymbolicLink()||rootStat.uid!==0||(rootStat.mode&0o077)!==0)throw Error('broker_root_directory');
+ let mainRootPhysicalUnknown=false;
  const lock=openPrivateVerificationDatabase(root);const maxPages=Math.floor(1024**2/Number(lock.pragma('page_size',{simple:true})));if(Number(lock.pragma(`max_page_count=${maxPages}`,{simple:true}))>maxPages){lock.close();throw Error('broker_lock_budget');}let sourceRegistry:ReturnType<typeof createProfileSourceCustodyRegistry>|undefined;let publicationRegistry:ReturnType<typeof createPublicationReviewRegistry>|undefined;let applicationRegistry:ReturnType<typeof createApplicationReviewRegistry>|undefined;let ipc:Awaited<ReturnType<typeof startControllerIpc>>|undefined,receiverClock:Awaited<ReturnType<typeof startReceiverClockServer>>|undefined;
  try{
   lock.exec('BEGIN EXCLUSIVE');syncDirectoryTreeStrict(root);
   // Parent is root-owned but searchable; private state remains0700. Peer gate is kernel authenticated.
-  const accountHelper=helper('account-generation'),enrollmentAuthorizer=helper('broker-enroll-authorize'),publicationAuthorizer=helper('broker-publish-authorize'),archiveAuthorizer=helper('broker-archive-authorize'),applicationAuthorizer=helper('broker-application-authorize'),sourceAuthorizer=helper('broker-source-authorize');
+  const accountHelper=helper('account-generation'),enrollmentAuthorizer=helper('broker-enroll-authorize'),mainRootAuthorizer=helper('broker-mainroot-enroll-authorize'),publicationAuthorizer=helper('broker-publish-authorize'),archiveAuthorizer=helper('broker-archive-authorize'),applicationAuthorizer=helper('broker-application-authorize'),sourceAuthorizer=helper('broker-source-authorize');
   const socketPath=join(base,'broker.sock');if(existsSync(socketPath)){const stat=lstatSync(socketPath);if(!stat.isSocket()||stat.uid!==0)throw Error('broker_socket_unknown');unlinkSync(socketPath);syncDirectoryTreeStrict(base);}
   const receiverPath=join(base,'receiver.json');assertRootProtectedFile(receiverPath);if(lstatSync(receiverPath).size>65536)throw Error('receiver_clock_registration');
   const receiverBytes=readFileSync(receiverPath),receiver=parseInstalledReceiverRegistration(JSON.parse(receiverBytes.toString()),{controllerPublicKey:createPublicKey(config.publicKeyPem),controllerServiceUid:serviceUid,interactiveUids:config.allowedUserIds});let receiverInvalid=false;
@@ -102,6 +104,13 @@ export async function startInstalledMacRootBroker():Promise<{close():Promise<voi
       async approve(input,signal){const bytes=await runBrokerHelper({executable:'/bin/launchctl',args:['asuser',String(input.uid),archiveAuthorizer,String(input.uid),String(input.auditSessionId),String(input.continuousDeadlineMs)],stdin:input.reviewBytes,maximumOutput:128,timeoutMs:120000,signal});return bytes.toString('ascii').trim();},
      });return Buffer.from(canonicalVerificationJson(result));
     }
+    if(request.method==='main-root-family.authorize'){
+     shape(p,['requestSource','review']);
+     const result=await authorizeMainRootFamilyEnrollmentPending({requestSource:p.requestSource,review:p.review},{authorityId:config.authorityId,allowedUserIds:config.allowedUserIds,signal,clock:clock.sample,retainPhysicalUnknown(){mainRootPhysicalUnknown=true;retainedBrokerLocks.add(lock);},
+      async resolveAccount(uid,signal){const bytes=await runBrokerHelper({executable:accountHelper,args:[String(uid)],maximumOutput:1024,timeoutMs:5000,signal});const value=JSON.parse(bytes.toString('utf8'));shape(value,['uid','accountGeneration','source']);if(value.uid!==uid||value.source!=='macos-local-generateduid')throw Error('broker_account_identity');return value.accountGeneration;},
+      async approve(input,signal){const bytes=await runBrokerHelper({executable:'/bin/launchctl',args:['asuser',String(input.uid),mainRootAuthorizer,String(input.uid),String(input.auditSessionId),String(input.continuousDeadlineMs)],stdin:input.reviewBytes,maximumOutput:128,timeoutMs:120000,signal});return bytes.toString('ascii').trim();},
+     });return Buffer.from(canonicalVerificationJson(result));
+    }
     if(request.method==='enrollment.authorize'){
      shape(p,['review']);
      const result=await authorizeOwnerEnrollment(p.review,{authorityId:config.authorityId,allowedUserIds:config.allowedUserIds,signal,clock:clock.sample,
@@ -140,9 +149,9 @@ export async function startInstalledMacRootBroker():Promise<{close():Promise<voi
     }
     throw Error('broker_method');
     };
-    return ['application.authorize','archive.authorize','enrollment.authorize','publication.authorize','materials.authorize'].includes(request.method)?sourceRegistry!.runNative(execute):execute();
+    return ['main-root-family.authorize','application.authorize','archive.authorize','enrollment.authorize','publication.authorize','materials.authorize'].includes(request.method)?sourceRegistry!.runNative(execute):execute();
    },
   });
- }catch(error){publicationRegistry?.close();applicationRegistry?.close();const results=await Promise.allSettled([ipc?.close(),receiverClock?.close(),sourceRegistry?.close()]);if(results.every(r=>r.status==='fulfilled'))lock.close();else retainedBrokerLocks.add(lock);throw error;}
- let closed:Promise<void>|undefined;return Object.freeze({close(){return closed??=(async()=>{publicationRegistry?.close();applicationRegistry?.close();const results=await Promise.allSettled([ipc!.close(),receiverClock!.close(),sourceRegistry!.close()]);const failures=results.filter(r=>r.status==='rejected');if(failures.length){retainedBrokerLocks.add(lock);throw new AggregateError(failures,'broker_shutdown_unknown');}lock.close();})();}});
+ }catch(error){publicationRegistry?.close();applicationRegistry?.close();const results=await Promise.allSettled([ipc?.close(),receiverClock?.close(),sourceRegistry?.close()]);if(!mainRootPhysicalUnknown&&results.every(r=>r.status==='fulfilled'))lock.close();else retainedBrokerLocks.add(lock);throw error;}
+ let closed:Promise<void>|undefined;return Object.freeze({close(){return closed??=(async()=>{publicationRegistry?.close();applicationRegistry?.close();const results=await Promise.allSettled([ipc!.close(),receiverClock!.close(),sourceRegistry!.close()]);const failures=results.filter(r=>r.status==='rejected');if(mainRootPhysicalUnknown)failures.push({status:'rejected',reason:Error('main_root_enrollment_physical_unknown')});if(failures.length){retainedBrokerLocks.add(lock);throw new AggregateError(failures,'broker_shutdown_unknown');}lock.close();})();}});
 }
