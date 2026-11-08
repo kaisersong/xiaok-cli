@@ -40,5 +40,5 @@ it.each(['channels','mcp']as const)('%s rejected delete preserves last-good and 
 });
 it('test rejection crosses the actual bridge, stays independent of readonly retry, and never echoes secrets',async()=>{
  endpoint.testChannel.mockRejectedValue(Error('OWNED_PRIVATE_SECRET'));await mount('channels');fireEvent.click(screen.getByRole('button',{name:'测试'}));expect(await screen.findByText('连接失败')).toBeInTheDocument();expect(screen.queryByText('OWNED_PRIVATE_SECRET')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'重新读取'}));await waitFor(()=>expect(endpoint.listChannels).toHaveBeenCalledTimes(2));expect(screen.getByText('连接失败')).toBeInTheDocument();expect(endpoint.testChannel).toHaveBeenCalledExactlyOnceWith('owned');
+ fireEvent.click(screen.getByRole('button',{name:'刷新状态',exact:true}));await waitFor(()=>expect(endpoint.listChannels).toHaveBeenCalledTimes(2));expect(screen.getByText('连接失败')).toBeInTheDocument();expect(endpoint.testChannel).toHaveBeenCalledExactlyOnceWith('owned');
 });
