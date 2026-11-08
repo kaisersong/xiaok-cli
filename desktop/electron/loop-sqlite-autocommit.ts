@@ -43,6 +43,7 @@ export function assertLoopSQLiteAutocommit(db: DatabaseSync, reason: Reason): vo
 
 export function closeLoopSQLiteDatabase(db: DatabaseSync): void {
   // Negative cleanup must remain reachable while the positive fuse is closed.
-  apply(nativeClose, db, []);
+  const returned=apply(nativeClose, db, []);
+  if(returned!==undefined)throw new NativeError('loop_sqlite_close_nonvoid',{cause:returned});
   if (heldFailure?.db === db) heldFailure = undefined;
 }

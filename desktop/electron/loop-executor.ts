@@ -1,4 +1,5 @@
 import {createLoopDatabaseOwnerGroup} from './loop-database-owner.js';
+import {assertLoopDatabaseBirthReady} from './loop-database-birth-custody.js';
 import {registerLoopDatabaseSourceObservation} from './loop-database-source-observation.js';
 import {readLoopCompletedRun} from './loop-completion-consumer.js';
 import {captureLoopRunContext,assertOrdinaryLoopOwner,type LoopRunContext} from './loop-run-context.js';
@@ -312,6 +313,7 @@ const loopLifecycleApply = Reflect.apply, LoopStartupError = Error;
 const ordinaryLoopDiscovery = process.platform !== 'win32';
 
 export function createDesktopLoopRuntime(options: CreateDesktopLoopRuntimeOptions): DesktopLoopRuntime {
+  assertLoopDatabaseBirthReady();
   if (loopLifecycleApply(retainedLoopCount, retainedLoopRuntimeConstructions, []) !== 0) throw new LoopStartupError('loop_runtime_cleanup_unconfirmed');
   const now = options.now ?? (() => Date.now());
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;

@@ -1,4 +1,5 @@
-import {assertLoopSQLiteReady,assertLoopSQLiteAutocommit,closeLoopSQLiteDatabase} from './loop-sqlite-autocommit.js';
+import {assertLoopSQLiteAutocommit,closeLoopSQLiteDatabase} from './loop-sqlite-autocommit.js';
+import {assertLoopDatabaseBirthReady,openLoopDatabaseBirth,commitLoopDatabaseBirth,abortLoopDatabaseBirth,type LoopDatabaseBirth} from './loop-database-birth-custody.js';
 import {assertOrdinarySourceWriterRoute} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import {existsSync,lstatSync,mkdirSync,realpathSync,statSync} from 'node:fs';
 import {basename,dirname,join,resolve} from 'node:path';
@@ -19,7 +20,7 @@ function retain(owner:Owner,raw:unknown){heldOwners.add(owner);owner.failures.pu
 function stop(owner:Owner){owner.stopped=true;try{if(!owner.closed){closeLoopSQLiteDatabase(owner.database);owner.closed=true;}if(owner.inventoryFailure)throw owner.inventoryFailure.raw;owner.stock.assertPhysicalKnown();heldOwners.delete(owner);}catch(raw){retain(owner,raw);throw raw;}}
 function fresh(owner:Owner,closed:boolean){
  if(owner.retirement)throw owner.retirement;
- assertLoopSQLiteReady();if(closed||owner.stopped)throw Error('loop_database_closed');if(owner.inventoryFailure)throw owner.inventoryFailure.raw;owner.stock.assertPhysicalKnown();
+ assertLoopDatabaseBirthReady();if(closed||owner.stopped)throw Error('loop_database_closed');if(owner.inventoryFailure)throw owner.inventoryFailure.raw;owner.stock.assertPhysicalKnown();
  try{assertOrdinarySourceWriterRoute();owner.fence?.assertOpen();assertOrdinarySourceWriterRoute();}
  catch(raw){if(!owner.retirement){owner.retirement=new Error('loop_ordinary_writer_retired',{cause:raw});retain(owner,raw);}throw owner.retirement;}
 }
@@ -28,8 +29,9 @@ function fileIdentity(path:string){if(!existsSync(path))return undefined;const s
 /** Main-owned connections only. Sources convey a local lifetime, never capacity
  * or execution authority. A group is published only after every open succeeds. */
 export function createLoopDatabaseOwnerGroup(paths:readonly string[]){
- assertLoopSQLiteReady();
+ assertLoopDatabaseBirthReady();
  const owners:Owner[]=[],byPath=new Map<string,Owner>(),byIdentity=new Map<string,Owner>();
+ const births:LoopDatabaseBirth[]=[];
  try{
   const result=paths.map(input=>{
    if(typeof input!=='string'||!input||input.includes('\0'))throw Error('loop_database_path');
@@ -37,25 +39,27 @@ export function createLoopDatabaseOwnerGroup(paths:readonly string[]){
    const location=input===':memory:'?input:filePath(input),identity=input===':memory:'?undefined:fileIdentity(location);
    let owner=byPath.get(location)??(identity?byIdentity.get(identity):undefined);
    if(!owner){
-    const database=new DatabaseSync(location);try{database.exec('PRAGMA journal_mode=WAL');database.exec('PRAGMA foreign_keys=ON');database.exec('PRAGMA busy_timeout=5000');owner={database,location,identity:location===':memory:'?undefined:fileIdentity(location),stopped:false,closed:false,components:new Set(),layoutRevision:0,stock:createRoomTurnCustody(),failures:[],fence:location===':memory:'?undefined:createKnownDirectoryWriterFence(dirname(location),'sqlite-db')};owners.push(owner);}
-    catch(error){try{database.close();}catch{/* Keep the initialization error. */}throw error;}
+    const birth=openLoopDatabaseBirth(location);births.push(birth);const database=birth.database;
+    database.exec('PRAGMA journal_mode=WAL');database.exec('PRAGMA foreign_keys=ON');database.exec('PRAGMA busy_timeout=5000');owner={database,location,identity:location===':memory:'?undefined:fileIdentity(location),stopped:false,closed:false,components:new Set(),layoutRevision:0,stock:createRoomTurnCustody(),failures:[],fence:location===':memory:'?undefined:createKnownDirectoryWriterFence(dirname(location),'sqlite-db')};owners.push(owner);
     const openedIdentity=location===':memory:'?undefined:fileIdentity(location);if(openedIdentity)byIdentity.set(openedIdentity,owner);
    }
    if(location!==':memory:')byPath.set(realpathSync(location),owner);
    byPath.set(location,owner);const source=Object.freeze({}) as LoopDatabaseSource;sources.set(source,owner);return source;
   });
-  return Object.freeze({sources:Object.freeze(result),close(){const errors:unknown[]=[];for(const owner of [...owners].reverse()){try{stop(owner);}catch(error){errors.push(error);}}if(errors.length)throw new AggregateError(errors,'loop_database_close');}});
- }catch(error){for(const owner of owners.reverse()){try{stop(owner);}catch{/* Retain the original initialization error. */}}throw error;}
+  const group=Object.freeze({sources:Object.freeze(result),close(){const errors:unknown[]=[];for(const owner of [...owners].reverse()){try{stop(owner);}catch(error){errors.push(error);}}if(errors.length)throw new AggregateError(errors,'loop_database_close');}});
+  for(let i=0;i<births.length;i++)commitLoopDatabaseBirth(births[i]!);
+  return group;
+ }catch(error){for(let i=0;i<owners.length;i++)owners[i]!.stopped=true;for(let i=births.length-1;i>=0;i--)abortLoopDatabaseBirth(births[i]!,error);throw error;}
 }
 export function openLoopDatabase(input:string|LoopDatabaseSource):LoopDatabaseLease {
- assertLoopSQLiteReady();
+ assertLoopDatabaseBirthReady();
  const standalone=typeof input==='string'?createLoopDatabaseOwnerGroup([input]):undefined;
  const source=standalone?.sources[0]??input,owner=source&&typeof source==='object'?sources.get(source):undefined;
  if(!owner)throw Error('loop_database_source');if(owner.stopped)throw Error('loop_database_closed');
  fresh(owner,false);
  let closed=false;
  const lease:LoopDatabaseLease=Object.freeze({
-  get database(){assertLoopSQLiteReady();if(closed||owner.stopped)throw Error('loop_database_closed');return owner.database;},
+  get database(){assertLoopDatabaseBirthReady();if(closed||owner.stopped)throw Error('loop_database_closed');return owner.database;},
   runWrite(sql:string,...bindings:unknown[]){
    if(owner.retirement)throw owner.retirement;if(typeof sql!=='string')throw Error('loop_sqlite_sql');
    const snapshot=captureLoopSQLiteBindings(bindings);fresh(owner,closed);
@@ -94,7 +98,7 @@ export interface LoopDatabaseMetadataFacts {
 /** Local physical observations only. These neither grant capacity nor prove
  * exclusion of another process; installed admission needs the broker custody. */
 export function describeLoopDatabaseSource(source:LoopDatabaseSource):Readonly<LoopDatabaseMetadataFacts> {
- assertLoopSQLiteReady();
+ assertLoopDatabaseBirthReady();
  const owner=source&&typeof source==='object'?sources.get(source):undefined;
  if(!owner)throw Error('loop_database_source');if(owner.stopped)throw Error('loop_database_closed');
  assertLoopSQLiteAutocommit(owner.database,'loop_database_metadata_transaction');
