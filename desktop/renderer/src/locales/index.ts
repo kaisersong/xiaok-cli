@@ -1,3 +1,4 @@
+import type {SecureCredentialsLabels} from './secure-credentials';
 import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
 import type { RoomWorkspaceLabels } from './room-workspace';
 import { zh } from "./zh";
@@ -7,6 +8,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  secureCredentials:SecureCredentialsLabels;
   assistantInbox: import('./assistant-inbox').AssistantInboxLabels;
   mailConnectors: import('./mail-connectors').MailConnectorLabels;
   loopPublication: import('./loop-publication').LoopPublicationLabels;

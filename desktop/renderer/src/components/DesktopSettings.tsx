@@ -1,3 +1,4 @@
+import {SecretInput} from './security/SecretInput';
 import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
@@ -739,8 +740,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAppKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAppKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
@@ -750,8 +750,7 @@ function VoicePane() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAccessKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAccessKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
@@ -788,8 +787,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.aliyunApiKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, aliyunApiKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
@@ -1484,8 +1482,8 @@ function ModelPane() {
                     {selectedProvider === provider.id && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="relative flex-1">
-                          <input aria-label="sk-..."
-                            type={showKey ? 'text' : 'password'}
+                          <SecretInput aria-label="sk-..."
+                            revealed={showKey}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                             placeholder="sk-..."
@@ -4736,8 +4734,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiK
 
   return (
     <div className="mt-2 flex items-center gap-2">
-      <input
-        type="password"
+      <SecretInput
         aria-label={ariaLabel}
         placeholder={placeholder}
         className={`flex-1 ${inputCls}`}

@@ -1,3 +1,5 @@
+import {configuredCredentialValues} from '../../src/shared/credential-fields.js';
+import {createCredentialInputTools,type CredentialInputPort} from './credential-input-service.js';
 import { createAssistantQuestionTool } from './assistant-question-tool.js';
 import { isAssistantThread } from '../shared/assistant-inbox-contract.js';
 import { createAssistantRegistry,constrainAssistantInvocation,assertAssistantExecutorInput } from './assistant-tool-policy.js';
@@ -522,6 +524,7 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  credentialInputs?:CredentialInputPort;
   mailConnectors?: MailConnectorService;
   assistantOutbox?: { proposeMail(input: import('../shared/mail-connectors-ipc-contract.js').MailSendInput, source:'agent',taskId?:string):unknown;waitForDecision?(id:string,signal?:AbortSignal):Promise<unknown> };
   onAssistantTaskEvent?: (input: import('../../src/runtime/task-host/task-runtime-host.js').PersistedTaskEvent) => void;
@@ -1930,6 +1933,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   );
   const assistantWorkRoot = join(options.dataRoot, 'assistant-workspace');
   const assistantRegistry = createAssistantRegistry(assistantWorkRoot, options.mailConnectors ? createMailTools(options.mailConnectors, options.assistantOutbox, true) : []);
+  if(options.credentialInputs)for(const tool of createCredentialInputTools(options.credentialInputs))assistantRegistry.registerTool(tool);
   const assistantCatalog = multiAgentStore ? new DesktopToolCatalogBridge({ registry: assistantRegistry, workspaceId: multiAgentWorkspaceId, getService: () => multiAgentService }) : undefined;
   const assistantRunner = createDesktopModelRunnerWithRegistry(assistantRegistry, [], options.dataRoot, options.kswarmService, materialRegistry, {}, {
     assistantOnly: true, cwd: assistantWorkRoot,
@@ -3731,6 +3735,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       for(const tool of tools) { if(!['assistant_read_sources','assistant_prepare_reply'].includes(tool.definition.name))throw Error('assistant_tool_denied'); assistantRegistry.registerTool(tool); }
       connectorsService.bindTools(assistantRegistry); assistantRegistry.unregisterTool('web_fetch'); assistantRegistry.unregisterTool('tool_search');
     },
+    refreshConnectorCredentials:()=>connectorsService.refreshStoredCredentials(),
     searchForAssistant(query:string, signal:AbortSignal) { const tool=assistantRegistry.getRegisteredTool('web_search'); if(!tool)throw Error('assistant_source_failed'); return tool.execute({query,count:5,max_chars:10000},{signal} as never); },
     createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
       assertAssistantExecutorInput(input,codexTasks.selected());
@@ -8079,7 +8084,7 @@ export function createDesktopModelRunnerWithRegistry(
 ): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
   const nativeReadonlyOnly = registry.isNativeReadonlyOnly;
   const assistantQuestionPorts=new Map<string,NonNullable<TaskRunnerInput['askUser']>>();
-  if(runnerOptions.assistantOnly)registry.registerTool(createAssistantQuestionTool(assistantQuestionPorts));
+  if(runnerOptions.assistantOnly)registry.registerTool(createAssistantQuestionTool(assistantQuestionPorts,()=>configuredCredentialValues(loadConfigSync())));
 
   const cwd = runnerOptions.cwd ?? runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();

@@ -1,3 +1,4 @@
+import {secureCredentialsEn} from './secure-credentials';
 import { assistantInboxEn } from './assistant-inbox';
 import {loopPublicationEn} from './loop-publication';
 import type { LocaleStrings } from "./index";
@@ -5,6 +6,7 @@ import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  secureCredentials:secureCredentialsEn,
   assistantInbox: assistantInboxEn,
   mailConnectors: {
     smtpHost:'SMTP server',smtpPort:'SMTP port',smtpHelp:'Uses the same email account and app password. Port 465 uses TLS; all other ports must support STARTTLS.',

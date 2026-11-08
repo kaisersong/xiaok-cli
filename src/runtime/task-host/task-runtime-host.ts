@@ -69,7 +69,7 @@ export interface TaskRunnerInput {
   /** Main-only, task/incarnation scoped; never accepted from a renderer draft. */
   executionPersistence?: DesktopExecutionPersistence;
   /** Main-only input-bound wait port; never read from task creation or IPC data. */
-  askUser?: (input: {prompt:string;choices?:Array<{id:string;label:string}>}, signal?:AbortSignal) => Promise<string>;
+  askUser?: (input: {prompt:string;choices?:Array<{id:string;label:string}>;validateAnswer?:(answer:string)=>void}, signal?:AbortSignal) => Promise<string>;
   taskId: string;
   sessionId: string;
   prompt: string;
@@ -411,7 +411,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly sourceCloseFailures: unknown[] = [];
   private readonly sourceClosingExecutions = new Map<string, { promise: Promise<void>; execution?: ActiveExecution }>();
   private readonly questions = new NeedsUserQuestionCorrelator();
-  private readonly liveQuestionAnswers = new Map<string,{question:NeedsUserQuestion;execution:ActiveExecution;ready:boolean;signal:AbortSignal;resolve:(value:string)=>void;reject:(error:unknown)=>void}>();
+  private readonly liveQuestionAnswers = new Map<string,{question:NeedsUserQuestion;execution:ActiveExecution;ready:boolean;signal:AbortSignal;validateAnswer?:(answer:string)=>void;resolve:(value:string)=>void;reject:(error:unknown)=>void}>();
   private readonly subscribers = new Map<string, Set<LiveSubscription>>();
   private readonly mutationChains = new Map<string, Promise<void>>();
   private readonly cancellingTaskIds = new Set<string>();
@@ -793,14 +793,14 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return this.runSourceOperation(() => this.answerQuestionSourceOwned(input));
   }
 
-  private async askExecutionUser(taskId:string,execution:ActiveExecution,input:{prompt:string;choices?:Array<{id:string;label:string}>},outerSignal?:AbortSignal):Promise<string> {
+  private async askExecutionUser(taskId:string,execution:ActiveExecution,input:{prompt:string;choices?:Array<{id:string;label:string}>;validateAnswer?:(answer:string)=>void},outerSignal?:AbortSignal):Promise<string> {
     const signal=outerSignal?AbortSignal.any([execution.controller.signal,outerSignal]):execution.controller.signal;
     const current=()=>{if(this.activeExecutions.get(taskId)!==execution||execution.phase!=='runner')throw Error('SOL_PI_DESKTOP_EXECUTION_EXPIRED');signal.throwIfAborted();};
     current();if(this.liveQuestionAnswers.has(taskId))throw Error('task_question_already_pending');
     if(typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>2000||input.choices&&(input.choices.length>8||input.choices.some(c=>!c.id||c.id.length>80||!c.label||c.label.length>300)||new Set(input.choices.map(c=>c.id)).size!==input.choices.length))throw Error('task_question_invalid');
     const question:NeedsUserQuestion={taskId,questionId:`question_${randomUUID()}`,kind:'freeform',prompt:input.prompt.trim(),...(input.choices?.length?{choices:input.choices.map(c=>({...c}))}:{})};
     let resolve!:(value:string)=>void,reject!:(error:unknown)=>void;const answer=new Promise<string>((yes,no)=>{resolve=yes;reject=no;});void answer.catch(()=>{});
-    const pending={question,execution,ready:false,signal,resolve,reject};this.liveQuestionAnswers.set(taskId,pending);this.questions.publish(question);
+    const pending={question,execution,ready:false,signal,validateAnswer:input.validateAnswer,resolve,reject};this.liveQuestionAnswers.set(taskId,pending);this.questions.publish(question);
     const abort=()=>reject(Error('task_question_aborted'));signal.addEventListener('abort',abort,{once:true});execution.health?.wait(question.questionId);
     try{await this.flushRuntimeEvents(taskId);current();await this.appendEvent(taskId,{type:'needs_user',question},{runtimeOrigin:true,execution});current();pending.ready=true;return await answer;}
     finally{signal.removeEventListener('abort',abort);execution.health?.resume(question.questionId);if(this.liveQuestionAnswers.get(taskId)===pending)this.liveQuestionAnswers.delete(taskId);this.questions.clear(taskId,question.questionId);}
@@ -817,6 +817,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       if(input.answer.type==='choice'){value=pending.question.choices?.find(c=>c.id===(input.answer as {choiceId:string}).choiceId)?.label;if(value===undefined)throw Error('task_question_invalid_choice');}
       else if(input.answer.type==='text'&&input.answer.text.trim()&&input.answer.text.length<=12000)value=input.answer.text;
       else throw Error('task_question_invalid_answer');
+      pending.validateAnswer?.(value!);
       pending.ready=false;
     }
     const result = this.questions.answer(input.taskId, input.answer);

@@ -1,3 +1,4 @@
+import {secureCredentialsZh} from './secure-credentials';
 import { assistantInboxZh } from './assistant-inbox';
 import {loopPublicationZh} from './loop-publication';
 import type { LocaleStrings } from "./index";
@@ -5,6 +6,7 @@ import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  secureCredentials:secureCredentialsZh,
   assistantInbox: assistantInboxZh,
   mailConnectors: {
     smtpHost:'SMTP 服务器',smtpPort:'SMTP 端口',smtpHelp:'使用同一邮箱账号与授权码。465 使用 TLS；其他端口必须支持 STARTTLS。',

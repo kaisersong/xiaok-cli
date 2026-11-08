@@ -104,6 +104,7 @@
     "@modelcontextprotocol/client": "2.3.0",
     "@modelcontextprotocol/ext-tasks": "0.2.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/keyring": "2.1.2",
     "@yunzhijia/cli": "0.1.8",
     "ajv": "8.20.0",
     "beautiful-mermaid": "^1.1.3",
