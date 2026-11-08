@@ -33,10 +33,27 @@ it.each(['protected','unavailable'] as const)('denies %s string standalone open 
 it.each(['protected','unavailable'] as const)('denies a fresh lease from an existing source after route changes to %s',kind=>{
  const path=join(root,'existing.sqlite'),group=createLoopDatabaseOwnerGroup([path]);closes.push(()=>group.close());
  const existing=openLoopDatabase(group.sources[0]!);closes.push(()=>existing.close());existing.database.exec("CREATE TABLE sentinel(value TEXT);INSERT INTO sentinel VALUES('original')");
- const opens=leaf.paths.length;leaf.kind=kind;
- let leaked:ReturnType<typeof openLoopDatabase>|undefined;
- try{expect(()=>{leaked=openLoopDatabase(group.sources[0]!);leaked.database.exec("INSERT INTO sentinel VALUES('forbidden')");}).toThrow('ordinary_source_route');}finally{leaked?.close();}
- expect(leaf.paths).toHaveLength(opens);expect(existing.database.prepare('SELECT value FROM sentinel').all()).toEqual([{value:'original'}]);
+ const opens=leaf.paths.length;
+ let retirement:Error|undefined,originalCause:unknown;
+ // Observed route loss retires this owner permanently, including after the
+ // ambient route becomes ordinary again. Both failures keep the original cause.
+ for(const route of [kind,'ordinary'] as const){
+  leaf.kind=route;
+  let leaked:ReturnType<typeof openLoopDatabase>|undefined,thrown=false,raw:unknown;
+  try{
+   leaked=openLoopDatabase(group.sources[0]!);
+   leaked.database.exec("INSERT INTO sentinel VALUES('forbidden')");
+  }catch(error){thrown=true;raw=error;}finally{leaked?.close();}
+  expect(thrown).toBe(true);expect(raw).toBeInstanceOf(Error);
+  expect((raw as Error).message).toBe('loop_ordinary_writer_retired');
+  const cause=Object.getOwnPropertyDescriptor(raw as Error,'cause');
+  expect(cause&&Object.hasOwn(cause,'value')).toBe(true);
+  expect(cause?.value).toBeInstanceOf(Error);
+  expect(cause?.value.message).toBe('ordinary_source_route');
+  if(retirement){expect(raw).toBe(retirement);expect(cause?.value).toBe(originalCause);}
+  else{retirement=raw as Error;originalCause=cause?.value;}
+  expect(leaf.paths).toHaveLength(opens);expect(existing.database.prepare('SELECT value FROM sentinel').all()).toEqual([{value:'original'}]);
+ }
 });
 it.each(['protected','unavailable'] as const)('rechecks the second group input after its getter switches route to %s',kind=>{
  const first=join(root,'first','one.sqlite'),second=join(root,'second','two.sqlite'),paths=[first,second];
