@@ -4,7 +4,7 @@ import { buildToolList } from '../../src/ai/tools/index.js';
 import type { Tool } from '../../src/types.js';
 import { DesktopOwnedToolRegistry } from './desktop-multi-agent-catalog-bridge.js';
 const NATIVE_NAMES=new Set(['read','write','edit','web_search','kim_judge_messages','kim_model_status']);
-const EXTRA_NAMES=new Set(['mail_list_accounts','mail_search','mail_read','mail_send','assistant_read_sources','assistant_prepare_reply','assistant_list_calendar_events','assistant_prepare_calendar_event']);
+const EXTRA_NAMES=new Set(['mail_list_accounts','mail_search','mail_read','mail_send','assistant_read_sources','assistant_analyze_messages','assistant_prepare_reply','assistant_list_calendar_events','assistant_prepare_calendar_event']);
 /** Construct from native factories, never from the broad host/MCP registry. */
 export function createAssistantRegistry(root:string,extras:Tool[]):DesktopOwnedToolRegistry{
  mkdirSync(root,{recursive:true,mode:0o700});const native=buildToolList(undefined,{cwd:root,allowOutsideCwd:false}).filter(tool=>NATIVE_NAMES.has(tool.definition.name));

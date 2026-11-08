@@ -1,3 +1,4 @@
+import {readAssistantMessageWindows} from './assistant-message-reader.js';
 import { spawn } from 'node:child_process';
 import {attentionId} from './assistant-inbox-store.js';
 import { createHash } from 'node:crypto';
@@ -16,6 +17,7 @@ export class AssistantYzjClient {
  constructor(deps:{run?:(args:string[],signal?:AbortSignal)=>Promise<unknown>}={}){this.run=deps.run??runAssistantYzj;}
  private async data(args:string[],signal?:AbortSignal){const result=object(await this.run(args,signal));if(result.success!==true)throw Error('assistant_source_failed');return object(result.data);}
  private async actor(signal?:AbortSignal){const data=await this.data(['whoami'],signal);if(typeof data.openId!=='string'||!data.openId||data.openId.length>256||data.openId.includes('\0')||typeof data.orgId!=='string'||!data.orgId||data.tokenStatus==='expired')throw Error('assistant_account_changed');return {openId:data.openId,identity:createHash('sha256').update(JSON.stringify([data.orgId,data.openId])).digest('hex')};}
+ async readMessages(raw:unknown,signal=new AbortController().signal,progress?:()=>void,naiveTimeZone=''){return readAssistantMessageWindows({actor:s=>this.actor(s),data:(args,s)=>this.data(args,s)},raw,signal,progress,naiveTimeZone);}
  async identity(signal?:AbortSignal):Promise<string>{return (await this.actor(signal)).identity;}
  async listCalendar(raw:unknown,signal?:AbortSignal){const range=ASSISTANT_CALENDAR_RANGE_SCHEMA.parse(raw),identity=await this.identity(signal);const data=await this.data(['calendar','event','list',`--start=${range.startDate}`,`--end=${range.endDate}`],signal);if(!Array.isArray(data.list))throw Error('assistant_source_failed');let partial=data.list.length>100||data.more===true||Number(data.count)>100;const items: Array<AssistantCalendarEvent&{id:string}>=[];for(const row of list(data.list).slice(0,100)){if(row.cancelReason||Number(row.cancelDate)>0)continue;try{const id=text(row.id,256);if(!id)throw Error('missing_id');const event=normalizeAssistantCalendarEvent({title:text(row.title,100),startAt:new Date(Number(row.startDate)).toISOString(),endAt:new Date(Number(row.endDate)).toISOString(),description:text(row.content,4000)});items.push({id,...event});}catch{partial=true;}}signal?.throwIfAborted();if(await this.identity(signal)!==identity)throw Error('assistant_account_changed');return {items,partial};}
  async createCalendar(raw:unknown,expectedIdentity:string,requestSource?:AssistantActor):Promise<{eventId:string}>{

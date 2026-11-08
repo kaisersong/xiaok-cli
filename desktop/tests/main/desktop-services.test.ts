@@ -280,9 +280,27 @@ describe('desktop services', () => {
       expect(captured).toHaveLength(1);
       expect(captured[0].prompt).toContain('内置技能：小K助理');
       expect(captured[0].prompt).toContain('assistant_prepare_calendar_event');
-      expect(captured[0].names).toEqual(expect.arrayContaining(['kim_judge_messages','kim_model_status','ask_user','assistant_list_calendar_events','assistant_prepare_calendar_event']));
+      expect(captured[0].names).toEqual(expect.arrayContaining(['kim_judge_messages','kim_model_status','ask_user','assistant_list_calendar_events','assistant_prepare_calendar_event','assistant_analyze_messages']));
       for(const forbidden of ['tool_search','bash','spawn_agent','skill','install_skill'])expect(captured[0].names).not.toContain(forbidden);
     } finally {stream.mockRestore();inbox.dispose();await inbox.drain();inbox.close();}
+  });
+
+  it('delivers bounded whole original-message JSON through the actual assistant runner to the adapter', async () => {
+    const {AssistantYzjClient}=await import('../../electron/assistant-yzj-cli.js');
+    const {KimDecisionRuntime}=await import('../../../src/ai/kim/runtime.js');
+    const {DEFAULT_CONFIG}=await import('../../../src/types.js');
+    const {kimScores}=await import('../fixtures/kim-scores.js');
+    const original='原文\n"quoted" '+ '汉'.repeat(9900);
+    const cloud=new AssistantYzjClient({run:async args=>args[0]==='whoami'?{success:true,data:{openId:'self',orgId:'org'}}:args[1]==='group'?{success:true,data:{list:[{groupId:'g',groupName:'Synthetic'}]}}:{success:true,data:{list:Array.from({length:5},(_,i)=>({msgId:'m'+i,content:original,fromOpenId:i===0?'self':'other',sendTime:`2026-11-08T10:0${i}:00+08:00`}))}}});
+    const realRead=cloud.readMessages.bind(cloud),realIdentity=cloud.identity.bind(cloud);
+    const readSpy=vi.spyOn(AssistantYzjClient.prototype,'readMessages').mockImplementation(realRead),identitySpy=vi.spyOn(AssistantYzjClient.prototype,'identity').mockImplementation(realIdentity);
+    const config=structuredClone(DEFAULT_CONFIG);config.kimDecision={enabled:true};
+    const kim=new KimDecisionRuntime({load:async()=>config,save:async()=>{},client:{judge:async windows=>windows.map(()=>kimScores)} as never});
+    const services=createDesktopServices({dataRoot:join(rootDir,'data'),kswarmService:mockKSwarmService()});
+    const inbox=createDesktopAssistantInbox({dataRoot:join(rootDir,'data'),kim,crypto:{isEncryptionAvailable:()=>true,encryptString:(s:string)=>Buffer.from(s),decryptString:(b:Buffer)=>b.toString()},mail:{list:()=>[]} as never,llm:{complete:vi.fn()},profile:()=>({active:true,timeZone:'Asia/Shanghai'}),search:async()=>'',launch:async()=>({taskId:'unused'}),canLaunch:()=>{},changed:()=>{},internal:async()=>[],facts:()=>[],reminders:{create:()=>'',cancel:()=>{}}});
+    services.bindAssistantTools(inbox.tools,'user');await services.saveModelConfig({providerId:'openai',apiKey:'sk-fixture'},undefined,'user');
+    let turn=0;let received='';const stream=vi.spyOn(OpenAIAdapter.prototype,'stream').mockImplementation(async function*(messages){if(turn++===0){yield {type:'tool_use',id:'original-analysis',name:'assistant_analyze_messages',input:{startAt:'2026-11-02T00:00:00+08:00',endAt:'2026-11-08T23:59:59+08:00'}};}else{received=messages.flatMap(m=>m.content).filter(b=>b.type==='tool_result').map(b=>b.type==='tool_result'?b.content:'').find(s=>s.includes('outputOmitted'))??'';yield {type:'text',delta:'Analysis ready'};}yield {type:'done'};});
+    try{const created=await services.createTask({prompt:'今天周日，分析本周消息',materials:[],context:{threadId:'a0c11111-1111-4111-8111-111111111111'}});await waitFor(async()=>['completed','failed'].includes((await services.recoverTask(created.taskId)).snapshot.status));expect(received).not.toBe('');const parsed=JSON.parse(received);expect(parsed.coverage.analyzed).toBe(5);expect(parsed.coverage.outputOmitted).toBeGreaterThan(0);expect(parsed.items.every((x:{text:string})=>x.text===original)).toBe(true);expect(Buffer.byteLength(received)).toBeLessThanOrEqual(100000);}finally{stream.mockRestore();readSpy.mockRestore();identitySpy.mockRestore();inbox.dispose();await inbox.drain();inbox.close();}
   });
 
   it('hashes the physical app.asar and restores Electron ASAR handling', () => {

@@ -3739,7 +3739,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     assertAssistantExecutor() { if (codexTasks.selected()) throw Error('assistant_executor_unavailable'); },
     bindAssistantTools(tools: Tool[], requestSource:'user') {
       if(requestSource!=='user')throw Error('assistant_user_only');
-      for(const tool of tools) { if(!['assistant_read_sources','assistant_prepare_reply','assistant_list_calendar_events','assistant_prepare_calendar_event'].includes(tool.definition.name))throw Error('assistant_tool_denied'); assistantRegistry.registerTool(tool); }
+      for(const tool of tools) { if(!['assistant_read_sources','assistant_prepare_reply','assistant_list_calendar_events','assistant_prepare_calendar_event','assistant_analyze_messages'].includes(tool.definition.name))throw Error('assistant_tool_denied'); assistantRegistry.registerTool(tool); }
       connectorsService.bindTools(assistantRegistry); assistantRegistry.unregisterTool('web_fetch'); assistantRegistry.unregisterTool('tool_search');
     },
     refreshConnectorCredentials:()=>connectorsService.refreshStoredCredentials(),
