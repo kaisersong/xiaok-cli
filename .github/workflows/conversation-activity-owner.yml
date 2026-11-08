@@ -1,0 +1,84 @@
+name: Conversation activity owner lifecycle
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/runtime/conversation-activity/**'
+      - 'tests/runtime/conversation-activity/**'
+      - 'tests/support/**'
+      - 'scripts/copy-test-assets.mjs'
+      - 'scripts/verification/copy-windows-absence.mjs'
+      - 'desktop/electron/*.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'scripts/repair-better-sqlite3-types.cjs'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'vitest.sandbox.config.mjs'
+      - '.github/workflows/conversation-activity-owner.yml'
+  pull_request:
+    paths:
+      - 'src/runtime/conversation-activity/**'
+      - 'tests/runtime/conversation-activity/**'
+      - 'tests/support/**'
+      - 'scripts/copy-test-assets.mjs'
+      - 'scripts/verification/copy-windows-absence.mjs'
+      - 'desktop/electron/*.mjs'
+      - 'scripts/copy-glob-worker.mjs'
+      - 'scripts/repair-better-sqlite3-types.cjs'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'vitest.sandbox.config.mjs'
+      - '.github/workflows/conversation-activity-owner.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  owner-lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2022]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact event head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Compile original test graph and copy its assets
+        run: npm run test:sandbox:build
+      - name: Check original owner and readonly lifecycle files
+        shell: bash
+        run: |
+          set -o pipefail
+          node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.sandbox.config.mjs --configLoader runner --maxWorkers=1 --minWorkers=1 \
+            .test-dist/tests/runtime/conversation-activity/owner-process.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-lock-start.test.js \
+            .test-dist/tests/runtime/conversation-activity/store-write-unconfirmed.post-only.test.js \
+            .test-dist/tests/runtime/conversation-activity/native-source-store-floor.test.js \
+            .test-dist/tests/runtime/conversation-activity/storage-permissions.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-launcher-exit.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-protocol.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-host.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-retire.test.js \
+            .test-dist/tests/runtime/conversation-activity/readonly-compat.test.js \
+            .test-dist/tests/runtime/conversation-activity/owner-pending-tasks.test.js 2>&1 | tee owner-lifecycle.log
+      - name: Preserve actual lifecycle test results
+        if: always() && hashFiles('owner-lifecycle.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: conversation-owner-${{ matrix.os }}-node-${{ matrix.node }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: owner-lifecycle.log
+          if-no-files-found: error
