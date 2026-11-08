@@ -1,4 +1,4 @@
-import { isKimiCodingModel } from './kimi-models.js';
+import { isKimiCodingRuntimeModel } from './kimi-models.js';
 import { getSupportedModelReasoningEfforts } from './model-reasoning-effort.js';
 import type { ConfigInput } from '../../types.js';
 import { normalizeConfig } from './normalize.js';
@@ -65,7 +65,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
   }
 
   const catalogRuntimeModel = providerId === 'kimi'
-    && isKimiCodingModel(catalogModel?.model)
+    && isKimiCodingRuntimeModel(catalogModel?.model)
     && (
       providerConfig.protocol !== 'openai_legacy'
       || !isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
@@ -73,21 +73,27 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     ? undefined
     : catalogModel;
   const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (
-    isKimiCodingModel(wireModel)
+    isKimiCodingRuntimeModel(wireModel)
     && providerConfig.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );
-  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
+  // New catalog selections copy K2.8 vision metadata as well as runtime options.
+  // An effort alone is not an opt-in: master ignored saved alias options (issue195).
+  const legacyCodingAlias = providerId === 'kimi' && wireModel === 'kimi-for-coding'
+    && !modelEntry.capabilities?.includes('image_in');
+  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions && !legacyCodingAlias
     ? modelEntry.runtimeOptions
     : undefined;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol: providerConfig.protocol,
     baseUrl: transport.baseUrl,
     wireModel,
-    catalogOptions: catalogRuntimeModel?.runtimeOptions,
+    catalogOptions: legacyCodingAlias && catalogModel
+      ? { contextLimit: 262_144 }
+      : catalogRuntimeModel?.runtimeOptions,
     catalogConstraints: catalogRuntimeModel?.runtimeConstraints,
     configuredOptions: configuredRuntimeOptions,
-    reasoningEfforts: getSupportedModelReasoningEfforts({ providerId, providerType: providerConfig.type, protocol: providerConfig.protocol, wireModel, baseUrl: transport.baseUrl }),
+    reasoningEfforts: legacyCodingAlias ? [] : getSupportedModelReasoningEfforts({ providerId, providerType: providerConfig.type, protocol: providerConfig.protocol, wireModel, baseUrl: transport.baseUrl }),
   });
 
   return {
@@ -108,7 +114,7 @@ export function resolveRuntimeModelBinding(rawConfig: ConfigInput, requestedMode
     // 的 custom provider 拿到的是官方 profile，但运行在自己 baseUrl 上的模型
     // 不能继承官方能力（评审 P2 #4）——custom 无显式声明时按保守空集。
     capabilities: modelEntry.capabilities
-      ?? catalogModel?.capabilities
+      ?? (legacyCodingAlias && catalogModel ? ['tools', 'thinking'] : catalogModel?.capabilities)
       ?? (providerConfig.type === 'first_party'
         ? providerProfile?.defaultModel.capabilities ?? []
         : []),

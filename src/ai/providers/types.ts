@@ -40,6 +40,8 @@ export interface ModelConfigEntry {
 }
 
 export interface ProviderModelVariant {
+  /** Release year of the model currently served by this wire (stable aliases included). */
+  releaseYear?: number;
   modelId: string;
   model: string;
   label: string;

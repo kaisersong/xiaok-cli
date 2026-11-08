@@ -1,3 +1,4 @@
+import { loadCurrentRecommendedModelIds } from '../lib/model-recommendations';
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   CheckCircle,
@@ -91,29 +92,13 @@ const VENDOR_URLS: Record<Vendor, string> = {
   gemini: "https://generativelanguage.googleapis.com/v1beta",
 };
 
-const RECOMMENDED_PATTERNS: Record<Vendor, string[]> = {
-  openai_responses: ["gpt-4o", "gpt-4o-mini"],
-  openai_chat_completions: ["gpt-4o", "gpt-4o-mini"],
-  anthropic: ["claude-3-5-sonnet", "claude-3-5-haiku", "claude-3-haiku"],
-  gemini: ["gemini-2.0-flash", "gemini-1.5-pro"],
-};
-
 function getDefaultSelectedIds(
   models: AvailableModel[],
-  vendor: Vendor,
+  recommendedIds: Set<string>,
 ): Set<string> {
-  const patterns = RECOMMENDED_PATTERNS[vendor];
-  const selected = new Set<string>();
-  const importable = models.filter((m) => !m.configured);
-
-  for (const pattern of patterns) {
-    const match = importable.find((m) => m.id.toLowerCase().includes(pattern));
-    if (match) selected.add(match.id);
-  }
-
-  if (selected.size === 0) {
-    importable.slice(0, 2).forEach((m) => selected.add(m.id));
-  }
+  const selected = new Set(models
+    .filter(model => !model.configured && recommendedIds.has(model.id))
+    .slice(0, 2).map(model => model.id));
 
   return selected;
 }
@@ -793,7 +778,9 @@ export function OnboardingWizard({ onComplete }: Props) {
       );
       const models = response.models ?? [];
       setAvailableModels(models);
-      setSelectedModelIds(getDefaultSelectedIds(models, vendor));
+      const providerId = vendor === 'anthropic' ? 'anthropic' : vendor === 'gemini' ? 'gemini' : 'openai';
+      const recommendedIds = await loadCurrentRecommendedModelIds(providerId);
+      setSelectedModelIds(getDefaultSelectedIds(models, recommendedIds));
       setModelImportStatus(
         models.filter((m) => !m.configured).length > 0 ? "ready" : "empty",
       );
