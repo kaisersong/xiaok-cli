@@ -60,6 +60,13 @@ jobs:
         node: ['22.14.0', '24']
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare the fixed KSwarm test child Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - name: Retain the absolute KSwarm test child executable
+        id: ks_test_node
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'executable=' + process.execPath + '\n')"
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -67,11 +74,20 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      - name: Keep client Node and KSwarm test child Node separate
+        env:
+          KS_TEST_NODE_EXECUTABLE: ${{ steps.ks_test_node.outputs.executable }}
+        run: node -e "const fs=require('node:fs'),path=require('node:path');const child=process.env.KS_TEST_NODE_EXECUTABLE;if(!child||!path.isAbsolute(child))throw Error('ks_test_node_missing');fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE='+child+'\n');console.log(JSON.stringify({clientNode:process.versions.node,clientExecutable:process.execPath,ksChildExecutable:child}));"
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+      - name: Original client and independent KSwarm Node executable probes
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/owned-kswarm-node-runtime.test.ts
       - run: npm run test:sandbox:build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -125,6 +141,9 @@ jobs:
           tests/main/loop-runtime-source-registration-failure.test.ts
           tests/main/loop-sqlite-autocommit-compat.test.ts
           tests/main/loop-transaction-rollback.test.ts
+          tests/main/loop-observed-writer.test.ts
+          tests/main/loop-sqlite-bindings.test.ts
+          tests/main/loop-owned-sql-population.test.ts
 
       - name: Prepare pinned native candidate fixtures (macOS)
         if: runner.os == 'macOS'
@@ -138,6 +157,16 @@ jobs:
           git -C ../intent-broker checkout --detach FETCH_HEAD
           npm ci --ignore-scripts --omit=dev --prefix ../kswarm
           npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - name: Desktop model services with the supported KSwarm child (macOS)
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --maxWorkers=1 --minWorkers=1
+          tests/main/desktop-services.test.ts
+          tests/main/desktop-services-model-catalog.test.ts
+          tests/main/desktop-services-pure-node-import.test.ts
+          tests/main/desktop-services-scheduled-task-authority.test.ts
+          tests/renderer/model-recommendations.test.ts
       - name: Uninstalled candidate and owned preparation boundaries (macOS)
         if: runner.os == 'macOS'
         working-directory: desktop
