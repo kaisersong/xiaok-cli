@@ -20,7 +20,7 @@ const apply=Reflect.apply,freeze=Object.freeze,create=Object.create,descriptor=O
 const get=WeakMap.prototype.get,set=WeakMap.prototype.set,isProxy=types.isProxy,NativeError=Error,FunctionPrototype=Function.prototype,prototype=Object.getPrototypeOf;
 const realms=new NativeWeakMap<object,State>();let singleton:MainDshBootstrapAuthority|undefined,birthAttempted=false,birthFailure:unknown;
 const installedPools=new NativeWeakMap<object,InstalledPool>();
-export const {prepareOriginalMainDshKSwarmChild,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut}=createOriginalMainDshCoreAccessors(realms,installedPools);
+export const {assertOptionalOriginalMainDshServiceComponent,prepareOriginalMainDshKSwarmChild,prepareOriginalMainDshInstalledRootPool,readOriginalMainDshStartedCore,openOriginalMainDshInstalledRootPool,readOriginalMainDshAdmissionDatabase,closeOriginalMainDshInstalledRootPool,prepareOriginalMainDshCoreInfrastructure,startOriginalMainDshCoreInfrastructure,prepareOriginalMainDshBudgetWorker,readOriginalMainDshRootNmpLedger,assertOriginalMainDshCoreReady,prepareOriginalMainDshBudgetLifecycle,closeOriginalMainDshCoreInfrastructure,returnOriginalMainDshInstalledRootPool,readOriginalMainDshCoreBootstrap,readOriginalDshAdmissionReferences,readOriginalMainDshBootstrapAuthority,readOriginalMainDshClock,observeOriginalMainDshClockDate,readOriginalMainDshClockCut}=createOriginalMainDshCoreAccessors(realms,installedPools);
 const NativePromise=Promise,nativeThen=Promise.prototype.then;
 const rejected=<T>(raw:unknown):Promise<T>=>new NativePromise<T>((_yes,no)=>no(raw));
 function denied():never{throw new NativeError('DSH_MAIN_NATIVE_AUTHORITY_REQUIRED');}
@@ -36,11 +36,18 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
   const method=(name:string):Function=>{const d=descriptor(api,name);if(!d||!own(d,'value')||typeof d.value!=='function'||isProxy(d.value)||prototype(d.value)!==FunctionPrototype)denied();return d.value;};
   const birth=method('createOriginalMainIssuer'),assert=method('assertOriginalMainIssuerCurrent'),revoke=method('revokeOriginalMainIssuer');
   const optional=(name:string)=>descriptor(api,name)?method(name):undefined;
+  const serviceComponentAssert=optional('assertOriginalMainDshServiceComponent');
   const ksMethods=freeze({prepare:optional('prepareOriginalKSwarmChild'),assert:optional('assertOriginalKSwarmChildPort'),terminal:optional('assertOriginalKSwarmChildTerminal')});
   const issuer=apply(birth,api,[]);if(!issuer||typeof issuer!=='object'||isProxy(issuer)||types.isPromise(issuer))denied();
   let sealed=false,failed=false,store:object|undefined;
   const local=()=>{if(sealed||failed)denied();};
   const current=()=>{local();try{const result=apply(assert,api,[issuer]);if(result!==undefined)denied();}catch(error){failed=true;throw error;}local();};
+  let componentFailure:{raw:unknown}|undefined;
+  const assertServiceComponent=():void|null=>{
+   local();if(componentFailure)throw componentFailure.raw;if(!serviceComponentAssert)return null;
+   try{const raw=apply(serviceComponentAssert,api,[issuer]);if(raw!==undefined)throw new NativeError('DSH_MAIN_SERVICE_COMPONENT_NONVOID',{cause:raw});local();}
+   catch(raw){componentFailure={raw};throw raw;}
+  };
   let installedLease:object|undefined;
   let installedCore=false;
   const prepareInstalled=(core=false):object=>{
@@ -243,6 +250,6 @@ export function createMainDshBootstrapAuthority():MainDshBootstrapAuthority {
    if(!pool)denied();pool.assertReadyForOwner();return installedLease;
   };
   const readAdmission=():OriginalAdmissionDatabaseBundle|null=>{local();if(!installedLease||!installedCore)return null;const pool=apply(get,installedPools,[installedLease]) as InstalledPool|undefined;if(!pool)denied();return pool.readAdmission();};
-  apply(set,realms,[authority,{authority,current,local,references,clock,observeClock,clockView,prepareInstalled,readAdmission,startedCore}]);current();singleton=authority;return authority;
+  apply(set,realms,[authority,{assertServiceComponent,authority,current,local,references,clock,observeClock,clockView,prepareInstalled,readAdmission,startedCore}]);current();singleton=authority;return authority;
  }catch(error){birthFailure=error;throw error;}
 }

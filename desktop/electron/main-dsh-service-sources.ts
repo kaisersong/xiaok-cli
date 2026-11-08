@@ -13,6 +13,7 @@ import {resolveDesktopServiceScope} from './desktop-service-scope.js';
 import type {HarnessUserContext} from './harness-optimization-types.js';
 import {createMainDshBusinessSource,type MainDshBusinessSource} from './main-dsh-business-source.js';
 import {prepareOriginalMainDshKSwarmChild} from './main-dsh-core-kswarm.js';
+import {assertOptionalOriginalMainDshServiceComponent} from './main-dsh-source-component.js';
 
 type Scope=Readonly<{profileId:string;workspaceId:string}>;
 interface OriginalSourceBirth {
@@ -106,8 +107,12 @@ export function prepareOriginalMainDshServiceSources(candidate:unknown,raw:unkno
    const actual=resolveDesktopServiceScope({dataRoot,...(workspaceRoot===undefined?{}:{workspaceRoot})});
    if(!same(row.scope,actual))throw denied();
    readOriginalMainDshControlSourceBinding(row.user).assertLocal();
-   if(readOriginalProductionRootResourceQualification().qualified){
-    row.coreStock=createRoomTurnCustody();
+   row.coreStock=createRoomTurnCustody();
+   const qualified=readOriginalProductionRootResourceQualification().qualified;
+   const component=qualified?null:await row.coreStock.sdk<void|null>(assertOptionalOriginalMainDshServiceComponent,undefined,[birth.realm]);
+   if(row.closing)throw denied();
+   readOriginalMainDshControlSourceBinding(row.user).assertLocal();
+   if(qualified||component!==null){
     row.coreLease=await row.coreStock.sdk<object>(prepareOriginalMainDshCoreInfrastructure,undefined,[birth.realm],{
      accept:value=>!!value&&typeof value==='object'&&!isProxy(value),consumer:closeOriginalMainDshCoreInfrastructure,
     });
@@ -215,10 +220,11 @@ async function closeResources(row:Row,startup:boolean):Promise<void> {
    if(row.runtime)try{await row.stock.consumeResource(disposeOriginalPreparedRuntime,row.runtime,[]);}catch(raw){errors[errors.length]=raw;}
    if(startup){
     if(row.store)try{negativeVoid(closeStore,row.store);row.storeClosed=true;}catch(raw){errors[errors.length]=raw;}
-    if(row.coreLease)try{await row.coreStock!.consumeResource(closeOriginalMainDshCoreInfrastructure,row.coreLease,[row.coreLease]);await row.coreStock!.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
+    if(row.coreLease)try{await row.coreStock!.consumeResource(closeOriginalMainDshCoreInfrastructure,row.coreLease,[row.coreLease]);}catch(raw){errors[errors.length]=raw;}
     try{negativeVoid(birth.realm.seal,birth.realm);}catch(raw){errors[errors.length]=raw;}
    }
   }
+  if(row.coreStock&&(startup||!row.coreLease))try{await row.coreStock.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
   try{await row.stock.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
   const negatives=row.negatives.snapshot();
   for(let i=0;i<negatives.length;i++)try{await negatives[i]!.waitPhysicalKnown();}catch(raw){errors[errors.length]=raw;}
@@ -247,7 +253,8 @@ export async function finishOriginalMainDshServiceStore(lease:unknown):Promise<v
   const stock=createRoomTurnCustody();row.negatives.add(stock);
   try{stock.syncVoid(closeStore,row.store,[]);await stock.waitPhysicalKnown();row.storeClosed=true;}catch(raw){first={raw};}
  }
- if(row.coreLease)try{await row.coreStock!.consumeResource(closeOriginalMainDshCoreInfrastructure,row.coreLease,[row.coreLease]);await row.coreStock!.waitPhysicalKnown();}catch(raw){first??={raw};}
+ if(row.coreLease)try{await row.coreStock!.consumeResource(closeOriginalMainDshCoreInfrastructure,row.coreLease,[row.coreLease]);}catch(raw){first??={raw};}
+ if(row.coreStock)try{await row.coreStock.waitPhysicalKnown();}catch(raw){first??={raw};}
  const authority=createRoomTurnCustody();row.negatives.add(authority);
  try{authority.syncVoid(row.birth.realm.seal,row.birth.realm,[]);await authority.waitPhysicalKnown();}catch(raw){first??={raw};}
  if(first)throw first.raw;
