@@ -1,4 +1,4 @@
-import {assertOrdinarySourceWriterRoute} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
+import {assertOriginalBudgetSourceBirthAllowed} from './harness-budget-source-lifecycle.js';
 import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
@@ -90,7 +90,7 @@ export class HarnessOptimizationLifecycle {
     }
   }
   async prepare(): Promise<{ witness: HarnessOwnerWitness; initializing: boolean; previousDirty: boolean }> {
-    assertOrdinarySourceWriterRoute();
+    assertOriginalBudgetSourceBirthAllowed();
     return this.prepareStorage(false);
   }
   /** Preparation metadata only. Core validates its private lease before using

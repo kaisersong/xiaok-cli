@@ -5,11 +5,13 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 const repo=resolve(import.meta.dirname,'../..');
-const modules=['harness-optimization-store-worker.mjs','harness-dsh-budget-data.mjs','harness-dsh-budget-ledger.mjs','harness-dsh-work-escrow.mjs','harness-dsh-source-read-budget.mjs','harness-dsh-budget-conservative.mjs','harness-dsh-account-revision.mjs','harness-dsh-account-epoch.mjs','harness-dsh-draft-usage.mjs'];
+const modules=['harness-optimization-store-worker.mjs','harness-dsh-budget-data.mjs','harness-dsh-budget-ledger.mjs','harness-dsh-work-escrow.mjs','harness-dsh-source-read-budget.mjs','harness-dsh-budget-conservative.mjs','harness-dsh-account-revision.mjs','harness-dsh-account-epoch.mjs','harness-dsh-draft-usage.mjs','harness-dsh-worker-initialize.mjs'];
 function fixture(missing){
  const root=mkdtempSync(join(tmpdir(),'copy-harness-draft-usage-'));
  mkdirSync(join(root,'scripts'),{recursive:true});mkdirSync(join(root,'desktop/electron'),{recursive:true});
  copyFileSync(join(repo,'scripts/copy-harness-runtime.mjs'),join(root,'scripts/copy-harness-runtime.mjs'));
+ mkdirSync(join(root,'native/protected-sqlite-facade'),{recursive:true});
+ copyFileSync(join(repo,'native/protected-sqlite-facade/index.cjs'),join(root,'native/protected-sqlite-facade/index.cjs'));
  for(const name of modules)if(name!==missing)copyFileSync(join(repo,'desktop/electron',name),join(root,'desktop/electron',name));
  return {root,run:()=>spawnSync(process.execPath,[join(root,'scripts/copy-harness-runtime.mjs')],{cwd:root,encoding:'utf8',timeout:10000})};
 }
