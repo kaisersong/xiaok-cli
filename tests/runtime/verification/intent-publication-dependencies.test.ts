@@ -1,3 +1,4 @@
+import {createIntentDependencyFixtureLifetime} from '../../support/intent-dependency-fixture-lifetime.js';
 import '../../support/installed-controller-fixture.js';
 import {afterEach,beforeEach,describe,it,expect,vi,type TestContext} from 'vitest';
 const installed=vi.hoisted(()=>({factory:undefined as any,route:undefined as any}));
