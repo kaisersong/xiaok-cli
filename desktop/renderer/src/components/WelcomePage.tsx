@@ -1,3 +1,4 @@
+import {AssistantCalendarSourceCard} from './assistant/AssistantCalendarSourceCard';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FolderKanban } from 'lucide-react';
@@ -365,6 +366,7 @@ function ConversationFirstHome({
           onResume={onResumeAssistant}
           onOpenDetails={onOpenAssistantDetails}
         />
+        <AssistantCalendarSourceCard/>
       </div>
       <section className="mt-[clamp(5rem,15vh,8rem)] w-full border-y border-[var(--c-border)] py-4" aria-labelledby="welcome-overview-title">
         <div className="mb-3 flex items-center justify-between gap-3">

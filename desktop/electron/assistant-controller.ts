@@ -1,3 +1,4 @@
+import type {AssistantCalendarSource} from './assistant-calendar-source.js';
 import type {AssistantMessage} from '../shared/assistant-inbox-contract.js';
 import {captureLoopProducerValue} from './loop-scan-publication-body.js';
 import {publicationFields,publicationIdentity} from './loop-publication-attempt.js';
@@ -44,6 +45,7 @@ export interface AssistantOverview {
 }
 
 export interface AssistantControllerOptions {
+  calendarSource?:AssistantCalendarSource;
   assistantService: AssistantStatusService;
   candidates: AssistantCandidateStore;
   memoryStore: MemoryStore;
@@ -72,6 +74,12 @@ export class AssistantController {
       }),
     });
   }
+
+
+  getCalendarStatus(){if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');return this.options.calendarSource.status();}
+  connectCalendar(input:{requestSource:'user'|'agent'|'scheduler'}){if(input?.requestSource!=='user')return Promise.reject(Error('assistant_calendar_user_only'));if(!this.options.calendarSource)return Promise.reject(Error('assistant_calendar_unavailable'));return this.options.calendarSource.enable(input);}
+  disconnectCalendar(input:{requestSource:'user'|'agent'|'scheduler'}){if(input?.requestSource!=='user')throw Error('assistant_calendar_user_only');if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');return this.options.calendarSource.disable(input);}
+  async refreshCalendar(input:{requestSource:'user'|'agent'|'scheduler'}){if(input?.requestSource!=='user')throw Error('assistant_calendar_user_only');if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');await this.options.calendarSource.collect({now:this.now(),requestSource:'user'});return this.options.calendarSource.status();}
 
   async getOverview(): Promise<AssistantOverview> {
     const { profile } = this.options.assistantService.bootstrap();

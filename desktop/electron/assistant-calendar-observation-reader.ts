@@ -1,3 +1,5 @@
+import {captureIpcData} from './ipc-data-snapshot.js';
+import {canonicalVerificationJson} from '../../src/runtime/verification/protocol.js';
 import {z} from 'zod';
 const millisecond=z.number().refine(value=>Number.isSafeInteger(value)&&value>=1_000_000_000_000&&Number.isFinite(new Date(value).getTime()));
 const windowSchema=z.object({from:millisecond,to:millisecond}).strict().refine(value=>value.to>value.from&&value.to-value.from<=8*86400000);
@@ -24,15 +26,16 @@ export async function readAssistantCalendarObservation(
  signal?.throwIfAborted();
  // Official CLI 0.1.8 accepts Unix milliseconds. to-1 preserves this
  // half-open local window without timezone parsing or fractional ISO seconds.
- const data=await ports.data(['calendar','event','list','--start',String(window.from),'--end',String(window.to-1)],signal);
+ const data=captureIpcData(await ports.data(['calendar','event','list','--start',String(window.from),'--end',String(window.to-1)],signal),'assistant_calendar_observation_invalid');
  signal?.throwIfAborted();
+ if(!data||typeof data!=='object'||Array.isArray(data))throw invalid();
  if(!Array.isArray(data.list)||data.list.length>200||data.list.some(row=>!row||typeof row!=='object'||Array.isArray(row))
   ||data.count!==undefined&&(!Number.isSafeInteger(data.count)||(data.count as number)<data.list.length)
   ||data.total!==undefined&&(!Number.isSafeInteger(data.total)||(data.total as number)<data.list.length)
   ||data.more!==undefined&&typeof data.more!=='boolean'
   ||data.pageToken!==undefined&&typeof data.pageToken!=='string')throw invalid();
  let records:Record<string,unknown>[];
- try{const bytes=JSON.stringify(data.list);if(Buffer.byteLength(bytes)>1024*1024)throw invalid();records=JSON.parse(bytes);}
+ try{if(Buffer.byteLength(canonicalVerificationJson(data.list))>1024*1024)throw invalid();records=data.list as Record<string,unknown>[];}
  catch{throw invalid();}
  signal?.throwIfAborted();
  if(await ports.identity(signal)!==accountId)throw Error('assistant_account_changed');

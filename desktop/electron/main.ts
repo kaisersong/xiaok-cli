@@ -1486,7 +1486,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         updatedAt: source.updatedAt,
       })),
   });
-  assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,
+  assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,calendarStore:loopRuntime.loopStore,
     dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
     profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',locale:profile?.locale??'zh',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
     search:(query,signal)=>services.searchForAssistant(query,signal),
@@ -1505,6 +1505,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
   const inboxOwner=assistantInbox;
   registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
+  const assistantCalendarSource=inboxOwner.calendarSource;if(!assistantCalendarSource)throw Error('assistant_calendar_unavailable');
+  registerLifetimeDisposerStep('assistant-calendar',()=>assistantCalendarSource.close());
   desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
     loopStore: loopRuntime.loopStore,
@@ -1522,6 +1524,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     assistantRuntime,
   });
   const assistantController = new AssistantController({
+    calendarSource:assistantCalendarSource,
     assistantService,
     candidates: loopRuntime.loopStore,
     memoryStore: getDesktopMemoryStore(dataRoot),

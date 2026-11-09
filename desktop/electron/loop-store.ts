@@ -1,3 +1,5 @@
+import {migrateAssistantCalendar,readAssistantCalendarConnection,setAssistantCalendarConnection,readAssistantCalendarGeneration,writeAssistantCalendarGeneration,type AssistantCalendarConnection} from './assistant-calendar-store.js';
+import type {AssistantCalendarSnapshot} from '../shared/assistant-calendar-observation-contract.js';
 import type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
 export type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
 import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
@@ -209,11 +211,22 @@ export class LoopStore {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
+    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); migrateAssistantCalendar(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
   }
 
   close(): void {
     this.connection.close();
+  }
+
+  getAssistantCalendarConnection():AssistantCalendarConnection{return readAssistantCalendarConnection(this.db);}
+  setAssistantCalendarConnection(input:{enabled:boolean;expectedEpoch:number;accountId?:string;requestSource:'user'|'agent'|'scheduler'}):AssistantCalendarConnection{
+    if(input?.requestSource!=='user')throw Error('assistant_calendar_user_only');
+    return this.transaction(()=>setAssistantCalendarConnection(this.db,this.connection,input));
+  }
+  getAssistantCalendarGeneration(epoch:number):AssistantCalendarSnapshot|undefined{return readAssistantCalendarGeneration(this.db,epoch);}
+  writeAssistantCalendarGeneration(snapshot:AssistantCalendarSnapshot,requestSource:'user'|'agent'|'scheduler',guard:()=>boolean):void{
+    if(!['user','scheduler'].includes(requestSource))throw Error('assistant_calendar_read_denied');
+    this.transaction(()=>writeAssistantCalendarGeneration(this.db,this.connection,snapshot,requestSource,guard));
   }
 
   /** Main-only audit primitive. Production export remains gated by the fixed

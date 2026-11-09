@@ -1,7 +1,9 @@
+import {LOOP_CALENDAR_SOURCE_SCHEMA,LOOP_CALENDAR_COLUMN_TYPES} from './loop-calendar-source-schema.js';
 /** Complete original constructor/migration sqlite_master comparison data.
  * Generated through actual Loop/Completion/scanner constructors; not SQL to execute. */
 import {freezeCapturedData} from './captured-source-json.js';
 export const LOOP_SOURCE_SCHEMAS = freezeCapturedData({
+  assistantCalendar:LOOP_CALENDAR_SOURCE_SCHEMA,
   "loop": [
     {
       "type": "index",
@@ -530,6 +532,7 @@ export const LOOP_SOURCE_MIGRATED_TABLES = freezeCapturedData({
   ]
 } as const);
 export const LOOP_SOURCE_COLUMN_TYPES = freezeCapturedData({
+  ...LOOP_CALENDAR_COLUMN_TYPES,
   "assistant_candidates": [
     {
       "name": "id",

@@ -60,6 +60,18 @@ describe('fixed bundled calendar observation transport',()=>{
   run.mockImplementation(async args=>{if(args[0]==='calendar'){controller.abort(Error('cancelled'));return {success:true,data:{list:[record]}};}return actor;});
   await expect(cloud.observeCalendar({from,to},identity,controller.signal)).rejects.toThrow('cancelled');expect(run.mock.calls.filter(([args])=>args[0]==='calendar')).toHaveLength(1);
  });
+ it('rejects accessor or custom serializer metadata without invoking it',async()=>{
+  for(const kind of ['getter','serializer'] as const){
+   const spy=vi.fn(()=>kind==='getter'?'changed':record),row={...record};
+   if(kind==='getter')Object.defineProperty(row,'title',{enumerable:true,get:spy});else Object.assign(row,{toJSON:spy});
+   const {cloud}=fixture({list:[row],count:1,more:false}),identity=await cloud.identity();
+   await expect(cloud.observeCalendar({from,to},identity)).rejects.toThrow('assistant_calendar_observation_invalid');expect(spy).not.toHaveBeenCalled();
+  }
+ });
+ it.each([NaN,Infinity,undefined])('rejects values outside actual JSON data without silently rewriting them: %s',async value=>{
+  const {cloud}=fixture({list:[{...record,extra:value}],count:1,more:false}),identity=await cloud.identity();
+  await expect(cloud.observeCalendar({from,to},identity)).rejects.toThrow('assistant_calendar_observation_invalid');
+ });
  it('keeps the original query and user-only create protocol independent from observation semantics',async()=>{
   const {cloud,run}=fixture({count:102,list:[{...record,content:'notes'}]});
   expect(await cloud.listCalendar({startDate:'2026-11-09',endDate:'2026-11-09'})).toMatchObject({partial:true,items:[{id:'event-1',title:'Review',description:'notes'}]});

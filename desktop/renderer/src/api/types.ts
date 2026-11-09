@@ -281,3 +281,5 @@ export type { ProxyJsonResult, ProxyTextResult, ProxyDeleteResult, ProxyHttpBody
 export type { ModelConfigResult, SaveModelConfigInput, UpdateModelRuntimeInput, SystemOneConfigResult, SystemOneConfigPatch, ManagedAgentInput, ManagedAgentResult, ProviderConnectionInput, ProviderConnectionResult, AvailableModelResult } from '../../../shared/model-provider-ipc-contract.js';
 export type {WriterControlResult} from '../../../shared/kswarm-writer-control-ipc-contract.js';
 export type {DshDesktopApi,DshDesktopState,DshDesktopMode,DshDesktopSetModeInput,DshDesktopConfigureSetupInput,DshDesktopConnectInput,DshDesktopDisconnectInput,DshDesktopReconcileInput,DshDesktopConfigureBudgetInput,DshDesktopPublishMandateInput,DshDesktopPublishEgressPolicyInput} from '../../../shared/dsh-desktop';
+
+export type {AssistantCalendarStatus,AssistantCalendarSnapshot} from '../../../shared/assistant-calendar-observation-contract.js';
