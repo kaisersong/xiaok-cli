@@ -1,0 +1,5 @@
+{
+  "status": 0,
+  "stdout": "HTTP/1.1 200 OK\nConnection: keep-alive\r\nContent-Type: application/json\r\nDate: Sun, 08 Nov 2026 21:30:00 GMT\r\nKeep-Alive: timeout=5\r\n\r\n{\"tag_name\":\"desktop-v1.6.3\",\"draft\":true,\"prerelease\":false}",
+  "stderr": ""
+}
