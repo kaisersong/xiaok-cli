@@ -12,7 +12,7 @@ const nativePrepare=DatabaseSync.prototype.prepare,nativeExec=DatabaseSync.proto
 declare const sourceBrand:unique symbol;
 export interface LoopDatabaseSource {readonly [sourceBrand]:true}
 export type LoopDatabaseComponent='loop'|'completion'|'artifactScanner'|'healthScanner';
-export interface LoopDatabaseLease {readonly database:DatabaseSync;runWrite(sql:string,...bindings:unknown[]):ReturnType<StatementSync['run']>;execWrite(sql:string):void;rollbackOwned():void;restoreForeignKeysOwned(enabled:boolean):void;recordComponent(component:LoopDatabaseComponent):void;close():void}
+export interface LoopDatabaseLease {readonly database:DatabaseSync;runWrite(sql:string,...bindings:unknown[]):ReturnType<StatementSync['run']>;execWrite(sql:string):void;rollbackOwned():void;rollbackAssistantQualitySavepointOwned(name:string):void;failAssistantQualityOwned(raw:unknown):void;restoreForeignKeysOwned(enabled:boolean):void;recordComponent(component:LoopDatabaseComponent):void;close():void}
 interface Owner {database:DatabaseSync;location:string;identity:string|undefined;stopped:boolean;closed:boolean;components:Set<LoopDatabaseComponent>;layoutRevision:number;retirement?:Error;stock:RoomTurnCustody;failures:{raw:unknown}[];inventoryFailure?:{raw:unknown};fence?:ReturnType<typeof createKnownDirectoryWriterFence>}
 const sources=new WeakMap<object,Owner>();
 const leases=new WeakMap<object,{owner:Owner;lease:LoopDatabaseLease}>(),heldOwners=new Set<Owner>();
@@ -68,6 +68,12 @@ export function openLoopDatabase(input:string|LoopDatabaseSource):LoopDatabaseLe
   },
   execWrite(sql:string){if(owner.retirement)throw owner.retirement;if(typeof sql!=='string')throw Error('loop_sqlite_sql');fresh(owner,closed);try{apply(nativeExec,owner.database,[sql]);}catch(raw){retain(owner,raw);throw raw;}},
   rollbackOwned(){try{apply(nativeExec,owner.database,['ROLLBACK']);}catch(raw){retain(owner,raw);throw raw;}},
+  failAssistantQualityOwned(raw:unknown){owner.stopped=true;retain(owner,raw);},
+  rollbackAssistantQualitySavepointOwned(name:string){
+   if(typeof name!=='string'||!/^assistant_quality_[a-f0-9]{32}$/.test(name))throw Error('assistant_quality_savepoint');
+   const failures:unknown[]=[];for(const sql of ['ROLLBACK TO '+name,'RELEASE '+name])try{apply(nativeExec,owner.database,[sql]);}catch(raw){owner.stopped=true;retain(owner,raw);failures.push(raw);}
+   if(failures.length===1)throw failures[0];if(failures.length)throw new AggregateError(failures,'assistant_quality_rollback',{cause:failures[0]});
+  },
   restoreForeignKeysOwned(enabled:boolean){if(typeof enabled!=='boolean')throw Error('loop_sqlite_foreign_keys');try{apply(nativeExec,owner.database,[enabled?'PRAGMA foreign_keys=ON':'PRAGMA foreign_keys=OFF']);}catch(raw){retain(owner,raw);throw raw;}},
   recordComponent(component:LoopDatabaseComponent){fresh(owner,closed);if(!['loop','completion','artifactScanner','healthScanner'].includes(component))throw Error('loop_database_component');if(!owner.components.has(component)){owner.components.add(component);owner.layoutRevision++;}},
   close(){closed=true;standalone?.close();},

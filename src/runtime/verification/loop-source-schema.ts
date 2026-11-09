@@ -1,9 +1,11 @@
+import {LOOP_ASSISTANT_PRODUCT_SCHEMAS,LOOP_ASSISTANT_PRODUCT_COLUMNS} from './loop-assistant-product-source-schema.js';
 import {LOOP_DERIVED_SOURCE_SCHEMA,LOOP_DERIVED_COLUMN_TYPES} from './loop-derived-source-schema.js';
 import {LOOP_CALENDAR_SOURCE_SCHEMA,LOOP_CALENDAR_COLUMN_TYPES} from './loop-calendar-source-schema.js';
 /** Complete original constructor/migration sqlite_master comparison data.
  * Generated through actual Loop/Completion/scanner constructors; not SQL to execute. */
 import {freezeCapturedData} from './captured-source-json.js';
 export const LOOP_SOURCE_SCHEMAS = freezeCapturedData({
+ ...LOOP_ASSISTANT_PRODUCT_SCHEMAS,
   assistantCalendar:LOOP_CALENDAR_SOURCE_SCHEMA,
   assistantDerived:LOOP_DERIVED_SOURCE_SCHEMA,
   "loop": [
@@ -534,6 +536,7 @@ export const LOOP_SOURCE_MIGRATED_TABLES = freezeCapturedData({
   ]
 } as const);
 export const LOOP_SOURCE_COLUMN_TYPES = freezeCapturedData({
+ ...LOOP_ASSISTANT_PRODUCT_COLUMNS,
   ...LOOP_CALENDAR_COLUMN_TYPES,
   ...LOOP_DERIVED_COLUMN_TYPES,
   "assistant_candidates": [

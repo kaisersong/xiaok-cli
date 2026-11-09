@@ -77,6 +77,20 @@ export class SqliteGoalStore implements GoalStore {
     return pointer ? this.loadGoalById(pointer.current_goal_id) : null;
   }
 
+  loadGoalStateByThread(sessionId: string): GoalState | null {
+    const row = this.db.prepare(`
+      select p.current_goal_id, g.session_id as goal_session_id, g.state_json, g.revision, g.epoch
+      from goal_sessions p left join goals g on g.goal_id = p.current_goal_id
+      where p.session_id = ?
+    `).get(sessionId) as {current_goal_id:string;goal_session_id:string|null;state_json:string|null;revision:number|null;epoch:number|null}|undefined;
+    if (!row) return null;
+    if (row.state_json === null || row.goal_session_id !== sessionId) throw Error('goal_current_state_unavailable');
+    const state = parseGoalState(row.state_json);
+    if (state.goalId !== row.current_goal_id || state.sessionId !== sessionId || state.revision !== row.revision || state.epoch !== row.epoch)
+      throw Error('goal_current_state_identity');
+    return state;
+  }
+
   loadGoalById(goalId: string): GoalDocument | null {
     const row = this.db.prepare('select state_json from goals where goal_id = ?')
       .get(goalId) as GoalStateRow | undefined;

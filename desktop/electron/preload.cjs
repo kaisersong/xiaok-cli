@@ -1,3 +1,6 @@
+function sanitizeAssistantPeriodicInput(input){return pickDefined({enabled:input?.enabled,notificationsEnabled:input?.notificationsEnabled,intervalMinutes:input?.intervalMinutes,quietHours:input?.quietHours,expectedRevision:input?.expectedRevision});}
+function sanitizeAssistantLaunchInput(input){return pickDefined({proposalId:input?.proposalId,expectedRevision:input?.expectedRevision,draftId:input?.draftId,instruction:input?.instruction,expectedResultDigest:input?.expectedResultDigest,existingThreadId:input?.existingThreadId,goalConsentChecked:input?.goalConsentChecked});}
+function sanitizeAssistantActionInput(input){return pickDefined({proposalId:typeof input?.proposalId==='string'?input.proposalId:'',expectedRevision:input?.expectedRevision,snoozeUntil:input?.snoozeUntil});}
 const { contextBridge, ipcRenderer } = require('electron');
 const os = require('os');
 
@@ -696,4 +699,26 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getAppFlag: (key) => ipcRenderer.invoke('desktop:getAppFlag', key),
   setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value),
   migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data),
+
+getAssistantCandidatePage:input=>ipcRenderer.invoke('desktop:assistant:getActionCandidatesPage',{cursor:input.cursor}),
+dismissAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:dismissAction',sanitizeAssistantActionInput(input)),
+snoozeAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:snoozeAction',sanitizeAssistantActionInput(input)),
+getAssistantAnalysisProvider:()=>ipcRenderer.invoke('desktop:assistant:getAnalysisProvider'),
+configureAssistantAnalysisProvider:input=>ipcRenderer.invoke('desktop:assistant:configureAnalysisProvider',{modelId:input?.modelId,expectedRevision:input?.expectedRevision}),
+getAssistantLaunchTargets:input=>ipcRenderer.invoke('desktop:assistant:listLaunchTargets',pickDefined({cursor:input?.cursor})),
+getAssistantQualityStatus:()=>ipcRenderer.invoke('desktop:assistant:getQualityStatus'),
+exportAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:exportQualityReview'),
+importAssistantQualityReview:input=>ipcRenderer.invoke('desktop:assistant:importQualityReview',{attestHumanReview:input?.attestHumanReview===true}),
+revokeAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:revokeQualityReview'),
+getAssistantPeriodicStatus:()=>ipcRenderer.invoke('desktop:assistant:getPeriodicStatus'),
+configureAssistantPeriodic:input=>ipcRenderer.invoke('desktop:assistant:configurePeriodic',sanitizeAssistantPeriodicInput(input)),
+checkAssistantPeriodic:()=>ipcRenderer.invoke('desktop:assistant:checkPeriodic'),
+cancelAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:cancelLaunch',{draftId:input.draftId}),
+prepareAssistantReconfirmation:input=>ipcRenderer.invoke('desktop:assistant:prepareReconfirmation',sanitizeAssistantLaunchInput(input)),
+prepareAssistantFollowUpLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareFollowUpLaunch',pickDefined({candidateId:input.candidateId,existingThreadId:input.existingThreadId})),
+prepareAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareLaunch',sanitizeAssistantLaunchInput(input)),
+confirmAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:confirmLaunch',sanitizeAssistantLaunchInput(input)),
+getAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:getActionLaunch',sanitizeAssistantLaunchInput(input)),
+resolveAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:resolveActionLaunch',sanitizeAssistantLaunchInput(input)),
+getAssistantActionOverview: () => ipcRenderer.invoke('desktop:assistant:getActionOverview'),
 });

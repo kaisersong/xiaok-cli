@@ -1,3 +1,7 @@
+import {AssistantLaunchConfirm} from './AssistantLaunchConfirm';
+import {ASSISTANT_LAUNCH_DRAFT_SCHEMA,ASSISTANT_LAUNCH_OPERATION_SCHEMA,ASSISTANT_LAUNCH_LOOKUP_SCHEMA,type AssistantLaunchDraft} from '../../../../shared/assistant-launch-contract';
+import {ASSISTANT_CANDIDATE_PAGE_SCHEMA} from '../../../../shared/assistant-ipc-contract';
+import {AssistantProductPanel} from './AssistantProductPanel';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarDays, ChevronRight, CircleDot, Clock3, Mail, MessagesSquare, Newspaper, RefreshCw, Settings2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -23,6 +27,11 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
   const labels = t.assistant.workspace;
   const navigate = useNavigate();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [followUpDraft,setFollowUpDraft]=useState<AssistantLaunchDraft>();
+  const [candidatePages,setCandidatePages]=useState<NonNullable<typeof data.overview>['candidates']>([]);
+  const [nextCursor,setNextCursor]=useState<string|null>(null),[loadingMore,setLoadingMore]=useState(false),[pagingFailed,setPagingFailed]=useState(false);
+  const candidateOwner=useRef<object>({});
+  useEffect(()=>{const owner={};candidateOwner.current=owner;setCandidatePages([]);setNextCursor(data.product?.nextCandidateCursor??null);setLoadingMore(false);setPagingFailed(false);return()=>{if(candidateOwner.current===owner)candidateOwner.current={};};},[data.overview,data.product,data.mutationBusy,data.operationUnknown]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([]);
@@ -56,6 +65,8 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
     });
     if (life.current.active) setBusyCandidateId(null);
   };
+  const startFollowUp=(candidateId:string)=>{if(data.mutationBusy||data.operationUnknown)return;void data.mutate(async()=>{const next=ASSISTANT_LAUNCH_DRAFT_SCHEMA.parse(await getDesktopApi()!.prepareAssistantFollowUpLaunch({candidateId}));if(life.current.active)setFollowUpDraft(next);});};
+  const loadCandidates=async()=>{if(!nextCursor||loadingMore||data.mutationBusy||data.operationUnknown)return;const owner=candidateOwner.current;setLoadingMore(true);setPagingFailed(false);try{const page=ASSISTANT_CANDIDATE_PAGE_SCHEMA.parse(await getDesktopApi()!.getAssistantCandidatePage({cursor:nextCursor}));if(candidateOwner.current!==owner||!life.current.active)return;setCandidatePages(previous=>{const seen=new Set([...(data.product?.candidates??data.overview?.candidates??[]),...previous].map(row=>row.id));return [...previous,...page.candidates.filter(row=>!seen.has(row.id))];});setNextCursor(page.nextCursor);}catch{if(candidateOwner.current===owner&&life.current.active)setPagingFailed(true);}finally{if(candidateOwner.current===owner&&life.current.active)setLoadingMore(false);}};
   const profile = data.overview?.profile;
   const suggestions = !hideSuggestions && profile?.status === 'active' ? data.overview?.suggestions.slice(0, 3) ?? [] : [];
   const pendingCount = data.overview?.pendingCandidateCount ?? 0;
@@ -85,6 +96,7 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
         </div>}
         {suggestions.length > 0 && <ul className="mt-4 divide-y divide-[var(--c-border-subtle)]">{suggestions.map(suggestion => <li key={suggestion.id} className="flex items-start justify-between gap-3 py-3"><div className="min-w-0"><p className="text-sm font-medium text-[var(--c-text-primary)]">{suggestion.title}</p><p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)]">{suggestion.summary}</p></div><button type="button" aria-label={labels.prepareSuggestion(suggestion.title)} className={subtleButton} onClick={() => onPrepareSuggestion?.(`请帮助我推进以下事项，先核对当前事实，再明确下一步和交付：\n${suggestion.title}\n${suggestion.summary}`)}>{labels.prepare}<ArrowRight size={13}/></button></li>)}</ul>}
         {pendingCount > 0 && <button type="button" className={subtleButton} onClick={() => void openDetails()}>{t.assistant.pendingCandidates(pendingCount)}<ChevronRight size={13}/></button>}
+        <AssistantProductPanel data={data}/>
         {sourceOpen && <div className={`mt-4 p-4 ${surface}`}><AppConnectorsSettings /></div>}
 
         <section className="mt-9" aria-labelledby="assistant-watches-title">
@@ -138,8 +150,11 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
         </div>
         <footer className="mt-9 flex items-start gap-2 border-t border-[var(--c-border-subtle)] pt-4 text-xs leading-5 text-[var(--c-text-tertiary)]"><Sparkles size={13} className="mt-1 shrink-0" />{labels.runtimeNotice}</footer>
         {collectionError && <p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{labels.readFailed}</p>}
-        {data.overview && <AssistantDetailPanel open={detailsOpen} profile={data.overview.profile} candidates={data.overview.candidates} knowledgeCollections={collections} busyCandidateId={data.mutationBusy ? busyCandidateId : null} decisionsDisabled={data.mutationBusy || data.operationUnknown}
+        {data.overview && <AssistantDetailPanel open={detailsOpen} profile={data.overview.profile} candidates={[...(data.product?.candidates??data.overview.candidates),...candidatePages]} hasMoreCandidates={!!nextCursor} loadingMore={loadingMore} onLoadMore={loadCandidates} onStartFollowUp={data.product?startFollowUp:undefined} knowledgeCollections={collections} busyCandidateId={data.mutationBusy ? busyCandidateId : null} decisionsDisabled={data.mutationBusy || data.operationUnknown}
           onClose={() => { life.current.collectionRevision++; setDetailsOpen(false); }} onAcceptCandidate={(id, collectionId) => decideCandidate(id, 'accept', collectionId)} onRejectCandidate={id => decideCandidate(id, 'reject')} />}
+
+        {pagingFailed&&<p role="alert">{t.assistant.unavailable}</p>}
+        {followUpDraft&&<AssistantLaunchConfirm draft={followUpDraft} busy={data.mutationBusy} unknown={data.operationUnknown} onClose={()=>setFollowUpDraft(undefined)} onLookup={()=>{void data.mutate(async()=>{ASSISTANT_LAUNCH_LOOKUP_SCHEMA.parse(await getDesktopApi()!.getAssistantLaunch({draftId:followUpDraft.id}));});}} onConfirm={(instruction,goalConsentChecked)=>{void data.mutate(async()=>{const result=ASSISTANT_LAUNCH_OPERATION_SCHEMA.parse(await getDesktopApi()!.confirmAssistantLaunch({draftId:followUpDraft.id,instruction,...(goalConsentChecked!==undefined?{goalConsentChecked}:{})}));if(life.current.active&&result.state!=='outcome_unknown')setFollowUpDraft(undefined);});}}/>}
       </main>
     </div>
   );

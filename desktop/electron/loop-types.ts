@@ -3,6 +3,7 @@ export type {LoopRunStatus, LoopStageStatus, LoopStageKind, LoopRunFailureKind} 
 import type { LoopContractV1 } from './loop-contract.js';
 
 export const BUILT_IN_LOOP_IDS = {
+ PERSONAL_ASSISTANT_TRANSACTION_CHECK:'personal-assistant-transaction-check',
   ARTIFACT_EVIDENCE_REGRESSION: 'artifact-evidence-regression',
   KSWARM_SERVICE_HEALTH: 'kswarm-service-health',
   PERSONAL_ASSISTANT_EVENING_REFLECTION: 'personal-assistant-evening-reflection',

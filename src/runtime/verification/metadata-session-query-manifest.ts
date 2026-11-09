@@ -1,7 +1,9 @@
+import {ASSISTANT_PRODUCT_SESSION_QUERIES} from './metadata-session-assistant-product-queries.js';
 import {GROUP_METADATA_SESSION_QUERIES} from './metadata-session-group-queries.js';
 /** Fixed projections inventoried from actual production constructors. This is
  * neither a complete layout declaration nor source/session authority. */
 const definitions = {
+ ...ASSISTANT_PRODUCT_SESSION_QUERIES,
   ...GROUP_METADATA_SESSION_QUERIES,
   "codex-native:codex_native_sessions": {"table":"codex_native_sessions","columns":["id","owner","native_id","snapshot"]},
   "codex-routes:settings": {"table":"settings","columns":["key","value"]},

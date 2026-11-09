@@ -82,3 +82,23 @@ for (const target of ['cli', 'desktop']) test(`legacy ${target} build invocation
     for (const arch of ['x64','arm64']) assert.doesNotThrow(() => verifyArtifact(join(verifier, 'native', `win32-${arch}`), arch));
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test('source-test target copies verified artifacts beside the actual TypeScript reader', async () => {
+  const root=mkdtempSync(join(tmpdir(),'xiaok-absence-source-'));
+  try {
+    const verifier=join(root,'src/runtime/verification');mkdirSync(verifier,{recursive:true});
+    writeFileSync(join(verifier,'windows-installation-absence.ts'),'// actual source-test reader location');
+    const result=spawnSync(process.execPath,[copyScript,'source','--root',root,'--arch','x64'],{encoding:'utf8'});
+    assert.equal(result.status,0,result.stderr);
+    const {verifyArtifact}=await import(pathToFileURL(copyScript));
+    assert.doesNotThrow(()=>verifyArtifact(join(verifier,'native','win32-x64'),'x64'));
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+test('source-test check fails closed without the TypeScript reader', () => {
+  const root=mkdtempSync(join(tmpdir(),'xiaok-absence-source-missing-'));
+  try {
+    const result=spawnSync(process.execPath,[copyScript,'source','--root',root,'--check','--arch','x64'],{encoding:'utf8'});
+    assert.notEqual(result.status,0);assert.match(result.stderr,/reader missing/);
+  } finally {rmSync(root,{recursive:true,force:true});}
+});

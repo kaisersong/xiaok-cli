@@ -46,6 +46,7 @@ function validatePromotion(reader:CapturedLoopSourceReader,item:CapturedLoopRow)
  if(m.run_id!==value.runId||m.title!==target.title||m.content!==target.content||m.scope!==target.scope||(m.project_id??undefined)!==target.projectId||canonical(member.json.evidence_refs_json)!==canonical(target.provenance.evidenceRefs)||m.target_id!==target.targetId||m.target_kind!==m.kind||m.status!==value.state||value.state==='accepted'&&m.accepted_target_ref!==value.targetRef)fail('promotion_member');
 }
 function validateSource(reader:CapturedLoopSourceReader):void{
+ const productJournals=['assistant_launch_confirmation_history','assistant_launch_events'] as const,productHighWater=new Map<string,number>();
  let highWater=0,calendarHighWater=0;const sequences=new Map<string,number>();
  for(const table of reader.tables)for(const item of reader.rows(table)){
   validateCapturedLoopOrdinaryRow(reader,item);orphanEdges(reader,item);
@@ -55,13 +56,15 @@ function validateSource(reader:CapturedLoopSourceReader):void{
    const record=readLoopArtifactExportRow(item.value as unknown as LoopArtifactExportRow),candidate=reader.one('loop:publication-candidate',record.source.candidateId)!,binding=parseLoopApplicationBinding(candidate.json.binding_json);
    if(binding.subject.loopId!==record.source.loopId||binding.subject.runId!==record.source.runId||binding.candidateRevision!==record.source.candidateRevision||!binding.body.artifacts.some(descriptor=>canonical(descriptor)===canonical(record.source.descriptor)))fail('export_source');highWater=Math.max(highWater,record.sequence);
   }
+  if((productJournals as readonly string[]).includes(table))productHighWater.set(table,Math.max(productHighWater.get(table)??0,Number(item.value.sequence)));
   if(table==='assistant_calendar_generations')calendarHighWater=Math.max(calendarHighWater,Number(item.value.id));
   if(table==='sqlite_sequence'){if(typeof item.value.name!=='string'||typeof item.value.seq!=='number'||sequences.has(item.value.name))fail('export_sequence');sequences.set(item.value.name,item.value.seq);}
  }
  if(highWater===0?sequences.has('loop_artifact_exports'):sequences.get('loop_artifact_exports')!==highWater)fail('export_sequence');
  const calendarSequence=sequences.get('assistant_calendar_generations');
  if(calendarSequence!==undefined&&(!reader.tables.includes('assistant_calendar_generations')||calendarSequence<calendarHighWater)||calendarHighWater>0&&calendarSequence===undefined)fail('calendar_sequence');
- for(const name of sequences.keys())if(!['loop_artifact_exports','assistant_calendar_generations'].includes(name))fail('export_sequence');
+ for(const table of productJournals){const sequence=sequences.get(table),maximum=productHighWater.get(table)??0;if(sequence!==undefined&&(!reader.tables.includes(table)||sequence<maximum)||maximum>0&&sequence===undefined)fail('assistant_launch_sequence');}
+ for(const name of sequences.keys())if(!['loop_artifact_exports','assistant_calendar_generations',...productJournals].includes(name))fail('export_sequence');
  validateCapturedLoopConstraintChains(reader);
  if(reader.tables.includes('loop_runs'))for(const run of reader.rows('loop_runs')){
   const basis=readCapturedLoopRunBasis(reader,run),projection=new CapturedLoopRunProjection(reader,run);

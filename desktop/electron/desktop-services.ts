@@ -1,3 +1,9 @@
+import {createAssistantDesktopAdmission} from './assistant-desktop-admission.js';
+import {createAssistantThreadTargets} from './assistant-launch-thread-target.js';
+import {readAssistantTaskSource} from './assistant-task-source.js';
+import type {AssistantLaunchDomain} from '../shared/assistant-launch-contract.js';
+import {assistantDigestEnvelopeSchema,type AssistantDigestEnvelope} from '../../src/runtime/assistant/notification-policy.js';
+import {assistantDigestReceiptSchema,type AssistantDigestReceipt} from '../../src/runtime/assistant/digest-receipts.js';
 import { RenderUiPreviewStream } from '../../src/a2ui/preview-stream.js';
 import {configuredCredentialValues} from '../../src/shared/credential-fields.js';
 import {createCredentialInputTools,type CredentialInputPort} from './credential-input-service.js';
@@ -2382,7 +2388,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       const consume=async(name:string,work:()=>Promise<unknown>)=>{
         try{await work();}catch(error){failures.push(error);console.warn(`[${name}] persisted task consumer failed:`,error instanceof Error?error.message:String(error));}
       };
-      await consume('assistant',async()=>{options.onAssistantTaskEvent?.(input);});
+      await consume('assistant',async()=>{options.onAssistantTaskEvent?.(input);if(input.event.type==='task_terminal')for(const listener of assistantTaskTerminalListeners)listener(input.taskId);});
       if(input.event.type==='task_terminal' && multiAgentService && hostDeliveryAuthority){
         await consume('conversation-activity',()=>multiAgentService!.reconcileActivityRuns({requestSource:'scheduler',authority:hostDeliveryAuthority!,taskId:input.taskId}));
       }
@@ -2405,6 +2411,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     // Existing historical bindings are validated by activity service, never rebound.
     if (!multiAgentStore?.getThread(threadId)) await prepareMultiAgentThread(threadId);
   };
+  let assistantAdmission:ReturnType<typeof createAssistantDesktopAdmission>|undefined;
+  const assistantTaskTerminalListeners=new Set<(taskId:string)=>void>();
   const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
       userSubmissions.beginEffects();
@@ -2423,6 +2431,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
           if (!actualPrepared || actualPrepared.taskId !== prepared.taskId || actualPrepared.prompt !== input.prompt) throw Error('conversation_user_preparation_mismatch');
           userSubmissions.recordPreparedTask(actualPrepared,host.getPreparedSourceReceipt(prepared.taskId));
           const submissionSource=userSubmissions.currentPreparedSourceProof();
+          assistantAdmission?.prepared(actualPrepared);
           const recorded=conversationProjects.recordPreparedUserTask(actualPrepared, {requestSource: 'user',preparedSource:host.getPreparedSourceReceipt(prepared.taskId),...(submissionSource?{submissionSource}:{})});
           if(recorded){
             const actualInput={...input,taskId:prepared.taskId,executionScope:actualPrepared.executionScope};
@@ -2579,7 +2588,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const backgroundTaskIdentity=createBackgroundTaskIdentityController({host,assertAdmission:()=>goalCoordinator.assertBackgroundAdmission(),captureAdmission:()=>goalCoordinator.captureBackgroundAdmission(),
     create:(input,reservation,guard)=>withExecutionLane('background',()=>afterLocalRecovery(()=>goalCoordinator.admitReservedBackgroundTask(input,reservation,guard)))});
   const originalGoalStop=goalShutdownBase.ingress.stopAccepting.bind(goalShutdownBase.ingress);
-  const stopBackgroundAndGoal=()=>{roomConversions.seal();userSubmissions.seal();conversationProjects.sealUserTaskFacts();backgroundTaskIdentity.close();unsubscribeMultiAgentGoal?.();unsubscribeMultiAgentGoal=undefined;originalGoalStop();};
+  const stopBackgroundAndGoal=()=>{roomConversions.seal();userSubmissions.seal();conversationProjects.sealUserTaskFacts();assistantAdmission?.stopAccepting();backgroundTaskIdentity.close();unsubscribeMultiAgentGoal?.();unsubscribeMultiAgentGoal=undefined;originalGoalStop();};
   const goalShutdown=Object.freeze({...goalShutdownBase,ingress:Object.freeze({...goalShutdownBase.ingress,stopAccepting:stopBackgroundAndGoal,abortAllActive:stopBackgroundAndGoal})});
   unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
     if (!['status', 'result', 'message_consumed'].includes(event.kind)) return;
@@ -3870,7 +3879,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       assertAssistantExecutorInput(input,nativeSelected);
       if(nativeSelected){userSubmissions.beginEffects();return conversationProjects.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode,threadId:input.context?.threadId},{requestSource:'user'},()=>codexTasks.create(input,nativeActor,current));}
       return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
-        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
+        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input,()=>assistantAdmission?.assertCurrent()))));
     };
 
   const submitUserTask = (raw:unknown,actor?:NativeActor,recheckAfterFileSelection?:()=>void) => {
@@ -3889,6 +3898,39 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     return createTask(input,actor,recheckAfterFileSelection);
     });
   };
+
+  const assistantDomain=():AssistantLaunchDomain=>{
+    if(codexTasks.selected())throw Error('assistant_native_admission_unsupported');
+    if(!options.workspaceRoot)throw Error('assistant_workspace_unavailable');
+    const cwd=realpathSync(options.workspaceRoot),stat=statSync(cwd,{bigint:true});
+    if(!stat.isDirectory()||dirname(cwd)===cwd||cwd===realpathSync(homedir())||cwd!==multiAgentCwd)throw Error('assistant_workspace_unavailable');
+    const authorization=multiAgentService?.getExecutionAuthorization();
+    if(authorization&&(!authorization.executionAllowed||authorization.persistenceState!=='confirmed'))throw Error('assistant_permission_unavailable');
+    return {lane:'local',workspaceId:multiAgentWorkspaceId,cwd,device:String(stat.dev),inode:String(stat.ino),permissionRevision:authorization?.permissionRevision??0,bootId:authorization?.bootId??assistantOrdinaryBootId};
+  };
+  const assistantOrdinaryBootId=randomUUID();
+  assistantAdmission=createAssistantDesktopAdmission({host,submissions:userSubmissions,ready:()=>afterLocalRecovery(async()=>{}),domain:assistantDomain,submit:input=>withExecutionLane('foreground',()=>submitUserTask(input,{requestSource:'user',actorId:'desktop-user:'+multiAgentProfileId})),consumeGoal:(quote,snapshot)=>{if(snapshot.executionScope?.kind!=='goal_turn')throw Error('goal_consent_scope_invalid');goalCoordinator.consumeAssistantGoalConsent(quote,snapshot.executionScope);}});
+
+  const assistantThreadTitles=new Map<string,string>();
+  const readAssistantOwnedThread=async(threadId:string)=>{
+    await afterLocalRecovery(async()=>{});const row=multiAgentStore?.getThread(threadId);if(!row)return undefined;
+    if(row.profileId!==multiAgentProfileId||row.workspaceId!==multiAgentWorkspaceId)return undefined;
+    multiAgentService!.assertExecutionAdmission(threadId);
+    const goal=await goalCoordinator.getGoal(threadId),latest=multiAgentStore!.getThread(threadId);
+    if(!latest||latest.threadRevision!==row.threadRevision||latest.profileId!==row.profileId||latest.workspaceId!==row.workspaceId)throw Error('assistant_thread_target_stale');
+    const group=multiAgentStore!.activeGroup(threadId);
+    return {threadId,title:(goal?.state.objective??assistantThreadTitles.get(threadId)??threadId).slice(0,500),profileId:row.profileId,workspaceId:row.workspaceId,revision:row.threadRevision??0,deleted:row.deleteState==='deleted',deletionPending:row.deleteState==='delete_pending',cleanupPending:!!group?.mutationBlockedReason,goal};
+  };
+  const assistantThreadTargets=createAssistantThreadTargets({profileId:multiAgentProfileId,goalCoordinator,read:readAssistantOwnedThread,
+    assertCurrent:target=>{const row=multiAgentStore?.getThread(target.threadId);if(!row||row.profileId!==target.profileId||row.workspaceId!==target.workspaceId||row.deleteState!=='none')throw Error('assistant_thread_target_stale');multiAgentService!.assertExecutionAdmission(target.threadId);if(multiAgentStore!.activeGroup(target.threadId)?.mutationBlockedReason)throw Error('thread_cleanup_pending');},
+    list:async(domain,input)=>{
+      await afterLocalRecovery(async()=>{});if(!multiAgentStore)throw Error('assistant_existing_thread_unsupported');
+      const source=readAssistantTaskSource(options.dataRoot,10000);for(const snapshot of source.items){const threadId=snapshot.context?.threadId;if(threadId&&!assistantThreadTitles.has(threadId))assistantThreadTitles.set(threadId,(snapshot.understanding?.goal??snapshot.prompt).slice(0,500));}
+      const page=multiAgentStore.listWorkspaceThreads({profileId:multiAgentProfileId,workspaceId:domain.workspaceId,cursor:input.cursor,limit:50}),items=[];
+      for(const row of page.items){if(row.deleteState!=='none')continue;try{const actual=await readAssistantOwnedThread(row.threadId);if(!actual)continue;const goal=actual.goal,available=!actual.cleanupPending&&(!goal||goal.state.status==='active'&&goal.activation==='armed');items.push({threadId:row.threadId,title:actual.title,available,reason:available?null:actual.cleanupPending?'thread_cleanup_pending':'goal_requires_new_thread'});}catch{/* Failed ownership/current reads never become selectable. */}}
+      return {items,nextCursor:page.nextCursor??null};
+    },
+  });
 
   let multiAgentDisposal:Promise<void>|undefined;
   const finalizeMultiAgentStores=():Promise<void>=>{
@@ -3940,7 +3982,14 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const originalServices = {
     submitUserTask,
     taskShutdown,
-    multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
+    assistantThreadTargets,assistantTaskAdmission:assistantAdmission.port,
+    subscribeAssistantTaskTerminal(listener:(taskId:string)=>void){assistantTaskTerminalListeners.add(listener);return()=>assistantTaskTerminalListeners.delete(listener);},
+    assistantDigestDelivery:{
+      async available():Promise<boolean>{try{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))return false;const value=await activityService.client.request<{available:boolean}>('assistantDigestReady');return value?.available===true;}catch{return false;}},
+      async send(raw:AssistantDigestEnvelope):Promise<AssistantDigestReceipt>{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))throw Error('assistant_notification_owner_unavailable');return assistantDigestReceiptSchema.parse(await activityService.client.request('assistantDigest',assistantDigestEnvelopeSchema.parse(raw)));},
+      async lookup(deliveryId:string):Promise<AssistantDigestReceipt|undefined>{await awaitActivityAttachment();if(!(activityService instanceof ConversationActivityAttachedService))return undefined;const result=await activityService.client.request('assistantDigestReceipt',{deliveryId});return result?assistantDigestReceiptSchema.parse(result):undefined;},
+    },
+        multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
     goalShutdown,
     kswarmBootstrapShutdown:createKSwarmBootstrapShutdownOwner(initialPlanBootstrapQueue),
     // Main-only Task metadata close. Group/native effects require their own drain.

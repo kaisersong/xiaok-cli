@@ -1,3 +1,19 @@
+import {readAssistantActionOverview} from './assistant-controller-overview.js';
+import {randomUUID} from 'node:crypto';
+import type {AssistantPeriodicPolicyService} from './assistant-periodic-policy.js';
+import type {AssistantPeriodicRuntime} from './assistant-periodic-runtime.js';
+import {ASSISTANT_PERIODIC_CHECK_SCHEMA,type AssistantPeriodicStatus,type AssistantPeriodicSettings} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchService} from './assistant-launch-service.js';
+import {ASSISTANT_LAUNCH_SUMMARY_SCHEMA} from '../shared/assistant-launch-contract.js';
+import {AssistantCandidatePager} from './assistant-candidate-pager.js';
+import type {AssistantActionService} from './assistant-action-service.js';
+import type {AssistantActionOverviewDto} from '../shared/assistant-ipc-contract.js';
+import type {AssistantSourceRun} from '../shared/assistant-coverage-contract.js';
+import {createCandidateRepository,createAssistantCandidatePromotionTargets} from './assistant-controller-promotion.js';
+export {createAssistantCandidatePromotionTargets} from './assistant-controller-promotion.js';
+import type {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
+import type {AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
 import {captureAssistantDerivedValue} from './assistant-derived-data.js';
 import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarSource} from './assistant-calendar-source.js';
@@ -19,6 +35,7 @@ import { computeKbSourceContentDigest, type KbStore } from './kb-store.js';
 import type { Source } from './kb-types.js';
 
 export interface AssistantCandidateStore {
+  getLatestAssistantSourceRun?(profileId:string):AssistantSourceRun|undefined;
   getAssistantCandidatePublicationMode?(candidateId:string):'ordinary'|'protected';
   getAssistantCandidate(id: string): AssistantCandidate | undefined;
   listAssistantCandidates(input?: { statuses?: AssistantCandidateStatus[] }): AssistantCandidate[];
@@ -47,6 +64,10 @@ export interface AssistantOverview {
 }
 
 export interface AssistantControllerOptions {
+  periodicPolicy?:AssistantPeriodicPolicyService;periodicRuntime?:AssistantPeriodicRuntime;notificationReady?:()=>Promise<boolean>;onProfileStatusChanged?:()=>void;isGlobalBackgroundEnabled?:()=>boolean;
+  launchService?:AssistantLaunchService;actionService?:AssistantActionService;
+  analysisSettings?:AssistantAnalysisSettings;
+  qualityReview?:{status():AssistantQualityStatus|Promise<AssistantQualityStatus>;exportReview(input:{requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;importReview(input:{attestHumanReview:true;requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;revoke(input:{requestSource:'user'}):AssistantQualityStatus|Promise<AssistantQualityStatus>};
   calendarMemory?:{status():AssistantCalendarMemorySettingsDto;configure(input:AssistantCalendarMemoryInput&{requestSource:'user'|'agent'|'scheduler'}):AssistantCalendarMemorySettingsDto};
   calendarSource?:AssistantCalendarSource;
   assistantService: AssistantStatusService;
@@ -62,6 +83,7 @@ export interface AssistantControllerOptions {
 }
 
 export class AssistantController {
+  private readonly candidatePager=new AssistantCandidatePager();
   private readonly now: () => number;
   private readonly promotion: AssistantCandidatePromotionService;
 
@@ -79,6 +101,50 @@ export class AssistantController {
   }
 
 
+  async getAnalysisProvider(){if(!this.options.analysisSettings)throw Error('assistant_analysis_unavailable');return this.options.analysisSettings.status();}
+  async configureAnalysisProvider(raw:AssistantAnalysisSettingsInput&{requestSource:AssistantCandidateRequestSource}){const input=captureAssistantDerivedValue(raw);if(input.requestSource!=='user'||!this.options.analysisSettings)throw Error('assistant_analysis_user_only');return this.options.analysisSettings.configure(input);}
+  async getQualityStatus(){if(!this.options.qualityReview)throw Error('assistant_quality_unavailable');return this.options.qualityReview.status();}
+  async exportQualityReview(raw:{requestSource:AssistantCandidateRequestSource}){const input=captureAssistantDerivedValue(raw);if(input.requestSource!=='user'||!this.options.qualityReview)throw Error('assistant_quality_user_only');return this.options.qualityReview.exportReview(input as {requestSource:'user'});}
+  async importQualityReview(raw:{attestHumanReview:true;requestSource:AssistantCandidateRequestSource}){const input=captureAssistantDerivedValue(raw);if(input.requestSource!=='user'||input.attestHumanReview!==true||!this.options.qualityReview)throw Error('assistant_quality_user_only');return this.options.qualityReview.importReview(input as {attestHumanReview:true;requestSource:'user'});}
+  async revokeQualityReview(raw:{requestSource:AssistantCandidateRequestSource}){const input=captureAssistantDerivedValue(raw);if(input.requestSource!=='user'||!this.options.qualityReview)throw Error('assistant_quality_user_only');return this.options.qualityReview.revoke(input as {requestSource:'user'});}
+
+  async getActionOverview():Promise<AssistantActionOverviewDto>{return readAssistantActionOverview(this,this.options,this.candidatePager);}
+  async getPeriodicStatus():Promise<AssistantPeriodicStatus>{
+    if(!this.options.periodicPolicy||!this.options.periodicRuntime)throw Error('assistant_periodic_unavailable');
+    const readiness=this.options.periodicRuntime.readiness(),profile=this.options.assistantService.bootstrap().profile;
+    const notificationsAvailable=readiness.available?await this.options.notificationReady?.()??false:false;
+    const policy=this.options.periodicPolicy.status();
+    const reason=!readiness.available?(readiness.reason==='budget_unavailable'?'budget_unavailable':'quality_unverified'):profile.status!=='active'?'assistant_paused':this.options.isGlobalBackgroundEnabled?.()===false?'background_disabled':null;
+    return {revision:policy.revision,enabled:policy.enabled,notificationsEnabled:policy.notificationsEnabled,intervalMinutes:policy.intervalMinutes,quietHours:policy.quietHours,available:reason===null,reason,notificationsAvailable};
+  }
+  async configurePeriodic(input:AssistantPeriodicSettings&{requestSource:'user'|'agent'|'scheduler'}){input=captureAssistantDerivedValue(input);
+    if(!this.options.periodicPolicy)throw Error('assistant_periodic_unavailable');this.options.periodicPolicy.configure(input);return this.getPeriodicStatus();
+  }
+  async checkPeriodic(input:{requestSource:'user'|'agent'|'scheduler'}){input=captureAssistantDerivedValue(input);
+    if(input?.requestSource!=='user')throw Error('assistant_periodic_user_only');if(!this.options.periodicRuntime)throw Error('assistant_periodic_unavailable');
+    const result=await this.options.periodicRuntime.check({requestSource:'user',occurrenceId:'manual:'+randomUUID()});
+    const value={status:result.status,reason:result.reason??null};return ASSISTANT_PERIODIC_CHECK_SCHEMA.safeParse(value).success?ASSISTANT_PERIODIC_CHECK_SCHEMA.parse(value):{status:'outcome_unknown' as const,reason:'analysis_unavailable' as const};
+  }
+  async listLaunchTargets(input:{cursor?:string;requestSource:'user'}){input=captureAssistantDerivedValue(input);if(input?.requestSource!=='user'||!this.options.launchService)throw Error('assistant_launch_user_only');return this.options.launchService.listTargets(input);}
+  cancelLaunch(input:Parameters<AssistantLaunchService['cancel']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.cancel(input);}
+  prepareReconfirmation(input:Parameters<AssistantLaunchService['prepareReconfirmation']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.prepareReconfirmation(input);}
+  prepareFollowUpLaunch(input:Parameters<AssistantLaunchService['prepareFollowUp']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.prepareFollowUp(input);}
+  prepareLaunch(input:Parameters<AssistantLaunchService['prepare']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.prepare(input);}
+  confirmLaunch(input:Parameters<AssistantLaunchService['confirm']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.confirm(input);}
+  getActionLaunch(input:Parameters<AssistantLaunchService['get']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.get(input);}
+  resolveActionLaunch(input:Parameters<AssistantLaunchService['resolve']>[0]){input=captureAssistantDerivedValue(input);if(!this.options.launchService)throw Error('assistant_launch_unavailable');return this.options.launchService.resolve(input);}
+  getActionCandidatesPage(input:{cursor:string}){input=captureAssistantDerivedValue(input);
+    if(!input||typeof input.cursor!=='string'||!input.cursor||input.cursor.length>160)throw Error('assistant_candidate_cursor_invalid');
+    return this.candidatePager.page(this.options.candidates.listAssistantCandidates(),input.cursor);
+  }
+  dismissAction(input:Parameters<AssistantActionService['dismiss']>[0]){input=captureAssistantDerivedValue(input);
+    if(!this.options.actionService)throw Error('assistant_actions_unavailable');
+    return this.options.actionService.dismiss(input);
+  }
+  snoozeAction(input:Parameters<AssistantActionService['snooze']>[0]){input=captureAssistantDerivedValue(input);
+    if(!this.options.actionService)throw Error('assistant_actions_unavailable');
+    return this.options.actionService.snooze(input);
+  }
   getCalendarMemorySettings(){if(!this.options.calendarMemory)throw Error('assistant_calendar_memory_unavailable');return this.options.calendarMemory.status();}
   configureCalendarMemory(input:AssistantCalendarMemoryInput&{requestSource:'user'|'agent'|'scheduler'}){input=captureAssistantDerivedValue(input);if(input?.requestSource!=='user'||!this.options.calendarMemory)throw Error('assistant_calendar_memory_user_only');return this.options.calendarMemory.configure(input);}
   getCalendarStatus(){if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');return this.options.calendarSource.status();}
@@ -105,17 +171,17 @@ export class AssistantController {
 
   activate(input: { requestSource: AssistantCandidateRequestSource }): AssistantProfile {
     requireAssistantUser(input.requestSource);
-    return this.options.assistantService.setStatus('active');
+    const profile=this.options.assistantService.setStatus('active');this.options.onProfileStatusChanged?.();return profile;
   }
 
   pause(input: { requestSource: AssistantCandidateRequestSource }): AssistantProfile {
     requireAssistantUser(input.requestSource);
-    return this.options.assistantService.setStatus('paused');
+    const profile=this.options.assistantService.setStatus('paused');this.options.onProfileStatusChanged?.();return profile;
   }
 
   resume(input: { requestSource: AssistantCandidateRequestSource }): AssistantProfile {
     requireAssistantUser(input.requestSource);
-    return this.options.assistantService.setStatus('active');
+    const profile=this.options.assistantService.setStatus('active');this.options.onProfileStatusChanged?.();return profile;
   }
 
   async acceptCandidate(input: {
@@ -159,154 +225,6 @@ export class AssistantController {
     }
     return results;
   }
-}
-
-export function createAssistantCandidatePromotionTargets(options: {
-  memoryStore: MemoryStore;
-  memoryBackend: 'layered' | 'fallback';
-  kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource' | 'ensureAssistantSource'>;
-  now?: () => number;
-}): AssistantCandidatePromotionTargets {
-  const now = options.now ?? (() => Date.now());
-  return {
-    async ensureMemory(input) {
-      const record = memoryRecordFromTarget(input, options.memoryBackend, now());
-      const existing = options.memoryStore.getById?.(input.targetId);
-      if (existing) {
-        assertMemoryTargetMatches(existing, record);
-      } else {
-        if (!options.memoryStore.getById) throw new Error('assistant_memory_stable_lookup_unavailable');
-        await options.memoryStore.save(record);
-        const saved = options.memoryStore.getById(input.targetId);
-        if (!saved) throw new Error('assistant_memory_write_not_durable');
-        assertMemoryTargetMatches(saved, record);
-      }
-      return { targetRef: `memory://${options.memoryBackend}/${input.targetId}` };
-    },
-
-    async ensureKnowledge(input) {
-      // Legacy ordinary recovery can recover the collection only from its exact
-      // existing stable target. Protected recovery always supplies durable intent.
-      const collectionId = input.collectionId ?? options.kbStore.getSource(input.targetId)?.collectionId;
-      if (!collectionId) throw new Error('assistant_candidate_collection_required');
-      if (!options.kbStore.ensureAssistantSource) throw Error('assistant_knowledge_durable_store_required');
-      const source = options.kbStore.ensureAssistantSource({
-        sourceId: input.targetId,
-        clientRequestKey: `assistant-candidate:${input.candidateId}`,
-        collectionId,
-        kind: 'paste', title: input.title, text: input.content, parseStatus: 'pending',
-        metadata: {assistantCandidateId:input.candidateId,assistantRunId:input.loopRunId,assistantEvidenceRefs:input.provenance.evidenceRefs},
-      }, 'user');
-      assertKnowledgeTargetMatches(source, {...input,collectionId});
-      return { targetRef: `kb://${input.targetId}` };
-    },
-
-    async ensureFollowUp(input) {
-      return { targetRef: `draft://${input.targetId}` };
-    },
-  };
-}
-
-function createCandidateRepository(
-  store: AssistantCandidateStore,
-  now: () => number,
-  resolveProjectCwd?: (projectId: string) => string | undefined,
-): AssistantCandidatePromotionRepository {
-  const map = (candidate: AssistantCandidate | undefined): AssistantCandidatePromotionRecord | undefined => {
-    if (!candidate || !['pending', 'accepting', 'accepted', 'accept_failed'].includes(candidate.status)) return undefined;
-    const mapped:AssistantCandidatePromotionRecord = {
-      id: candidate.id,
-      runId: candidate.runId,
-      kind: candidate.kind,
-      status: candidate.status as AssistantCandidatePromotionRecord['status'],
-      title: candidate.title,
-      content: candidate.content,
-      scope: candidate.scope,
-      projectId: candidate.projectId,
-      projectCwd: candidate.projectId ? resolveProjectCwd?.(candidate.projectId) : undefined,
-      evidenceRefs: candidate.evidenceRefs.map(reference => ({ ...reference })),
-      targetKind: candidate.targetKind,
-      targetId: candidate.targetId,
-      acceptedTargetRef: candidate.acceptedTargetRef,
-    };
-    if(store.getAssistantCandidatePublicationMode?.(candidate.id)==='protected')throw Error('assistant_publication_required');
-    return mapped;
-  };
-  return {
-    get(candidateId) {
-      return map(store.getAssistantCandidate(candidateId));
-    },
-    beginAccept(candidateId, targetKind, targetId) {
-      const candidate = map(store.beginAssistantCandidateAccept(candidateId, targetKind, targetId, now()));
-      return candidate?.status === 'accepting' && candidate.targetKind === targetKind && candidate.targetId === targetId
-        ? candidate
-        : undefined;
-    },
-    markAccepted(candidateId, targetRef) {
-      const candidate = map(store.markAssistantCandidateAccepted(candidateId, targetRef, now()));
-      return candidate?.status === 'accepted' && candidate.acceptedTargetRef === targetRef ? candidate : undefined;
-    },
-    markAcceptFailed(candidateId) {
-      const candidate = map(store.markAssistantCandidateAcceptFailed(candidateId, now()));
-      return candidate?.status === 'accept_failed' ? candidate : undefined;
-    },
-    listAccepting() {
-      return store.listAssistantCandidates({ statuses: ['accepting'] })
-        .map(candidate => map(candidate))
-        .filter((candidate): candidate is AssistantCandidatePromotionRecord => candidate !== undefined);
-    },
-  };
-}
-
-function memoryRecordFromTarget(
-  input: AssistantPromotionTargetInput,
-  backend: 'layered' | 'fallback',
-  updatedAt: number,
-): MemoryRecord {
-  if (input.scope === 'project' && !input.projectCwd) throw new Error('assistant_candidate_project_cwd_required');
-  return {
-    id: input.targetId,
-    scope: input.scope,
-    cwd: input.scope === 'project' ? input.projectCwd : undefined,
-    title: input.title,
-    summary: input.content,
-    tags: ['assistant-candidate'],
-    updatedAt,
-    type: input.scope === 'project' ? 'project' : 'user',
-    provenance: {
-      kind: 'assistant_candidate',
-      candidateId: input.candidateId,
-      loopRunId: input.loopRunId,
-      backend,
-      evidenceRefs: input.provenance.evidenceRefs.map(reference => ({ ...reference })),
-    },
-  };
-}
-
-function assertMemoryTargetMatches(existing: MemoryRecord, expected: MemoryRecord): void {
-  const matches = existing.id === expected.id
-    && existing.scope === expected.scope
-    && existing.cwd === expected.cwd
-    && existing.title === expected.title
-    && existing.summary === expected.summary
-    && existing.type === expected.type
-    && canonicalJson(existing.provenance) === canonicalJson(expected.provenance);
-  if (!matches) throw new Error('assistant_memory_target_conflict');
-}
-
-function assertKnowledgeTargetMatches(
-  source: Source,
-  input: AssistantPromotionTargetInput,
-): void {
-  const metadata = source.metadata;
-  const matches = source.id === input.targetId
-    && (!input.collectionId || source.collectionId === input.collectionId)
-    && metadata.clientRequestKey === `assistant-candidate:${input.candidateId}`
-    && metadata.assistantCandidateId === input.candidateId
-    && metadata.assistantRunId === input.loopRunId
-    && canonicalJson(metadata.assistantEvidenceRefs ?? []) === canonicalJson(input.provenance.evidenceRefs)
-    && metadata.assistantContentDigest === computeKbSourceContentDigest({ text: input.content });
-  if (!matches) throw new Error('assistant_knowledge_target_conflict');
 }
 
 function requireAssistantUser(requestSource: AssistantCandidateRequestSource): void {
