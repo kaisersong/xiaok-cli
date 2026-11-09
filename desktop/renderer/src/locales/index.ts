@@ -2784,6 +2784,7 @@ export interface LocaleStrings {
     openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) => string;
   };
 
+  assistantCalendar:{title:string;loading:string;unavailable:string;partial:string;disabled:string;connect:string;disconnect:string;refresh:string;count:(value:number)=>string};
   assistant: {
     conversation: { loading: string; loadFailed: string; continueHint: string; expand: string; collapse: string; };
     workspace: {

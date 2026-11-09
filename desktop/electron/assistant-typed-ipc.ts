@@ -1,3 +1,4 @@
+import {ASSISTANT_CALENDAR_STATUS_SCHEMA as CALENDAR_SOURCE_STATUS_SCHEMA} from '../shared/assistant-calendar-observation-contract.js';
 import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import { z } from 'zod';
 import { types } from 'node:util';
@@ -9,9 +10,16 @@ import { captureIpcData } from './ipc-data-snapshot.js';
 import { registerIpcHandler, type RiskTag } from './ipc-runtime.js';
 
 const isPromise = types.isPromise, promiseThen = Promise.prototype.then, apply = Reflect.apply;
+// Root and Desktop keep separate Zod major versions. Calendar validation stays
+// Main-only; existing renderer schemas never import the host-side contract.
+const calendarStatus=z.unknown().transform((raw,context)=>{const parsed=CALENDAR_SOURCE_STATUS_SCHEMA.safeParse(raw);if(!parsed.success){context.addIssue({code:'custom',message:'assistant_calendar_status_invalid'});return z.NEVER;}return parsed.data;});
+const inputSchemas=Object.freeze({...ASSISTANT_INPUT_SCHEMAS,getCalendarStatus:z.tuple([]),connectCalendar:z.tuple([]),disconnectCalendar:z.tuple([]),refreshCalendar:z.tuple([])});
+const outputSchemas=Object.freeze({...ASSISTANT_OUTPUT_SCHEMAS,getCalendarStatus:calendarStatus,connectCalendar:calendarStatus,disconnectCalendar:calendarStatus,refreshCalendar:calendarStatus});
+
 
 const channels = Object.freeze({
   getOverview: 'desktop:assistant:getOverview', activate: 'desktop:assistant:activate',
+  getCalendarStatus:'desktop:assistant:getCalendarStatus',connectCalendar:'desktop:assistant:connectCalendar',disconnectCalendar:'desktop:assistant:disconnectCalendar',refreshCalendar:'desktop:assistant:refreshCalendar',
   pause: 'desktop:assistant:pause', resume: 'desktop:assistant:resume',
   acceptCandidate: 'desktop:assistant:acceptCandidate', rejectCandidate: 'desktop:assistant:rejectCandidate',
 });
@@ -28,6 +36,7 @@ const owners = new WeakMap<IpcHandleRegistrar, Owner>();
 const localRisks: RiskTag[] = ['fs-read', 'fs-write-userData', 'internal-mutation'];
 const risks: Record<Method, RiskTag[]> = {
   getOverview: [...localRisks, 'network', 'external-process', 'capability-token'],
+  getCalendarStatus:['fs-read'],connectCalendar:[...localRisks,'network','external-process'],disconnectCalendar:[...localRisks],refreshCalendar:[...localRisks,'network','external-process'],
   activate: [...localRisks], pause: [...localRisks], resume: [...localRisks], rejectCandidate: [...localRisks],
   acceptCandidate: [...localRisks, 'fs-write', 'network', 'external-process', 'capability-token', 'issues-token'],
 };
@@ -81,7 +90,7 @@ function inputSchema(method: Method) {
         || Object.keys(input).some(key => !fields.includes(key))) throw Error('assistant_ipc_input');
       readId(input.candidateId); if (method === 'acceptCandidate') optionalId(input.collectionId);
     }
-    if (!ASSISTANT_INPUT_SCHEMAS[method].safeParse(value).success) throw Error('assistant_ipc_input');
+    if (!inputSchemas[method].safeParse(value).success) throw Error('assistant_ipc_input');
     return value;
   });
 }
@@ -89,7 +98,7 @@ export function registerAssistantTypedIpc(ipc: IpcHandleRegistrar, controller: A
   authorize: (event: unknown) => boolean = deny): void {
   const owner = admission(ipc, controller, authorize);
   for (const [key, channel] of Object.entries(channels)) {
-    const method = key as Method, output = ASSISTANT_OUTPUT_SCHEMAS[method];
+    const method = key as Method, output = outputSchemas[method];
     if (owner.installed.has(method)) continue;
     registerIpcHandler<Input, unknown>({ registrar: owner.registrar, channel, payloadMode: 'tuple', input: inputSchema(method), output,
       sourceFile: 'desktop/electron/assistant-typed-ipc.ts', rolloutRound: 10, riskTags: [...risks[method]],
@@ -100,6 +109,8 @@ export function registerAssistantTypedIpc(ipc: IpcHandleRegistrar, controller: A
         });
         else if (method === 'rejectCandidate') result = controller.rejectCandidate({ candidateId: readId(input[0]!.candidateId), requestSource: 'user' });
         else if (method === 'getOverview') result = controller.getOverview();
+        else if(method==='getCalendarStatus'){if(!controller.getCalendarStatus)throw Error('assistant_calendar_unavailable');result=controller.getCalendarStatus();}
+        else if(method==='connectCalendar'||method==='disconnectCalendar'||method==='refreshCalendar'){const operation=controller[method];if(!operation)throw Error('assistant_calendar_unavailable');result=apply(operation,controller,[{requestSource:'user'}]);}
         else result = controller[method]({ requestSource: 'user' });
         const snapshot = (value: unknown): unknown => {
           let captured: unknown;

@@ -1,3 +1,4 @@
+import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
 import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
 import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
 import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
@@ -286,6 +287,11 @@ export const PRELOAD_API_KEYS = [
   'onAssistantInboxChanged',
   'onAssistantInboxFocus',
   'getAssistantOverview',
+  'getAssistantCalendarStatus',
+  'connectAssistantCalendar',
+  'disconnectAssistantCalendar',
+  'refreshAssistantCalendar',
+
   'activateAssistant',
   'pauseAssistant',
   'resumeAssistant',
@@ -705,6 +711,11 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   approveAssistantSend: 'desktop:assistantInbox:approve',
   refuseAssistantSend: 'desktop:assistantInbox:refuse',
   getAssistantOverview: 'desktop:assistant:getOverview',
+  getAssistantCalendarStatus: 'desktop:assistant:getCalendarStatus',
+  connectAssistantCalendar: 'desktop:assistant:connectCalendar',
+  disconnectAssistantCalendar: 'desktop:assistant:disconnectCalendar',
+  refreshAssistantCalendar: 'desktop:assistant:refreshCalendar',
+
   activateAssistant: 'desktop:assistant:activate',
   pauseAssistant: 'desktop:assistant:pause',
   resumeAssistant: 'desktop:assistant:resume',
@@ -1467,6 +1478,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   onAssistantInboxChanged(handler:()=>void): ()=>void;
   onAssistantInboxFocus(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
+  getAssistantCalendarStatus():Promise<AssistantCalendarStatus>;
+  connectAssistantCalendar():Promise<AssistantCalendarStatus>;
+  disconnectAssistantCalendar():Promise<AssistantCalendarStatus>;
+  refreshAssistantCalendar():Promise<AssistantCalendarStatus>;
+
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
   resumeAssistant(): Promise<AssistantProfileDto>;
@@ -2023,6 +2039,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
     onAssistantInboxFocus(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.off('desktop:assistantInbox:focus', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
+    getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus') as ReturnType<DesktopApi['getAssistantCalendarStatus']>,
+    connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar') as ReturnType<DesktopApi['connectAssistantCalendar']>,
+    disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar') as ReturnType<DesktopApi['disconnectAssistantCalendar']>,
+    refreshAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:refreshCalendar') as ReturnType<DesktopApi['refreshAssistantCalendar']>,
+
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,
     resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume') as ReturnType<DesktopApi['resumeAssistant']>,
