@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { configureBundledYzjCli, ensureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { bashTool } from '../../src/ai/tools/bash.js';
 
@@ -24,11 +24,11 @@ describe('bundled Yunzhijia CLI', () => {
   it('publishes one complete executable under concurrent real-process initialization', async () => {
     const f = fixture(); writeFileSync(f.source, Buffer.alloc(1024 * 1024, 37));
     let moduleUrl = new URL('../../src/runtime/bundled-yzj-cli.js', import.meta.url).href;
-    const loaderArgs = existsSync(fileURLToPath(moduleUrl)) ? [] : ['--import', createRequire(import.meta.url).resolve('tsx')];
+    const loaderArgs = existsSync(fileURLToPath(moduleUrl)) ? [] : ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href];
     if (loaderArgs.length) moduleUrl = moduleUrl.replace(/\.js$/, '.ts');
     const script = `import {ensureBundledYzjCli} from ${JSON.stringify(moduleUrl)}; ensureBundledYzjCli(JSON.parse(process.argv[1]));`;
     const results = await Promise.allSettled(Array.from({ length: 4 }, () => promisify(execFile)(process.execPath, [...loaderArgs, '--input-type=module', '--eval', script, JSON.stringify(f)])));
-    for (const result of results) expect(result.status).toBe('fulfilled');
+    for (const result of results) expect(result.status, result.status === 'rejected' ? String(result.reason) : undefined).toBe('fulfilled');
     const seeded = ensureBundledYzjCli(f);
     expect(readFileSync(seeded.binaryPath)).toEqual(readFileSync(f.source)); expect(readdirSync(seeded.binDir)).toHaveLength(1);
   });
