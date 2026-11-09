@@ -4,14 +4,14 @@ import type { Config } from '../../../src/types.js';
 
 describe('Desktop memory distillation owner', () => {
   it('uses current configuration on every side call and follows main-model changes', async () => {
-    const config = { defaultModelId: 'main-a', models: { 'main-a': {}, 'main-b': {}, 'memory-a': {} } } as unknown as Config;
+    const config = { defaultModelId: 'main-a', providers:{ fixture:{type:'custom',protocol:'openai_legacy'} }, models: Object.fromEntries(['main-a','main-b','memory-a'].map(id=>[id,{provider:'fixture',model:id,label:id,capabilities:['text_generation']}])) } as Config;
     const build = vi.fn(async (_config: Config, id?: string) => async () => id ?? _config.defaultModelId);
     const llm = createDesktopMemoryLlm(async () => config, build);
     expect(await llm('p')).toBe('main-a');
     config.defaultModelId = 'main-b'; expect(await llm('p')).toBe('main-b');
     config.memory = { modelId: 'memory-a' }; expect(await llm('p')).toBe('memory-a');
-    config.memory.modelId = 'deleted'; expect(await llm('p')).toBe('main-b');
-    expect(build).toHaveBeenCalledTimes(4);
+    config.memory.modelId = 'deleted'; await expect(llm('p')).rejects.toThrow('invalid_compaction_model');
+    expect(build).toHaveBeenCalledTimes(3);
   });
   it('registers a real forced user operation, rejects foreign sender and propagates errors', async () => {
     let handler!: (event: unknown, ...args: unknown[]) => Promise<unknown>;
@@ -46,3 +46,8 @@ describe('Desktop memory distillation owner', () => {
     expect(() => selectMemoryEmbeddingModel({} as Config, 'not-downloaded-registry-id', ['embedding'])).toThrow();
   });
 });
+
+ it('refuses a changed model after inference disclosure without invoking a different provider',async()=>{
+  const config={defaultModelId:'new',providers:{fixture:{type:'custom',protocol:'openai_legacy'}},models:{new:{provider:'fixture',model:'new',label:'New',capabilities:['text_generation']}}} as Config;
+  const build=vi.fn();const llm=createDesktopMemoryLlm(async()=>config,build,'previous');await expect(llm('synthetic')).rejects.toThrow('invalid_compaction_model');expect(build).not.toHaveBeenCalled();
+ });

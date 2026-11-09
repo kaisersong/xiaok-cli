@@ -1,3 +1,4 @@
+import type { MemorySettingsSnapshot } from '../shared/memory-settings-types.js';
 import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../shared/decision-model-types.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
@@ -395,6 +396,9 @@ export const PRELOAD_API_KEYS = [
   'importMemories',
   'memoryStats',
   'memoryCompact',
+  'memoryGetSettings',
+  'memoryCancelCompaction',
+  'deleteEmbeddingModel',
   'memoryPersonaTraits',
   'memoryListLayer',
   'memoryDeleteEntry',
@@ -829,6 +833,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   importMemories: 'desktop:importMemories',
   memoryStats: 'desktop:memoryStats',
   memoryCompact: 'desktop:memoryCompact',
+  memoryGetSettings: 'desktop:memoryGetSettings',
+  memoryCancelCompaction: 'desktop:memoryCancelCompaction',
+  deleteEmbeddingModel: 'desktop:deleteEmbeddingModel',
   memoryPersonaTraits: 'desktop:memoryPersonaTraits',
   memoryListLayer: 'desktop:memoryListLayer',
   memoryDeleteEntry: 'desktop:memoryDeleteEntry',
@@ -1610,7 +1617,10 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, Cont
   deleteMemory(id: string): Promise<boolean>;
   importMemories(raw: string): Promise<MemoryImportIpcResult>;
   memoryStats(): Promise<MemoryStatsIpcSnapshot | null>;
-  memoryCompact(): Promise<MemoryCompactionResult>;
+  memoryCompact(input?:{expectedModelId:string}): Promise<MemoryCompactionResult>;
+  memoryGetSettings(): Promise<MemorySettingsSnapshot>;
+  memoryCancelCompaction(): Promise<boolean>;
+  deleteEmbeddingModel(modelId:string): Promise<void>;
   memoryPersonaTraits(): Promise<MemoryPersonaIpcTrait[]>;
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
@@ -2283,7 +2293,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<boolean>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<MemoryImportIpcResult>,
     memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<MemoryStatsIpcSnapshot | null>,
-    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
+    memoryCompact: (input?:{expectedModelId:string}) => (input === undefined ? ipcRenderer.invoke('desktop:memoryCompact') : ipcRenderer.invoke('desktop:memoryCompact',input)) as Promise<MemoryCompactionResult>,
+    memoryGetSettings: () => ipcRenderer.invoke('desktop:memoryGetSettings') as Promise<MemorySettingsSnapshot>,
+    memoryCancelCompaction: () => ipcRenderer.invoke('desktop:memoryCancelCompaction') as Promise<boolean>,
+    deleteEmbeddingModel: (modelId:string) => ipcRenderer.invoke('desktop:deleteEmbeddingModel', modelId) as Promise<void>,
     memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<MemoryPersonaIpcTrait[]>,
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,

@@ -174,7 +174,7 @@ export function getManualDownloadHint(modelId: string): {urls:{file:string;url:s
 }
 export async function deleteEmbeddingModelFiles(id: string,source:{requestSource:'user'|'agent'|'scheduler'}):Promise<void>{
   if(source?.requestSource!=='user')throw new Error('memory_settings_user_only');
-  await withFiles(id,false,async(base,entry)=>{
+  await withFiles(id,false,async(base,entry,op)=>{
     const live=await import('./embedding.js');
     if(typeof live.getLiveEmbeddingModelIds!=='function')throw new Error('embedding_model_live_owner_unavailable');
     const dir=path.join(base,entry.id),names=files(dir,entry,true);if(!names)return;
@@ -182,21 +182,36 @@ export async function deleteEmbeddingModelFiles(id: string,source:{requestSource
     const explicit=config.memory?.embedding?.model,legacy=config.memory?.modelId;
     const active=explicit??(typeof legacy==='string'&&fixedEntries.has(legacy)?legacy:'all-MiniLM-L6-v2');
     if(typeof active!=='string')throw new Error('embedding_model_configuration_unconfirmed');
-    if(active===entry.id)throw new Error('embedding_model_active');
+    const canonicalId=(value:string)=>[...fixedEntries.keys()].find(known=>known.toLowerCase()===value.toLowerCase());
+    const configured=canonicalId(active);
+    if(configured===entry.id || (config.memory?.embedding?.provider!=='api' && !configured))throw new Error('embedding_model_active');
     // Config await may outlive another file writer; recheck immediately before effects.
     directory(base);files(dir,entry,true);
     const before=directory(dir)!;
     const ids=live.getLiveEmbeddingModelIds();
     if(!Array.isArray(ids)||ids.some(value=>typeof value!=='string'))throw new Error('embedding_model_live_owner_unconfirmed');
-    if(ids.includes(entry.id))throw new Error('embedding_model_active');
+    if(ids.some(value=>{const known=canonicalId(value);return !known || known===entry.id;}))throw new Error('embedding_model_active');
     if(source?.requestSource!=='user')throw new Error('memory_settings_user_only');
     const staged=path.join(base,`.delete-${entry.id}-${randomUUID()}`);
     fs.renameSync(dir,staged);
-    const after=directory(staged);if(!after||after.dev!==before.dev||after.ino!==before.ino)unsafe('path');
-    const current=files(staged,entry,true)!;
-    // Fixed flat unlinks only. An unexpected racing descendant is never traversed.
-    for(const name of current){const file=path.join(staged,name),value=stat(file);if(!value||!value.isFile()||value.isSymbolicLink()||value.nlink!==1)unsafe('files');fs.unlinkSync(file);}
-    fs.rmdirSync(staged);
+    try {
+      const after=directory(staged);if(!after||after.dev!==before.dev||after.ino!==before.ino)unsafe('path');
+      const current=files(staged,entry,true)!;
+      // Fixed flat unlinks only. An unexpected racing descendant is never traversed.
+      for(const name of current){const file=path.join(staged,name),value=stat(file);if(!value||!value.isFile()||value.isSymbolicLink()||value.nlink!==1)unsafe('files');fs.unlinkSync(file);}
+      fs.rmdirSync(staged);
+    } catch(original) {
+      let rollbackFailed=false,rollback:unknown;
+      try {
+        directory(base);
+        const retained=directory(staged);
+        if(!retained||retained.dev!==before.dev||retained.ino!==before.ino||stat(dir))unsafe('path');
+        files(staged,entry,true);
+        fs.renameSync(staged,dir);
+      } catch(raw) {rollbackFailed=true;rollback=raw;op.uncertain=true;}
+      if(rollbackFailed)throw new AggregateError([original,rollback],'embedding_model_delete_restore_failed',{cause:original});
+      throw original;
+    }
   });
 }
 /** One original HTTP attempt. Close ACK and all entered stream tails precede resolution. */

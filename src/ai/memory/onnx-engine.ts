@@ -157,7 +157,7 @@ export class OnnxEmbeddingEngine {
 
   async close(): Promise<void> {
     if (this.session) {
-      this.session.release();
+      await this.session.release();
       this.session = null;
     }
     this.tokenizer = null;

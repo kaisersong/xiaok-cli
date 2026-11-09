@@ -4419,7 +4419,15 @@ function MemoryPane({ onOpenDecisionModels }: { onOpenDecisionModels: () => void
         {(['content', 'configuration'] as const).map(tab => (
           <button type="button" role="tab" key={tab} id={`memory-tab-${tab}`}
             aria-selected={memoryTab === tab} aria-controls={`memory-panel-${tab}`}
+            tabIndex={memoryTab === tab ? 0 : -1}
             onClick={() => setMemoryTab(tab)}
+            onKeyDown={event => {
+              if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 'content' : event.key === 'End' ? 'configuration' : memoryTab === 'content' ? 'configuration' : 'content';
+              setMemoryTab(next);
+              document.getElementById(`memory-tab-${next}`)?.focus();
+            }}
             className={`border-b-2 px-1 py-2 text-sm ${memoryTab === tab ? 'border-[var(--c-accent)] text-[var(--c-text-heading)]' : 'border-transparent text-[var(--c-text-muted)]'}`}>
             {tab === 'content' ? ds.memoryContentTab : ds.memoryConfigurationTab}
           </button>

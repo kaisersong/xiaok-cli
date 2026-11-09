@@ -10,7 +10,7 @@ const layerEntry: ZodSchema<MemoryLayerIpcEntry> = z.object({
   id: z.string(), content: z.string(), tags: z.array(z.string()).optional(), createdAt: z.string().optional(),
   meta: z.object({ role: z.string().optional(), sessionId: z.string().optional(), scope: z.string().optional(), type: z.string().nullable().optional(), keyFacts: z.array(z.string()).optional(), evidence: z.array(z.string()).optional(), confidence: z.number().optional() }).strict().optional(),
 }).strict();
-const modelEntry: ZodSchema<EmbeddingModelIpcEntry> = z.object({ id: z.string(), name: z.string(), dims: z.number(), size: z.string(), languages: z.string(), downloaded: z.boolean(), active: z.boolean(), manualHint: z.object({ urls: z.array(z.object({ file: z.string(), url: z.string() }).strict()), targetDir: z.string() }).strict() }).strict();
+const modelEntry: ZodSchema<EmbeddingModelIpcEntry> = z.object({ id: z.string(), name: z.string(), dims: z.number(), size: z.string(), languages: z.string(), downloaded: z.boolean(), filesPresent:z.boolean().optional(), active: z.boolean(), manualHint: z.object({ urls: z.array(z.object({ file: z.string(), url: z.string() }).strict()), targetDir: z.string() }).strict() }).strict();
 const compactResult: ZodSchema<MemoryCompactionResult> = z.object({ status: z.enum(['completed', 'unchanged']), l1: z.number(), l2: z.number(), l3: z.number() }).strict();
 const ignoredInput = z.preprocess(() => undefined, z.void());
 const contractViolation = (): never => { throw new Error('ipc_contract_violation'); };
@@ -34,7 +34,7 @@ export const MEMORY_IPC_CONTRACTS = {
   deleteMemory: single(z.string(), z.boolean(), ['fs-delete', 'fs-write-userData']),
   importMemories: single(z.string(), importResult, ['fs-read', 'fs-write-userData'], importFailure),
   memoryStats: single(ignoredInput, stats.nullable(), ['fs-read'], () => null),
-  memoryCompact: { ...single(z.tuple([]), compactResult, ['fs-read', 'fs-write-userData', 'network']), payloadMode: 'tuple' },
+  memoryCompact: { ...single(z.union([z.tuple([]),z.tuple([z.object({expectedModelId:z.string().min(1)}).strict()])]), compactResult, ['fs-read', 'fs-write-userData', 'network']), payloadMode: 'tuple' },
   memoryPersonaTraits: single(ignoredInput, z.array(persona), ['fs-read'], () => []),
   memoryListLayer: { ...single(z.preprocess(positions(3), z.tuple([z.number(), z.number().nullish(), z.number().nullish()])), z.array(layerEntry), ['fs-read'], () => []), payloadMode: 'tuple' },
   memoryDeleteEntry: { ...single(z.preprocess(positions(2), z.tuple([z.string(), z.number().optional()])), z.boolean(), ['fs-delete', 'fs-write-userData'], () => false), payloadMode: 'tuple' },

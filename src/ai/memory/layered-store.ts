@@ -61,14 +61,17 @@ export function resolveLayeredConfig(config?: Record<string, unknown>): LayeredM
 /**
  * Create an LLM function from a ModelAdapter, following the CompactRunner pattern.
  */
-export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string) => Promise<string> {
-  return async (prompt: string) => {
+export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string, signal?: AbortSignal) => Promise<string> {
+  return async (prompt: string, signal?: AbortSignal) => {
     const messages: Message[] = [
       { role: 'user', content: [{ type: 'text', text: prompt }] },
     ];
     const chunks: string[] = [];
     let done = false;
     const controller = new AbortController();
+    signal?.throwIfAborted();
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => controller.abort(new DOMException('memory_compaction_timeout', 'AbortError')), 120_000);
     timer.unref?.();
     try {
@@ -87,7 +90,7 @@ export function createLLMFromAdapter(adapter: ModelAdapter): (prompt: string) =>
       controller.signal.throwIfAborted();
       if (!done) throw new Error('memory_output_incomplete');
       return chunks.join('');
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
   };
 }
 
@@ -103,7 +106,7 @@ export class LayeredMemoryStore implements MemoryStore {
   private db: Database.Database;
   private dbPath: string;
   private embeddingClient: EmbeddingClient;
-  private llmFn?: (prompt: string) => Promise<string>;
+  private llmFn?: (prompt: string, signal?: AbortSignal) => Promise<string>;
   private compactionConfig: {
     l0MinMessages: number;
     autoCompact: boolean;
@@ -112,6 +115,7 @@ export class LayeredMemoryStore implements MemoryStore {
   };
   private compactTimer?: ReturnType<typeof setInterval>;
   private compacting = false;
+  private compactionController?: AbortController;
   private closed = false;
   /** Set when close() had to wait for pending writes; repeated close() calls return the same wait. */
   private closing: Promise<void> | undefined;
@@ -145,10 +149,23 @@ export class LayeredMemoryStore implements MemoryStore {
 
   }
 
-  setLLMFn(fn: (prompt: string) => Promise<string>): void {
+  setLLMFn(fn: (prompt: string, signal?: AbortSignal) => Promise<string>): void {
     this.llmFn = fn;
     if (this.compactionConfig.autoCompact && !this.compactTimer && !this.closed) this.startAutoCompact();
   }
+
+  cancelCompaction(request: { requestSource: 'user' | 'agent' | 'scheduler' }): boolean {
+    if (request?.requestSource !== 'user') throw new Error('memory_compaction_forbidden');
+    if (!this.compactionController) return false;
+    this.compactionController.abort(); return true;
+  }
+  async configureEmbedding(config: EmbeddingConfig, request: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
+    if (request?.requestSource !== 'user') throw new Error('memory_embedding_forbidden');
+    if (this.closed) throw new Error('memory_store_closed');
+    await this.trackWrite(() => this.embeddingClient.configure(config));
+    if (this.closed) { await this.embeddingClient.close(); throw new Error('memory_store_closed'); }
+  }
+  getEmbeddingModelId(): string { return this.embeddingClient.getModelId(); }
 
   private trackWrite<T>(start: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error('memory_store_closed'));
@@ -261,18 +278,25 @@ export class LayeredMemoryStore implements MemoryStore {
       || (request.requestSource === 'scheduler' && request.force)) throw new Error('memory_compaction_forbidden');
     if (this.closed) throw new Error('memory_store_closed');
     if (this.compacting) throw new Error('memory_compaction_busy');
-    if (!this.llmFn) throw new Error('memory_model_unavailable');
-    this.compacting = true;
-    const before = this.getStats();
-    const assertOpen = () => { if (this.closed) throw new Error('memory_store_closed'); };
+    if (!request.llm && !this.llmFn) throw new Error('memory_model_unavailable');
+    request.signal?.throwIfAborted();
+    const controller = new AbortController();
+    const abort = () => controller.abort(request.signal?.reason);
+    request.signal?.addEventListener('abort', abort, { once: true });
+    this.compacting = true; this.compactionController = controller;
+    const llm = request.llm ?? this.llmFn!;
+    const assertOpen = () => { request.assertCurrent?.(); controller.signal.throwIfAborted(); if (this.closed) throw new Error('memory_store_closed'); };
     try {
-      const options = { force: request.force, assertOpen };
-      const r1 = await compactL0toL1(this.db, this.llmFn, {
+      assertOpen();
+      if (request.prepare) { await request.prepare(controller.signal); assertOpen(); }
+      const before = this.getStats();
+      const options = { force: request.force, assertOpen, signal: controller.signal };
+      const r1 = await compactL0toL1(this.db, llm, {
         ...options, force: false, minMessages: this.compactionConfig.l0MinMessages,
         maxPromptTokens: this.compactionConfig.maxPromptTokens,
       });
-      const r2 = await compactL1toL2(this.db, this.llmFn, options);
-      const r3 = await compactL2toL3(this.db, this.llmFn, options);
+      const r2 = await compactL1toL2(this.db, llm, options);
+      const r3 = await compactL2toL3(this.db, llm, options);
       const counts = { l1: r1.extracted, l2: r2.scenarios, l3: r3.traits };
       const result: MemoryCompactionResult = {
         status: Object.values(counts).some(count => count > 0)
@@ -280,7 +304,11 @@ export class LayeredMemoryStore implements MemoryStore {
       };
       logger.info('memory distillation finished', { requestSource: request.requestSource, force: !!request.force, ...result });
       return result;
-    } finally { this.compacting = false; }
+    } finally {
+      request.signal?.removeEventListener('abort', abort);
+      if (this.compactionController === controller) this.compactionController = undefined;
+      this.compacting = false;
+    }
   }
 
   async delete(id: string, layer?: number): Promise<boolean> {
@@ -455,6 +483,7 @@ export class LayeredMemoryStore implements MemoryStore {
   close(): void | Promise<void> {
     if (this.closed) return this.closing;
     this.closed = true;
+    this.compactionController?.abort();
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }
@@ -504,7 +533,7 @@ export class LayeredMemoryStore implements MemoryStore {
       provenance_json?: string;
     };
 
-    // L0 results don't carry tags/scope — look up L1 for enriched metadata
+    // L0 carries its own scope; an exact L1 sibling may add tags and provenance.
     if (r.layer === 0) {
       const l1 = this.db.prepare(
         'SELECT tags, scope, mem_type, cwd, provenance_json FROM memory_l1_extracted WHERE id = ?'

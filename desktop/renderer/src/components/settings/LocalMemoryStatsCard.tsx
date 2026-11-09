@@ -56,6 +56,8 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
   const [compacting, setCompacting] = useState(false)
   const [compactDone, setCompactDone] = useState(false)
   const [compactError, setCompactError] = useState(false)
+  const [cancelRequested, setCancelRequested] = useState(false)
+  const [compactConfirm, setCompactConfirm] = useState<string | null>(null)
   const [modelOptions, setModelOptions] = useState<{ id: string; label: string }[]>([])
   const compactDoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
@@ -120,11 +122,15 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
 
   const handleCompact = useCallback(async () => {
     if (!memoryApi?.compact) return
+    const expectedModelId = compactConfirm;
+    setCompactConfirm(null)
+    if (!expectedModelId) return
     setCompacting(true)
+    setCancelRequested(false)
     setCompactError(false)
     setCompactDone(false)
     try {
-      const result = await memoryApi.compact()
+      const result = await memoryApi.compact({ expectedModelId })
       if (!result || !['completed', 'unchanged'].includes(result.status)
         || ![result.l1, result.l2, result.l3].every(n => Number.isInteger(n) && n >= 0)) throw new Error('invalid_memory_compaction_result')
       setCompactDone(true)
@@ -137,7 +143,15 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
     } finally {
       setCompacting(false)
     }
-  }, [memoryApi, loadData])
+  }, [memoryApi, loadData, compactConfirm])
+
+  const requestCompact = async () => {
+    try {
+      const settings = await memoryApi?.getSettings()
+      if (!settings?.resolvedCompactionModelId || settings.warning) { setCompactError(true); return }
+      setCompactConfirm(settings.resolvedCompactionModelId)
+    } catch { setCompactError(true) }
+  }
 
   const handleClearAll = useCallback(async () => {
     if (!memoryApi?.clearAll) return
@@ -300,7 +314,7 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
           </button>
           <button
             type="button"
-            onClick={handleCompact}
+            onClick={() => void requestCompact()}
             disabled={compacting}
             className={secondaryButtonSmCls}
             style={secondaryButtonBorderStyle}
@@ -320,7 +334,11 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
         </div>
       </div>
 
-      {compactError && <p role="alert" className="text-sm text-[var(--c-status-error)]">{ds.memoryCompactFailed}</p>}
+      {compacting && <button type="button" disabled={cancelRequested} onClick={async () => {
+        try { if (await memoryApi?.cancelCompaction()) setCancelRequested(true) }
+        catch { setCompactError(true) }
+      }}>{cancelRequested ? ds.memoryCompactCancelRequested : ds.memoryCompactCancel}</button>}
+      {compactError && <p role="alert" className="text-sm text-[var(--c-status-error)]">{cancelRequested ? ds.memoryCompactCancelRequested : ds.memoryCompactFailed}</p>}
       {/* Layer stats */}
       {stats && (
         <div
@@ -546,6 +564,8 @@ export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConf
         </div>
       </Modal>
 
+      <ConfirmDialog open={compactConfirm !== null} onClose={() => setCompactConfirm(null)} onConfirm={() => void handleCompact()}
+        title={ds.memoryCompact} message={ds.memoryCompactionConfirm(compactConfirm ?? '')} confirmLabel={ds.memoryCompact} cancelLabel={ds.memoryCancel} />
       {/* Clear confirm */}
       <ConfirmDialog
         open={clearConfirmOpen}
