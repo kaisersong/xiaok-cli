@@ -126,7 +126,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.14.0'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -137,6 +137,9 @@ jobs:
       - name: Install root dependencies
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
+
+      - name: Verify packaged CLI preparation contract
+        run: node --test tests/workflows/desktop-yzj-package-prerequisites.test.mjs
 
       - name: Install desktop dependencies
         # Keep native rebuild lifecycle scripts disabled. Real Electron imports
@@ -257,7 +260,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.14.0'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -283,6 +286,13 @@ jobs:
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+
+      - name: Prepare locked bundled Yunzhijia binary before packaging
+        working-directory: desktop
+        run: node scripts/prepare-packaged-yzj-cli.cjs
+
+      - name: Verify prepared bundled CLI lifecycle
+        run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
 
       - name: Build nodejieba native binding for packaged segmentation (#150 M6)
         # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
