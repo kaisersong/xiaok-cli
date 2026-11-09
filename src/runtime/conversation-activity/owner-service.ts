@@ -16,7 +16,9 @@ type ProjectAttachment={store:ConversationActivityStore;assertUserRead(watch:Wor
 export class ConversationActivityAttachedService implements ConversationActivityApi {
   private disposed = false;
   private closing?:Promise<void>;
+  private disposeFailure?: { error: unknown };
   private readonly work=new Set<Promise<void>>();
+  private workCut?: readonly Promise<void>[];
   private own<T>(begin:()=>Promise<T>):Promise<T>{
     let completed!:()=>void,failed!:(error:unknown)=>void;
     const reservation=new Promise<void>((resolve,reject)=>{completed=resolve;failed=reject;});this.work.add(reservation);
@@ -143,8 +145,24 @@ export class ConversationActivityAttachedService implements ConversationActivity
   close():Promise<void>{
     if(this.closing)return this.closing;
     let completed!:()=>void,failed!:(error:unknown)=>void;this.closing=new Promise<void>((resolve,reject)=>{completed=resolve;failed=reject;});
-    const failures:unknown[]=[];try{this.dispose();}catch(error){failures.push(error);}const active=[...this.work];
+    const failures:unknown[]=[];try{this.dispose();}catch(error){failures.push(error);}const active=[...(this.workCut??this.work)];
+    try{active.push(this.client.close());}catch(error){failures.push(error);}
     void Promise.allSettled(active).then(results=>{failures.push(...results.flatMap(result=>result.status==='rejected'?[result.reason]:[]));if(failures.length)failed(new AggregateError(failures,'activity_attached_service_drain_failed'));else completed();},failed);return this.closing;
   }
-  dispose(): void { this.disposed = true;this.nativeRounds.clear(); for (const stop of this.subscriptions) stop(); this.subscriptions.clear(); this.client.dispose(); }
+  dispose(): void {
+    if (this.disposed) { if (this.disposeFailure) throw this.disposeFailure.error; return; }
+    this.disposed = true;
+    this.workCut = [...this.work];
+    this.client.seal();
+    this.nativeRounds.clear();
+    const failures: unknown[] = [];
+    for (const stop of this.subscriptions) try { stop(); } catch (error) { failures.push(error); }
+    this.subscriptions.clear();
+    try { this.client.dispose(); } catch (error) { failures.push(error); }
+    if (failures.length) {
+      const error = new AggregateError(failures, 'activity_attached_service_dispose_failed');
+      this.disposeFailure = { error };
+      throw error;
+    }
+  }
 }
