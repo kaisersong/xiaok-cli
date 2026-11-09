@@ -1304,6 +1304,11 @@ export interface LocaleStrings {
     memoryPaneTitle: string;
     memoryContentTab: string;
     memoryConfigurationTab: string;
+    conversationModelsTab: string;
+    decisionModelsTab: string;
+    decisionModelsDesc: string;
+    memoryDecisionModelsMoved: string;
+    openDecisionModelSettings: string;
     memoryEmbeddingCurrent: string;
     memoryModelConfigFailed: string;
 

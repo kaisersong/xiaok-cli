@@ -107,6 +107,7 @@ import {
 } from './settings/loopDiagnostics';
 
 type SettingsTab = 'model' | 'skills' | 'channels' | 'connectors' | 'mcp' | 'tools' | 'general' | 'dsh' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type ModelSettingsTab = 'conversation' | 'decision';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -256,6 +257,7 @@ interface Props {
 
 export function DesktopSettings({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [modelTab, setModelTab] = useState<ModelSettingsTab>('conversation');
   const { t } = useLocale();
   const navItems = getNavItems(t);
 
@@ -302,7 +304,7 @@ export function DesktopSettings({ onClose }: Props) {
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className={`px-8 py-6 ${activeTab === 'connectors' ? 'w-full max-w-[1100px]' : 'max-w-[700px]'}`}>
-          {activeTab === 'model' && <ModelPane />}
+          {activeTab === 'model' && <ModelSettingsPane activeTab={modelTab} onSelect={setModelTab} />}
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
@@ -314,7 +316,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'voice' && <VoicePane />}
           {activeTab === 'appearance' && <DesktopAppearanceSettings />}
           {activeTab === 'data' && <DataPane />}
-          {activeTab === 'memory' && <MemoryPane />}
+          {activeTab === 'memory' && <MemoryPane onOpenDecisionModels={() => { setModelTab('decision'); setActiveTab('model'); }} />}
           {activeTab === 'about' && <AboutPane />}
         </div>
       </div>
@@ -1135,7 +1137,51 @@ interface SkillItem {
   tier: string;
 }
 
-function ModelPane() {
+function ModelSettingsPane({ activeTab, onSelect }: { activeTab: ModelSettingsTab; onSelect: (tab: ModelSettingsTab) => void }) {
+  const { t } = useLocale();
+  const ds = t.desktopSettings;
+  const [visited, setVisited] = useState<ModelSettingsTab[]>(() => [activeTab]);
+  const initialTab = useRef(activeTab);
+  const buttons = useRef<Partial<Record<ModelSettingsTab, HTMLButtonElement | null>>>({});
+  const tabs = ['conversation', 'decision'] as const;
+  useEffect(() => {
+    if (initialTab.current === 'decision') buttons.current.decision?.focus();
+  }, []);
+  const select = (tab: ModelSettingsTab) => {
+    setVisited(current => current.includes(tab) ? current : [...current, tab]);
+    onSelect(tab);
+  };
+  return <>
+    <div role="tablist" aria-label={ds.navModel} className="mb-5 flex flex-wrap gap-4 border-b border-[var(--c-border-subtle)]">
+      {tabs.map((tab, index) => <button key={tab} type="button" role="tab" id={`model-tab-${tab}`}
+        ref={node => { buttons.current[tab] = node; }}
+        aria-selected={activeTab === tab} aria-controls={`model-panel-${tab}`} tabIndex={activeTab === tab ? 0 : -1}
+        onClick={() => select(tab)}
+        onKeyDown={event => {
+          const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[1]
+            : event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+            : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length] : undefined;
+          if (!next) return;
+          event.preventDefault(); select(next); buttons.current[next]?.focus();
+        }}
+        className={`border-b-2 px-1 py-2 text-sm ${activeTab === tab ? 'border-[var(--c-accent)] text-[var(--c-text-heading)]' : 'border-transparent text-[var(--c-text-muted)]'}`}>
+        {tab === 'conversation' ? ds.conversationModelsTab : ds.decisionModelsTab}
+      </button>)}
+    </div>
+    <div role="tabpanel" id="model-panel-conversation" aria-labelledby="model-tab-conversation" hidden={activeTab !== 'conversation'}>
+      {(visited.includes('conversation') || activeTab === 'conversation') && <ConversationModelPane />}
+    </div>
+    <div role="tabpanel" id="model-panel-decision" aria-labelledby="model-tab-decision" hidden={activeTab !== 'decision'}>
+      {(visited.includes('decision') || activeTab === 'decision') && <>
+        <p className="mb-5 text-xs text-[var(--c-text-secondary)]">{ds.decisionModelsDesc}</p>
+        <SystemOneSection />
+        <KimDecisionSection />
+      </>}
+    </div>
+  </>;
+}
+
+function ConversationModelPane() {
   const { t } = useLocale();
   const [config, setConfig] = useState<DesktopModelConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4359,7 +4405,7 @@ function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus, t:
 
 // ---- Memory ----
 
-function MemoryPane() {
+function MemoryPane({ onOpenDecisionModels }: { onOpenDecisionModels: () => void }) {
   const { t } = useLocale();
   const [memoryTab, setMemoryTab] = useState<'content' | 'configuration'>('content');
   const ds = t.desktopSettings;
@@ -4383,8 +4429,10 @@ function MemoryPane() {
       {memoryTab === 'configuration' && <div role="tabpanel" id="memory-panel-configuration" aria-labelledby="memory-tab-configuration" className="space-y-6">
         <MemoryCompactionModelSettings />
         <MemoryModelSettings />
-        <KimDecisionSection />
-        <SystemOneSection />
+        <div className="rounded-xl border border-[var(--c-border)] p-4">
+          <p className="mb-3 text-xs text-[var(--c-text-secondary)]">{ds.memoryDecisionModelsMoved}</p>
+          <button type="button" className={btnSecondary} onClick={onOpenDecisionModels}>{ds.openDecisionModelSettings}</button>
+        </div>
       </div>}
     </Section>
   );
