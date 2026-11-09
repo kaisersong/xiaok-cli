@@ -155,6 +155,7 @@ jobs:
           .test-dist/tests/ai/memory/segment.test.js
           .test-dist/tests/ai/memory/segment-async.test.js
           .test-dist/tests/ai/memory/segment-worker-fallback.test.js
+          .test-dist/tests/ai/memory/segment-worker-exit.test.js
           .test-dist/tests/ai/memory/segment-native-paths.test.js
           .test-dist/tests/ai/memory/compaction.test.js
           .test-dist/tests/ai/memory/distillation-repair.test.js
