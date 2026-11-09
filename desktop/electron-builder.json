@@ -8,6 +8,12 @@
       "schemes": [
         "intent-broker"
       ]
+    },
+    {
+      "name": "xiaok context references",
+      "schemes": [
+        "xiaok"
+      ]
     }
   ],
   "directories": {
