@@ -37,6 +37,7 @@ on:
       - 'scripts/read-kimi-coding-models.mjs'
       - 'scripts/verify-packaged-kimi-smoke-result.mjs'
       - 'scripts/check-desktop-sibling-pins.mjs'
+      - 'src/ai/runtime/**'
       - '.github/workflows/desktop-cross-platform.yml'
       - '.github/workflows/desktop-release.yml'
   pull_request:
@@ -66,6 +67,7 @@ on:
       - 'scripts/read-kimi-coding-models.mjs'
       - 'scripts/verify-packaged-kimi-smoke-result.mjs'
       - 'scripts/check-desktop-sibling-pins.mjs'
+      - 'src/ai/runtime/**'
       - '.github/workflows/desktop-cross-platform.yml'
       - '.github/workflows/desktop-release.yml'
   workflow_dispatch: {}
@@ -189,6 +191,9 @@ jobs:
           tests/main/ipc-handler-test-injection.test.ts
           tests/main/shutdown-aware-ipc-main.test.ts
           tests/main/desktop-text-repetition.test.ts
+          tests/renderer/chat-shell-repetition.test.tsx
+          tests/renderer/chat-shell-repetition-structured.test.tsx
+          tests/renderer/chat-shell-repetition-history.test.tsx
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
           tests/main/desktop-memory-store-close.test.ts

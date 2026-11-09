@@ -1,0 +1,422 @@
+[
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.js.map",
+    "sha256": "e675397cf7e72e7d1a6d68a5e438fb83611577bd1863cf0fb39d8afd82bdf976",
+    "size": 14695,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.d.ts",
+    "sha256": "49aa140361777d45e15a3df2f27d9e4aef84fa28af9a2fe259445ed99569705f",
+    "size": 249,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.js",
+    "sha256": "95588da51264f223f12ae87660deddf67b41f854bf49977a8908f079fa20aa16",
+    "size": 892,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/image.js.map",
+    "sha256": "dfffca485a222e4d21895023fbba944c5786b2ec0af08ff10d6a633bb3203d43",
+    "size": 949,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.d.ts",
+    "sha256": "1fcfe4d63cd2ddb34e4f65ab8dfff02b9e8f49558595b1c3460342c1f9b3c143",
+    "size": 337,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.js",
+    "sha256": "5593fa5609bf1a0e95785f393efaba51a5abee1e6a42090769c1aa637d768931",
+    "size": 2551,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/kpi.js.map",
+    "sha256": "0e59ee56c54ca99adca8489b687393b83a662f59b32778534a7d6133d9aae9d3",
+    "size": 2719,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.d.ts",
+    "sha256": "e98f203fd1057a4b45494455bfc450f777701ae4a3510457ec49450b687ad337",
+    "size": 237,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.js",
+    "sha256": "8e3911d51f368adc0259a4e88c88df15f566bb4e94d2a9fe5775af4663218c13",
+    "size": 754,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/list.js.map",
+    "sha256": "4c89a472e3da5224ffcf79055d21a75884f04a91c729f6d873e9c868810786b3",
+    "size": 946,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.d.ts",
+    "sha256": "83d56834f274087f4ff0ac23e80b6adf3eb325f5c2a3f6e2e2282f183a1bb22a",
+    "size": 268,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.js",
+    "sha256": "f0c9b9ea112cd356a758885bb3e21c99c58d1653dbcbefa71305b501bc1fbbbe",
+    "size": 1172,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/table.js.map",
+    "sha256": "2d2398301fad9924b5667e8498b01a75bb629c8106dc7a3fdbe855b1cfa2f3f3",
+    "size": 1345,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.d.ts",
+    "sha256": "95788a33728ba5f230c006bb87c8740dfe76387f7a9850715af9e8eb10c177d2",
+    "size": 281,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.js",
+    "sha256": "09ae81a52d154f016fc77da87c4e0178e4dadbd22819f4e11c42e2085f929b93",
+    "size": 1568,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/timeline.js.map",
+    "sha256": "43a1b31dcc7ce447b46d66583d0edd75a9b53f49b3be393ef944f2662eb54970",
+    "size": 1545,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.d.ts",
+    "sha256": "e7c0866b8e1c7c3d4978c0efd3305a2b2e5cf020a5bc1ba1cc8381d0ddafad57",
+    "size": 912,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.js",
+    "sha256": "8f2dbe0b2f1bdaca1cd3f8c5fb943000e6843cefd1d3754c260cf2fd87cdbef7",
+    "size": 1914,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/escape.js.map",
+    "sha256": "bd181ddded347c3a2282fdd14e696637b2f0b9c48556d7ac8ee4caa8e27dbbf3",
+    "size": 1250,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.d.ts",
+    "sha256": "6c9f3e68ad075629c7afc0006f97d52b69e7672e31cb9563188390a1ed8b28da",
+    "size": 561,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.js",
+    "sha256": "a22bddceb963dc88c221d40791a9fc7bebb5f1a42e542d85df6b0a14e84e62b9",
+    "size": 22174,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/html-builder.js.map",
+    "sha256": "e42159b207d870c549f04cc353f700e3a017258e3ec0358542994a1e5158b6f1",
+    "size": 20200,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.d.ts",
+    "sha256": "13fda5d4383765dad945638c38922b0dca996dd84aafaddf643c9cfd903c6235",
+    "size": 753,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.js",
+    "sha256": "c52a31820338b0207bb1ceb05ff64b02386cf71d87c84eca0c6201c8ba0dd8c7",
+    "size": 21564,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/shell.js.map",
+    "sha256": "c1ea546992269b1ea71dec0120fdc0ebe5fd280f99f8ee2c24c2b02afb7ee0ba",
+    "size": 4942,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.d.ts",
+    "sha256": "ca1d384f40f74de6c6e4f62388b8f3befce66e85ca6665eb40a128bc60646de9",
+    "size": 251,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.js",
+    "sha256": "01ae2a5b120382f9a648ced7ee8507493a134f216d100fc61600c6c9738235d2",
+    "size": 44,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/types.js.map",
+    "sha256": "35688ff23501996ad178923406011e279a1f0cf6d598896d7d861de1b34ea8bf",
+    "size": 114,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.d.ts",
+    "sha256": "73f1111963940507e028757786a61b5449dee81385b9f06ea591e9502d7683e8",
+    "size": 1142,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.js",
+    "sha256": "f51679ec328c75af316a58fa5a33bd3ab9d6b1f793672fb62f92e05f20692505",
+    "size": 11394,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/report-tasks.js.map",
+    "sha256": "ea246e45f7ca1a90509c68cbe84508c97386ed0c17d2f4509d49dbd04bdf303b",
+    "size": 10902,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js",
+    "sha256": "c593e900e3ae7e3c9b1b8b36804922d5712eb33ea22ad7fe77eb613c33e49b26",
+    "size": 1636351,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.d.ts",
+    "sha256": "2bd9c711c74d45074ed0bac9002c955a1b3e3db74b724fd3643136b4439d5e8e",
+    "size": 108,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.js",
+    "sha256": "2b0068e89f65a9f6e8d5ecccb330b6e880b4a4ec3b21711f9558dedae52c6c86",
+    "size": 3356,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.js.map",
+    "sha256": "96b944f4480dbfe7ba4ff3eb533f6579a95596875ce1b00a9bc7223ea9082c7b",
+    "size": 3437,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/corporate-blue.css",
+    "sha256": "99da2926d1dd5bc9955b2409a1ed0cfc846609484c1c75a350f8ddef7930ba9b",
+    "size": 1614,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/dark-board.css",
+    "sha256": "eabd88dfb122f6a68fe527d5b5ef77440f56fd08a898dbd1bb4387c9afa69393",
+    "size": 2808,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/dark-tech.css",
+    "sha256": "220bc131554e2dcfac7607aa1318792cd85419c02309770bb43392871e34bb59",
+    "size": 1605,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/data-story.css",
+    "sha256": "de890467f29187718bf25c24bf1854d752df1f34d96408ce0f010e2875ce9447",
+    "size": 1767,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/fangsong.css",
+    "sha256": "1c95d20eb89ee72fe15f0ea431a377682a11b7ffd3061bcb27f45dac78e02f45",
+    "size": 7606,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/minimal.css",
+    "sha256": "7085a7e10a4180acba22b4ac5a15b31696d578e0c4385ecee12edcec38925a9e",
+    "size": 1144,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/newspaper.css",
+    "sha256": "86d25f316924dcf791d6e43f04aa000ebb672e14f3011ddba967bee36c50db1a",
+    "size": 2096,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/regular-lumen.css",
+    "sha256": "c6fb280393c6aae8a8df8380dd53c53570e098d6eaf95f848d1e1fb214c48120",
+    "size": 7841,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/css/shared.css",
+    "sha256": "9f922cbbf1c50fff3cf866e33b2465b1dcad1ccf9eba775735058331baee9734",
+    "size": 18219,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.d.ts",
+    "sha256": "df935c5f7d895b1a4f79ff216d476e9b43e02f24274342150162cbd97148373c",
+    "size": 608,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.js",
+    "sha256": "1348ef56fe3a606b9c129266ad0ebf20df518f98702bf75d8458069062d6fb44",
+    "size": 2341,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/themes/loader.js.map",
+    "sha256": "43822810c83251dc62307afd01afa4418950a920c30cc0c28d6ede3c5c1f0755",
+    "size": 2313,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.d.ts",
+    "sha256": "2a4eaad358778c5fc2a89322fa7a9a6c8e3d5521205873eced81dfb13724200b",
+    "size": 249,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.js",
+    "sha256": "a073f22cd1f04ff02bc4148f2c6b283182d6e107c096812a3e383790b9298040",
+    "size": 2604,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/list-themes.js.map",
+    "sha256": "6dd185a216ad56e97a3b247beb6c86bef04cf68c626fc362f49186eea5934c8c",
+    "size": 1416,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.d.ts",
+    "sha256": "30754de2a6c387151df97d4a81e7e1585e7b89f89d168cc78151e2b946a5b45e",
+    "size": 302,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.js",
+    "sha256": "8e076babbcd04585e6b49eb7982ec899ecdb0c060df3273121522155dbd2d7d1",
+    "size": 2307,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/preview-section.js.map",
+    "sha256": "4fbb07a3e85c017fdbc125245cd1e3218526098a93380b55fad0db1c2a5a6f9f",
+    "size": 2282,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.d.ts",
+    "sha256": "e39e30767f9b73b1d4d8129b90afc89d9f6bc6c1b98f9945fe185435fb782905",
+    "size": 524,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.js",
+    "sha256": "2be22f0511ed39267c36b75a6b6507f7f65490605c1f5900a201a6c134e0293e",
+    "size": 852,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/render-report.js.map",
+    "sha256": "8c28852826c3c9fb83612482af1c29a0ff87c5393f1d77d051821935c0d4ce90",
+    "size": 823,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.d.ts",
+    "sha256": "a0085d50a3277b8c804c0aa2efcff2f19b09020539001ba50ca54e32357613c2",
+    "size": 580,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.js",
+    "sha256": "74c910752e740bccaee7d7fd033c8cb06dce18e7181705df217a90e58f210d8f",
+    "size": 1354,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/tools/validate-ir.js.map",
+    "sha256": "866852471843d630ae4f54d1306ae5ab165c49866e929996b58e5fa0a96b46fb",
+    "size": 1298,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.d.ts",
+    "sha256": "f5a2f7510817886df2a23334f287be0f2ecabd2f03385f1cad651eeda4742d66",
+    "size": 907,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.js",
+    "sha256": "18126d8362afa20a23c8768baf20cc7251db29b560a67840eba8fbe6120d85ca",
+    "size": 11181,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/ir-validator.js.map",
+    "sha256": "228c252c2263cbeefb1f65010cbf15fa30d14f2b0ab8349d00558276b76606ff",
+    "size": 9877,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.d.ts",
+    "sha256": "5ee8bc9894d5dd65fee7736068bd973d111e440bdc47f4bc35ed82eab23c20cd",
+    "size": 410,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.js",
+    "sha256": "e26aef64a716913ccbe00c397539e05648f2bd2c5ef23fe8e6ab3ed5d70ed51b",
+    "size": 5371,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/validation/quality-checks.js.map",
+    "sha256": "418ca8dff6cac39ea23d0be73eccd9a8a4c3dd21355820576c19484fcfcd09ca",
+    "size": 3859,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/package-lock.json",
+    "sha256": "2971e4296fa32144ce21e51952f97ce3b04e2c5e18b4c495b9e4afa85c11f239",
+    "size": 87163,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/package.json",
+    "sha256": "36b2d09f34a1f60a7b618ed6b31c702adbeee91a93d2c438877fa05c458dc314",
+    "size": 927,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/cli.ts",
+    "sha256": "52092c945a12ca0f70c178d219eeeacecd28b9fe53db4a308725fdba2338e756",
+    "size": 2588,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/parser/frontmatter.ts",
+    "sha256": "808eaba79b22349417ad2b4caa1507361b3a4e3c5133b8a70f143761f623aeb9",
+    "size": 6401,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/src/parser/ir-parser.ts",
+    "sha256": "0eadb31d639fb24522570edd0ee3fed737d99629b2a65704d1c635917ba60981",
+    "size": 5159,
+    "mode": "100644"
+  }
+]

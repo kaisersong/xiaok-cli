@@ -201,6 +201,7 @@ describe('MCP cancellation R1: generic builder and CUA production multi-step wra
     expect(callTool.mock.calls[0]![2]?.executionContext).toBe(contextA);
     expect(callTool.mock.calls[1]![2]?.executionContext).toBe(contextB);
     expect(callTool.mock.calls[1]![2]?.executionContext).not.toBe(contextA);
+    for (const call of callTool.mock.calls) expect(Object.keys(call[2]!).sort()).toEqual(['executionContext', 'signal']);
   });
 
   it.each(['list_windows', 'click', 'capture_after_lookup', 'capture_after_result'] as const)('M5 stops at the actual CUA %s barrier with no later backend action', async (stage) => {

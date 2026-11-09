@@ -1,6 +1,12 @@
 import { stdin, stdout } from 'node:process';
 
 let owners = 0;
+let escapeDisambiguationConfirmed = false;
+
+/** Device replies are safe to frame only after a real disambiguated ESC. */
+export function canMeasureTerminalCursor(): boolean {
+  return owners > 0 && escapeDisambiguationConfirmed;
+}
 
 function restoreKeyboardProtocol(): void {
   if (owners === 0) return;
@@ -33,6 +39,7 @@ export function normalizeEnhancedKeys(bytes: Buffer): Buffer {
   const normalized = bytes.toString('latin1').replace(
     /\x1b\[(\d+)(?:;(\d+))?u/g,
     (sequence: string, codeText: string, modifierText: string | undefined) => {
+      if (owners > 0 && sequence === '\x1b[27u') escapeDisambiguationConfirmed = true;
       const code = Number(codeText);
       const modifier = Number(modifierText ?? 1);
       if (modifier === 5 && code >= 97 && code <= 122) {

@@ -120,6 +120,7 @@ export async function createProjectAgentModel(options: {
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
+          // Per-attempt signal: release every selected request (success or failure, e.g. text repetition); keep the task signal live.
           attempt.abort();
           let observedReturn = false;
           try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
@@ -132,6 +133,10 @@ export async function createProjectAgentModel(options: {
           providerError = new Error('project_agent_model_incomplete_response');
         }
         if (providerFailed) {
+          if (providerError && typeof providerError === 'object' && (providerError as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) {
+            // Keep accepted narration, but never execute buffered tool calls from a failed reply.
+            for (const chunk of chunks) if (chunk.type === 'text') yield chunk;
+          }
           if (isBoundaryFailure(providerError)) throw providerError;
           assertBeforeEffects(input.beforeEffects);
           const current = resolveRuntimeModelBinding(await options.loadConfig());

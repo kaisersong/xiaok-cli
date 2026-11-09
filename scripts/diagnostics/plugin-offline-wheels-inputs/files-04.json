@@ -1,0 +1,422 @@
+[
+  {
+    "path": "plugins/kai-report-creator/references/ir-contract.md",
+    "sha256": "aff0cff7bffc055da738d07ce2ded8b86b32f16b6bb696df0deef09928df4ca9",
+    "size": 3022,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/output-metadata.md",
+    "sha256": "544ec9489935c6c211af6430a12e2d9354815befcaaf7076af664f6f951b1231",
+    "size": 4774,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/plan-flow.md",
+    "sha256": "b755699c2bdb6526a1dbc4f4848b6ec611e549710ebcf284ed3e13a857014460",
+    "size": 1544,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/regular-report-content-rules.md",
+    "sha256": "a6a16404d95397be30ff5c7423925f0a95f9ee02f81c7ed2c41d8221533278c9",
+    "size": 1726,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering-rules.md",
+    "sha256": "91a4e08089b376e9f07c36731e9c56f0b4ddbe649418602de131fe6a740098d0",
+    "size": 3597,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/chart.md",
+    "sha256": "329dffeadb08c162f7d296923cd4dfd32070933be723777aeba77ecac0c97052",
+    "size": 8595,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/kpi.md",
+    "sha256": "b607ee6cce3412cabd65ff5b0d6c1e27cadc688fa119ce6a70588436b61ea2c1",
+    "size": 8359,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/media-code-callout.md",
+    "sha256": "c5fbd82dc5f5c034656b119b7cc83330fe6ec9f5a44b9d75bab2c17a65c20878",
+    "size": 2088,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/plain-markdown.md",
+    "sha256": "44528c39b241630ea0514e8c934b821cb60fdf8b03e67a411ee3de7c00642816",
+    "size": 1449,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/table-list.md",
+    "sha256": "383b627129a09f141398f8b530e08f2e3b981eb90b39be7bc63f03767499ba77",
+    "size": 1304,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/rendering/timeline-diagram.md",
+    "sha256": "794834e8078403c47603190c6a39cc4aab7201480ab6253a82d9ed871ba5f2ff",
+    "size": 3486,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/review-checklist.md",
+    "sha256": "2ea062bde00448a7435b6351f8a5e58440d5e9290dca3fcb410d65fda16c5f62",
+    "size": 10967,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/review-report-template.md",
+    "sha256": "d689d98d38d8045879f9bbc98e84e5c5327186c589770b6bcc8963e298231cc1",
+    "size": 2069,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/spec-loading-matrix.md",
+    "sha256": "7b04321bf09d58a7de079b1e42fa0ab76409e7a804aa6c09ed639ed42c781024",
+    "size": 1939,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/theme-css.md",
+    "sha256": "0b6bb49af183c6bff5added6be1095e03410ec1b7d65782a7c0a735bbc90553a",
+    "size": 3670,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/theme-routing.md",
+    "sha256": "2cf727edd0728456b18f9bd1cf48aef831d42522f91076bc6ec703b255d3519f",
+    "size": 2091,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/references/toc-and-template.md",
+    "sha256": "6cc2c34d4888caf0f381412d0b6b51bee714156768a97c44f8b3b27d1c1cd9ec",
+    "size": 1972,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/skills/report-planner/SKILL.md",
+    "sha256": "9cdf0a3a6229c617028d357ded2ff408a785d399be42ff50b1bc095429ef9f24",
+    "size": 14671,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/themes/README.md",
+    "sha256": "aa1cbce143bdcf1fd9405bee3ba591bae58666d7c77e193cdd0b76a1c38edf80",
+    "size": 4608,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/themes/README.zh-CN.md",
+    "sha256": "8ce3dc05d824042eef987a9854916f12e506aa5f511b839f333241d40465ea84",
+    "size": 4499,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/themes/_example-warm-editorial/reference.md",
+    "sha256": "106a6c156461469119a3aa8a465c9490e2d9a1787399a44fde5cbc0ad8bd4c76",
+    "size": 1780,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/themes/_example-warm-editorial/theme.css",
+    "sha256": "67dc661d19f48803bafcec2888e3f05956833abb643915e158ec20bc63822c22",
+    "size": 923,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/vendor-manifest.json",
+    "sha256": "eb4e712234cb9bdec084d42bc4f2caf055a2e024d9b0529404237c7123259f7d",
+    "size": 4419,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/SKILL.md",
+    "sha256": "62fedac8c59abfb80c75378b4cf179710c1860fcccec3012ee1d5ad31f496efa",
+    "size": 29,
+    "mode": "120000"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/annotated_types-0.8.0-py3-none-any.whl",
+    "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+    "size": 13427,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/anyio-4.14.2-py3-none-any.whl",
+    "sha256": "9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+    "size": 125813,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/attrs-26.1.0-py3-none-any.whl",
+    "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+    "size": 67548,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/beautifulsoup4-4.15.0-py3-none-any.whl",
+    "sha256": "d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9",
+    "size": 109924,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/cffi-2.1.0-cp311-cp311-macosx_11_0_arm64.whl",
+    "sha256": "f5bce581e6b8c235e566a14768a943b172ada3ed73537bb0c0be1edee312d4e7",
+    "size": 184186,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/cffi-2.1.0-cp314-cp314-win_amd64.whl",
+    "sha256": "1b96bfe2c4bd825681b7d311ad6d9b7280a091f43e8f63da5729638083cd3bfb",
+    "size": 187937,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/click-8.4.2-py3-none-any.whl",
+    "sha256": "e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76",
+    "size": 119243,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/colorama-0.4.6-py2.py3-none-any.whl",
+    "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+    "size": 25335,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/cryptography-49.0.0-cp311-abi3-macosx_11_0_arm64.whl",
+    "sha256": "966fe0e9c67490071f14c0d2b1cb2dfb3023c5ce39457343931415f08382f2db",
+    "size": 4032100,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/cryptography-49.0.0-cp311-abi3-win_amd64.whl",
+    "sha256": "e5dfc1e64de5677cec922ffa8da89c546d0415bf6efdf081842e5d44c84e1f0e",
+    "size": 3810026,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/h11-0.16.0-py3-none-any.whl",
+    "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+    "size": 37515,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/httpcore2-2.13.1-py3-none-any.whl",
+    "sha256": "e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a",
+    "size": 83423,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/httpx2-2.13.1-py3-none-any.whl",
+    "sha256": "6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4",
+    "size": 95597,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/idna-3.18-py3-none-any.whl",
+    "sha256": "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2",
+    "size": 65455,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/jsonschema-4.26.0-py3-none-any.whl",
+    "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+    "size": 90630,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/jsonschema_specifications-2025.9.1-py3-none-any.whl",
+    "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+    "size": 18437,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/mcp-2.3.0-py3-none-any.whl",
+    "sha256": "dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377",
+    "size": 368664,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/mcp_types-2.3.0-py3-none-any.whl",
+    "sha256": "968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d",
+    "size": 69108,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/opentelemetry_api-1.44.0-py3-none-any.whl",
+    "sha256": "94b98c893a91b88657eaac1e3ba89618cdb85be6918196705354f34728b2cdef",
+    "size": 60018,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pycparser-3.0-py3-none-any.whl",
+    "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+    "size": 48172,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pydantic-2.13.4-py3-none-any.whl",
+    "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba",
+    "size": 472262,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl",
+    "sha256": "e0d65b8c354be7fb5f720c3caa8bc940bc2d20ce749c8e06135f07f8ed95dd7c",
+    "size": 1948255,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pydantic_core-2.46.4-cp314-cp314-win_amd64.whl",
+    "sha256": "811ff8e9c313ab425368bcbb36e5c4ebd7108c2bbf4e4089cfbb0b01eff63fac",
+    "size": 2072238,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pyjwt-2.13.0-py3-none-any.whl",
+    "sha256": "66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728",
+    "size": 31274,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/python_multipart-0.0.32-py3-none-any.whl",
+    "sha256": "ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23",
+    "size": 30042,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/pywin32-312-cp314-cp314-win_amd64.whl",
+    "sha256": "a4dd3a848290ef724347b19f301045831d8e802fa4464f491b98b1e0a081432e",
+    "size": 7024157,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/referencing-0.37.0-py3-none-any.whl",
+    "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+    "size": 26766,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/rpds_py-2026.6.3-cp311-cp311-macosx_11_0_arm64.whl",
+    "sha256": "db08f45aecde626498fb3df07bcf6d2ec040af42e859a4f5040d79c200342911",
+    "size": 345513,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/rpds_py-2026.6.3-cp314-cp314-win_amd64.whl",
+    "sha256": "0be972be84cfcaf46c8c6edf690ca0f154ac17babf1f6a955a51579b34ad2dc5",
+    "size": 220380,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/soupsieve-2.9.1-py3-none-any.whl",
+    "sha256": "4f4477399246b7a0c720a88ca2454b11cd6bb9ae4c9d170140786e916776c14c",
+    "size": 37404,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/sse_starlette-3.4.6-py3-none-any.whl",
+    "sha256": "56217ab4c9a9f9c5db7b21e08732d3e7c2b807f45231ad23de0551a24c4a41f6",
+    "size": 16516,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/starlette-1.3.1-py3-none-any.whl",
+    "sha256": "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6",
+    "size": 73632,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/truststore-0.10.4-py3-none-any.whl",
+    "sha256": "adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981",
+    "size": 18660,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/typing_extensions-4.16.0-py3-none-any.whl",
+    "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+    "size": 45571,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/typing_inspection-0.4.2-py3-none-any.whl",
+    "sha256": "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7",
+    "size": 14611,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/bundled-wheels/uvicorn-0.52.0-py3-none-any.whl",
+    "sha256": "3d887809810b89ed33501bcf0a9aba469b06ecd608158efce04bd6b48d8c9b08",
+    "size": 79058,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/aurora-mesh-en.html",
+    "sha256": "342a0fa1484ffdec4dddce5bb1034f95cab90919bd0aeb1116d0f28f6b0c3d1e",
+    "size": 40927,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/aurora-mesh-zh.html",
+    "sha256": "af4a8604b5e24fb75f69e90c505303b127362f515f0e769bfc660ddef6c305ba",
+    "size": 43617,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/blue-sky-en.html",
+    "sha256": "5a2ef418e6458953e70b92d06774924f74ac32c429611d23624b4eeed648c5f2",
+    "size": 37435,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/blue-sky-zh.html",
+    "sha256": "0bc025ae94a4a58ccabcdae061524a9a950725d396becf8d43a0c670075b6c8f",
+    "size": 62994,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/bold-signal-en.html",
+    "sha256": "ef48876d5f6d9083bc5839ce00756f82c3bad67bb528f53519039c3dd4a9eb42",
+    "size": 38221,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/bold-signal-zh.html",
+    "sha256": "3fd1f4e32ae242b00978fa83c4e7c4d60ce3dd60be2aad494009d6f3a011f3c1",
+    "size": 56401,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/chinese-chan-en.html",
+    "sha256": "1c08b9e67c6034f2296a67960f84d22589302b7873160dd313cacb87319df4f7",
+    "size": 32478,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/chinese-chan-zh.html",
+    "sha256": "3a29e39b47840852f8a23d407b2bab527e33a17c6b6470888f65334b91f7a73f",
+    "size": 33112,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/creative-voltage-en.html",
+    "sha256": "abec497ed4bb8a4c02176aa63775b4f02a3a444c807ec8d2e4c73f65d687b368",
+    "size": 36169,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-slide-creator/demos/creative-voltage-zh.html",
+    "sha256": "5f1928543d1de9d4d6de10842be94a905f05eff88d1c1336b4c4f72be46f5f22",
+    "size": 45257,
+    "mode": "100644"
+  }
+]

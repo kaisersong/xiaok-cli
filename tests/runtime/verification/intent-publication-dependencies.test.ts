@@ -6,7 +6,7 @@ vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readI
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {join} from 'node:path';
 import {Session as InspectorSession} from 'node:inspector';
-import {writeFileSync} from 'node:fs';
+import {lstatSync,readdirSync,realpathSync,writeFileSync} from 'node:fs';
 import {verifiedOperationFixture} from '../../support/verified-operation-fixture.js';
 import {loopPublicationReceiver} from '../../support/loop-publication-receiver.js';
 import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
@@ -56,8 +56,20 @@ function scenarioInvoke(lifetime:ScenarioLifetime,invoke:Parameters<typeof start
   catch(error){lifetime.retainLateFailure(error);throw error;}
  };
 }
+function diagnosticProfileWriter(directory:string|undefined){
+ const names=['solpi-intent-population.cpuprofile','solpi-intent-population-failure.cpuprofile'] as const;
+ if(directory===undefined)return (name:typeof names[number],data:string)=>writeFileSync('/tmp/'+name,data);
+ const identity=lstatSync(directory);
+ if(realpathSync(directory)!==directory||!identity.isDirectory()||identity.isSymbolicLink()||identity.uid!==process.getuid?.()||(identity.mode&0o777)!==0o700||readdirSync(directory).length!==0)throw Error('profile_output_directory_invalid');
+ return (name:typeof names[number],data:string)=>{
+  const current=lstatSync(directory);
+  if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==identity.dev||current.ino!==identity.ino||current.uid!==identity.uid||(current.mode&0o777)!==0o700||realpathSync(directory)!==directory)throw Error('profile_output_directory_changed');
+  writeFileSync(join(directory,name),data,{flag:'wx',mode:0o600});
+ };
+}
 async function fixture(lifetime:ScenarioLifetime,afterQuery?:()=>void,options:Parameters<typeof verifiedOperationFixture>[1]={},large=false){
  const {signal}=lifetime;signal();
+ const writeProfile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?diagnosticProfileWriter(process.env.SOLPI_INTENT_PROFILE_DIR):undefined;
  const owned=createIntentDependencyFixtureLifetime();
  try{
  const f=await owned.captureFixture(verifiedOperationFixture('dispatch',large?{...options,controllerMetadataMinimumBytes:96*1024**2}:options,owned)),raw=structuredClone(intentApplicationCandidate()),recipe={kind:'artifact-content' as const,checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes' as const}]},definition={version:1 as const,obligations:[{obligationId:'original',predicateId:'content',predicateVersion:'1',semantics:'current-subject' as const,recipe}]};
@@ -68,7 +80,7 @@ async function fixture(lifetime:ScenarioLifetime,afterQuery?:()=>void,options:Pa
  const receiver=await owned.captureReceiver(loopPublicationReceiver(f,{afterQuery})),bindings:any[]=[];
  const profile=large&&process.env.SOLPI_INTENT_PROFILE==='1'?new InspectorSession():undefined;
  const post=(method:string)=>new Promise<any>((resolve,reject)=>profile!.post(method as any,(error,result)=>error?reject(error):resolve(result)));
- if(profile){profile.connect();await post('Profiler.enable');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
+ if(profile){if(process.env.SOLPI_INTENT_PROFILE_DIR!==undefined)console.info('population-profile-output-mode owned-private');profile.connect();await post('Profiler.enable');await new Promise<void>((resolve,reject)=>profile.post('Profiler.setSamplingInterval',{interval:10000},error=>error?reject(error):resolve()));console.info('population-profile-sampling-interval-us 10000');await post('Profiler.start');console.info('population-profile-start native-subjects='+subjects.length);}
  let profileStopped=false;
  const started=Date.now();
  try{
@@ -83,9 +95,9 @@ async function fixture(lifetime:ScenarioLifetime,afterQuery?:()=>void,options:Pa
    phase('verification-prepare');const operation=await f.operations.prepare({mountPlanHandle:staged.mountPlanHandle,obligationId:'original',expectedAttemptEpoch:0,requestSource:'agent'},f.peer,signal());phase('verification-dispatch');await f.operations.dispatch({operationHandle:operation.operationHandle},f.peer,signal());
    phase('publication');signal();const pub=receiver.publication.prepare({...intentHostSubjectOwner(subject),requestSource:'user'},f.peer);await receiver.publication.approve({challengeId:pub.challengeId},f.peer,signal());
    if(large&&!profile){console.info('population-actual-publication '+(i+1)+'/'+contract.stages.length+' elapsedMs='+(Date.now()-started));await new Promise<void>(resolve=>setImmediate(resolve));}
-   if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');profileStopped=true;try{writeFileSync('/tmp/solpi-intent-population.cpuprofile',JSON.stringify(result.profile));}finally{await lifetime.cleanup(()=>profile.disconnect());}throw Error('explicit_profile_stopped_after_three_actual_publications');}}
+   if(profile){console.info('population-publication-ms '+i+' '+(Date.now()-started));if(i===2){const result=await post('Profiler.stop');profileStopped=true;try{writeProfile!('solpi-intent-population.cpuprofile',JSON.stringify(result.profile));}finally{await lifetime.cleanup(()=>profile.disconnect());}throw Error('explicit_profile_stopped_after_three_actual_publications');}}
   }
- }catch(error){if(profile&&!profileStopped){await lifetime.cleanup(async()=>{const result=await post('Profiler.stop');profileStopped=true;writeFileSync('/tmp/solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));});await lifetime.cleanup(()=>profile.disconnect());}throw error;}
+ }catch(error){if(profile&&!profileStopped){await lifetime.cleanup(async()=>{const result=await post('Profiler.stop');profileStopped=true;writeProfile!('solpi-intent-population-failure.cpuprofile',JSON.stringify(result.profile));});await lifetime.cleanup(()=>profile.disconnect());}throw error;}
  return {f,receiver,subjects,owners,bindings,contract,fail(raw:unknown){owned.fail(raw);},close(){return owned.close();}};
  }catch(raw){owned.fail(raw);await owned.close();throw raw;}
 }

@@ -30,7 +30,7 @@ import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
-import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
+import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
@@ -311,6 +311,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   // Native Codex events already arrive through the standard task stream.
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
     thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
+  const [repetitionStopped, setRepetitionStopped] = useState(false);
+  const repetitionRequestRef = useRef<{ text: string; files?: Array<{ filePath: string; name: string }> } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const olderHistoryRef = useRef<{ remaining: string[]; loading: boolean }>({ remaining: [], loading: false });
   const [olderHistory, setOlderHistory] = useState({ remaining: 0, loading: false, error: '' });
@@ -499,6 +501,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
     switch (event.type) {
       case 'task_started': {
+        setRepetitionStopped(false);
         setPlanSteps([]);
         break;
       }
@@ -759,7 +762,9 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           break;
         }
         lastLiveErrorRef.current = { taskKey: eventTaskKey, rawMessage: msg };
-        const partialText = streamRef.current.trim();
+        const repetitionStop = isRepetitionStopEvent(event as { message: string; retryable?: boolean; code?: string });
+        setRepetitionStopped(repetitionStop);
+        const partialText = streamRef.current;
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
           modelKeyMissing: t.chatShell.modelKeyMissing,
@@ -793,7 +798,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             {
               id: `msg-${Date.now()}-error`,
               role: 'assistant' as const,
-              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : msg === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
+              content: msg === 'app_shutdown' ? t.chatShell.taskInterrupted : msg === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             },
           ];
         });
@@ -1028,11 +1033,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
   const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean, historicalOnly = false): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+    if (!historicalOnly) setRepetitionStopped(false);
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
     const actionCodes = historicalOnly ? new Set<string>() : computerUseActionCodesRef.current;
     if (addPromptAsUser && snapshot?.prompt) {
+      if (!historicalOnly) repetitionRequestRef.current = { text: snapshot.prompt, files: snapshot.materials?.flatMap(material => material.filePath ? [{ filePath: material.filePath, name: material.name || material.originalName || fileBasename(material.filePath) }] : []) };
       const display = parseScheduledTaskPromptDisplay(snapshot.prompt);
       if (display.notice) {
         msgs.push({
@@ -1164,6 +1171,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           lastProgress = null;
         } else if (ev.type === 'error') {
           const rawMessage = (ev as { type: 'error'; message: string }).message;
+          const repetitionStop = isRepetitionStopEvent(ev as { message: string; retryable?: boolean; code?: string });
+          if (!historicalOnly) setRepetitionStopped(repetitionStop);
           if (accumulated.trim()) {
             msgs.push({
               id: `msg-assistant-partial-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1185,7 +1194,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             msgs.push({
               id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'assistant',
-              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : rawMessage === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : t.chatShell.taskExecutionFailed(reason),
+              content: rawMessage === 'app_shutdown' ? t.chatShell.taskInterrupted : rawMessage === 'multi_agent_prepare_interrupted' ? t.chatShell.taskExecutionInterrupted : repetitionStop ? t.chatShell.modelTextRepetition : t.chatShell.taskExecutionFailed(reason),
             });
             lastErrorMessage = rawMessage;
           }
@@ -1333,6 +1342,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setMessages([]);
     olderHistoryRef.current = { remaining: [], loading: false };
     setOlderHistory({ remaining: 0, loading: false, error: '' });
+    repetitionRequestRef.current = null;
+    setRepetitionStopped(false);
     setPlanSteps([]);
     setCurrentQuestion(null);
     setInterruptedTask(null);
@@ -1594,6 +1605,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
     toolStepsMsgIdRef.current = null;
 
+    setRepetitionStopped(false);
+    repetitionRequestRef.current = { text, files };
     // Add user message immediately (include file names in content)
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-user`,
@@ -2103,6 +2116,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         <p>{actionError}</p>
         <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
       </div>}
+      {status === 'failed' && repetitionStopped && repetitionRequestRef.current && (
+        <button type="button" className="px-4 py-2 text-[var(--c-accent)]" onClick={() => {
+          setRepetitionStopped(false);
+          const request = repetitionRequestRef.current;
+          if (request) void handleSubmit(request.text, request.files);
+        }}>{t.chatShell.regenerateReply}</button>
+      )}
       <ChatView
         localCommands={hideObservationControls ? undefined : [{name: 'observation', description: t.observation.commandHint}]}
         inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
