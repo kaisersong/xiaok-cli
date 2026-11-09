@@ -3,6 +3,7 @@ export interface DesktopNotificationInput {
   body: string;
   silent?: boolean;
   onClick?: () => void;
+  beforeShow?: () => boolean;
 }
 
 export interface DesktopNotificationResult {
@@ -28,6 +29,7 @@ export function createElectronDesktopNotificationPort(): DesktopNotificationPort
           return { ok: false, skipped: true, reason: 'electron_notification_unsupported' };
         }
 
+        if (input.beforeShow && !input.beforeShow()) return { ok: false, skipped: true, reason: 'notification_admission_rejected' };
         const notification = new Notification({
           title: input.title,
           body: input.body,

@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+import { useAssistantFocus } from './hooks/useAssistantFocus';
 import { Navigate, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { WelcomePage } from './components/WelcomePage';
@@ -16,6 +17,7 @@ const AssistantPage = lazy(() => import('./components/assistant/AssistantPage').
 
 export function App() {
   useScheduledTaskBootstrap();
+  useAssistantFocus();
 
   return (
     <>

@@ -36,6 +36,10 @@
       "to": "skills/yzj-cli"
     },
     {
+      "from": "../data/skills/xiaok-assistant",
+      "to": "skills/xiaok-assistant"
+    },
+    {
       "from": "../data/skills/dingtalk-cli",
       "to": "skills/dingtalk-cli"
     },

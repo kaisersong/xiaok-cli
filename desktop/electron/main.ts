@@ -1,5 +1,6 @@
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
+import {AssistantMorningNotificationLedger,createAssistantMorningDelivery} from './assistant-morning-delivery.js';
 import {MemoryCredentialSettingsStore} from './memory-credential-settings.js';
 import {createCredentialInputOwner} from './credential-input-consumers.js';
 import {registerCredentialInputIpc} from './credential-input-ipc.js';
@@ -1487,7 +1488,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,
     dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
-    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',locale:profile?.locale??'zh',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
     search:(query,signal)=>services.searchForAssistant(query,signal),
     launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
     canLaunch:()=>services.assertAssistantExecutor(),
@@ -1528,7 +1529,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     kbStore: knowledgeBaseStore,
     resolveProjectCwd: projectId => projectCwdById.get(projectId),
     assistantPublication: loopPublicationService,
-    listMorningSuggestions: () => assistantContextReader.listMorningSuggestions(),
+    readMorningConversation:()=>assistantContextReader.readMorningConversation(loopRuntime.loopStore.getAssistantProfile('default-personal-assistant')?.locale??'zh'),
   });
   const kswarmTeamService = createKSwarmTeamService({
     kswarmService,
@@ -1935,6 +1936,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mcpRegistrationPromise = mcpRegistrationOwner.registered;
   debugMain('createWindow:mcp-registration-started');
 
+  const assistantMorningDelivery=createAssistantMorningDelivery({
+    loopStore:loopRuntime.loopStore,timedStore:timedActionStore,ledger:new AssistantMorningNotificationLedger(inboxOwner.store.db),
+    profile:()=>loopRuntime.loopStore.getAssistantProfile('default-personal-assistant'),
+    readMorningRun:id=>assistantContextReader.readMorningRun(id),notificationPort:createElectronDesktopNotificationPort(),
+    ready:()=>!!mainWindow&&!mainWindow.isDestroyed()&&!mainWindow.webContents.isDestroyed()&&!mainWindow.webContents.isLoadingMainFrame(),
+    isOpen:()=>desktopShutdownGate.isOpen,
+    refresh:()=>mainWindow?.webContents.send('desktop:assistantInbox:changed'),
+    focus:()=>{const window=mainWindow;if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();window.webContents.send('desktop:assistantInbox:focus');},
+  });
+  desktopIngressOwners.push({name:'assistant-morning-delivery',stopAccepting:()=>assistantMorningDelivery.stopAccepting(),abortAllActive:()=>assistantMorningDelivery.stopAccepting(),drain:async()=>{await assistantMorningDelivery.close();return true;}});
+  registerLifetimeDisposerStep('assistant-morning-delivery',()=>assistantMorningDelivery.close());
+
   const loopTimedCompletion=createLoopTimedCompletionHost({
     timedStore:timedActionStore,loopStore:loopRuntime.loopStore,
     taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
@@ -1969,7 +1982,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     onError: error => debugMain('scheduled:completion-reconcile-failed', String(error)),
   });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
-    reconcileScheduledTasks,
+    reconcileScheduledTasks:async signal=>{await reconcileScheduledTasks(signal);await assistantMorningDelivery.reconcile();},
     loopCompletion:loopTimedCompletion,
     acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
@@ -1990,6 +2003,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       timedActionRunId,
     }),
     onRunComplete: event => {
+      if(event.action.executor.kind==='loop')return assistantMorningDelivery.handle(event);
       if (event.action.executor.kind !== 'agent_task' || event.action.executor.roomTarget || event.status === 'publication_pending') return;
       publishScheduledTaskEvent({
         taskId: event.action.id, runId: event.runId, runtimeTaskId: event.runtimeTaskId,

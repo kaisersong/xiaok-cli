@@ -104,27 +104,20 @@ export function WelcomePage() {
   const automationLoading = automationLoadState === 'loading';
   const automationUnavailable = automationLoadState === 'error';
 
+  const assistantReads=useRef({active:false,busy:false,queued:false,revision:0});
+  const assistantReadRequest=useRef<()=>Promise<void>>(async()=>{});
   const loadAssistantOverview = useCallback(async () => {
-    const assistantApi = getAssistantDesktopApi();
-    if (!assistantApi?.getAssistantOverview) {
-      setAssistantSnapshot(null);
-      setAssistantCandidates([]);
-      setAssistantLoadState('unavailable');
-      return;
-    }
+    const owner=assistantReads.current;if(!owner.active)return;owner.revision++;
+    if(owner.busy){owner.queued=true;return;}owner.busy=true;const revision=owner.revision;
+    const current=()=>owner.active&&assistantReads.current===owner&&owner.revision===revision;
     try {
-      const overview = await assistantApi.getAssistantOverview();
-      setAssistantSnapshot(buildAssistantHomeProjection(overview));
-      setAssistantCandidates(overview.candidates ?? []);
-      setAssistantLoadState('ready');
-      setAssistantOperationUnknown(false);
-    } catch {
-      setAssistantOperationUnknown(true);
-      setAssistantSnapshot(null);
-      setAssistantCandidates([]);
-      setAssistantLoadState('unavailable');
-    }
+      const assistantApi=getAssistantDesktopApi();if(!assistantApi?.getAssistantOverview)throw Error('assistant_unavailable');
+      const overview=await assistantApi.getAssistantOverview();if(!current())return;
+      setAssistantSnapshot(buildAssistantHomeProjection(overview));setAssistantCandidates(overview.candidates??[]);setAssistantLoadState('ready');setAssistantOperationUnknown(false);
+    } catch {if(current()){setAssistantOperationUnknown(true);setAssistantSnapshot(null);setAssistantCandidates([]);setAssistantLoadState('unavailable');}}
+    finally {owner.busy=false;if(owner.active&&assistantReads.current===owner&&owner.queued){owner.queued=false;void assistantReadRequest.current();}}
   }, []);
+  assistantReadRequest.current=loadAssistantOverview;
 
   useEffect(() => {
     let active = true;
@@ -147,7 +140,9 @@ export function WelcomePage() {
   }, []);
 
   useEffect(() => {
-    void loadAssistantOverview();
+    const owner={active:true,busy:false,queued:false,revision:0};assistantReads.current=owner;void loadAssistantOverview();
+    const stop=getDesktopApi()?.onAssistantInboxChanged?.(()=>{void loadAssistantOverview();});
+    return ()=>{owner.active=false;stop?.();};
   }, [loadAssistantOverview]);
 
   const updateAssistantStatus = async (action: 'activateAssistant' | 'pauseAssistant' | 'resumeAssistant') => {
@@ -157,6 +152,7 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    assistantReads.current.revision++;
     setAssistantOperationUnknown(false);
     setAssistantBusy(true);
     try {
@@ -176,6 +172,7 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    assistantReads.current.revision++;
     setAssistantOperationUnknown(false);
     setAssistantBusyCandidateId(candidateId);
     try {
