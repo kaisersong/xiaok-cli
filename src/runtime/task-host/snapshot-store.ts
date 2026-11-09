@@ -1,6 +1,6 @@
 import {isDeepStrictEqual,types as nativeTypes} from 'node:util';
 import {assertStandardIpcPromise} from '../verification/native-ipc-promise.js';
-import {createIntrinsicSet} from '../verification/intrinsic-async-collection.js';
+import {createIntrinsicSet,appendIntrinsic,aggregateIntrinsicErrors} from '../verification/intrinsic-async-collection.js';
 import {scanTaskStoreSdkChildren} from './source-sdk-children.js';
 import {registerSourceSyncCustodyOwner,createSourceSyncCustodyContext,type SourceSyncSdkKind} from './source-sync-custody.js';
 import {captureOriginalChildPreparation,readOriginalChildPreparationObservationTicket,readOriginalChildPreparationTicket,assertOriginalChildPreparationSnapshot,assertOriginalChildPreparationTransition,originalPreparedContentDigest,originalChildPreparationSourceData,assertOriginalChildPreparationInput} from './default-dispatch-preparation.js';
@@ -15,7 +15,7 @@ import type {OriginalHostWorkerContext,OriginalHostWorkerRequest} from './origin
 import { mergeProtectedObservationClosures } from '../../ai/runtime/protected-observation-closure.js';
 import { createHash,randomUUID } from 'node:crypto';
 import {writeFileAtomicallySync} from '../../utils/atomic-file.js';
-import { readFileSync, lstatSync, realpathSync,closeSync,fstatSync,unlinkSync,renameSync } from 'node:fs';
+import { readFileSync, lstatSync, realpathSync,openSync,closeSync,fstatSync,unlinkSync,renameSync } from 'node:fs';
 import { acquireSaveLock } from '../../ai/runtime/session-store/mutation-lock.js';
 import { appendFile, mkdir, open, readdir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
@@ -28,7 +28,7 @@ const sdkMkdir=mkdir,sdkReadFile=readFile,sdkWriteFile=writeFile,sdkRename=renam
 const sdkLstat=lstatSync,sdkRealpath=realpathSync,sdkReadFileSync=readFileSync,sdkIsDate=nativeTypes.isDate;
 const sdkWeakGet=WeakMap.prototype.get,sdkWeakSet=WeakMap.prototype.set;
 const SdkWeakMap=WeakMap,sdkDescriptors=Object.getOwnPropertyDescriptors,sdkKeys=Reflect.ownKeys,sdkInteger=Number.isSafeInteger;
-const sdkCloseSync=closeSync,sdkFstat=fstatSync,sdkUnlinkSync=unlinkSync,sdkRenameSync=renameSync;
+const sdkOpenSync=openSync,sdkPlatform=process.platform,sdkCloseSync=closeSync,sdkFstat=fstatSync,sdkUnlinkSync=unlinkSync,sdkRenameSync=renameSync;
 const sdkDate=Date,sdkMath=Math,sdkNow=Date.now,sdkRandom=Math.random,sdkNumberText=Number.prototype.toString,sdkSlice=String.prototype.slice,sdkPid=process.pid,sdkFinite=Number.isFinite;
 const sdkGet=Reflect.get,sdkIsError=nativeTypes.isNativeError;
 const identityUuid=randomUUID,identityExec=RegExp.prototype.exec;
@@ -345,12 +345,16 @@ export class FileTaskSnapshotStore {
     const resourceCleanup=(kind==='fd-close'&&method===sdkCloseSync||kind==='fd-stat'&&method===sdkFstat)&&!!held;
     const lockCleanup=kind==='lock-release'&&method===sdkUnlinkSync&&state.locks.has(args[0] as string);
     const tempProbe=kind==='stat'&&method===sdkLstat&&state.tempProbe===args[0];
+    let tempIdentityOpen=false;
+    if(sdkPlatform==='win32'&&kind==='fd-open-read'&&method===sdkOpenSync&&args.length===2&&args[1]==='r'&&state.tempProbe===args[0]){
+      const temps=state.temps.snapshot();for(let i=0;i<temps.length;i++)if(temps[i]!.path===args[0]&&temps[i]!.identity)tempIdentityOpen=true;
+    }
     const finalRead=(kind==='stat'&&method===sdkLstat||kind==='string'&&method===sdkReadFileSync)&&state.finalReadPath===args[0];
     let database:SyncDatabase|undefined;const databases=state.databases.snapshot();for(let i=0;i<databases.length;i++)if(databases[i]!.database===receiver||databases[i]!.database===args[0])database=databases[i];
     const databaseCleanup=!!database&&(kind==='db-close'&&method===database.close||kind==='db-method'&&method===sdkGet&&args[1]==='close'||kind==='db-open-state'&&method===sdkGet&&args[1]==='open');
     try{
       if(this.#sourceSdkFailure&&!resourceCleanup&&!databaseCleanup&&!lockCleanup&&!tempProbe&&!finalRead&&kind!=='unlink-temp')throw this.#sourceSdkFailure.error;
-      if(state.cleaning&&kind!=='stat'&&kind!=='string'&&kind!=='boolean'&&!resourceCleanup&&!databaseCleanup&&!lockCleanup&&kind!=='unlink-temp')throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_CLEANUP_REQUIRED');
+      if(state.cleaning&&kind!=='stat'&&kind!=='string'&&kind!=='boolean'&&!resourceCleanup&&!databaseCleanup&&!lockCleanup&&!tempIdentityOpen&&kind!=='unlink-temp')throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_CLEANUP_REQUIRED');
       if(state.purpose==='observe'&&kind!=='stat'&&kind!=='string'&&kind!=='boolean'&&kind!=='fd-open-read'&&kind!=='fd-read'&&!resourceCleanup)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_READ_ONLY');
       if(kind==='fd-read'&&(!held||held.temp))throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_READ_RESOURCE_REQUIRED');
       if(kind==='rename-temp'){
@@ -373,8 +377,7 @@ export class FileTaskSnapshotStore {
         // The exact fd's original inode was recorded before it was closed.
         // Never remove a replacement at its former temp name.
         let current:any;const previous=state.tempProbe;state.tempProbe=temp.path;
-        try{current=this.#sourceSyncSdk(key,'stat',sdkLstat,[temp.path,{bigint:true}]);}catch(error){if(isNodeErrorCode(error,'ENOENT')&&!state.pending.size){state.temps.delete(temp);this.#unconfirmedSyncHandles.delete(temp);this.#ownedSyncRaws.delete(reservation);return undefined;}throw error;}finally{state.tempProbe=previous;}
-        if(current.dev!==temp.identity.dev||current.ino!==temp.identity.ino)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');
+        try{current=this.#sourceSyncSdk(key,'stat',sdkLstat,[temp.path,{bigint:true}]);this.#assertTempPathIdentity(state.context,temp,current);}catch(error){if(isNodeErrorCode(error,'ENOENT')&&!state.pending.size){state.temps.delete(temp);this.#unconfirmedSyncHandles.delete(temp);this.#ownedSyncRaws.delete(reservation);return undefined;}throw error;}finally{state.tempProbe=previous;}
       }
       if(kind==='stale-unlink'||kind==='lock-release'){
         if(kind==='stale-unlink'){
@@ -392,12 +395,12 @@ export class FileTaskSnapshotStore {
           if(before.dev!==args[1]||before.ino!==args[2]||after.dev!==args[1]||after.ino!==args[2]||bytes!==args[3])throw new SdkError('session_save_locked');
         }finally{state.finalReadPath=previous;}
       }
-      if(!state.cleaning&&!resourceCleanup&&!databaseCleanup&&!lockCleanup&&!tempProbe&&!finalRead&&kind!=='unlink-temp'&&kind!=='stale-unlink')state.context.assertCurrent();entered=true;
+      if(!state.cleaning&&!resourceCleanup&&!databaseCleanup&&!lockCleanup&&!tempProbe&&!tempIdentityOpen&&!finalRead&&kind!=='unlink-temp'&&kind!=='stale-unlink')state.context.assertCurrent();entered=true;
       if(kind==='rename-temp'){
         // After the last Source callback, inspect the actual source pathname.
         // Cleanup uses the same inode rule and cannot unlink a replacement.
         const previous=state.tempProbe;state.tempProbe=renamedTemp!.path;
-        try{const current=this.#sourceSyncSdk(key,'stat',sdkLstat,[renamedTemp!.path,{bigint:true}]) as any;if(current.dev!==renamedTemp!.identity!.dev||current.ino!==renamedTemp!.identity!.ino)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');}
+        try{const current=this.#sourceSyncSdk(key,'stat',sdkLstat,[renamedTemp!.path,{bigint:true}]) as any;this.#assertTempPathIdentity(state.context,renamedTemp!,current);}
         finally{state.tempProbe=previous;}
       }
       if(kind==='fd-close')held!.closing=true;
@@ -457,11 +460,31 @@ export class FileTaskSnapshotStore {
         const previousFailure=this.#sourceSdkFailure;
         this.#syncInventory(state,error);
         if(!previousFailure&&this.#sourceSdkFailure)this.#sourceSdkFailure=sdkFailure(error);
-        if(!returned&&(kind==='stat'||kind==='fd-stat'||kind==='string'||kind==='boolean'||kind==='pid-live'&&isNodeErrorCode(error,'ESRCH')||kind==='link'&&isNodeErrorCode(error,'EEXIST')||kind==='fd-open'&&isNodeErrorCode(error,'EEXIST'))&&sdkIsError(error)&&!state.pending.size&&!this.#sourceSdkFailure){if(kind==='pid-live')state.deadPid=args[0] as number;this.#ownedSyncRaws.delete(reservation);}
+        if(!returned&&(kind==='stat'||kind==='fd-stat'||kind==='string'||kind==='boolean'||kind==='pid-live'&&isNodeErrorCode(error,'ESRCH')||kind==='link'&&isNodeErrorCode(error,'EEXIST')||kind==='fd-open'&&isNodeErrorCode(error,'EEXIST')||kind==='fd-open-read'&&isNodeErrorCode(error,'ENOENT'))&&sdkIsError(error)&&!state.pending.size&&!this.#sourceSdkFailure){if(kind==='pid-live')state.deadPid=args[0] as number;this.#ownedSyncRaws.delete(reservation);}
         else this.#sourceSdkFailure??=sdkFailure(error);
       }else this.#ownedSyncRaws.delete(reservation);
       throw error;
     }
+  }
+  #assertTempPathIdentity(context:SourceStoreContext,temp:SyncTemp,before:any):void{
+    const identity=temp.identity;if(!identity)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REQUIRED');
+    if(before.dev===identity.dev&&before.ino===identity.ino)return;
+    if(sdkPlatform!=='win32'||before.dev!==0n||before.ino!==identity.ino||!this.#statKind(before,'file',context)||this.#statKind(before,'symlink',context))throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');
+    // Windows path stats can omit the volume ID. Compare a separate original
+    // read handle to the retained writer identity, without dropping dev/ino.
+    // Every new raw and descriptor remains in the same Source custody owner.
+    let probe:number|undefined,failure:{error:unknown}|undefined;
+    try{
+      probe=this.#sourceSyncSdk(context,'fd-open-read',sdkOpenSync,[temp.path,'r']) as number;
+      const opened=this.#sourceSyncSdk(context,'fd-stat',sdkFstat,[probe,{bigint:true}]) as any;
+      const after=this.#sourceSyncSdk(context,'stat',sdkLstat,[temp.path,{bigint:true}]) as any;
+      if(opened.dev!==identity.dev||opened.ino!==identity.ino||!this.#statKind(opened,'file',context)||opened.mode!==before.mode||opened.size!==before.size)throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');
+      const fields=['dev','ino','mode','nlink','size','mtimeNs','ctimeNs'];
+      for(let i=0;i<fields.length;i++)if(after[fields[i]!]!==before[fields[i]!])throw new SdkError('TASK_SNAPSHOT_SOURCE_SYNC_TEMP_REPLACED');
+    }catch(error){failure=sdkFailure(error);}
+    try{if(probe!==undefined)this.#sourceSyncSdk(context,'fd-close',sdkCloseSync,[probe]);}
+    catch(error){if(!failure)throw error;const errors:unknown[]=[];appendIntrinsic(errors,failure.error);appendIntrinsic(errors,error);const combined=aggregateIntrinsicErrors(errors,'TASK_SNAPSHOT_SOURCE_SYNC_TEMP_PROBE_CLEANUP');syncDefine(combined,'cause',{__proto__:null,value:failure.error} as PropertyDescriptor);throw combined;}
+    if(failure)throw failure.error;
   }
   #sourceStat(path:string,context?:SourceStoreContext,bigint=false):any{
     return context?this.#sourceSyncSdk(context,'stat',sdkLstat,[path,{bigint:true}]):bigint?lstatSync(path,{bigint:true}):lstatSync(path);
@@ -714,9 +737,10 @@ export class FileTaskSnapshotStore {
       // A no-change retry must complete that original durable bookkeeping.
       await this.#syncIndexForTransition(undefined, committed.snapshot,context);
       const sync = async (path: string, optional = false) => {
+        const flags=sdkPlatform==='win32'?'r+':'r';
         let handle:Awaited<ReturnType<typeof open>>;
         let acquisitionFailure:{error:unknown}|undefined;
-        try {const acquired:{value:unknown;failure?:{error:unknown}}=await (context?this.#sourceSdk(context,'resource',sdkOpen,[path,'r']):this.#consumeSyncSdk(open(path,'r')));handle=acquired.value as typeof handle;acquisitionFailure=acquired.failure;}
+        try {const acquired:{value:unknown;failure?:{error:unknown}}=await (context?this.#sourceSdk(context,'resource',sdkOpen,[path,flags]):this.#consumeSyncSdk(open(path,flags)));handle=acquired.value as typeof handle;acquisitionFailure=acquired.failure;}
         catch(error){if(optional&&(!context||!this.#sourceSdkFailure)&&isNodeErrorCode(error,'ENOENT'))return;throw error;}
         this.#holdPhysicalResource(handle);
         if(!handle||typeof handle!=='object'||syncIsProxy(handle))throw Error('TASK_SNAPSHOT_SYNC_SDK_UNCONFIRMED');
