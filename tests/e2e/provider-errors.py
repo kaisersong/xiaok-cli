@@ -51,7 +51,7 @@ for provider in ['glm','kimi']:
     try:
         tmux('new-session','-d','-s',provider,'-x','190','-y','45','-c',str(project),command)
         tmux('set-option','-t',provider,'remain-on-exit','on')
-        until(lambda p:'欢迎使用' in p)
+        until(lambda p:'❯' in p)
         send('PROVIDER_QUOTA_CASE: report the provider error')
         quota=until(lambda p:'套餐额度已用尽' in p and '已停止自动重试' in p)
         assert 'HTTP 429' in quota,quota
