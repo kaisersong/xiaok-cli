@@ -1,14 +1,13 @@
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 import {CredentialStore,type CredentialStoreKind} from './credential-store.js';
-import {createRequire} from 'node:module';
+import {loadFixedKeyringEntry} from './fixed-keyring-native.js';
 export interface CredentialBackend {get(id:string):string|null;put(id:string,value:string):void}
-const require=createRequire(import.meta.url);
 /** OS backend remains explicit; no shell arguments carry credential values. */
 function keychainCredentialBackend():CredentialBackend {
   const entry=(id:string)=>{
     if((process as NodeJS.Process & {type?:string}).type==='browser')throw Error('credential_worker_required');
-    try {const {Entry}=require('@napi-rs/keyring') as typeof import('@napi-rs/keyring');return new Entry('com.xiaok.credentials.v1',id,{linux:{store:'secret-service'}});}
+    try {const Entry=loadFixedKeyringEntry();return new Entry('com.xiaok.credentials.v1',id,{linux:{store:'secret-service'}});}
     catch {throw Error('credential_store_unavailable');}
   };
   return {get(id){try{return entry(id).getPassword();}catch{throw Error('credential_store_unavailable');}},put(id,value){try{entry(id).setPassword(value);}catch{throw Error('credential_store_unavailable');}}};
