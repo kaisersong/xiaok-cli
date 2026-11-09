@@ -76,3 +76,37 @@ test('resetting only the real original declaration simulates reinstall then repa
   const f = setup(t); assert.equal(cli(f, '--apply').status, 0); copy(path.join(ROOT, 'tests', 'fixtures', 'better-sqlite3-types-7.6.13', 'index.d.ts.txt'), f.target);
   const result = cli(f, '--apply'); assert.equal(result.status, 0, result.stderr); assert.equal(digest(fs.readFileSync(f.target)), f.spec.postSHA256); noTemp(f);
 });
+
+
+// Controlled path-stat compatibility inputs exercise the real CLI; Windows
+// qualification additionally runs this whole file on its actual Node binary.
+function windowsIdentityPreload(f, fault) {
+  const preload = path.join(f.root, 'windows-identity-fault.cjs');
+  fs.writeFileSync(preload, `'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const lstat=fs.lstatSync,open=fs.openSync,fstat=fs.fstatSync;
+const target=fs.realpathSync(${JSON.stringify(f.target)}),fault=${JSON.stringify(fault)};
+const handles=new Map(),counts=new Map();let swapped=false;
+Object.defineProperty(process,'platform',{value:'win32'});
+fs.lstatSync=function(file,...args){const stat=lstat.call(fs,file,...args);if(stat.isFile()&&!stat.isSymbolicLink())stat.dev=typeof stat.dev==='bigint'?0n:0;return stat;};
+fs.openSync=function(file,...args){const fd=open.call(fs,file,...args);if(typeof file==='string'){const count=(counts.get(file)||0)+1;counts.set(file,count);handles.set(fd,{file,count});}return fd;};
+fs.fstatSync=function(fd,...args){const stat=fstat.call(fs,fd,...args),row=handles.get(fd);if(row?.file===target){if(row.count===2&&fault==='reading-device')stat.dev+=typeof stat.dev==='bigint'?1n:1;if(row.count===2&&fault==='reading-inode')stat.ino+=typeof stat.ino==='bigint'?1n:1;if(row.count===1&&fault==='probe-replacement'&&!swapped){swapped=true;fs.renameSync(target,target+'.retained-original');fs.copyFileSync(target+'.retained-original',target);}}return stat;};
+`);
+  return preload;
+}
+test('zero path device uses real handle identity and still repairs exact frozen declaration', t => {
+  const f=setup(t),result=cli(f,'--apply',windowsIdentityPreload(f,'none'));
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(digest(fs.readFileSync(f.target)),f.spec.postSHA256);noTemp(f);
+});
+for (const fault of ['reading-device','reading-inode']) test(`zero path device still rejects actual reading handle ${fault}`,t=>{
+  const f=setup(t),before=fs.readFileSync(f.target),result=cli(f,'--apply',windowsIdentityPreload(f,fault));
+  assert.equal(result.status,1);assert.match(result.stderr,/read-file-concurrent-change/);
+  assert.deepEqual(fs.readFileSync(f.target),before);noTemp(f);
+});
+test('zero path device rejects a real leaf replacement during identity probe',t=>{
+  const f=setup(t),before=fs.readFileSync(f.target),result=cli(f,'--apply',windowsIdentityPreload(f,'probe-replacement'));
+  assert.equal(result.status,1);assert.match(result.stderr,/path-identity-change/);
+  assert.deepEqual(fs.readFileSync(f.target),before);
+  assert.deepEqual(fs.readFileSync(f.target+'.retained-original'),before);noTemp(f);
+});
