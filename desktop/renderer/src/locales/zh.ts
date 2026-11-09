@@ -1,3 +1,4 @@
+import { localDecisionModelsZh } from './local-decision-models';
 import {kimDecisionZh} from './kim-decision';
 import {secureCredentialsZh} from './secure-credentials';
 import { assistantInboxZh } from './assistant-inbox';
@@ -8,6 +9,7 @@ import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  localDecisionModels: localDecisionModelsZh,
   secureCredentials:secureCredentialsZh,
   kimDecision:kimDecisionZh,
   assistantInbox: assistantInboxZh,

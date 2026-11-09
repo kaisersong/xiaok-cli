@@ -223,6 +223,15 @@ const threadDeletionDiagnosticState = { active: false };
 let threadDeletionDiagnosticAttemptOrdinal = 0;
 
 export const api = {
+  decisionModelsList: async () => window.xiaokDesktop.decisionModelsList(),
+  decisionModelsDownload: async (id: string) => window.xiaokDesktop.decisionModelsDownload(id),
+  decisionModelsCancel: async (id: string) => window.xiaokDesktop.decisionModelsCancel(id),
+  decisionModelsRemove: async (id: string) => window.xiaokDesktop.decisionModelsRemove(id),
+  decisionModelsStart: async (input: { modelId: string; approveCommunityCode: boolean }) => window.xiaokDesktop.decisionModelsStart(input),
+  decisionModelsStop: async (id: string) => window.xiaokDesktop.decisionModelsStop(id),
+  decisionModelsUse: async (id: string) => window.xiaokDesktop.decisionModelsUse(id),
+  onDecisionModelsChanged: (handler: (models: import('./types').DecisionModelView[]) => void) => window.xiaokDesktop.onDecisionModelsChanged(handler),
+
   dsh: {
     getState: async () => window.xiaokDesktop.dsh.getState(),
     setMode: async (input: import('../../../shared/dsh-desktop').DshDesktopSetModeInput) => window.xiaokDesktop.dsh.setMode(input),
