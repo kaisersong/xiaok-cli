@@ -28,7 +28,15 @@ export async function createDesktopProductObservationGroup(input: Omit<OrdinaryI
   service.assertInvocation(context.actor, context);
   service.assertFreshObservationGroup(context);
   if (context.sourceTaskId !== taskId) throw Error('SOL_PI_DESKTOP_GROUP_TASK_MISMATCH');
-  const invocation = new AsyncLocalStorage<Readonly<{ context: DesktopAgentExecutionContext; taskId: string }>>();
+  const invocation = new AsyncLocalStorage<object>();
+  // Node 22 exposes ALS stores on Promise metadata. Keep original live facts
+  // private so SDK inventory sees only an inert membership token.
+  const invocationRows = new WeakMap<object, Readonly<{ context: DesktopAgentExecutionContext; taskId: string }>>();
+  function runInvocation<T>(row: Readonly<{ context: DesktopAgentExecutionContext; taskId: string }>, work: () => Promise<T>): Promise<T> {
+    const token: object = Object.freeze(Object.create(null));
+    invocationRows.set(token, row);
+    return invocation.run(token, work);
+  }
   let groupAuthority: ReturnType<DesktopMultiAgentService['bindObservationGroupLifetime']> | undefined;
   const assertCurrent = () => { if (groupAuthority) groupAuthority.assertCurrent(); else service.assertInvocation(context.actor, context); };
   const persistence = observationStore.getExecutionPersistence(taskId, () => {
@@ -44,7 +52,8 @@ export async function createDesktopProductObservationGroup(input: Omit<OrdinaryI
   let rootTail: Promise<unknown> = Promise.resolve();
   const publish = async () => {
     assertCurrent();
-    const current = invocation.getStore();
+    const token = invocation.getStore();
+    const current = token ? invocationRows.get(token) : undefined;
     if (!current) throw Error('SOL_PI_DESKTOP_GROUP_PUBLICATION_CONTEXT_REQUIRED');
     service.assertInvocation(current.context.actor, current.context);
     const ticket = service.prepareGroupObservationReference({ actor: current.context.actor, requestSource: 'agent',
@@ -89,7 +98,7 @@ export async function createDesktopProductObservationGroup(input: Omit<OrdinaryI
       runChildTurn<T>(childContext: DesktopAgentExecutionContext, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
         assertCurrent();service.assertInvocation(childContext.actor,childContext);
         if(childContext.groupId!==groupAuthority!.groupId)throw Error('SOL_PI_DESKTOP_GROUP_TASK_MISMATCH');
-        return lifetime.runChild(signal=>invocation.run(Object.freeze({context:childContext,taskId}),()=>work(signal)));
+        return lifetime.runChild(signal=>runInvocation(Object.freeze({context:childContext,taskId}),()=>work(signal)));
       },
       async runRootTurn<T>(next: DesktopAgentExecutionContext, mode: PermissionMode, signal: AbortSignal,
         work: (turn: DesktopObservationGroupTurn) => Promise<T>,extraTools:readonly import('../../src/types.js').Tool[]=[]): Promise<T> {
@@ -101,7 +110,7 @@ export async function createDesktopProductObservationGroup(input: Omit<OrdinaryI
         await waitForCompoundFinalPublication(product.owner,signal);
         assertCurrent();service.assertInvocation(next.actor,next);
         const registry = await privateHost.createTurnRegistry(capturedTools);
-        try { return await lifetime.runRootTurn(registry, signal, bound => invocation.run(Object.freeze({ context: next, taskId: next.sourceTaskId! }), async () => {
+        try { return await lifetime.runRootTurn(registry, signal, bound => runInvocation(Object.freeze({ context: next, taskId: next.sourceTaskId! }), async () => {
           const ticket = await publish();
           const binding = bindDesktopGroupObservationSession({ service, ticket, registry, semanticCompactionOwner: product.semanticCompactionOwner });
           let publishedRevision:number|undefined;

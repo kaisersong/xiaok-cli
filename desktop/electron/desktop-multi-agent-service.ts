@@ -240,9 +240,11 @@ export class DesktopMultiAgentService {
   }
 
   private readonly observationPreparationDrains = new Set<Promise<void>>();
+  private readonly managedFollowupPreparationTails = new WeakMap<LiveChild, Promise<void>>();
   private readonly groupObservationPreparationDrains = new WeakMap<LiveGroup,Set<Promise<void>>>();
   private readonly managedFollowupPreparations=new WeakMap<object,ManagedFollowupPreparationState>();
-  private readonly followupInvocationScope=new AsyncLocalStorage<Readonly<{context:DesktopAgentExecutionContext;operationId:string;origin:NonNullable<ManagedCompoundFollowupFacts['origin']>}>>();
+  private readonly followupInvocationScope=new AsyncLocalStorage<object>();
+  private readonly followupInvocationRows=new WeakMap<object,Readonly<{context:DesktopAgentExecutionContext;operationId:string;origin:NonNullable<ManagedCompoundFollowupFacts['origin']>}>>();
   private readonly managedFollowupReceipts=new WeakMap<object,{preparation:object;kind:'applied'|'cancelled'}>();
   private readonly managedRuntimeBindings=new WeakMap<object,Readonly<{sessionId:string;nativeInvocationId:string}>>();
   private readonly managedReleaseReceipts=new WeakMap<object,Readonly<{admission:ManagedCompoundAdmission;closedSnapshotDigest:string}>>();
@@ -3182,12 +3184,16 @@ export class DesktopMultiAgentService {
     if(!this.observationResources.has(context.groupId))return work();
     if(typeof nativeInvocationId!=='string'||!nativeInvocationId||nativeInvocationId.length>256)throw Error('SOL_PI_DESKTOP_FOLLOWUP_INVOCATION');
     const owner=this.getObservationExecutionOwner(context.actor),session=getObservationSessionOwnerHostBinding(owner).session;
-    return this.followupInvocationScope.run(Object.freeze({context,operationId:`${context.turnId}:${nativeInvocationId}`,origin:Object.freeze({session,nativeInvocationId})}),work);
+    const token:object=Object.freeze(Object.create(null));
+    this.followupInvocationRows.set(token,Object.freeze({context,operationId:`${context.turnId}:${nativeInvocationId}`,origin:Object.freeze({session,nativeInvocationId})}));
+    return this.followupInvocationScope.run(token,work);
   }
 
   async followup(input: AgentRequest & { target: string; message: string }): Promise<MultiAgentControlResult> {
     const state = this.requireActor(input.actor, input.requestSource);
-    const invocation=this.followupInvocationScope.getStore();
+    const token=this.followupInvocationScope.getStore();
+    const invocation=token?this.followupInvocationRows.get(token):undefined;
+    if(token&&!invocation)throw Error('SOL_PI_DESKTOP_FOLLOWUP_INVOCATION');
     if(invocation&&(invocation.context!==state.context||invocation.operationId!==input.operationId))throw Error('SOL_PI_DESKTOP_FOLLOWUP_INVOCATION');
     const origin=invocation?.origin;
     const targetId = this.resolveTarget(state, input.target).id;
@@ -3772,10 +3778,14 @@ export class DesktopMultiAgentService {
   }
 
   private beginManagedFollowup(group:LiveGroup,child:LiveChild,pending:PendingFollowup,ticket:ExecutionLease):Promise<void> {
-    const work=Promise.resolve().then(()=>this.activateManagedFollowup(group,child,pending,ticket));
+    // A durable cancellation can precede completion of its old preparation.
+    // Keep that full tail ordered before another window for the same child.
+    const previous=this.managedFollowupPreparationTails.get(child);
+    const work=Promise.resolve().then(async()=>{if(previous)await previous;return this.activateManagedFollowup(group,child,pending,ticket);});
+    this.managedFollowupPreparationTails.set(child,work);
     let owned=this.groupObservationPreparationDrains.get(group);if(!owned){owned=new Set();this.groupObservationPreparationDrains.set(group,owned);}
     this.observationPreparationDrains.add(work);owned.add(work);
-    const release=()=>{this.observationPreparationDrains.delete(work);owned!.delete(work);};void work.then(release,release);
+    const release=()=>{this.observationPreparationDrains.delete(work);owned!.delete(work);if(this.managedFollowupPreparationTails.get(child)===work)this.managedFollowupPreparationTails.delete(child);};void work.then(release,release);
     return work;
   }
 
