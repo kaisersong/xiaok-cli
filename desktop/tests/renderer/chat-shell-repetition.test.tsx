@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
+const { mockSubmitUserTask, mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
+  mockSubmitUserTask: vi.fn(),
   mockCreateTask: vi.fn(),
   mockCreateTaskWithFiles: vi.fn(),
   mockGetThread: vi.fn(),
@@ -15,6 +16,7 @@ const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask,
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
+    submitUserTask: mockSubmitUserTask,
     createTask: mockCreateTask,
     createTaskWithFiles: mockCreateTaskWithFiles,
     getThread: mockGetThread,
@@ -117,6 +119,9 @@ import { projectRuntimeEventToDesktopEvent } from '../../../src/runtime/task-hos
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 beforeEach(() => {
+  mockSubmitUserTask.mockReset();
+  mockCreateTask.mockReset();
+  mockCreateTaskWithFiles.mockReset();
   // This suite exercises the wide chat layout. Unlike the global no-op mock,
   // report the measured region so production responsive behavior is exercised.
   vi.stubGlobal('ResizeObserver', class {
@@ -155,10 +160,13 @@ it('keeps partial output and offers manual regeneration after repetition', async
   expect(screen.getByText('检测到重复输出，已停止', { exact: false })).toBeTruthy();
   expect(screen.getByRole('button', { name: '重新生成' })).toBeTruthy();
   expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockSubmitUserTask).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: /自动重试|auto.?retry/i })).toBeNull();
-  mockCreateTask.mockResolvedValue({ taskId: 'regenerated' });
+  mockSubmitUserTask.mockResolvedValue({ taskId: 'regenerated' });
   fireEvent.click(screen.getByRole('button', { name: '重新生成' }));
-  await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request' })));
+  await waitFor(() => expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit_new', gestureId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i), input: expect.objectContaining({ kind: 'materials', prompt: 'original request', materials: [], context: { threadId: 'rep', taskIds: ['task-rep'] } }) })));
+  expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
   expect(within(screen.getByTestId('chat-messages')).getByText('Already emitted partial answer')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
 });
@@ -190,9 +198,11 @@ it.each([false, true])('does not infer repetition from identical rendered error 
 it.each([false, true])('clears repetition after a new submit (history=%s)', async history => {
   await renderFailure('MODEL_TEXT_REPETITION_DETECTED', history);
   expect(await screen.findByRole('button', { name: '重新生成' })).toBeTruthy();
-  mockCreateTask.mockResolvedValue({ taskId: 'new-task' });
+  mockSubmitUserTask.mockResolvedValue({ taskId: 'new-task' });
   fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
-  await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: '触发提交' })));
+  await waitFor(() => expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit_new', gestureId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i), input: expect.objectContaining({ kind: 'materials', prompt: '触发提交', materials: [], context: { threadId: 'rep', taskIds: ['task-rep'] } }) })));
+  expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
   expect(screen.queryByRole('button', { name: /自动重试|auto.?retry/i })).toBeNull();
 });
@@ -200,9 +210,12 @@ it.each([false, true])('clears repetition after a new submit (history=%s)', asyn
 it('regenerates the original history prompt with its files', async () => {
   const files = [{ filePath: '/tmp/context.md', name: 'context.md' }];
   await renderFailure('MODEL_TEXT_REPETITION_DETECTED', true, files);
-  mockCreateTaskWithFiles.mockResolvedValue({ taskId: 'regenerated-files' });
+  mockSubmitUserTask.mockResolvedValue({ taskId: 'regenerated-files' });
   fireEvent.click(await screen.findByRole('button', { name: '重新生成' }));
-  await waitFor(() => expect(mockCreateTaskWithFiles).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'original request', filePaths: files.map(file => file.filePath) })));
+  await waitFor(() => expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit_new', gestureId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i), input: expect.objectContaining({ kind: 'files', prompt: 'original request', filePaths: files.map(file => file.filePath), context: { threadId: 'rep', taskIds: ['task-rep'] } }) })));
+  expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
+  expect(mockSubmitUserTask.mock.calls.at(-1)?.[0].input).not.toHaveProperty('materials');
   expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull();
 });
 
@@ -211,4 +224,5 @@ it('replays a legacy persisted repetition error without retryable', async () => 
   expect(await screen.findByRole('button', { name: '重新生成' })).toBeTruthy();
   expect(screen.getByText('检测到重复输出，已停止', { exact: false })).toBeTruthy();
   expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockSubmitUserTask).not.toHaveBeenCalled();
 });

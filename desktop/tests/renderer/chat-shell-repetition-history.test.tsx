@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
+const { mockSubmitUserTask, mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
+  mockSubmitUserTask: vi.fn(),
   mockCreateTask: vi.fn(),
   mockCreateTaskWithFiles: vi.fn(),
   mockGetThread: vi.fn(),
@@ -15,6 +16,7 @@ const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask,
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
+    submitUserTask: mockSubmitUserTask,
     createTask: mockCreateTask,
     createTaskWithFiles: mockCreateTaskWithFiles,
     getThread: mockGetThread,
@@ -120,6 +122,9 @@ import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 beforeEach(() => {
+  mockSubmitUserTask.mockReset();
+  mockCreateTask.mockReset();
+  mockCreateTaskWithFiles.mockReset();
   // This suite exercises the wide chat layout. Unlike the global no-op mock,
   // report the measured region so production responsive behavior is exercised.
   vi.stubGlobal('ResizeObserver', class {
@@ -171,10 +176,15 @@ it.each([
   expect(screen.getByTestId('chat-status')).toHaveTextContent('failed');
   expect(Boolean(screen.queryByRole('button', { name: '重新生成' }))).toBe(currentRepeat);
   expect(mockCreateTask).not.toHaveBeenCalled();
+  expect(mockSubmitUserTask).not.toHaveBeenCalled();
   if (currentRepeat) {
-    mockCreateTask.mockResolvedValue({ taskId: 'regenerated-current' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'regenerated-current' });
     fireEvent.click(screen.getByRole('button', { name: '重新生成' }));
-    await waitFor(() => expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'current request' })));
-    expect(mockCreateTask).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({ action: 'submit_new', gestureId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i), input: expect.objectContaining({ kind: 'materials', prompt: 'current request', materials: [], context: { threadId: 'paging', taskIds: ids } }) })));
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).toHaveBeenCalledTimes(1);
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
   }
 });
