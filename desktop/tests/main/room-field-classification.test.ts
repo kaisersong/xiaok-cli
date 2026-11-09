@@ -135,4 +135,26 @@ describe('Room field classification contracts', () => {
     Object.defineProperty(claims, '0', { get() { throw new Error(canary); } });
     expect(projectMetadataOnly('RoomWorkspaceSnapshot', { claims })).toEqual({});
   });
+  it('keeps every newly classified room field forbidden and preserves the previous metadata allowlist', () => {
+    const projected = projectMetadataOnly('RoomWorkspaceSnapshot', {
+      instructions: { revision: 3, sourceHash: 'hash', roomId: canary, description: canary, directoryNotes: canary, snapshotDigest: canary, publishedBy: canary, publishedAt: canary },
+      claims: [{ claimId: 'claim-1', runId: 'run-1', roomId: canary, logicalAgentId: canary, contextScope: canary, parentClaimId: canary,
+        projectMappingRevision: canary, taskId: canary, protocolVersion: canary, workspaceId: canary, originHostId: canary, hostPrincipal: canary,
+        hostIncarnation: canary, bindingId: canary, generation: canary, workspaceRevision: canary, instructionsDigest: canary, membershipRevision: canary,
+        createdAt: canary, acquireDigest: canary, taskName: canary, mappingRevision: canary, roomSequence: canary, updatedAt: canary,
+        lastHeartbeatAt: canary, terminationEvidence: canary }],
+      artifacts: [{ artifactId: 'artifact-1', versionId: 'version-1', roomId: canary, workspaceId: canary, originHostId: canary,
+        workspaceRevision: canary, contextScope: canary, producerClaimId: canary, handoff: canary, observedAt: canary,
+        commitTicketId: canary, confirmationTicketId: canary, sourceSequence: canary }],
+    });
+    expect(JSON.stringify(projected)).not.toContain(canary);
+    expect(projected).toEqual({ instructions: { revision: 3, sourceHash: 'hash' },
+      claims: [{ claimId: 'claim-1', runId: 'run-1' }], artifacts: [{ artifactId: 'artifact-1', versionId: 'version-1' }] });
+    let getters = 0;
+    const claim = { claimId: 'claim-1' };
+    for (const key of ['roomId', 'contextScope']) Object.defineProperty(claim, key, { enumerable: true, get() { getters++; throw Error(canary); } });
+    expect(projectMetadataOnly('RoomWorkspaceClaim', claim)).toEqual({claimId: 'claim-1'});
+    expect(getters).toBe(0);
+  });
+
 });
