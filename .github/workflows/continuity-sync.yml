@@ -1,0 +1,40 @@
+name: Continuity sync protocol
+on:
+  pull_request:
+    paths:
+      - services/continuity-sync/**
+      - services/continuity-device/**
+      - .github/workflows/continuity-sync.yml
+  push:
+    branches: [master]
+    paths:
+      - services/continuity-sync/**
+      - services/continuity-device/**
+      - .github/workflows/continuity-sync.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  protocol:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        node: ['24.0.0', '24']
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: services/continuity-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: services/continuity-sync/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install independent device IO dependencies without scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix ../continuity-device
+      - run: npm test
+      - name: Check device namespace and test-backend IO contracts
+        run: node --test ../continuity-device/test/device-lock.test.mjs ../continuity-device/test/os-backend.test.mjs ../continuity-device/test/os-guard.test.mjs
