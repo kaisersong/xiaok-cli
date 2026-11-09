@@ -1,3 +1,4 @@
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
 import { registerCollaborationRoomTypedIpc } from './collaboration-room-typed-ipc.js';
 import type { RoomCreateInput, RoomArchiveInput, RoomDeleteInput, RoomMembersInput, RoomSendInput, RoomSeenInput, RoomCancelInput, RoomProjectCreateInput, RoomTaskCreateInput, RoomListResultDto, RoomSnapshotDto, RoomCreateResultDto, RoomArchiveResultDto, RoomDeleteResultDto, RoomMembersResultDto, RoomSendResultDto, RoomSeenResultDto, RoomCancelResultDto, RoomProjectCreateResultDto, RoomTaskCreateResultDto } from '../shared/collaboration-room-ipc-contract.js';
@@ -28,6 +29,8 @@ export interface CollaborationRoomSemanticController {
 }
 
 export interface AssistantSemanticController {
+  getCalendarMemorySettings?():AssistantCalendarMemorySettingsDto|Promise<AssistantCalendarMemorySettingsDto>;
+  configureCalendarMemory?(input:AssistantCalendarMemoryInput&{requestSource:'user'}):AssistantCalendarMemorySettingsDto|Promise<AssistantCalendarMemorySettingsDto>;
   getCalendarStatus?():AssistantCalendarStatus|Promise<AssistantCalendarStatus>;
   connectCalendar?(input:{requestSource:'user'}):Promise<AssistantCalendarStatus>;
   disconnectCalendar?(input:{requestSource:'user'}):AssistantCalendarStatus|Promise<AssistantCalendarStatus>;

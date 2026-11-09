@@ -1,3 +1,4 @@
+import {ASSISTANT_CALENDAR_MEMORY_INPUT_SCHEMA,ASSISTANT_CALENDAR_MEMORY_SCHEMA} from '../shared/assistant-calendar-memory-contract.js';
 import {ASSISTANT_CALENDAR_STATUS_SCHEMA as CALENDAR_SOURCE_STATUS_SCHEMA} from '../shared/assistant-calendar-observation-contract.js';
 import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import { z } from 'zod';
@@ -13,18 +14,19 @@ const isPromise = types.isPromise, promiseThen = Promise.prototype.then, apply =
 // Root and Desktop keep separate Zod major versions. Calendar validation stays
 // Main-only; existing renderer schemas never import the host-side contract.
 const calendarStatus=z.unknown().transform((raw,context)=>{const parsed=CALENDAR_SOURCE_STATUS_SCHEMA.safeParse(raw);if(!parsed.success){context.addIssue({code:'custom',message:'assistant_calendar_status_invalid'});return z.NEVER;}return parsed.data;});
-const inputSchemas=Object.freeze({...ASSISTANT_INPUT_SCHEMAS,getCalendarStatus:z.tuple([]),connectCalendar:z.tuple([]),disconnectCalendar:z.tuple([]),refreshCalendar:z.tuple([])});
-const outputSchemas=Object.freeze({...ASSISTANT_OUTPUT_SCHEMAS,getCalendarStatus:calendarStatus,connectCalendar:calendarStatus,disconnectCalendar:calendarStatus,refreshCalendar:calendarStatus});
+const inputSchemas=Object.freeze({...ASSISTANT_INPUT_SCHEMAS,getCalendarMemorySettings:z.tuple([]),configureCalendarMemory:z.tuple([ASSISTANT_CALENDAR_MEMORY_INPUT_SCHEMA]),getCalendarStatus:z.tuple([]),connectCalendar:z.tuple([]),disconnectCalendar:z.tuple([]),refreshCalendar:z.tuple([])});
+const outputSchemas=Object.freeze({...ASSISTANT_OUTPUT_SCHEMAS,getCalendarMemorySettings:ASSISTANT_CALENDAR_MEMORY_SCHEMA,configureCalendarMemory:ASSISTANT_CALENDAR_MEMORY_SCHEMA,getCalendarStatus:calendarStatus,connectCalendar:calendarStatus,disconnectCalendar:calendarStatus,refreshCalendar:calendarStatus});
 
 
 const channels = Object.freeze({
   getOverview: 'desktop:assistant:getOverview', activate: 'desktop:assistant:activate',
+  getCalendarMemorySettings:'desktop:assistant:getCalendarMemorySettings',configureCalendarMemory:'desktop:assistant:configureCalendarMemory',
   getCalendarStatus:'desktop:assistant:getCalendarStatus',connectCalendar:'desktop:assistant:connectCalendar',disconnectCalendar:'desktop:assistant:disconnectCalendar',refreshCalendar:'desktop:assistant:refreshCalendar',
   pause: 'desktop:assistant:pause', resume: 'desktop:assistant:resume',
   acceptCandidate: 'desktop:assistant:acceptCandidate', rejectCandidate: 'desktop:assistant:rejectCandidate',
 });
 type Method = keyof typeof channels;
-type Input = [] | [{ candidateId: string; collectionId?: string }];
+type Input = [] | [Record<string,unknown>];
 const captureOptions = Object.freeze({ preserveDataPrototype: true });
 const deny = () => false;
 const methods = new Map<string, Method>(Object.entries(channels).map(([method, channel]) => [channel, method as Method]));
@@ -36,6 +38,7 @@ const owners = new WeakMap<IpcHandleRegistrar, Owner>();
 const localRisks: RiskTag[] = ['fs-read', 'fs-write-userData', 'internal-mutation'];
 const risks: Record<Method, RiskTag[]> = {
   getOverview: [...localRisks, 'network', 'external-process', 'capability-token'],
+  getCalendarMemorySettings:['fs-read'],configureCalendarMemory:[...localRisks],
   getCalendarStatus:['fs-read'],connectCalendar:[...localRisks,'network','external-process'],disconnectCalendar:[...localRisks],refreshCalendar:[...localRisks,'network','external-process'],
   activate: [...localRisks], pause: [...localRisks], resume: [...localRisks], rejectCandidate: [...localRisks],
   acceptCandidate: [...localRisks, 'fs-write', 'network', 'external-process', 'capability-token', 'issues-token'],
@@ -72,7 +75,7 @@ function admission(ipc: IpcHandleRegistrar, controller: AssistantSemanticControl
     if (!method) throw Error('assistant_ipc_channel');
     return ipc.handle(channel, (event, ...args) => {
       if (authorize(event) !== true) throw Error('assistant_ipc_denied');
-      if (args.length !== (method === 'acceptCandidate' || method === 'rejectCandidate' ? 1 : 0)) throw Error('assistant_ipc_input');
+      if (args.length !== (method === 'acceptCandidate' || method === 'rejectCandidate' || method==='configureCalendarMemory' ? 1 : 0)) throw Error('assistant_ipc_input');
       return listener(event, ...args);
     });
   } });
@@ -109,6 +112,8 @@ export function registerAssistantTypedIpc(ipc: IpcHandleRegistrar, controller: A
         });
         else if (method === 'rejectCandidate') result = controller.rejectCandidate({ candidateId: readId(input[0]!.candidateId), requestSource: 'user' });
         else if (method === 'getOverview') result = controller.getOverview();
+        else if(method==='getCalendarMemorySettings'){if(!controller.getCalendarMemorySettings)throw Error('assistant_calendar_memory_unavailable');result=controller.getCalendarMemorySettings();}
+        else if(method==='configureCalendarMemory'){if(!controller.configureCalendarMemory)throw Error('assistant_calendar_memory_unavailable');const value=ASSISTANT_CALENDAR_MEMORY_INPUT_SCHEMA.parse(input[0]);result=controller.configureCalendarMemory({...value,requestSource:'user'});}
         else if(method==='getCalendarStatus'){if(!controller.getCalendarStatus)throw Error('assistant_calendar_unavailable');result=controller.getCalendarStatus();}
         else if(method==='connectCalendar'||method==='disconnectCalendar'||method==='refreshCalendar'){const operation=controller[method];if(!operation)throw Error('assistant_calendar_unavailable');result=apply(operation,controller,[{requestSource:'user'}]);}
         else result = controller[method]({ requestSource: 'user' });

@@ -1,3 +1,5 @@
+import {captureAssistantDerivedValue} from './assistant-derived-data.js';
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarSource} from './assistant-calendar-source.js';
 import type {AssistantMessage} from '../shared/assistant-inbox-contract.js';
 import {captureLoopProducerValue} from './loop-scan-publication-body.js';
@@ -45,6 +47,7 @@ export interface AssistantOverview {
 }
 
 export interface AssistantControllerOptions {
+  calendarMemory?:{status():AssistantCalendarMemorySettingsDto;configure(input:AssistantCalendarMemoryInput&{requestSource:'user'|'agent'|'scheduler'}):AssistantCalendarMemorySettingsDto};
   calendarSource?:AssistantCalendarSource;
   assistantService: AssistantStatusService;
   candidates: AssistantCandidateStore;
@@ -76,6 +79,8 @@ export class AssistantController {
   }
 
 
+  getCalendarMemorySettings(){if(!this.options.calendarMemory)throw Error('assistant_calendar_memory_unavailable');return this.options.calendarMemory.status();}
+  configureCalendarMemory(input:AssistantCalendarMemoryInput&{requestSource:'user'|'agent'|'scheduler'}){input=captureAssistantDerivedValue(input);if(input?.requestSource!=='user'||!this.options.calendarMemory)throw Error('assistant_calendar_memory_user_only');return this.options.calendarMemory.configure(input);}
   getCalendarStatus(){if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');return this.options.calendarSource.status();}
   connectCalendar(input:{requestSource:'user'|'agent'|'scheduler'}){if(input?.requestSource!=='user')return Promise.reject(Error('assistant_calendar_user_only'));if(!this.options.calendarSource)return Promise.reject(Error('assistant_calendar_unavailable'));return this.options.calendarSource.enable(input);}
   disconnectCalendar(input:{requestSource:'user'|'agent'|'scheduler'}){if(input?.requestSource!=='user')throw Error('assistant_calendar_user_only');if(!this.options.calendarSource)throw Error('assistant_calendar_unavailable');return this.options.calendarSource.disable(input);}

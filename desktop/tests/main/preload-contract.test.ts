@@ -290,7 +290,7 @@ describe('preload API contract', () => {
   'onAssistantInboxChanged',
   'onAssistantInboxFocus',
   'getAssistantOverview',
-  'getAssistantCalendarStatus',
+  'getAssistantCalendarMemorySettings','configureAssistantCalendarMemory','getAssistantCalendarStatus',
   'connectAssistantCalendar',
   'disconnectAssistantCalendar',
   'refreshAssistantCalendar',

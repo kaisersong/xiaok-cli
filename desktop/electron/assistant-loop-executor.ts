@@ -1,3 +1,6 @@
+import {assertOrdinaryLoopOwner} from './loop-run-context.js';
+import type {AssistantDerivedRuntimePorts} from './assistant-derived-main.js';
+import {attachAssistantDerivedContext,prepareAssistantProtectedInternalContext,type AssistantDerivedCapture} from './assistant-derived-lineage.js';
 import type {LoopPublicationProducer} from './loop-store.js';
 import type { EveningReflectionOutput, MorningBriefingOutput } from './assistant-llm.js';
 
@@ -16,6 +19,7 @@ export interface AssistantLoopProfile {
 }
 
 export interface AssistantLoopExecutorDependencies {
+  derived?:AssistantDerivedRuntimePorts;
   getProfile(): AssistantLoopProfile | undefined | Promise<AssistantLoopProfile | undefined>;
   collect(input: {
     kind: 'evening' | 'morning';
@@ -41,6 +45,7 @@ export interface AssistantLoopExecutorDependencies {
     now: number;
   }): string[] | Promise<string[]>;
   finishSuccess(input: {
+    assertCurrent?:()=>void;
     runId: string;
     evidenceIds: string[];
     summary: string;
@@ -73,8 +78,17 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
       if (profile.status !== 'active') return { status: 'skipped', reason: profile.status };
 
       try {
-        const snapshot = await dependencies.collect({ kind: input.kind, profile, now: input.now });
+        // Protected output retains the original fixed publication body. External
+        // derived context is ordinary-only until that protocol binds it itself.
+        const session=!input.publicationProducer?dependencies.derived?.beginCapture({kind:input.kind,profile,now:input.now}):undefined;
+        const collected = await dependencies.collect({ kind: input.kind, profile, now: input.now });
+        const capture:AssistantDerivedCapture|undefined=session?await session.finish(collected):undefined;
+        const internal=input.publicationProducer&&dependencies.derived?prepareAssistantProtectedInternalContext(collected,dependencies.derived.visibility):undefined;
+        const assertCurrent=()=>{if(internal&&!internal.isCurrent())throw Error('assistant_derived_stale');if(capture){assertOrdinaryLoopOwner('loop_run',input.runId);if(!capture.isCurrent())throw Error('assistant_derived_stale');}};
+        assertCurrent();if(capture)dependencies.derived!.recordCollection(input.runId,capture.lineage,capture.isCurrent);
+        const snapshot=internal?internal.snapshot:dependencies.derived?attachAssistantDerivedContext(collected,capture):collected;
         const output = await dependencies.complete({ kind: input.kind, profile, snapshot, signal: input.signal });
+        assertCurrent();
         let summary: string;
         let candidateCount = 0;
         if (input.kind === 'evening') {
@@ -89,6 +103,7 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
             : morning.recommendations.map(item => item.title).join('\n');
         }
         if(input.publicationProducer){input.publicationProducer.recordAssistantOutput(output,input.now);return {status:'publication_pending',summary,candidateCount};}
+        assertCurrent();
         const evidenceIds = await dependencies.recordEvidence({
           runId: input.runId,
           kind: input.kind,
@@ -96,7 +111,8 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
           output,
           now: input.now,
         });
-        await dependencies.finishSuccess({ runId: input.runId, evidenceIds, summary, now: input.now });
+        assertCurrent();
+        await dependencies.finishSuccess({ ...(capture?{assertCurrent}:{}),runId: input.runId, evidenceIds, summary, now: input.now });
         return { status: 'success', summary, candidateCount };
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);

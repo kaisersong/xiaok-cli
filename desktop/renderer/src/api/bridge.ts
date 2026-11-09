@@ -1,3 +1,4 @@
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../../../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarStatus} from '../../../shared/assistant-calendar-observation-contract.js';
 import type {DefaultDispatchInput,DefaultDispatchResult} from './types';
 import type {RoomConversionCaptureInput,RoomConversionCaptureOutput,RoomConversionCaptureReference,RoomConversionObserveInput} from '../../../shared/room-conversion-input-contract.js';
@@ -1292,6 +1293,8 @@ export const api = {
     return window.xiaokDesktop.saveKswarmConfig(input);
   },
 
+  async getAssistantCalendarMemorySettings():Promise<AssistantCalendarMemorySettingsDto>{return window.xiaokDesktop.getAssistantCalendarMemorySettings();},
+  async configureAssistantCalendarMemory(input:AssistantCalendarMemoryInput):Promise<AssistantCalendarMemorySettingsDto>{return window.xiaokDesktop.configureAssistantCalendarMemory(input);},
   async getAssistantCalendarStatus():Promise<AssistantCalendarStatus>{return window.xiaokDesktop.getAssistantCalendarStatus();},
   async connectAssistantCalendar():Promise<AssistantCalendarStatus>{return window.xiaokDesktop.connectAssistantCalendar();},
   async disconnectAssistantCalendar():Promise<AssistantCalendarStatus>{return window.xiaokDesktop.disconnectAssistantCalendar();},

@@ -1,3 +1,4 @@
+import type {AssistantDerivedRuntimePorts} from './assistant-derived-main.js';
 import {readLoopCompletedRun} from './loop-completion-consumer.js';
 import {captureLoopRunContext,assertOrdinaryLoopOwner} from './loop-run-context.js';
 import {
@@ -33,6 +34,7 @@ const ASSISTANT_LLM_QUEUE_TIMEOUT_MS = 5 * 60_000;
 const ASSISTANT_LLM_COMPLETION_TIMEOUT_MS = 60_000;
 
 export interface CreateAssistantRuntimeOptions {
+  derived?:AssistantDerivedRuntimePorts;
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   llmPort: Pick<LoopLLMPort, 'complete'>;
@@ -48,6 +50,7 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
   const executor = createAssistantLoopExecutor({
     getProfile: () => options.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID),
+    derived:options.derived,
     collect: options.collect,
     complete: async ({ kind, snapshot, signal }) => kind === 'evening'
       ? completeAssistantJson({
@@ -101,8 +104,8 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
         now: completedAt,
       }).evidenceIds;
     },
-    finishSuccess: ({ runId, evidenceIds, summary, now: completedAt }) => {
-      options.loopStore.finishAssistantLoopRunSuccess(runId, evidenceIds, completedAt, summary);
+    finishSuccess: ({ runId, evidenceIds, summary, now: completedAt, assertCurrent }) => {
+      options.loopStore.finishAssistantLoopRunSuccess(runId, evidenceIds, completedAt, summary, assertCurrent);
     },
     finishFailure: ({ runId, failureKind, message, now: failedAt }) => {
       options.loopStore.finishLoopRunFailure(runId, failureKind, message, [], failedAt);
