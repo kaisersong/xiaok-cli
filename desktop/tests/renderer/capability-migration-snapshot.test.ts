@@ -52,13 +52,19 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // artifact operations; it does not expose generic filesystem access.
     // Native Goal/publication, Loop publication and observation add only
     // semantic commands; the canonical allowlist and real bridge must agree.
+    // Eight manual decision-manager operations add no caller path, provider,
+    // namespace, process command, role or automatic memory-rerank enable flag.
     expect(frozenKeys.main).toHaveLength(295);
     expect(frozenKeys.closure).toHaveLength(307);
-    const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure])].sort();
+    // These pre-existing semantic successors are witnessed against base11e0's
+    // actual CJS exposure; the original frozen310-key evidence stays unchanged.
+    const priorSuccessorKeys=["actOnAssistantItem","answerMcpTaskInput","answerNativeActivityQuestion","approveAssistantSend","cancelCredentialInput","cancelMailOAuth","cancelMcpWork","captureDefaultDispatchOperation","captureRoomConversion","connectAssistantCalendar","connectMailAccount","controlEnterpriseCliConnector","controlYzjCliAuth","disconnectAssistantCalendar","disconnectMailAccount","dismissWorkAttention","dsh","ensureAssistantToday","getAssistantCalendarStatus","getAssistantState","getConversationActivities","getConversationActivityUnread","getEnterpriseCliConnectors","getHarnessOptimizationConfig","getKimDecisionConfig","getMailAccounts","getMailOAuthState","getMcpTaskInputs","getNativeActivityQuestions","getPrivateMemorySettings","getRecentScheduledDeliveries","getWorkActivity","getYzjCliAuthState","inspectWriterConfiguration","listCredentialInputs","markConversationActivitiesRead","migrateWriterConfiguration","observeRoomConversion","onAssistantInboxChanged","onAssistantInboxFocus","onCredentialInputsChanged","prepareWriterConfiguration","readMailMessage","refreshAssistantCalendar","refreshAssistantSources","refuseAssistantSend","resetOptimizationClockGuard","revokeHarnessOptimizationGrants","saveHarnessOptimizationConfig","saveKimDecisionConfig","savePrivateMemorySettings","searchMailMessages","setHarnessOptimizationEnabled","setMailAccountAccess","startAssistantItem","startMailOAuth","stopWorkWatch","submitCredentialInput","submitUserTask","subscribeConversationActivities","subscribeConversationActivityOverview","testAssistantMessage","testKimDecisionConnection","testMailAccount","updateWorkReporting"];
+    const manualDecisionKeys=['decisionModelsList','decisionModelsDownload','decisionModelsCancel','decisionModelsRemove','decisionModelsStart','decisionModelsStop','decisionModelsUse','onDecisionModelsChanged'];
+    const union = [...new Set([...frozenKeys.main, ...frozenKeys.closure,...priorSuccessorKeys,...manualDecisionKeys])].sort();
     expect(keys).toEqual(union);
     expect([...FULL_PRELOAD_KEYS].sort()).toEqual(union);
     expect(new Set(FULL_PRELOAD_KEYS).size).toBe(FULL_PRELOAD_KEYS.length);
-    expect(keys.length).toMatchInlineSnapshot(`310`);
+    expect(keys.length).toMatchInlineSnapshot(`383`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

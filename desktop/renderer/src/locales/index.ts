@@ -9,6 +9,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  localDecisionModels: import('./local-decision-models').LocalDecisionModelsLabels;
   kimDecision: import('./kim-decision').KimDecisionLabels;
   secureCredentials:SecureCredentialsLabels;
   assistantInbox: import('./assistant-inbox').AssistantInboxLabels;

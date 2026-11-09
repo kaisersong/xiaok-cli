@@ -1,4 +1,5 @@
 import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
+import type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../shared/decision-model-types.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
 import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
 import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
@@ -398,6 +399,14 @@ export const PRELOAD_API_KEYS = [
   'memoryListLayer',
   'memoryDeleteEntry',
   'memoryClearAll',
+  'decisionModelsList',
+  'decisionModelsDownload',
+  'decisionModelsCancel',
+  'decisionModelsRemove',
+  'decisionModelsStart',
+  'decisionModelsStop',
+  'decisionModelsUse',
+  'onDecisionModelsChanged',
   'memoryGetModelId',
   'memorySetModelId',
   'getEmbeddingModels',
@@ -535,6 +544,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onUpdateStatus',
   'onSkillsChanged',
   'onReminder',
+  'onDecisionModelsChanged',
   'onScheduledTaskDue',
   'onCredentialInputsChanged',
   'onAssistantInboxChanged',
@@ -823,6 +833,13 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   memoryListLayer: 'desktop:memoryListLayer',
   memoryDeleteEntry: 'desktop:memoryDeleteEntry',
   memoryClearAll: 'desktop:memoryClearAll',
+  decisionModelsList: 'desktop:decisionModelsList',
+  decisionModelsDownload: 'desktop:decisionModelsDownload',
+  decisionModelsCancel: 'desktop:decisionModelsCancel',
+  decisionModelsRemove: 'desktop:decisionModelsRemove',
+  decisionModelsStart: 'desktop:decisionModelsStart',
+  decisionModelsStop: 'desktop:decisionModelsStop',
+  decisionModelsUse: 'desktop:decisionModelsUse',
   memoryGetModelId: 'desktop:memoryGetModelId',
   memorySetModelId: 'desktop:memorySetModelId',
   getEmbeddingModels: 'desktop:getEmbeddingModels',
@@ -1598,6 +1615,14 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, Cont
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
   memoryClearAll(): Promise<boolean>;
+  decisionModelsList():Promise<DecisionModelView[]>;
+  decisionModelsDownload(id:string):Promise<void>;
+  decisionModelsCancel(id:string):Promise<void>;
+  decisionModelsRemove(id:string):Promise<void>;
+  decisionModelsStart(input:DecisionModelAction):Promise<void>;
+  decisionModelsStop(id:string):Promise<void>;
+  decisionModelsUse(id:string):Promise<DecisionModelSelection>;
+  onDecisionModelsChanged(handler:(views:DecisionModelView[])=>void):()=>void;
   memoryGetModelId(): Promise<string | null>;
   memorySetModelId(modelId: string | null): Promise<boolean>;
   getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
@@ -2263,6 +2288,18 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,
     memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
+    decisionModelsList:()=>ipcRenderer.invoke('desktop:decisionModelsList') as Promise<DecisionModelView[]>,
+    decisionModelsDownload:id=>ipcRenderer.invoke('desktop:decisionModelsDownload',id) as Promise<void>,
+    decisionModelsCancel:id=>ipcRenderer.invoke('desktop:decisionModelsCancel',id) as Promise<void>,
+    decisionModelsRemove:id=>ipcRenderer.invoke('desktop:decisionModelsRemove',id) as Promise<void>,
+    decisionModelsStart:input=>ipcRenderer.invoke('desktop:decisionModelsStart',input) as Promise<void>,
+    decisionModelsStop:id=>ipcRenderer.invoke('desktop:decisionModelsStop',id) as Promise<void>,
+    decisionModelsUse:id=>ipcRenderer.invoke('desktop:decisionModelsUse',id) as Promise<DecisionModelSelection>,
+    onDecisionModelsChanged(handler){
+      const channel='desktop:decisionModelsChanged';
+      const listener=(_event:unknown,views:unknown)=>handler(views as DecisionModelView[]);
+      ipcRenderer.on(channel,listener);return()=>{ipcRenderer.off(channel,listener);};
+    },
     memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
     memorySetModelId: (modelId: string | null) => ipcRenderer.invoke('desktop:memorySetModelId', modelId) as Promise<boolean>,
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,

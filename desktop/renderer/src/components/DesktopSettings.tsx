@@ -1,3 +1,4 @@
+import { DecisionModelSettings } from './settings/DecisionModelSettings';
 import {KimDecisionSection} from './KimDecisionSection';
 import {SecretInput} from './security/SecretInput';
 import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
@@ -1176,6 +1177,7 @@ function ModelSettingsPane({ activeTab, onSelect }: { activeTab: ModelSettingsTa
         <p className="mb-5 text-xs text-[var(--c-text-secondary)]">{ds.decisionModelsDesc}</p>
         <SystemOneSection />
         <KimDecisionSection />
+        <DecisionModelSettings />
       </>}
     </div>
   </>;

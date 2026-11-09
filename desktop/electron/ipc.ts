@@ -1,3 +1,4 @@
+import {registerDecisionModelIpc} from './decision-model-ipc.js';
 import {registerRoomConversionCaptureIpc} from './room-conversion-typed-ipc.js';
 import {registerUserTaskSubmissionIpc} from './user-task-submission-typed-ipc.js';
 import {expandSelectedMaterialPaths} from './material-selection.js';
@@ -1505,6 +1506,12 @@ export async function registerDesktopIpc(
     try { memoryStore.clearAll?.(); return true; }
     catch (e) { log('error', 'memoryClearAll failed', e); return false; }
   });
+  registerDecisionModelIpc({registrar:ipcMain,dataRoot:services.getDataRoot(),
+    authorize:options.multiAgentAuthorize??(()=>null),
+    window:()=>options.getMainWindow?.()??window,
+    registerDisposer:dispose=>options.registerLifetimeDisposer?.(dispose),
+  });
+
   memoryHandler('memoryGetModelId', async () => {
     try {
       const config = await (await import('../../src/utils/config.js')).loadConfig();

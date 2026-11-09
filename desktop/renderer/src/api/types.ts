@@ -1,3 +1,4 @@
+export type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../../../shared/decision-model-types.js';
 export type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../../../shared/mail-connectors-ipc-contract.js';
 export type {DefaultDispatchInput,DefaultDispatchResult,DefaultDispatchPreparationObservationView} from '../../../shared/default-dispatch-ipc-contract.js';
 export type {NativeActivityQuestionForm,NativeActivityAnswer} from '../../../shared/native-activity-question-contract.js';

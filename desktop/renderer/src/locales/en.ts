@@ -1,3 +1,4 @@
+import { localDecisionModelsEn } from './local-decision-models';
 import {kimDecisionEn} from './kim-decision';
 import {secureCredentialsEn} from './secure-credentials';
 import { assistantInboxEn } from './assistant-inbox';
@@ -8,6 +9,7 @@ import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  localDecisionModels: localDecisionModelsEn,
   secureCredentials:secureCredentialsEn,
   kimDecision:kimDecisionEn,
   assistantInbox: assistantInboxEn,
