@@ -1,3 +1,4 @@
+import {MAX_PUBLICATION_PAGE_BYTES} from './publication-page-size.js';
 import {withIntentSqlParsingContext} from './intent-sql-parsing-context.js';
 import {PUBLICATION_SETTLEMENT_FENCE_SQL} from './kswarm-sql-integrity.js';
 import {parseIntentHostSubject,intentHostSubjectOwner} from './intent-host-subject.js';
@@ -188,7 +189,7 @@ export function createApprovedPublicationOperations(input:{database:Database;aut
  async function readOwnerPayload(raw:unknown,rawPeer:ControllerPeer,signal:AbortSignal){
   current();if(db.inTransaction)throw Error('publication_operation_outer_transaction');
   const p=shape(raw,['ownerKind','ownerId','operationId','fullTupleHash','offset','maxBytes']),who=peer(rawPeer),originalPrincipal=principal(who),active=AbortSignal.any([signal,lifetime.signal]);
-  if(typeof p.operationId!=='string'||!p.operationId||p.operationId.length>160||typeof p.fullTupleHash!=='string'||!/^[a-f0-9]{64}$/.test(p.fullTupleHash)||!Number.isSafeInteger(p.offset)||p.offset<0||!Number.isSafeInteger(p.maxBytes)||p.maxBytes<1||p.maxBytes>262144)throw Error('publication_payload_request');
+  if(typeof p.operationId!=='string'||!p.operationId||p.operationId.length>160||typeof p.fullTupleHash!=='string'||!/^[a-f0-9]{64}$/.test(p.fullTupleHash)||!Number.isSafeInteger(p.offset)||p.offset<0||!Number.isSafeInteger(p.maxBytes)||p.maxBytes<1||p.maxBytes>MAX_PUBLICATION_PAGE_BYTES)throw Error('publication_payload_request');
   const observed=await observeOwner({ownerKind:p.ownerKind,ownerId:p.ownerId},who,active);
   if(observed.publication.status!=='committed'||!observed.publication.current||observed.publication.operationId!==p.operationId||observed.publication.fullTupleHash!==p.fullTupleHash)throw Error('publication_payload_not_current');
   const rows=db.prepare("SELECT * FROM publication_operations WHERE owner_key=? AND json_extract(review_json,'$.tuple.operationId')=?").all(json(observed.owner),p.operationId) as Row[];

@@ -1,3 +1,5 @@
+import {readPublicationPageBytes} from './controller-client.js';
+import {LEGACY_PUBLICATION_PAGE_BASE64,MAX_PUBLICATION_PAGE_BASE64,MAX_PUBLICATION_PAGE_BYTES} from './publication-page-size.js';
 import {createHash} from 'node:crypto';
 import type {createAuthenticatedControllerClient} from './controller-client.js';
 import type {VerificationOwner} from './proof-authority.js';
@@ -36,12 +38,14 @@ export function createPublicationClient(input:{owner:VerificationOwner;requestSo
   let offset=0,total:number|undefined,payloadHash:string|undefined;const chunks:Buffer[]=[];
   do{
    signal?.throwIfAborted();
-   const page=snapshot(await call('publication.readOwnerPayload',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,operationId:publication.operationId,fullTupleHash:publication.fullTupleHash,offset,maxBytes:262144},signal),['owner','businessRevision','operationId','fullTupleHash','payloadHash','totalBytes','offset','bytes','eof']);
-   if(json(owner(page.owner))!==json(boundOwner)||page.businessRevision!==expected.businessRevision||page.operationId!==publication.operationId||page.fullTupleHash!==publication.fullTupleHash||!Number.isSafeInteger(page.totalBytes)||page.totalBytes<1||page.totalBytes>32*1024**2||typeof page.payloadHash!=='string'||!/^[a-f0-9]{64}$/.test(page.payloadHash)||page.offset!==offset||typeof page.bytes!=='string'||page.bytes.length>349528||typeof page.eof!=='boolean')throw Error('publication_client_payload_page');
+   const requestedMax=readPublicationPageBytes(input.transport);
+   const encodedMax=requestedMax===MAX_PUBLICATION_PAGE_BYTES?MAX_PUBLICATION_PAGE_BASE64:LEGACY_PUBLICATION_PAGE_BASE64;
+   const page=snapshot(await call('publication.readOwnerPayload',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,operationId:publication.operationId,fullTupleHash:publication.fullTupleHash,offset,maxBytes:requestedMax},signal),['owner','businessRevision','operationId','fullTupleHash','payloadHash','totalBytes','offset','bytes','eof']);
+   if(json(owner(page.owner))!==json(boundOwner)||page.businessRevision!==expected.businessRevision||page.operationId!==publication.operationId||page.fullTupleHash!==publication.fullTupleHash||!Number.isSafeInteger(page.totalBytes)||page.totalBytes<1||page.totalBytes>32*1024**2||typeof page.payloadHash!=='string'||!/^[a-f0-9]{64}$/.test(page.payloadHash)||page.offset!==offset||typeof page.bytes!=='string'||page.bytes.length>encodedMax||typeof page.eof!=='boolean')throw Error('publication_client_payload_page');
    if(total!==undefined&&(total!==page.totalBytes||payloadHash!==page.payloadHash))throw Error('publication_client_payload_changed');
    total=page.totalBytes;payloadHash=page.payloadHash;
    const bytes=Buffer.from(page.bytes,'base64');
-   if(bytes.toString('base64')!==page.bytes||bytes.length>262144||offset+bytes.length>total!||page.eof!==(offset+bytes.length===total)||(!bytes.length&&!page.eof))throw Error('publication_client_payload_page');
+   if(bytes.toString('base64')!==page.bytes||bytes.length>requestedMax||offset+bytes.length>total!||page.eof!==(offset+bytes.length===total)||(!bytes.length&&!page.eof))throw Error('publication_client_payload_page');
    chunks.push(bytes);offset+=bytes.length;if(page.eof)break;
   }while(true);
   signal?.throwIfAborted();const bytes=Buffer.concat(chunks,offset);

@@ -1,3 +1,4 @@
+import {MAX_PUBLICATION_PAGE_BYTES} from './publication-page-size.js';
 import {METADATA_CAPACITY_METHODS} from './metadata-capacity-protocol.js';
 import {APPLICATION_METHODS} from './application-transport.js';
 import {ARCHIVE_METHODS} from './archive-transport.js';
@@ -43,7 +44,7 @@ export async function startPublicController(options: {
       const principal = `kernel-session:v1:${peer.uid}:${peer.gid}:${peer.auditSessionId}`;
       if (request.method !== 'controller.identity') tickets.consume(request.requestTicket, principal);
       let result: unknown;
-      try { signal.throwIfAborted(); result = request.method === 'controller.identity' ? { serviceEpoch, requestTicket: tickets.issue(principal) } : await invoke(request.method, request.payload, connectionPeer as ControllerPeer, signal); }
+      try { signal.throwIfAborted(); result = request.method === 'controller.identity' ? { serviceEpoch, requestTicket: tickets.issue(principal), publicationReadPageBytes:MAX_PUBLICATION_PAGE_BYTES } : await invoke(request.method, request.payload, connectionPeer as ControllerPeer, signal); }
       catch { result = { error: { code: 'controller_operation_rejected' } }; }
       return encodeControllerResponse({ domain: 'xiaok.controller.response.v1', authorityId, serviceEpoch, nonce: request.nonce, method: request.method, requestHash: request.requestHash, result }, privateKey);
     },
