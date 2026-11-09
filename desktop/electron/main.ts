@@ -1,3 +1,4 @@
+import {getDecisionModelService} from './decision-model-service.js';
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
 import {AssistantMorningNotificationLedger,createAssistantMorningDelivery} from './assistant-morning-delivery.js';
@@ -967,6 +968,11 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDefaultDispatchIpc(shutdownAwareIpc,defaultDispatchController,preparationOwner);
   desktopIngressOwners.push(services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress);
+  const decisionModelOwner=getDecisionModelService(services.getDataRoot());
+  decisionModelOwner.setPythonCommandResolver(()=>managedPythonCommand);
+  desktopIngressOwners.push({name:'decision-models',stopAccepting:()=>decisionModelOwner.beginShutdown(),abortAllActive:()=>decisionModelOwner.beginShutdown(),drain:async()=>{await decisionModelOwner.dispose();return true;}});
+  if(desktopShutdownCoordinator.isQuitting)decisionModelOwner.beginShutdown();
+  registerLifetimeDisposerStep('decision-models',()=>decisionModelOwner.dispose());
   desktopDurableStores.push(services.taskShutdown.durable);
   if(desktopShutdownCoordinator.isQuitting){
     for(const owner of [services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress]){owner.stopAccepting();owner.abortAllActive('app_shutdown');}

@@ -457,6 +457,18 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   memoryListLayer: (layer, limit, offset) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset),
   memoryDeleteEntry: (id, layer) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer),
   memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll'),
+    decisionModelsList:()=>ipcRenderer.invoke('desktop:decisionModelsList'),
+    decisionModelsDownload:id=>ipcRenderer.invoke('desktop:decisionModelsDownload',id),
+    decisionModelsCancel:id=>ipcRenderer.invoke('desktop:decisionModelsCancel',id),
+    decisionModelsRemove:id=>ipcRenderer.invoke('desktop:decisionModelsRemove',id),
+    decisionModelsStart:input=>ipcRenderer.invoke('desktop:decisionModelsStart',input),
+    decisionModelsStop:id=>ipcRenderer.invoke('desktop:decisionModelsStop',id),
+    decisionModelsUse:id=>ipcRenderer.invoke('desktop:decisionModelsUse',id),
+    onDecisionModelsChanged(handler){
+      const channel='desktop:decisionModelsChanged';
+      const listener=(_event,views)=>handler(views);
+      ipcRenderer.on(channel,listener);return()=>{ipcRenderer.off(channel,listener);};
+    },
   memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId'),
   memorySetModelId: (modelId) => ipcRenderer.invoke('desktop:memorySetModelId', modelId),
   getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels'),

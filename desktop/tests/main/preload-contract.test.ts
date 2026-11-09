@@ -1,3 +1,5 @@
+import {join} from 'node:path';
+import {registerDecisionModelIpc} from '../../electron/decision-model-ipc.js';
 import {registerKimDecisionIpc} from '../../electron/kim-decision-typed-ipc.js';
 import {registerCredentialInputIpc} from '../../electron/credential-input-ipc.js';
 import { registerAssistantInboxIpc } from '../../electron/assistant-inbox-ipc.js';
@@ -365,6 +367,14 @@ describe('preload API contract', () => {
       'memoryListLayer',
       'memoryDeleteEntry',
       'memoryClearAll',
+      'decisionModelsList',
+      'decisionModelsDownload',
+      'decisionModelsCancel',
+      'decisionModelsRemove',
+      'decisionModelsStart',
+      'decisionModelsStop',
+      'decisionModelsUse',
+      'onDecisionModelsChanged',
       'memoryGetModelId',
       'memorySetModelId',
       'getEmbeddingModels',
@@ -1221,6 +1231,7 @@ registerComputerUseCapabilityReadonlyIpc({ handle: channel => { channels.add(cha
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
+  registerDecisionModelIpc({registrar:{handle:channel=>{channels.add(channel);}} as never,dataRoot:join(import.meta.dirname,'preload-registration-no-io'),authorize:()=>null,window:()=>{throw Error('preload_registration_window_unexpected');},registerDisposer:dispose=>{dispose();}});
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;
