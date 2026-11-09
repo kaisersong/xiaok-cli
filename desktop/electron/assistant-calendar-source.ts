@@ -1,3 +1,4 @@
+import {assistantDerivedHash} from './assistant-derived-data.js';
 import {canonicalVerificationJson} from '../../src/runtime/verification/protocol.js';
 import {createHash} from 'node:crypto';
 import {settleIntrinsicOperations} from '../../src/runtime/verification/intrinsic-async-collection.js';
@@ -21,6 +22,7 @@ export class AssistantCalendarSource {
  }
  private open(){if(this.stopped)throw Error('assistant_calendar_closed');}
  private track<T>(promise:Promise<T>):Promise<T>{this.pending.add(promise);void promise.then(()=>{this.pending.delete(promise);},()=>{this.pending.delete(promise);});return promise;}
+ context(){const grant=this.options.store.getAssistantCalendarConnection(),snapshot=this.latest(),revision=assistantDerivedHash(snapshot);return Object.freeze({lineage:{epoch:grant.epoch,revision},read:()=>snapshot,isCurrent:()=>{try{const current=this.options.store.getAssistantCalendarConnection();return !this.stopped&&current.epoch===grant.epoch&&current.enabled===grant.enabled&&current.accountId===grant.accountId&&current.binary===grant.binary&&assistantDerivedHash(this.latest())===revision;}catch{return false;}}});}
  status():AssistantCalendarStatus{const grant=this.options.store.getAssistantCalendarConnection();return {enabled:grant.enabled,epoch:grant.epoch,lastCompleteWatermark:null,snapshot:this.latest()};}
  enable(input:{requestSource:Source}):Promise<AssistantCalendarStatus>{
   if(input?.requestSource!=='user')return Promise.reject(Error('assistant_calendar_user_only'));

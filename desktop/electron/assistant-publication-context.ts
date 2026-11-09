@@ -1,3 +1,4 @@
+import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
 import {ASSISTANT_MESSAGE_SCHEMA,type AssistantMessage} from '../shared/assistant-inbox-contract.js';
 import {validateMorningBriefing} from './assistant-llm.js';
 import {readInstalledCurrentOwner} from '../../src/runtime/verification/installed-owner-state.js';
@@ -14,7 +15,7 @@ type Output=Awaited<ReturnType<DesktopLoopPublicationService['readAssistantOutpu
 /** Main-only read composition. Each result is an observation for this call, never
  * an acceptance capability or a reusable freshness cache. */
 export function createAssistantPublicationContextReader(options:{
- store:LoopStore;evidenceStore:CompletionEvidenceStore;publication:DesktopLoopPublicationService;
+ store:LoopStore;evidenceStore:CompletionEvidenceStore;publication:DesktopLoopPublicationService;derivedVisibility?:AssistantDerivedVisibility;
 }){
  const {store,evidenceStore,publication}=options;
  function route(runId:string){return readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:runId}));}
@@ -25,6 +26,7 @@ export function createAssistantPublicationContextReader(options:{
  }
  async function read(runId:string,requestSource:'user'|'scheduler'){
   try{
+   if(options.derivedVisibility&&!options.derivedVisibility.isRunVisible(runId))return undefined;
    const originalRoute=route(runId),routeJson=json(originalRoute);
    if(originalRoute.kind==='unavailable')return undefined;
    const protectedRun=!!store.getLoopRunPublicationBasis(runId)||originalRoute.kind!=='ordinary';
@@ -35,7 +37,7 @@ export function createAssistantPublicationContextReader(options:{
     return {kind:'protected' as const,output,current};
    }
    const snapshot=ordinarySnapshot(runId),encoded=json(snapshot);
-   const current=()=>{try{return json(route(runId))===routeJson&&!store.getLoopRunPublicationBasis(runId)&&json(ordinarySnapshot(runId))===encoded;}catch{return false;}};
+   const current=()=>{try{return (!options.derivedVisibility||options.derivedVisibility.isRunVisible(runId))&&json(route(runId))===routeJson&&!store.getLoopRunPublicationBasis(runId)&&json(ordinarySnapshot(runId))===encoded;}catch{return false;}};
    if(snapshot.run?.status!=='success')return undefined;
    return {kind:'ordinary' as const,snapshot,current};
   }catch{return undefined;}
@@ -52,7 +54,7 @@ export function createAssistantPublicationContextReader(options:{
    const latestEvening=store.listLoopRuns(ASSISTANT_EVENING_LOOP_ID,10).find(run=>run.status==='success');
    const selected=evening&&latestEvening?.id===evening.id?observations.get(evening.id):undefined;
    const summary=selected?.kind==='protected'?(selected.output.body.kind==='assistant-evening'?selected.output.body.summary:undefined):(selected&&selected.kind==='ordinary'?selected.snapshot.run?.summary:undefined);
-   return buildAssistantMorningContext({snapshot:input.snapshot,pinnedThreadIds:input.pinnedThreadIds,
+   const context=buildAssistantMorningContext({snapshot:input.snapshot,pinnedThreadIds:input.pinnedThreadIds,
     eveningRun:evening&&summary?{id:evening.id,status:'success',summary}:undefined,
     pendingCandidates:pending.flatMap(candidate=>{
      const observation=observations.get(candidate.runId);if(!observation)return [];
@@ -60,6 +62,7 @@ export function createAssistantPublicationContextReader(options:{
      return member?.status==='pending'?[{id:member.id,kind:member.kind,title:member.title}]:[];
     }),
    });
+   return {...context,derivedRunIds:[...new Set([...(context.latestEvening&&evening?[evening.id]:[]),...pending.filter(c=>context.pendingCandidates.some(p=>p.id===c.id)).map(c=>c.runId)])].filter(id=>!!options.derivedVisibility?.readLineage(id))};
   },
   async readMorningRun(runId:string,requestSource:'user'|'scheduler'='scheduler'){
    if(store.getLoopRun(runId)?.loopId!==ASSISTANT_MORNING_LOOP_ID)return undefined;

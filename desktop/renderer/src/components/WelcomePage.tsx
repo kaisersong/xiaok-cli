@@ -277,6 +277,7 @@ export function WelcomePage() {
         onActivateAssistant={() => updateAssistantStatus('activateAssistant')}
         onPauseAssistant={() => updateAssistantStatus('pauseAssistant')}
         onResumeAssistant={() => updateAssistantStatus('resumeAssistant')}
+        onCalendarSourceChanged={loadAssistantOverview}
         onOpenAssistantDetails={openAssistantDetails}
         onCloseAssistantDetails={() => setAssistantDetailsOpen(false)}
         onAcceptAssistantCandidate={(candidateId, collectionId) => decideAssistantCandidate(candidateId, 'accept', collectionId)}
@@ -306,6 +307,7 @@ type HomeContentProps = {
   onActivateAssistant: () => Promise<void>;
   onPauseAssistant: () => Promise<void>;
   onResumeAssistant: () => Promise<void>;
+  onCalendarSourceChanged: () => Promise<void>;
   onOpenAssistantDetails: () => void;
   onCloseAssistantDetails: () => void;
   onAcceptAssistantCandidate: (candidateId: string, collectionId?: string) => Promise<void>;
@@ -333,6 +335,7 @@ function ConversationFirstHome({
   onActivateAssistant,
   onPauseAssistant,
   onResumeAssistant,
+  onCalendarSourceChanged,
   onOpenAssistantDetails,
   onCloseAssistantDetails,
   onAcceptAssistantCandidate,
@@ -366,7 +369,7 @@ function ConversationFirstHome({
           onResume={onResumeAssistant}
           onOpenDetails={onOpenAssistantDetails}
         />
-        <AssistantCalendarSourceCard/>
+        <AssistantCalendarSourceCard onChanged={()=>{void onCalendarSourceChanged();}}/>
       </div>
       <section className="mt-[clamp(5rem,15vh,8rem)] w-full border-y border-[var(--c-border)] py-4" aria-labelledby="welcome-overview-title">
         <div className="mb-3 flex items-center justify-between gap-3">

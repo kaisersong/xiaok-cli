@@ -1,3 +1,6 @@
+import {migrateAssistantDerived,readAssistantCalendarMemorySettings,setAssistantCalendarMemorySettings,readAssistantDerivedLineage,isAssistantDerivedRunTracked,recordAssistantDerivedLineage} from './assistant-derived-store.js';
+import {assistantDerivedHash} from './assistant-derived-data.js';
+import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
 import {migrateAssistantCalendar,readAssistantCalendarConnection,setAssistantCalendarConnection,readAssistantCalendarGeneration,writeAssistantCalendarGeneration,type AssistantCalendarConnection} from './assistant-calendar-store.js';
 import type {AssistantCalendarSnapshot} from '../shared/assistant-calendar-observation-contract.js';
 import type {LoopRunRow, AssistantCandidateRow, LoopStageRow, StoredLoopPublicationCandidate, LoopNativePhase, LoopNativeAttempt, LoopVerificationSession} from '../../src/runtime/loop/producer-types.js';
@@ -209,9 +212,25 @@ export class LoopStore {
   private readonly publicationProducers=new WeakMap<object,{runId:string;basisJson:string}>();
   private readonly exportCursors=new WeakMap<object,{after:number;through:number}>();
 
+  private assistantDerivedVisibility?:AssistantDerivedVisibility;
+  bindAssistantDerivedVisibility(value:AssistantDerivedVisibility){if(this.assistantDerivedVisibility&&this.assistantDerivedVisibility!==value)throw Error('assistant_derived_owner_conflict');this.assistantDerivedVisibility=value;}
+  private assistantRunVisible(id:string){try{return this.assistantDerivedVisibility?.isRunVisible(id)??!isAssistantDerivedRunTracked(this.db,id);}catch{return false;}}
+  private visibleAssistantRun(row:LoopRunRow):LoopRun{const run=this.runRowToRecord(row);return this.assistantRunVisible(run.id)?run:{id:run.id,loopId:run.loopId,status:run.status,trigger:{kind:'source_unavailable'},evidenceIds:[],startedAt:run.startedAt,finishedAt:run.finishedAt,updatedAt:run.updatedAt,message:'assistant_source_unavailable'};}
+  getAssistantCalendarMemorySettings(input:Parameters<typeof readAssistantCalendarMemorySettings>[1]){return readAssistantCalendarMemorySettings(this.db,input);}
+  setAssistantCalendarMemorySettings(input:Parameters<typeof setAssistantCalendarMemorySettings>[2]){return this.transaction(()=>setAssistantCalendarMemorySettings(this.db,this.connection,input));}
+  readAssistantDerivedLineage(id:string){return readAssistantDerivedLineage(this.db,id);}
+  isAssistantDerivedRunTracked(id:string){return isAssistantDerivedRunTracked(this.db,id);}
+  recordAssistantDerivedLineage(id:string,lineage:Parameters<typeof recordAssistantDerivedLineage>[3],current:()=>boolean){return this.transaction(()=>{assertOrdinaryLoopOwner('loop_run',id);if(this.getLoopRunPublicationBasis(id))throw Error('assistant_derived_protected');recordAssistantDerivedLineage(this.db,this.connection,id,lineage,current);});}
+  captureAssistantMemoryConfirmationFacts(candidateId:string){
+   const read=()=>{const row=this.db.prepare('SELECT * FROM assistant_candidates WHERE id=?').get(candidateId) as AssistantCandidateRow|undefined;if(!row||row.kind!=='memory'||row.status!=='accepted')return undefined;
+    const runRow=this.getLoopRunRow(row.run_id),intent=this.getAssistantPromotionIntent(candidateId);if(!runRow||runRow.status!=='success'||!intent||intent.state!=='accepted'||this.getLoopRunPublicationBasis(row.run_id)||readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:row.run_id})).kind!=='ordinary')return undefined;
+    const members=this.db.prepare('SELECT * FROM assistant_candidates WHERE run_id=? ORDER BY id LIMIT 101').all(row.run_id);if(members.length>100)return undefined;return {candidate:this.assistantCandidateRowToRecord(row),run:this.runRowToRecord(runRow),members,intent};};
+   const facts=read();if(!facts)return undefined;const revision=assistantDerivedHash(facts);return {candidate:facts.candidate,run:facts.run,revision,isCurrent:()=>{try{const value=read();return !!value&&assistantDerivedHash(value)===revision;}catch{return false;}}};
+  }
+
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); migrateAssistantCalendar(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
+    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); migrateAssistantCalendar(this.db,this.connection); migrateAssistantDerived(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
   }
 
   close(): void {
@@ -1437,8 +1456,9 @@ export class LoopStore {
     });
   }
 
-  finishAssistantLoopRunSuccess(runId: string, evidenceIds: string[], now: number, summary: string): LoopRun | undefined {
+  finishAssistantLoopRunSuccess(runId: string, evidenceIds: string[], now: number, summary: string, assertCurrent?:()=>void): LoopRun | undefined {
     return this.transaction(() => {
+      assertCurrent?.();
       const current = this.getLoopRunRow(runId);
       if (!current || current.status !== 'running') return current ? this.runRowToRecord(current) : undefined;
       if(this.hasLoopPublicationResults(runId)||this.hasUnknownLoopTask(runId))return this.runRowToRecord(current);
@@ -1449,10 +1469,12 @@ export class LoopStore {
       `, JSON.stringify(evidenceIds), now, now, summary, runId);
       if (updated.changes === 1) {
         this.connection.runWrite(`update assistant_candidates set status = 'pending' where run_id = ? and status = 'staged'`, runId);
+        assertCurrent?.();
         this.finishOpenStagesForTerminalRun(current.loop_id, runId, { status: 'success' }, current.status, now);
         this.clearActiveRun(current.loop_id, runId, now);
         this.bumpAutomationStoreVersion();
       }
+      assertCurrent?.();
       return this.getLoopRun(runId);
     });
   }
@@ -1514,7 +1536,7 @@ export class LoopStore {
 
   getAssistantCandidate(id: string): AssistantCandidate | undefined {
     const row = this.db.prepare('select * from assistant_candidates where id = ?').get(id) as AssistantCandidateRow | undefined;
-    return row ? this.assistantCandidateRowToRecord(row) : undefined;
+    return row&&this.assistantRunVisible(row.run_id) ? this.assistantCandidateRowToRecord(row) : undefined;
   }
 
   listAssistantCandidates(input: { statuses?: AssistantCandidateStatus[] } = {}): AssistantCandidate[] {
@@ -1522,7 +1544,7 @@ export class LoopStore {
     const rows = statuses?.length
       ? typedRows<AssistantCandidateRow>(this.db.prepare(`select * from assistant_candidates where status in (${statuses.map(() => '?').join(',')}) order by created_at asc`).all(...statuses))
       : typedRows<AssistantCandidateRow>(this.db.prepare('select * from assistant_candidates order by created_at asc').all());
-    return rows.map(row => this.assistantCandidateRowToRecord(row));
+    return rows.filter(row=>this.assistantRunVisible(row.run_id)).map(row => this.assistantCandidateRowToRecord(row));
   }
 
   private assistantPromotionHistory(rows:LoopProjectionRows,allowLegacy=false):Readonly<AssistantPromotionIntent>[] {
@@ -1693,12 +1715,12 @@ export class LoopStore {
       order by started_at desc, id desc
       limit ?
     `).all(loopId, Math.max(0, limit)));
-    return rows.map(row => this.runRowToRecord(row));
+    return rows.map(row => this.visibleAssistantRun(row));
   }
 
   getLoopRun(runId: string): LoopRun | undefined {
     const row = this.getLoopRunRow(runId);
-    return row ? this.runRowToRecord(row) : undefined;
+    return row ? this.visibleAssistantRun(row) : undefined;
   }
 
   findLoopRunsByTimedActionRunId(timedActionRunId: string): LoopRun[] {
@@ -1709,7 +1731,7 @@ export class LoopStore {
       where trigger_json like ?
       order by started_at desc, id desc
     `).all('%"timedActionRunId"%'));
-    return rows.map(row=>this.runRowToRecord(row)).filter(run=>run.trigger.timedActionRunId===needle);
+    return rows.map(row=>this.visibleAssistantRun(row)).filter(run=>run.trigger.timedActionRunId===needle);
   }
 
   findLoopRunByTimedActionRunId(timedActionRunId:string):LoopRun|undefined {

@@ -1,3 +1,4 @@
+import {createAssistantRuntimeCollector} from './assistant-runtime-collector.js';
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
 import {AssistantMorningNotificationLedger,createAssistantMorningDelivery} from './assistant-morning-delivery.js';
@@ -142,6 +143,7 @@ import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js'
 import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
 import { AssistantController, createAssistantCandidatePromotionTargets } from './assistant-controller.js';
+import {createAssistantDerivedMainPorts} from './assistant-derived-main.js';
 import { createAssistantPublicationContextReader } from './assistant-publication-context.js';
 import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
 import { createAssistantRuntime } from './assistant-runtime.js';
@@ -1413,7 +1415,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     getWindow: () => mainWindow,
     isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer}),
   }));
-  const assistantContextReader = createAssistantPublicationContextReader({store: loopRuntime.loopStore, evidenceStore: loopRuntime.evidenceStore, publication: loopPublicationService});
+  let assistantContextReader=createAssistantPublicationContextReader({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,publication:loopPublicationService});
   const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
     listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
       .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
@@ -1507,24 +1509,22 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
   const assistantCalendarSource=inboxOwner.calendarSource;if(!assistantCalendarSource)throw Error('assistant_calendar_unavailable');
   registerLifetimeDisposerStep('assistant-calendar',()=>assistantCalendarSource.close());
+  const assistantDerivedPorts=createAssistantDerivedMainPorts({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,publication:loopPublicationService,calendarSource:assistantCalendarSource,memoryStore:()=>getDesktopMemoryStore(dataRoot),dataRoot,cwd:()=>process.cwd(),projectCwd:id=>projectCwdById.get(id)});
+  assistantContextReader=assistantDerivedPorts.contextReader;
   desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
+    derived:assistantDerivedPorts.derived,
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
-    collect: async input => {
-      if(input.kind==='morning')await assistantInbox!.service.ensureToday('scheduler');
-      const snapshot = await assistantSnapshotReader.collect(input);
-      if (input.kind === 'evening') return snapshot;
-      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
-    },
+    collect:createAssistantRuntimeCollector({inbox:inboxOwner.service,snapshotReader:assistantSnapshotReader,calendarSource:assistantCalendarSource,contextReader:assistantContextReader,threadMetaStore}),
   });
   const assistantAwareRunner = createLoopExecutionAdapter({
     genericRunner: loopRuntime.runner,
     assistantRuntime,
   });
   const assistantController = new AssistantController({
-    calendarSource:assistantCalendarSource,
+    calendarSource:assistantCalendarSource,calendarMemory:assistantDerivedPorts.calendarMemory,
     assistantService,
     candidates: loopRuntime.loopStore,
     memoryStore: getDesktopMemoryStore(dataRoot),

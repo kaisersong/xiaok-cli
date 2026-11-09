@@ -384,6 +384,8 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   onAssistantInboxChanged: handler => { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.removeListener('desktop:assistantInbox:changed', listener); },
   onAssistantInboxFocus: handler => { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.removeListener('desktop:assistantInbox:focus', listener); },
   getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview'),
+  getAssistantCalendarMemorySettings:()=>ipcRenderer.invoke('desktop:assistant:getCalendarMemorySettings'),
+  configureAssistantCalendarMemory:input=>ipcRenderer.invoke('desktop:assistant:configureCalendarMemory',input),
   getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus'),
   connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar'),
   disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar'),

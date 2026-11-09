@@ -2905,7 +2905,7 @@ export const zh: LocaleStrings = {
     ] as const,
   },
 
-  assistantCalendar:{title:'只读日历',loading:'正在读取来源状态…',unavailable:'来源不可用，不能据此推断没有日程。',partial:'仅显示已观察记录，可能有遗漏；全天与取消状态尚未确认。',disabled:'尚未连接只读日历来源。',connect:'连接并允许读取日历',disconnect:'断开只读来源',refresh:'刷新已观察日程',count:(value:number)=>`已观察 ${value} 条记录`},
+  assistantCalendar:{memoryOptIn:'允许用我已采纳的记忆辅助日历建议',memoryNotice:'默认关闭，仅只读使用匹配且仍有效的已确认记忆；不会创建任务或修改日程。关闭后撤回依赖这些记忆的建议。',memoryUnavailable:'记忆授权暂不可用，请重新打开设置后再试。',title:'只读日历',loading:'正在读取来源状态…',unavailable:'来源不可用，不能据此推断没有日程。',partial:'仅显示已观察记录，可能有遗漏；全天与取消状态尚未确认。',disabled:'尚未连接只读日历来源。',connect:'连接并允许读取日历',disconnect:'断开只读来源',refresh:'刷新已观察日程',count:(value:number)=>`已观察 ${value} 条记录`},
   assistant: {
     conversation: { loading: '正在打开小K的对话…', loadFailed: '助理对话暂时无法打开，请重试。', continueHint: '随时和我聊，我会和你一起把事情推进。', expand: '关注与连接设置', collapse: '收起助理设置' },
     workspace: {

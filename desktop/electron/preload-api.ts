@@ -1,3 +1,4 @@
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
 import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
 import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
@@ -287,6 +288,7 @@ export const PRELOAD_API_KEYS = [
   'onAssistantInboxChanged',
   'onAssistantInboxFocus',
   'getAssistantOverview',
+  'getAssistantCalendarMemorySettings','configureAssistantCalendarMemory',
   'getAssistantCalendarStatus',
   'connectAssistantCalendar',
   'disconnectAssistantCalendar',
@@ -711,6 +713,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   approveAssistantSend: 'desktop:assistantInbox:approve',
   refuseAssistantSend: 'desktop:assistantInbox:refuse',
   getAssistantOverview: 'desktop:assistant:getOverview',
+  getAssistantCalendarMemorySettings:'desktop:assistant:getCalendarMemorySettings',configureAssistantCalendarMemory:'desktop:assistant:configureCalendarMemory',
   getAssistantCalendarStatus: 'desktop:assistant:getCalendarStatus',
   connectAssistantCalendar: 'desktop:assistant:connectCalendar',
   disconnectAssistantCalendar: 'desktop:assistant:disconnectCalendar',
@@ -1478,6 +1481,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   onAssistantInboxChanged(handler:()=>void): ()=>void;
   onAssistantInboxFocus(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
+  getAssistantCalendarMemorySettings():Promise<AssistantCalendarMemorySettingsDto>;
+  configureAssistantCalendarMemory(input:AssistantCalendarMemoryInput):Promise<AssistantCalendarMemorySettingsDto>;
   getAssistantCalendarStatus():Promise<AssistantCalendarStatus>;
   connectAssistantCalendar():Promise<AssistantCalendarStatus>;
   disconnectAssistantCalendar():Promise<AssistantCalendarStatus>;
@@ -2039,6 +2044,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
     onAssistantInboxFocus(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.off('desktop:assistantInbox:focus', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
+    getAssistantCalendarMemorySettings:()=>ipcRenderer.invoke('desktop:assistant:getCalendarMemorySettings') as ReturnType<DesktopApi['getAssistantCalendarMemorySettings']>,
+    configureAssistantCalendarMemory:input=>ipcRenderer.invoke('desktop:assistant:configureCalendarMemory',input) as ReturnType<DesktopApi['configureAssistantCalendarMemory']>,
     getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus') as ReturnType<DesktopApi['getAssistantCalendarStatus']>,
     connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar') as ReturnType<DesktopApi['connectAssistantCalendar']>,
     disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar') as ReturnType<DesktopApi['disconnectAssistantCalendar']>,

@@ -2922,7 +2922,7 @@ export const en: LocaleStrings = {
     ] as const,
   },
 
-  assistantCalendar:{title:'Read-only calendar',loading:'Reading source status…',unavailable:'The source is unavailable. This does not mean there are no events.',partial:'Observed records may be incomplete. All-day and cancellation status remain unconfirmed.',disabled:'The read-only calendar source is not connected.',connect:'Connect and allow calendar reads',disconnect:'Disconnect read-only source',refresh:'Refresh observed events',count:(value:number)=>`${value} observed records`},
+  assistantCalendar:{memoryOptIn:'Use memories I previously accepted for calendar suggestions',memoryNotice:'Off by default. This reads matching confirmed memories only; it does not create tasks or change calendar events. Turning it off withdraws dependent suggestions.',memoryUnavailable:'Memory consent is unavailable. Reopen these settings before trying again.',title:'Read-only calendar',loading:'Reading source status…',unavailable:'The source is unavailable. This does not mean there are no events.',partial:'Observed records may be incomplete. All-day and cancellation status remain unconfirmed.',disabled:'The read-only calendar source is not connected.',connect:'Connect and allow calendar reads',disconnect:'Disconnect read-only source',refresh:'Refresh observed events',count:(value:number)=>`${value} observed records`},
   assistant: {
     conversation: { loading: 'Opening your assistant conversation…', loadFailed: 'Could not open the assistant conversation. Please retry.', continueHint: 'Talk to me anytime. We’ll move things forward together.', expand: 'Focus and connections', collapse: 'Close assistant settings' },
     workspace: {
