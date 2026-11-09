@@ -5,9 +5,9 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { AssistantWorkspaceContent } from '../../renderer/src/components/assistant/AssistantWorkspaceContent';
 import { useAssistantWorkspace } from '../../renderer/src/hooks/useAssistantWorkspace';
 function AssistantPage() { return <AssistantWorkspaceContent data={useAssistantWorkspace()} onPrepareSuggestion={text => window.dispatchEvent(new CustomEvent('assistant-test-draft', { detail: text }))} />; }
-const h = vi.hoisted(() => ({ overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), changed: undefined as undefined | (() => void), stopAssistant:vi.fn(), due: undefined as undefined | (() => void) }));
+const h = vi.hoisted(() => ({ product:vi.fn(),page:vi.fn(),prepareFollow:vi.fn(),confirm:vi.fn(),overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), changed: undefined as undefined | (() => void), stopAssistant:vi.fn(), due: undefined as undefined | (() => void) }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => ({
-  getAssistantOverview: h.overview, getScheduledTasks: h.schedules,
+  getAssistantActionOverview:h.product,getAssistantCandidatePage:h.page,prepareAssistantFollowUpLaunch:h.prepareFollow,confirmAssistantLaunch:h.confirm,kbListCollections:async()=>[],getAssistantOverview: h.overview, getScheduledTasks: h.schedules,
   getAutomationRunHistory: h.history, getAutomationOverviewSnapshot: h.automation,
   onAssistantInboxChanged:(handler:()=>void)=>{h.changed=handler;return h.stopAssistant;},
   activateAssistant: h.activate, onScheduledTaskDue: (handler: () => void) => { h.due = handler; return h.unsubscribe; },
@@ -19,6 +19,7 @@ const automation = { generatedAt: 1, sourceVersions: { loopStore: 1, timedAction
 function Probe() { const location = useLocation(); return <output data-testid="location">{location.pathname}{location.search}{location.hash}<span data-testid="draft">{location.state?.assistantDraftPrompt}</span></output>; }
 function page() { return render(<MemoryRouter initialEntries={['/assistant']}><LocaleProvider><AssistantPage /><Probe /></LocaleProvider></MemoryRouter>); }
 beforeEach(() => {
+  h.product.mockReset();h.page.mockReset();h.prepareFollow.mockReset();h.confirm.mockReset();
   localStorage.clear(); localStorage.setItem('xiaok:locale', 'zh');
   h.overview.mockReset().mockResolvedValue(overview); h.schedules.mockReset().mockResolvedValue([schedule]);
   h.history.mockReset().mockResolvedValue([{ id: 'run1', automationKind: 'agent_task', actionId: 'ai-daily', title: '原有 AI 动态', status: 'success', startedAt: 100 }]);
@@ -107,3 +108,14 @@ it('keeps the top focused when there are no suggestions, hiding repeated copy, s
 });
 
 it('refreshes completed morning suggestions from the assistant event and cleans its listener',async()=>{const view=page();await screen.findByText('跟进发布评审');h.overview.mockResolvedValue({...overview,suggestions:[{id:'morning-new',title:'晨间运行的新建议',summary:'safe'}]});act(()=>h.changed?.());await screen.findByText('晨间运行的新建议');const calls=h.overview.mock.calls.length;view.unmount();expect(h.stopAssistant).toHaveBeenCalledTimes(1);act(()=>h.changed?.());expect(h.overview).toHaveBeenCalledTimes(calls);});
+
+
+it('uses the modern Main candidate page and only prepares an accepted follow-up after an explicit click',async()=>{
+ const candidate={id:'follow',runId:'run',kind:'follow_up',title:'Accepted follow-up',content:'Review evidence',scope:'global',confidence:1,evidenceRefs:[],dedupeKey:'d',status:'accepted',acceptedTargetRef:'draft://follow',createdAt:1};
+ h.product.mockResolvedValue({...overview,schemaVersion:2,candidates:[candidate],nextCandidateCursor:'main-cursor',proposals:[],coverageState:'unknown',coverage:[],analysisStatus:null,collectedAt:null});
+ h.page.mockResolvedValue({candidates:[{...candidate,id:'next',title:'Next candidate',status:'pending',acceptedTargetRef:undefined}],nextCursor:null});
+ h.prepareFollow.mockResolvedValue({id:'a6ed0df6-18ac-4d34-a228-c864e9b4c9b0',candidateId:'follow',proposalId:'follow',proposalRevision:1,sourceVector:'a'.repeat(64),workItemIdentity:'b'.repeat(64),title:'Accepted follow-up',instruction:'Review evidence',domain:{lane:'local',workspaceId:'workspace',cwd:'/private/fixture',device:'1',inode:'2',permissionRevision:0,bootId:'boot'},threadId:'new-thread',createdAt:1,validUntil:Date.now()+60000});
+ page();await screen.findByText('跟进发布评审');fireEvent.click(screen.getByText('助理设置'));fireEvent.click(screen.getByRole('button',{name:'查看小K助理详情'}));
+ expect(h.prepareFollow).not.toHaveBeenCalled();fireEvent.click(await screen.findByRole('button',{name:'加载更多候选'}));await screen.findByText('Next candidate');expect(h.page).toHaveBeenCalledExactlyOnceWith({cursor:'main-cursor'});
+ fireEvent.click(screen.getByRole('button',{name:'开始处理'}));await screen.findByRole('button',{name:'确认并开始'});expect(h.prepareFollow).toHaveBeenCalledExactlyOnceWith({candidateId:'follow'});expect(h.confirm).not.toHaveBeenCalled();
+});

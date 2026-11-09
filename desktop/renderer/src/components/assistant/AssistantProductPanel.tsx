@@ -1,3 +1,4 @@
+import {AssistantCoverage} from './AssistantCoverage';
 import {useEffect,useRef,useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {useLocale} from '../../contexts/LocaleContext';
@@ -31,6 +32,7 @@ export function AssistantProductPanel({data}:{data:ReturnType<typeof useAssistan
   if(life.current)setTarget({proposalId,expectedRevision,page,unavailable});
  });
  return <section data-testid="assistant-product-controls" className="mt-4 space-y-3">
+  <AssistantCoverage snapshot={product}/>
   {product.analysisProvider&&<AssistantAnalysisModelSettings key={product.analysisProvider.revision} status={product.analysisProvider} busy={busy} onConfigure={input=>act(async()=>{ASSISTANT_ANALYSIS_STATUS_SCHEMA.parse(await api().configureAssistantAnalysisProvider(input));})}/>}
   {product.quality&&<AssistantQualityReview status={product.quality} busy={busy} onExport={()=>act(async()=>{ASSISTANT_QUALITY_RESULT_SCHEMA.parse(await api().exportAssistantQualityReview());})} onImport={input=>act(async()=>{ASSISTANT_QUALITY_RESULT_SCHEMA.parse(await api().importAssistantQualityReview(input));})} onRevoke={()=>act(async()=>{ASSISTANT_QUALITY_STATUS_SCHEMA.parse(await api().revokeAssistantQualityReview());})}/>}
   {product.periodic&&<AssistantPeriodicSettings key={product.periodic.revision} status={product.periodic} busy={busy} onSave={input=>act(async()=>{ASSISTANT_PERIODIC_STATUS_SCHEMA.parse(await api().configureAssistantPeriodic(input));})} onCheck={()=>act(async()=>{ASSISTANT_PERIODIC_CHECK_SCHEMA.parse(await api().checkAssistantPeriodic());})}/>}

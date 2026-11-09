@@ -11,6 +11,10 @@ import type {
 export type { AssistantCandidateView } from './view-types';
 
 export interface AssistantDetailPanelProps {
+  onStartFollowUp?:(candidateId:string)=>void;
+  hasMoreCandidates?:boolean;
+  loadingMore?:boolean;
+  onLoadMore?:()=>void|Promise<void>;
   open: boolean;
   profile: AssistantProfileView;
   candidates: AssistantCandidateView[];
@@ -23,7 +27,8 @@ export interface AssistantDetailPanelProps {
 }
 
 export function AssistantDetailPanel({
-  open,
+  open,onStartFollowUp,
+  hasMoreCandidates=false,loadingMore=false,onLoadMore,
   profile,
   candidates,
   knowledgeCollections,
@@ -89,7 +94,7 @@ export function AssistantDetailPanel({
                         </div>
                         <h4 className="mt-2 text-sm font-semibold text-[var(--c-text-primary)]">{candidate.title}</h4>
                       </div>
-                      <span className="rounded bg-[var(--c-bg-deep)] px-2 py-1 text-[10px] text-[var(--c-text-secondary)]">{statusLabel(candidate.status)}</span>
+                      <span className="rounded bg-[var(--c-bg-deep)] px-2 py-1 text-[10px] text-[var(--c-text-secondary)]">{candidate.kind==='follow_up'&&candidate.status==='accepted'&&candidate.acceptedTargetRef?.startsWith('draft://')?t.assistant.followUpAcceptedDraft:statusLabel(candidate.status)}</span>
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-[var(--c-text-secondary)]">{candidate.content}</p>
                     {candidate.evidenceRefs.length > 0 && (
@@ -101,6 +106,7 @@ export function AssistantDetailPanel({
                         ))}
                       </div>
                     )}
+                    {onStartFollowUp&&candidate.kind==='follow_up'&&candidate.status==='accepted'&&candidate.acceptedTargetRef?.startsWith('draft://')&&<button type="button" disabled={decisionsDisabled||!!busyCandidateId} className="mt-3 text-xs text-[var(--c-accent)] disabled:opacity-50" onClick={()=>onStartFollowUp(candidate.id)}>{t.assistant.launchStart}</button>}
                     {canDecide && (
                       <div className="mt-4 space-y-3">
                         {needsCollection && (
@@ -141,6 +147,7 @@ export function AssistantDetailPanel({
               })}
             </div>
           )}
+          {hasMoreCandidates&&onLoadMore&&<button type="button" disabled={loadingMore} onClick={onLoadMore} className="mt-4 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] disabled:opacity-60">{loadingMore?t.assistant.loading:t.assistant.loadMoreCandidates}</button>}
         </div>
       </section>
     </div>

@@ -5,6 +5,7 @@
  * when a new one is added.
  */
 
+const copyPackagedDependencies = require('./copy-packaged-dependencies.cjs');
 const verifyPackagedMainFreshness = require('./verify-packaged-main-freshness.cjs');
 const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dependencies.cjs');
 const verifyPackagedYzjCli = require('./verify-packaged-yzj-cli.cjs');
@@ -13,6 +14,7 @@ const packArtifactExportHelper = require('./pack-artifact-export-helper.cjs');
 const verifyPackagedServiceContracts = require('./verify-packaged-service-contracts.cjs');
 
 module.exports = async function afterPack(context) {
+  await copyPackagedDependencies(context);
   await verifyPackagedMainFreshness(context);
   await verifyPackagedRuntimeDependencies(context);
   await verifyPackagedYzjCli(context);
