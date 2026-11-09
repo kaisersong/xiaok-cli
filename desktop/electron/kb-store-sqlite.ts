@@ -1,3 +1,4 @@
+import {assertKbSQLiteBirthReady,createKbSQLiteTransactions} from './kb-sqlite-transactions.js';
 /**
  * Knowledge Base — SQLite Store Implementation
  *
@@ -174,10 +175,12 @@ const SCHEMA_SQL = `
 `;
 
 export function createKbStoreSqlite(dbPath: string): KbStore {
+  assertKbSQLiteBirthReady();
   let originClosed=false;
   const sourceOrigins=new WeakMap<object,OriginalKnowledgeSourceReceipt>();
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
+  const transactions=createKbSQLiteTransactions(db);
   db.exec(SCHEMA_SQL);
   db.exec('PRAGMA foreign_keys = ON');
   backfillCanonicalSourceHashes(db);
@@ -195,6 +198,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     const local = () => {
       if (originClosed || invalid)
         throw Error('MAIN_MATERIAL_KNOWLEDGE_SOURCE_RETIRED');
+      transactions.ready();
     };
     const current = () => {
       local();
@@ -317,7 +321,6 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
 
   function ensureAssistantSource(raw: AddSourceInput, requestSource: RequestSource): Source {
     if (requestSource !== 'user') throw Error('assistant_knowledge_user_only');
-    if (db.isTransaction) throw Error('assistant_knowledge_outer_transaction');
     const input = captureExecutionValue(raw);
     const fields = ['sourceId','clientRequestKey','collectionId','kind','title','text','parseStatus','metadata'];
     const meta = input?.metadata;
@@ -358,8 +361,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
         || actual.map(chunk=>chunk.text).join('') !== content) throw Error('assistant_knowledge_body_conflict');
       return source;
     };
-    db.exec('BEGIN IMMEDIATE');
-    try {
+    return transactions.exclusive(() => {
       if (!getCollection(input.collectionId)) throw Error('assistant_candidate_collection_not_found');
       const source = addSource(input,'user');matches(source);
       if (source.parseStatus !== 'parsed') {
@@ -368,8 +370,8 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
         insertChunks(source.id,chunks,'user');
         updateSourceParseResult(source.id,{parseStatus:'parsed',metadata:{engine:'builtin-text'}},'user');
       }
-      const result = durable();db.exec('COMMIT');return result;
-    } catch (error) { db.exec('ROLLBACK');throw error; }
+      return durable();
+    });
   }
 
   function findSourceByClientRequestKey(clientRequestKey: string): Source | undefined {
@@ -737,10 +739,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   function withMutationTransaction<T>(run: () => T): T {
-    if (db.isTransaction) return run();
-    db.exec('BEGIN IMMEDIATE');
-    try { const value = run(); db.exec('COMMIT'); return value; }
-    catch (error) { if (db.isTransaction) { try { db.exec('ROLLBACK'); } catch (rollbackError) { console.error('[KB] mutation rollback failed', rollbackError); } } throw error; }
+    return transactions.run(run);
   }
 
   function assertSchedulerChunkState(chunkId: string, requestSource: RequestSource): void {
@@ -750,17 +749,20 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   function close(): void {
+    transactions.close();
     originClosed=true;
-    db.close();
   }
 
+  function positive<T extends (...args: never[]) => unknown>(fn:T):T {
+    return ((...args:Parameters<T>)=>{transactions.ready();return fn(...args);}) as T;
+  }
   const originalStore:KbStore = {
     _db: db,
-    createCollection, getCollection, listCollections, renameCollection, deleteCollection,
-    addSource, ensureAssistantSource, claimSourceContentHash, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
-    insertChunks, listChunks, markChunkEmbedded, markChunkFailed,
-    createMeeting, getMeeting, listMeetings, updateMeeting,
-    getCollectionState, getSourceWithContent, close,
+    createCollection: positive(createCollection), getCollection: positive(getCollection), listCollections: positive(listCollections), renameCollection: positive(renameCollection), deleteCollection: positive(deleteCollection),
+    addSource: positive(addSource), ensureAssistantSource: positive(ensureAssistantSource), claimSourceContentHash: positive(claimSourceContentHash), getSource: positive(getSource), listSources: positive(listSources), deleteSource: positive(deleteSource), retrySource: positive(retrySource), updateSourceParseResult: positive(updateSourceParseResult), getSourceEmbeddingProgress: positive(getSourceEmbeddingProgress),
+    insertChunks: positive(insertChunks), listChunks: positive(listChunks), markChunkEmbedded: positive(markChunkEmbedded), markChunkFailed: positive(markChunkFailed),
+    createMeeting: positive(createMeeting), getMeeting: positive(getMeeting), listMeetings: positive(listMeetings), updateMeeting: positive(updateMeeting),
+    getCollectionState: positive(getCollectionState), getSourceWithContent: positive(getSourceWithContent), close,
   };
   kbOriginApply(kbOriginSet, originalKbStores, [
     originalStore,
