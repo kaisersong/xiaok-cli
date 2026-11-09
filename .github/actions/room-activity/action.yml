@@ -1,0 +1,14 @@
+name: Room boundaries and activity retention
+description: Run the Room and Activity regressions with the existing desktop test setup.
+runs:
+  using: composite
+  steps:
+    - name: Test Room boundaries and activity retention
+      working-directory: desktop
+      shell: bash
+      run: >
+        npm test -- --run --maxWorkers=1
+        tests/renderer/collaboration-rooms-page.test.tsx
+        tests/renderer/conversation-activity.test.tsx
+        tests/main/room-field-classification.test.ts
+        tests/main/conversation-activity-store.test.ts
