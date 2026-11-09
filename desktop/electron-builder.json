@@ -203,6 +203,53 @@
         "xiaok-source-runtime.cjs",
         "source-runtime-manifest.json"
       ]
+    },
+    {
+      "from": "../services/continuity-sync/src",
+      "to": "services/continuity-sync/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/package.json",
+      "to": "services/continuity-sync/package.json"
+    },
+    {
+      "from": "../services/continuity-device/src",
+      "to": "services/continuity-device/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/package.json",
+      "to": "services/continuity-device/package.json"
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium",
+      "to": "services/continuity-sync/node_modules/libsodium",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium-wrappers",
+      "to": "services/continuity-sync/node_modules/libsodium-wrappers",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/node_modules/@napi-rs/keyring",
+      "to": "services/continuity-device/node_modules/@napi-rs/keyring",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-native/auth-owner.json",
+      "to": "continuity-native/auth-owner.json"
     }
   ],
   "publish": {

@@ -1,0 +1,13 @@
+name: Install desktop resource dependencies
+description: Install locked private continuity and sibling service dependencies
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        retry="$PWD/.github/scripts/retry.sh"
+        bash "$retry" npm ci --prefix services/continuity-sync --ignore-scripts --omit=dev
+        bash "$retry" npm ci --prefix services/continuity-device --ignore-scripts --omit=dev
+        cd ../kswarm && bash "$retry" npm ci --omit=dev
+        cd ../intent-broker && bash "$retry" npm ci --omit=dev
