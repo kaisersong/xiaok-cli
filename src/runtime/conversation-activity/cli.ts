@@ -26,7 +26,6 @@ export class CliConversationActivities {
   readonly mcp: ConversationMcpActivities;
   private readonly actor = { requestSource: 'user' as const, actorId: 'cli-user' };
   private readonly pending = new Map<string, ConversationActivity>();
-  private unsubscribe?: () => void;
   private stopDisconnect?: () => void;
   private refreshPending?: Promise<void>;
   private through = 0;
@@ -74,7 +73,7 @@ export class CliConversationActivities {
       if (context.session.sessionId !== options.sessionId && !context.session.lineage.includes(options.sessionId)) return;
       return this.mcp.observer(options.sessionId, context.toolInvocationId ?? randomUUID(), connection);
     } });
-    void Promise.resolve(this.service.subscribe(options.sessionId, this.actor, () => { void this.refresh().catch(error => options.onError?.(error)); })).then(stop => { if (this.disposed) stop(); else { this.unsubscribe = stop; void this.refresh().catch(error => options.onError?.(error)); } }).catch(error => options.onError?.(error));
+    void Promise.resolve(this.service.subscribe(options.sessionId, this.actor, () => { void this.refresh().catch(error => options.onError?.(error)); })).then(stop => { if (this.disposed) stop(); else { void this.refresh().catch(error => options.onError?.(error)); } }).catch(error => options.onError?.(error));
     this.service.start(); void this.refresh().catch(error => options.onError?.(error));
   }
 
@@ -119,7 +118,7 @@ export class CliConversationActivities {
 
   close():Promise<void>{
     if(this.closing)return this.closing;
-    this.disposed=true;this.stopDisconnect?.();this.unsubscribe?.();this.pending.clear();
+    this.disposed=true;this.stopDisconnect?.();this.pending.clear();
     this.closing=closeConversationActivity({mcp:this.mcp,service:this.service,store:this.store,presentationTails:[this.pendingPresentation,...(this.refreshPending?[this.refreshPending]:[])]});return this.closing;
   }
 
