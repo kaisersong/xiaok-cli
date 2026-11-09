@@ -215,6 +215,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
         finally { this.scope?.dispose(); this.scope = undefined; }
       }
       if (modelBodyFailure) throw modelBodyFailure.error;
+      boundSignal.throwIfAborted();
       return modelResult!;
     };
     const execution=Promise.resolve().then(()=>this.observed&&this.options.runObservedTurn?this.options.runObservedTurn(execute):execute());
