@@ -7,6 +7,7 @@
 
 const verifyPackagedMainFreshness = require('./verify-packaged-main-freshness.cjs');
 const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dependencies.cjs');
+const verifyPackagedContinuitySource = require('./verify-packaged-continuity-source.cjs');
 const verifyPackagedYzjCli = require('./verify-packaged-yzj-cli.cjs');
 const packBrokerRuntime = require('./pack-broker-runtime.cjs');
 const packBundledRuntimes = require('./pack-bundled-runtimes.cjs');
@@ -16,6 +17,7 @@ const verifyPackagedServiceContracts = require('./verify-packaged-service-contra
 module.exports = async function afterPack(context) {
   await verifyPackagedMainFreshness(context);
   await verifyPackagedRuntimeDependencies(context);
+  await verifyPackagedContinuitySource(context);
   await verifyPackagedYzjCli(context);
   await verifyPackagedServiceContracts(context);
   await packBundledRuntimes(context);

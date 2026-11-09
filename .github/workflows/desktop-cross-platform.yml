@@ -331,12 +331,7 @@ jobs:
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
-      - name: Install sidecar dependencies
-        shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          cd ../kswarm && bash "$retry" npm ci --omit=dev
-          cd ../intent-broker && bash "$retry" npm ci --omit=dev
+      - uses: ./.github/actions/install-desktop-sidecars
 
       - name: Build report-renderer bundle
         shell: bash
