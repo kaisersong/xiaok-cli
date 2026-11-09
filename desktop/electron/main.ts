@@ -173,6 +173,8 @@ import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
 import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
+import { attachContextApplicationNavigation } from './context-continuity/application-navigation.js';
+import { registerContextProtocol } from './context-continuity/navigation.js';
 import { buildAutomationOverviewSnapshot } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -2366,6 +2368,21 @@ if (packagedKimiSmokeResultPath) {
   debugMain('single-instance-lock:failed');
   app.quit();
 } else {
+  const contextApplicationNavigation = attachContextApplicationNavigation({
+    argv: process.argv,
+    isReady: () => app.isReady(),
+    isOpen: () => desktopShutdownGate.isOpen,
+    open: async () => {
+      const window = await createWindow();
+      if (!desktopShutdownGate.isOpen || window.isDestroyed()) throw Error('context_navigation_closed');
+      restoreExistingWindow(window);
+      return { getURL: () => window.webContents.getURL(), loadURL: (url: string) => window.loadURL(url) };
+    },
+    isTrusted: url => isTrustedDesktopRendererUrl(url, { rendererFile: join(__dirname, '../../../renderer/index.html'), devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'] }),
+    registerProtocol: () => registerContextProtocol(app, process.platform),
+    subscribeOpenUrl: handler => { app.on('open-url', handler); return () => { app.removeListener('open-url', handler); }; },
+    unavailable: () => debugMain('context-navigation:unavailable'),
+  });
   app.whenReady().then(async () => {
     debugMain('app:whenReady');
     const protocolRegistered = registerIntentBrokerProtocolClient(app, {
@@ -2387,17 +2404,19 @@ if (packagedKimiSmokeResultPath) {
         app.dock.setIcon(nativeImage.createFromPath(iconPath));
       }
     }
-    void createWindow();
+    await createWindow();
+    await contextApplicationNavigation.ready();
   }).catch((error) => {
     console.error('[main] whenReady failed:', error);
   });
   app.on('second-instance', (_event, commandLine) => {
     const protocolUrl = findIntentBrokerProtocolUrl(commandLine);
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
-    restoreOrCreateWindow();
+    if (!contextApplicationNavigation.secondInstance(commandLine)) restoreOrCreateWindow();
   });
   // Quitting state belongs to the coordinator's synchronous phase ①.
   registerLifetimeDisposerStep('window-scoped', async () => {
+    contextApplicationNavigation.dispose();
     meetingRecorderController?.dispose();
     destroyMenuBar();
     debugMain('app:before-quit');
