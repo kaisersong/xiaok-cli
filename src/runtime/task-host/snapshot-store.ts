@@ -907,6 +907,71 @@ export class FileTaskSnapshotStore {
     return observed;
   }
 
+  /** Drain synchronous SDK children before returning even a failed read.
+   * The callback is private implementation code, not a caller-supplied port. */
+  async #inspectCurrentRead<T>(read: (context: SourceStoreContext) => Promise<T>): Promise<T> {
+    const context = this.#ordinaryContext();
+    let result!: T, failure: { error: unknown } | undefined;
+    try { result = await read(context); } catch (error) { failure = { error }; }
+    try { await this.#joinSourceSync(context); }
+    catch (error) { if (failure) throw new AggregateError([failure.error, error], 'task_inspection_read_unconfirmed', { cause: failure.error }); throw error; }
+    if (failure) throw failure.error;
+    return result;
+  }
+
+  /** Uncached durable DATA only. This does not observe execution completion,
+   * mint a Source receipt, repair journals, or populate the runtime cache. */
+  async inspectPersistedTask(taskId: string): Promise<TaskSnapshot | null> {
+    if (typeof taskId !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,255}$/.test(taskId)) throw new Error('task_identity_conflict');
+    return this.#inspectCurrentRead(async context => {
+    const protection = await this.#readProtection(taskId);
+    const pending = this.#taskWriteQueues.get(taskId); if (pending) await pending;
+    let checkpoint;
+    try { checkpoint = this.#sourceStat(this.#snapshotPath(taskId), context); }
+    catch (error) { if (!isNodeErrorCode(error, 'ENOENT')) throw error; }
+    if (checkpoint && (!this.#statKind(checkpoint, 'file', context) || this.#statKind(checkpoint, 'symlink', context) || checkpoint.nlink !== (typeof checkpoint.nlink === 'bigint' ? 1n : 1))) throw new Error('task_inventory_unavailable');
+    const loaded = await this.#loadSnapshotState(taskId);
+    if (!loaded) {
+      if (protection.closure || protection.executionProtected) throw new Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE');
+      return null;
+    }
+    if (loaded.snapshot.taskId !== taskId || typeof loaded.snapshot.sessionId !== 'string' || !loaded.snapshot.sessionId) throw new Error('task_inventory_unavailable');
+    return this.#withProtection(loaded.snapshot, undefined, protection);
+    });
+  }
+
+  /** Complete durable-file inventory, including terminal tasks and orphan
+   * journals. Rows are DATA, not an atomic cross-file snapshot or authority. */
+  async inspectPersistedInventory(): Promise<TaskSnapshot[]> {
+    return this.#inspectCurrentRead(async context => {
+    const directory = this.#snapshotDir();
+    let initial;
+    try { initial = this.#sourceStat(directory, context); }
+    catch (error) { if (isNodeErrorCode(error, 'ENOENT')) return []; throw error; }
+    const owner = process.platform !== 'win32' && typeof process.getuid === 'function' ? process.getuid() : undefined;
+    if (!this.#statKind(initial, 'directory', context) || this.#statKind(initial, 'symlink', context) || owner !== undefined && initial.uid !== (typeof initial.uid === 'bigint' ? BigInt(owner) : owner)) throw new Error('task_inventory_unavailable');
+    const names = (await this.#sourceSdk(context, 'names', sdkReaddir, [directory])).value as string[];
+    const ids = new Set<string>();
+    for (const name of names) {
+      const entry = this.#sourceStat(join(directory, name), context);
+      if (!this.#statKind(entry, 'file', context) || this.#statKind(entry, 'symlink', context) || entry.nlink !== (typeof entry.nlink === 'bigint' ? 1n : 1) || owner !== undefined && entry.uid !== (typeof entry.uid === 'bigint' ? BigInt(owner) : owner)) throw new Error('task_inventory_unavailable');
+      if (/\.[0-9]+\.[0-9]+\.[a-z0-9]+\.tmp$/.test(name)) continue;
+      const suffix = name.endsWith('.journal.jsonl') ? '.journal.jsonl' : name.endsWith('.json') ? '.json' : null;
+      if (!suffix) throw new Error('task_inventory_unavailable');
+      const id = name.slice(0, -suffix.length);
+      if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,255}$/.test(id)) throw new Error('task_inventory_unavailable');
+      ids.add(id);
+    }
+    const snapshots: TaskSnapshot[] = [];
+    for (const id of ids) {
+      const snapshot = await this.inspectPersistedTask(id);
+      if (!snapshot) throw new Error('task_inventory_unavailable');
+      snapshots.push(snapshot);
+    }
+    return snapshots;
+    });
+  }
+
   /** Uncached source reconstruction only. Never revives purged input from the
    * runtime cache, observes completion, repairs journals, or grants execution. */
   async readOriginalUserInput(taskId:string,options?:TaskSnapshotReadOptions):Promise<OriginalTaskUserInput|null>{
