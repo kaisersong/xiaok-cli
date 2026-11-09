@@ -44,7 +44,7 @@ export async function activityFixture(cleanup: Cleanup) {
   await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const service = boundary.service, internals = service as unknown as Internals, store = internals.options.store;
   const db = (store as unknown as { db: NativeDb }).db;
-  cleanup.push(() => db.setAuthorizer(null));
+  if (nativeAuthorizer) cleanup.push(() => db.setAuthorizer(null));
   const contexts: DesktopAgentExecutionContext[] = [];
   const observedGroups = new Map<string, LiveFacts>();
   const capture = (context: DesktopAgentExecutionContext) => {

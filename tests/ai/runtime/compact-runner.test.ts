@@ -49,7 +49,7 @@ describe('CompactRunner', () => {
     expect(capturedTools).toEqual([]);
   });
 
-  it('passes the exact stream options object through to adapter', async () => {
+  it('preserves caller options without mutation and requires complete summaries', async () => {
     let capturedOptions: StreamOptions | undefined;
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
@@ -74,7 +74,9 @@ describe('CompactRunner', () => {
       streamOptions,
     );
 
-    expect(capturedOptions).toBe(streamOptions);
+    expect(capturedOptions).not.toBe(streamOptions);
+    expect(capturedOptions).toEqual({...streamOptions,requireCompleteResponse:true});
+    expect(streamOptions).toEqual({signal:controller.signal,cacheKey:`pc1_${'a'.repeat(64)}`});
   });
 
   it('drains usage and rethrows the same pending adapter error', async () => {

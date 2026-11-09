@@ -1,4 +1,5 @@
 import { createDesktopModelPhysicalScope, closeDesktopModelPhysicalScope, waitDesktopModelPhysicalIdle, assertDesktopModelPhysicalIdle } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import { consumeDelegatedObservationExecutionPlan, assertDelegatedObservationPaused, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner, type DelegatedObservationExecutionPlan } from '../../src/runtime/sol-pi/delegated-session-owner.js';
 import { bindDesktopDelegatedObservationSession, type DesktopObservationBinding } from './desktop-observation-owner.js';
 import type { DesktopMultiAgentService, DesktopObservationChildPreparation } from './desktop-multi-agent-service.js';
@@ -40,6 +41,7 @@ export interface DesktopManagedAgentSessionOptions {
   skillCatalog: SkillCatalog;
   emitRuntimeEvent(event: Parameters<TaskRunnerInput['emitRuntimeEvent']>[0], context: DesktopAgentExecutionContext): void | Promise<void>;
   onUsage?(inputTokens: number, outputTokens: number, usageId: string | undefined, context: DesktopAgentExecutionContext): void | Promise<void>;
+  admitUsage?(context: DesktopAgentExecutionContext, invocationId: string): DesktopModelUsageAdmission;
   onToolFinished?(context: DesktopAgentExecutionContext, fact: { executionEventId: string; toolName: string; ok: boolean }): void | Promise<void>;
   maxIterations?: number;
   runObservedTurn?<T>(work:(signal:AbortSignal)=>Promise<T>):Promise<T>;
@@ -178,6 +180,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
           materials: this.options.materials, materialRegistry: this.options.materialRegistry,
           skillInvocation: null, skillCatalog: this.options.skillCatalog, maxIterations: this.options.maxIterations,
           mailbox: context.mailbox, onUsage: (incoming, outgoing, usageId) => this.options.onUsage?.(incoming, outgoing, usageId, context),
+          admitUsage: this.options.admitUsage ? invocationId => this.options.admitUsage!(context, invocationId) : undefined,
           onActivity: activity?.onActivity,
           emitRuntimeEvent: async event => {
             if (event.type === 'assistant_delta' || event.type === 'tool_finished' && event.invoked === true) activity?.onActivity({ phase: 'model' });
@@ -245,13 +248,30 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
     return this.disposal;
   }
   private async disposeOwned(): Promise<void> {
-    await this.deactivate();
-    await closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason);
-    await this.running?.catch(() => {});
+    const failures: Array<{ error: unknown } | undefined> = [];
+    const pending: Promise<void>[] = [];
+    const observed = this.observed, running = this.running;
+    // Start every negative operation before joining.
+    const attempt = (action: () => void | Promise<void>) => {
+      const index = failures.length; failures.push(undefined);
+      try { pending.push(Promise.resolve(action()).then(() => {}, error => { failures[index] = { error }; })); }
+      catch (error) { failures[index] = { error }; }
+    };
+    attempt(() => this.deactivate());
+    attempt(() => closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason));
+    if (observed) {
+      attempt(() => observed.child.execution?.dispose());
+      attempt(() => observed.host.drainTransport());
+    }
+    await Promise.all(pending);
+    // Running reports its business error separately; this join grants no physical receipt.
+    await running?.catch(() => {});
+    const errors = failures.flatMap(failure => failure ? [failure.error] : []);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'desktop_managed_session_shutdown_failed', { cause: errors[0] });
     this.scope?.dispose(); this.scope = undefined;
-    if (this.observed) {
-      try { await this.observed.child.execution?.dispose(); await this.observed.host.drainTransport(); }
-      finally { this.observed.child.owner.dispose(); this.observed.initialScope?.dispose(); }
+    if (observed) {
+      observed.child.owner.dispose(); observed.initialScope?.dispose();
     }
     await this.options.releaseResources?.();
     this.messages = [];

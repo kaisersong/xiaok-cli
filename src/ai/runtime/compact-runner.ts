@@ -6,6 +6,7 @@ import {
 } from './provider-private-projection.js';
 import { randomUUID } from 'node:crypto';
 import { streamCliCompactionProviderConversation } from './provider-conversation-authorization.js';
+import { collectCompactionResponse } from './compaction-response.js';
 
 const NO_TOOLS_PREAMBLE = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. Do NOT use any tool_use blocks.
 Your task is to summarize the conversation below into a compact form that preserves all important context.
@@ -38,19 +39,13 @@ export class CompactRunner {
 
   async run(messages: Message[], streamOptions?: StreamOptions, onProgress?: () => void): Promise<string> {
     const prepared = this.prepareRequest(messages);
-    const chunks: string[] = [];
-    for await (const chunk of streamCliCompactionProviderConversation({
+    return collectCompactionResponse(streamCliCompactionProviderConversation({
       adapter: this.adapter,
       messages: prepared.messages,
       tools: [],
       systemPrompt: prepared.systemPrompt,
-      options: streamOptions,
+      options: { ...streamOptions, requireCompleteResponse: true },
       invocationId: `inv_${randomUUID()}`,
-    })) {
-      onProgress?.();
-      if (chunk.type === 'text') chunks.push(chunk.delta);
-    }
-
-    return chunks.join('').trim();
+    }), { signal: streamOptions?.signal, onProgress });
   }
 }
