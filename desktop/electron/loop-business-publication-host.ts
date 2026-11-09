@@ -1,3 +1,5 @@
+import {ownDataBufferFrom,ownDataObjectFreeze} from '../../src/runtime/verification/application-native-intrinsics.js';
+import type {PublishedPayload} from '../../src/runtime/verification/publication-client.js';
 import {readCurrentLoopPublishedCandidate,isLoopPublicationNotCurrent,type CurrentLoopPublishedCandidate} from '../../src/runtime/loop/published-candidate.js';
 import {readCurrentLoopPublicationSet,isLoopPublicationSetNotCurrent,type CurrentLoopPublicationSet} from '../../src/runtime/loop/published-set.js';
 import {completionConsumerOwner} from '../../src/runtime/verification/completion-consumer-owner.js';
@@ -177,8 +179,11 @@ export function createLoopBusinessPublicationHost(options:{store:LoopStore;asser
    return track(Promise.resolve().then(()=>project(input.runId,'user',signal,true,(target,_active,current,_guard,payloads)=>{
     const index=target.candidates.findIndex(c=>c.stageId===null),root=target.candidates[index];
     if(!root||root.binding.contract.kind!=='user-template'||root.binding.body.kind!=='user-template'||!target.projection)throw Error('loop_output_publication');
-    current();return Object.freeze({binding:root.binding,payload:payloads[index],assertCurrent:current});
-   }))) as Promise<Readonly<{binding:CurrentLoopPublishedCandidate['binding'];payload:Readonly<CurrentLoopPublishedCandidate>;assertCurrent():void}>>;
+    current();const published=payloads[index];
+    const payload:Readonly<PublishedPayload>=ownDataObjectFreeze({owner:published.owner,businessRevision:published.businessRevision,
+     operationId:published.operationId,fullTupleHash:published.fullTupleHash,payloadHash:published.payloadHash,bytes:ownDataBufferFrom(published.bytes)});
+    current();return ownDataObjectFreeze({binding:root.binding,payload,assertCurrent:current});
+   }))) as Promise<Readonly<{binding:CurrentLoopPublishedCandidate['binding'];payload:Readonly<PublishedPayload>;assertCurrent():void}>>;
   }catch(error){return Promise.reject(error);}
  }
  function readAssistantOutput(raw:Action):Promise<Readonly<{runId:string;vector:string;rows:LoopProjectionRows;body:Readonly<LoopCandidateBody>}>>{
