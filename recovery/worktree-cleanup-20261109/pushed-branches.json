@@ -1,0 +1,170 @@
+[
+  {
+    "branch": "backup/scheduled-history-installed-667f54a2",
+    "sha": "667f54a279f48d27dc3f3e376fc49828944b2acb",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 3,
+    "ahead_main": 3
+  },
+  {
+    "branch": "build/cli-candidate-20261103",
+    "sha": "ab04418f4271f328ff2ff6c39e41a0a5d3cf5d24",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 6,
+    "ahead_main": 6
+  },
+  {
+    "branch": "fix/release-1.6.3-credential-lock-20261109",
+    "sha": "bddd6b5d57ae6b3df972babb89235b81363014ad",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 3,
+    "ahead_main": 179
+  },
+  {
+    "branch": "fix/release-1.6.3-observation-async-context-20261109",
+    "sha": "3ab82784eebc4c6b5c60970f95603ce68a1db93f",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 173,
+    "ahead_main": 754
+  },
+  {
+    "branch": "fix/scheduled-task-delivery",
+    "sha": "4c3b2f957f6465926377a59d9aefa826ebb77a76",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 2,
+    "ahead_main": 2
+  },
+  {
+    "branch": "integration/dsh-covered-history-20261109",
+    "sha": "e8d0588da692f54a43a184af62db9b9eddda9406",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 68,
+    "ahead_main": 340
+  },
+  {
+    "branch": "integration/final-reviewed-head-20261109",
+    "sha": "c552a7ab2a30b67bcb14a9826c959bb74ccf3310",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 177,
+    "ahead_main": 758
+  },
+  {
+    "branch": "integration/harness2-56-20261109",
+    "sha": "82397692db77377b87b0501e8d57b8541e139fe9",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 74,
+    "ahead_main": 509
+  },
+  {
+    "branch": "integration/observation-cea-20261109",
+    "sha": "406f5fef395fc8d830754af1f5abbecb18b79b35",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 86,
+    "ahead_main": 529
+  },
+  {
+    "branch": "integration/owner-floor-794-20261109",
+    "sha": "b962326f841552e4225cf0fa0a3d1cb2cf208607",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 74,
+    "ahead_main": 505
+  },
+  {
+    "branch": "integration/pi74-net-20261109",
+    "sha": "1659ea9aff8ce8592fe3061df5ce5262afada5ce",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 169,
+    "ahead_main": 749
+  },
+  {
+    "branch": "integration/pr101-20261109",
+    "sha": "32ba5b810c6a1b796ff82fc31bbbbcd8bc021989",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 1,
+    "ahead_main": 206
+  },
+  {
+    "branch": "integration/primary-capture-a992-20261109",
+    "sha": "f3f2ebd9ac585a4066a5abc39039d806fbd56f8a",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 86,
+    "ahead_main": 529
+  },
+  {
+    "branch": "integration/primary-history-20261109",
+    "sha": "ec3a360e6f0047b35e38b83396ed67ce9455c51e",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 86,
+    "ahead_main": 529
+  },
+  {
+    "branch": "integration/primary-intent-generic-20261109",
+    "sha": "3a8c2bdc10a1ab8596acc127f9496c368ec40405",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 20,
+    "ahead_main": 213
+  },
+  {
+    "branch": "integration/primary-modern-20261109",
+    "sha": "90280571c59d260575a7914d039050d120296bfe",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 3,
+    "ahead_main": 185
+  },
+  {
+    "branch": "integration/root-credentials-208-20261109",
+    "sha": "8f36042e209e0a6fc0c5ffe4b95f4bd9e8eb8056",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 2,
+    "ahead_main": 178
+  },
+  {
+    "branch": "integration/root-metadata-20261109",
+    "sha": "317a5d9e3c1916ddf7a6e4ca5ce756baae773315",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 67,
+    "ahead_main": 490
+  },
+  {
+    "branch": "integration/root-two-unique-20261109",
+    "sha": "5ec892216880d21d2831651a4110df60e1512036",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 22,
+    "ahead_main": 224
+  },
+  {
+    "branch": "integration/settings-decision-186-20261109",
+    "sha": "3dc800afae3d217ab1a3e725f76478592c6e3d7d",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 1,
+    "ahead_main": 179
+  },
+  {
+    "branch": "release/1.6.3-gates-20261109",
+    "sha": "9d03f99c78d8bf47c2958e29bd8204735d721888",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 4,
+    "ahead_main": 186
+  }
+]
