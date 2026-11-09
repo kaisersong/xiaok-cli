@@ -19,6 +19,7 @@ import {createSandboxPolicy} from '../../dist/platform/sandbox/policy.js';
 
 test('CLI built worker matches source bytes and executes with the built tool', async () => {
   assert.deepEqual(readFileSync(new URL('../../dist/ai/tools/glob-worker.mjs', import.meta.url)), readFileSync(new URL('../../src/ai/tools/glob-worker.mjs', import.meta.url)));
+  assert.deepEqual(readFileSync(new URL('../../dist/ai/tools/search-scope.mjs', import.meta.url)), readFileSync(new URL('../../src/ai/tools/search-scope.mjs', import.meta.url)));
   const dir = mkdtempSync(join(tmpdir(), 'xiaok-glob-package-'));
   try {
     writeFileSync(join(dir, 'expected.txt'), '');
