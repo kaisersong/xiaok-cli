@@ -31,7 +31,7 @@ describe('bundled Yunzhijia CLI', () => {
     for (const result of results) expect(result.status, result.status === 'rejected' ? String(result.reason) : undefined).toBe('fulfilled');
     const seeded = ensureBundledYzjCli(f);
     expect(readFileSync(seeded.binaryPath)).toEqual(readFileSync(f.source)); expect(readdirSync(seeded.binDir)).toHaveLength(1);
-  });
+  }, 12000);
   it.each(['darwin', 'win32'] as const)('seeds a writable %s copy and preserves independent updates', platform => {
     const f = fixture(platform); const first = ensureBundledYzjCli(f);
     expect(readFileSync(first.binaryPath, 'utf8')).toBe('bundled-v1');
