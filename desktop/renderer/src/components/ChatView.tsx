@@ -279,6 +279,8 @@ interface ChatViewProps {
   assistantContent?: ReactNode;
   assistantHasMessages?: boolean;
   conversationHeader?: ReactNode;
+  localCommands?: import('./ChatInput').LocalChatCommand[];
+  inputAccessory?: ReactNode;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -312,7 +314,7 @@ interface ChatViewProps {
 export function ChatView({ uiPreviews = [],
   emptyContent, conversationHeader, assistantContent, assistantHasMessages, historyContent,
   thread, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
-  executionConnection,
+  executionConnection, localCommands, inputAccessory,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
@@ -750,7 +752,9 @@ export function ChatView({ uiPreviews = [],
         }}
       >
         {activityContent}
+        {inputAccessory}
         <ChatInput
+          localCommands={localCommands}
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}

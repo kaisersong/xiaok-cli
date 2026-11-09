@@ -16,6 +16,7 @@ vi.mock('../../renderer/src/layouts/AppLayout', () => ({ useSidebarCollapse: () 
 // Leaf presentation only: real ChatShell owns every state transition, real
 // GoalBar drives semantic handlers, and the production attachment helper runs.
 vi.mock('../../renderer/src/components/ChatView', () => ({ ChatView: (p: ComponentProps<typeof ActualChatView>) => { interruptedHandler.latest=p.onInterruptedChoice;return <>
+  {p.inputAccessory}
   <form onSubmit={event => { event.preventDefault(); void p.onSubmit(p.prompt); }}>
     <input aria-label="chat draft" value={p.prompt} onChange={event => p.onPromptChange(event.target.value)} />
     <button type="submit">ordinary submit</button>

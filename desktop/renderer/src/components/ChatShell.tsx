@@ -3,7 +3,7 @@ import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-tas
 import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
-import { ObservationControls } from './ObservationControls';
+import { ObservationControls, type ObservationCommandHandle } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
@@ -296,6 +296,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const navigate = useNavigate();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
+  const observationCommands = useRef<ObservationCommandHandle>(null);
   const [observationDraft, setObservationDraft] = useState<string|null>(null);
   useEffect(()=>setObservationDraft(null),[taskId]);
   const [agentHistory, setAgentHistory] = useState<{ threadId: string; groupId?: string } | null>(null);
@@ -1545,6 +1546,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   }, [queuedPrompt, status, taskId]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>, intent: 'composer' | 'interrupted_choice' = 'composer') => {
+    if (intent === 'composer' && !hideObservationControls && text.trim().split(/\s+/)[0] === '/observation') {
+      if (files?.length) return false;
+      await observationCommands.current?.execute('status');
+      return;
+    }
     if (!taskId || admissionPending.current === renderScope) return false;
     setActionError(null);
     if (observationDraft && files?.length) {
@@ -2071,12 +2077,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
-      {!hideObservationControls && <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />}
       {actionError && <div role="alert" className="mx-4 mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]">
         <p>{actionError}</p>
         <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
       </div>}
       <ChatView
+        localCommands={hideObservationControls ? undefined : [{name: 'observation', description: t.observation.commandHint}]}
+        inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
         emptyContent={emptyContent}
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}

@@ -14,6 +14,12 @@ vi.mock('../../renderer/src/components/ChatRightSurface',()=>({ChatRightSurface:
 vi.mock('../../renderer/src/components/TaskPanel',()=>({TaskPanel:(p:any)=><div>{p.goalContent}</div>}));
 vi.mock('../../renderer/src/components/CanvasPanel',()=>({CanvasPanel:()=>null}));
 vi.mock('../../renderer/src/components/ChatView',()=>({ChatView:(p:any)=><div>
+ {p.inputAccessory}
+ <output data-testid="local-command-names">{p.localCommands?.map((c:any)=>c.name).join(",")??""}</output>
+ <output data-testid="input-accessory-present">{String(Boolean(p.inputAccessory))}</output>
+ {p.interruptedTask?.choices?.map((c:any)=><button key={c.id} onClick={()=>void p.onInterruptedChoice?.(c.id)}>{c.label}</button>)}
+ <button onClick={()=>void p.onSubmit('/observation')}>open observation</button>
+ <button onClick={()=>void p.onSubmit('/observation on')}>observation with old arguments</button>
  <output data-testid="thread-current">{p.thread?.currentTaskId??''}</output><output data-testid="chat-status">{p.status}</output>
  <output data-testid="chat-history">{p.messages?.map((m:any)=>m.content).join('\n')}</output>
  <button type="button" onClick={()=>void p.onSubmit('  owned prompt  ')}>submit ordinary prompt</button>
@@ -31,11 +37,13 @@ function deferred<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(don
 function NavigateThread(){const navigate=useNavigate();return <button type="button" onClick={()=>navigate('/t/thread_2')}>change ordinary thread</button>;}
 beforeEach(()=>{for(const mock of Object.values(state))mock.mockReset();state.getThread.mockImplementation(async id=>record(id));state.subscribeTask.mockReturnValue(()=>{});state.updateThreadTaskId.mockResolvedValue(undefined);state.updateThreadTitle.mockResolvedValue(undefined);state.createTask.mockResolvedValue({taskId:'ordinary-task'});state.createTaskWithFiles.mockResolvedValue({taskId:'ordinary-file-task'});});
 afterEach(()=>{cleanup();delete (window as unknown as {xiaokDesktop?:unknown}).xiaokDesktop;window.localStorage.removeItem('xiaok:locale');});
-async function setup(locale:'zh'|'en'='en') {
+async function setup(locale:'zh'|'en'='en',options:{hidden?:boolean;open?:boolean;interrupted?:boolean}={}) {
+ if(options.interrupted){state.getThread.mockImplementation(async id=>({...record(id),currentTaskId:'interrupted-task',taskIds:['interrupted-task']}));state.recoverTask.mockResolvedValue({snapshot:{taskId:'interrupted-task',sessionId:'thread_1',status:'failed',prompt:'old prompt',materials:[],createdAt:1,updatedAt:1,context:{threadId:'thread_1'},events:[{type:'needs_user',question:{taskId:'interrupted-task',questionId:'old-question',kind:'freeform',prompt:'old decision',choices:[{id:'observation-choice',label:'/observation'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]}});}
  window.localStorage.setItem('xiaok:locale',locale);const f=await fixture(),ordinary=f.installControllerSurrogate(),calls:unknown[][]=[];
  window.xiaokDesktop=createPreloadApi({invoke:async(channel:string,...args:unknown[])=>{calls.push([channel,...args]);return Reflect.apply(f.listeners.get(channel)!,undefined,[{sender:f.sender,senderFrame:f.frame},...args]);},on(){},off(){},removeListener(){},send(){}} as never);
- const view=render(<MemoryRouter initialEntries={['/t/thread_1']}><LocaleProvider><NavigateThread/><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+ const view=render(<MemoryRouter initialEntries={['/t/thread_1']}><LocaleProvider><NavigateThread/><Routes><Route path="/t/:taskId" element={<ChatShell hideObservationControls={options.hidden}/>}/></Routes></LocaleProvider></MemoryRouter>);
  await screen.findByTestId('chat-status');await waitFor(()=>expect(state.getThread).toHaveBeenCalledWith('thread_1'));
+ if(options.open!==false){fireEvent.click(screen.getByRole('button',{name:'open observation'}));await screen.findByRole('region',{name:(locale==='zh'?zh:en).observation.menuTitle});}
  return {...f,ordinary,calls,view,labels:(locale==='zh'?zh:en).observation};
 }
 it.each(['zh','en'] as const)('%s ChatShell native draft -> real bridge/preload/Main create consumes real approval once, exact thread/prompt/materials and updates thread before subscribe',async locale=>{
@@ -70,3 +78,21 @@ it('ChatShell healthy draft submit is one admission, even under two immediate cl
 // Layout/ChatView and unrelated ordinary storage are surrogates. ObservationControls, ChatShell,
 // the observation bridge methods, preload, Main registrar and WeakMap consumption are production.
 // No actual model/controller/native/material/metadata/P4 operations or whole-parent qualification.
+it('ChatShell consumes observation status without creating a model task',async()=>{
+ const f=await setup();expect(screen.getByRole('button',{name:f.labels.enable})).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'observation with old arguments'}));await screen.findByText(f.labels.unavailable);expect(f.ordinary.calls).toHaveLength(0);expect(state.createTask).not.toHaveBeenCalled();expect(f.calls.some(call=>call[0]==='desktop:prepareObservationTask')).toBe(false);
+});
+it('ChatShell held prepare cannot publish a draft after switching between empty threads',async()=>{
+ const f=await setup(),held=deferred<any>();window.xiaokDesktop.prepareObservationTask=()=>held.promise;fireEvent.click(screen.getByRole('button',{name:f.labels.enable}));fireEvent.click(screen.getByRole('button',{name:'change ordinary thread'}));await waitFor(()=>expect(state.getThread).toHaveBeenCalledWith('thread_2'));await act(async()=>held.resolve({draftId:'late-approved',model:'fixture',expiresAt:Date.now()+10000}));expect(screen.queryByText(f.labels.ready)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'submit ordinary prompt'}));await waitFor(()=>expect(state.createTask).toHaveBeenCalled());expect(f.ordinary.calls).toHaveLength(0);
+});
+
+it('keeps observation commands and controls hidden for the assistant surface without changing ordinary submission',async()=>{
+ const f=await setup('en',{hidden:true,open:false});
+ expect(screen.getByTestId('local-command-names')).toBeEmptyDOMElement();expect(screen.getByTestId('input-accessory-present')).toHaveTextContent('false');expect(screen.queryByRole('region',{name:f.labels.menuTitle})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'open observation'}));await waitFor(()=>expect(state.createTask).toHaveBeenCalledWith({prompt:'/observation',materials:[],context:{threadId:'thread_1'}}));
+ expect(f.calls.some(call=>String(call[0]).includes('Observation'))).toBe(false);expect(f.ordinary.calls).toHaveLength(0);expect(screen.queryByRole('region',{name:f.labels.menuTitle})).toBeNull();
+});
+it('submits an interrupted choice labelled observation through the original choice admission rather than the local menu',async()=>{
+ const f=await setup('en',{open:false,interrupted:true});await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('failed'));
+ fireEvent.click(await screen.findByRole('button',{name:'/observation'}));await waitFor(()=>expect(state.createTask).toHaveBeenCalledWith({prompt:'/observation',materials:[],context:{threadId:'thread_1',taskIds:['interrupted-task']}}));
+ expect(f.calls.some(call=>String(call[0]).includes('Observation'))).toBe(false);expect(f.ordinary.calls).toHaveLength(0);expect(screen.queryByRole('region',{name:f.labels.menuTitle})).toBeNull();
+});
