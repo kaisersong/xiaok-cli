@@ -7,6 +7,7 @@ import type {DefaultDispatchResult} from '../api/types';
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { KSWARM_STATUS_SCHEMA } from '../../../shared/runtime-status-readonly-ipc-contract';
 import { getDesktopApi } from '@xiaok/shared/desktop';
 import type { ProxyHttpBody, KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
 
@@ -987,6 +988,8 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     let disposed = false;
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let snapshotRetryAttempt = 0;
+    let snapshotReadVersion = 0;
+    let runtimeReady = false;
 
     const clearSnapshotRetry = () => {
       if (snapshotRetryTimer) {
@@ -1008,12 +1011,13 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     };
 
     const loadSnapshot = async ({ retryOnFailure }: { retryOnFailure: boolean }) => {
+      const readVersion = ++snapshotReadVersion;
       const [projectData, agentData, participantData] = await Promise.all([
         httpGet<{ projects: KSwarmProject[] }>('/projects'),
         httpGet<{ agents: KSwarmAgent[] }>('/agents'),
         httpGet<{ participants: KSwarmParticipant[] }>('/participants'),
       ]);
-      if (disposed) return;
+      if (disposed || readVersion !== snapshotReadVersion) return;
 
       const projectList = Array.isArray(projectData?.projects) ? projectData.projects : null;
       if (projectList) {
@@ -1038,6 +1042,20 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
         setParticipants(participantList);
       }
     };
+
+    // Stream connectivity can precede authenticated runtime readiness by minutes.
+    const unsubRuntimeStatus = api.onKSwarmStatus?.(payload => {
+      if (disposed) return;
+      const parsed = KSWARM_STATUS_SCHEMA.safeParse(payload);
+      if (!parsed.success) return;
+      const becameReady = parsed.data.running && !runtimeReady;
+      runtimeReady = parsed.data.running;
+      if (becameReady) {
+        snapshotRetryAttempt = 0;
+        clearSnapshotRetry();
+        void loadSnapshot({ retryOnFailure: true });
+      }
+    });
 
     let subscriptionUncertain = false;
     const applyConnectionStatus = (status?: string) => {
@@ -1088,6 +1106,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
     return () => {
       disposed = true;
+      unsubRuntimeStatus?.();
       try {
         Promise.resolve(api.kswarmStreamUnsubscribe?.())
           .catch(error => console.warn('[kswarm] stream unsubscribe outcome unknown', error));
