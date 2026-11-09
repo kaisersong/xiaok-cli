@@ -87,17 +87,25 @@ export class CredentialStore implements CredentialBackend{
   }
   private locked<T>(body:(state:State,root:string,guard:()=>void)=>T):T{
     const root=this.directory(true)!,rootIdentity=identity(root),lock=join(root,'.lock'),owner=join(lock,'owner.json'),nonce=randomUUID();
-    let lockIdentity:string|undefined;
+    let lockIdentity:string|undefined,ownerPublished=false;
     const guard=()=>{
       const directoryStat=lstatSync(root);owned(directoryStat);if(identity(root)!==rootIdentity||!directoryStat.isDirectory()||directoryStat.isSymbolicLink())fail('config_changed');
       if(lockIdentity!==undefined){
-        if(identity(lock)!==lockIdentity)fail('config_changed');
-        let ownerNonce:unknown;try{ownerNonce=JSON.parse(this.text(owner,lock)??'').nonce;}catch{fail('config_changed');}
-        if(ownerNonce!==nonce)fail('config_changed');
+        const lockStat=lstatSync(lock);owned(lockStat);
+        if(!lockStat.isDirectory()||lockStat.isSymbolicLink()||`${lockStat.dev}:${lockStat.ino}`!==lockIdentity)fail('config_changed');
+        if(ownerPublished){
+          let ownerNonce:unknown;try{ownerNonce=JSON.parse(this.text(owner,lock)??'').nonce;}catch{fail('config_changed');}
+          if(ownerNonce!==nonce)fail('config_changed');
+        }
       }
     };
     for(let attempt=0;;attempt++){
-      try{guard();mkdirSync(lock,{mode:0o700});protectKnownPath(lock,true);break;}
+      try{
+        guard();mkdirSync(lock,{mode:0o700});
+        const acquired=lstatSync(lock);if(!acquired.isDirectory()||acquired.isSymbolicLink())fail('path_unsafe');owned(acquired);
+        lockIdentity=`${acquired.dev}:${acquired.ino}`;
+        guard();protectKnownPath(lock,true);guard();break;
+      }
       catch(error){
         if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;
         const stat=lstatSync(lock);if(!stat.isDirectory()||stat.isSymbolicLink())fail('path_unsafe');owned(stat);
@@ -113,7 +121,7 @@ export class CredentialStore implements CredentialBackend{
         }finally{if(claimed){try{if(identity(lock)===priorLock&&readFileSync(claim,'utf8')===nonce)rmSync(claim);}catch{}}}
       }
     }
-    try{writeFileSync(owner,JSON.stringify({pid:process.pid,nonce}),{flag:'wx',mode:0o600});lockIdentity=identity(lock);guard();const result=body(this.read(root),root,guard);guard();return result;}
+    try{writeFileSync(owner,JSON.stringify({pid:process.pid,nonce}),{flag:'wx',mode:0o600});ownerPublished=true;guard();const result=body(this.read(root),root,guard);guard();return result;}
     finally{try{guard();if(JSON.parse(this.text(owner,lock)??'').nonce===nonce){rmSync(owner);rmSync(lock,{recursive:true});}}catch{/* Unverifiable locks remain closed. */}}
   }
   kind():CredentialStoreKind{return this.read().backend;}

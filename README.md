@@ -130,7 +130,7 @@ The CLI can ask about material delegation choices when interactive input is avai
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
-- Model and connector credentials default to a private file in the configuration directory (`credentials/store.json`, directory mode `0700` and file mode `0600` on macOS/Linux). Choose `keychain` explicitly to use the system credential store. Existing keychain references are imported into file storage when first used; the original keychain items are retained.
+- Model and connector credentials default to an unencrypted private file in the configuration directory (`credentials/store.json`, directory mode `0700` and file mode `0600` on macOS/Linux). Choose `keychain` explicitly to use the system credential store. Existing keychain references are imported into file storage when first used; the original keychain items are retained. Switching to keychain copies and verifies entries before replacing file metadata. If copying fails partway, the complete file store remains active; native items already written may remain.
 
 
 ### Install from npm
