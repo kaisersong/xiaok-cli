@@ -1,0 +1,20 @@
+{
+  "kind": "actual_original_v6_native_root_pool_fixture",
+  "databaseSha256": "f1cbde67bcb5224d4ba600a793ccd0d8293b3493cbe2beba54f63af7027668a1",
+  "gzipSha256": "8bae8c64838f01f91bb86f0039ca9457d84e9d1765d3e7dc2f93b42ea1b59680",
+  "contractSha256": "1e04b496364184acbdb96b17473e83356b1c70859da0d81c9409fc6eb6f0930f",
+  "sourceExtraction": "18 FULL original Native source files from d23-readonly-leaf final content-addressed review packet; each complete byte hash verified before compilation",
+  "buildLog": "d23-root-pool-v6-original-frozen-build",
+  "seedLog": "d23-root-pool-v6-original-frozen-seed",
+  "mainPid": 58597,
+  "mainExitCode": 0,
+  "reaped": true,
+  "counts": {
+    "root_resources": 2,
+    "root_launch_outbox": 1,
+    "root_resource_receipts": 2,
+    "root_physical_resources": 2,
+    "root_physical_receipts": 3
+  },
+  "boundary": "Original Native accounting fixture only; no SDK execution, no product N qualification or OS terminal claim. v6 has no persistent physical identity anchor."
+}

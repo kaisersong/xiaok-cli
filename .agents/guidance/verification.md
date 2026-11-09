@@ -4,6 +4,8 @@
 
 ## Desktop 验证
 
+- 只读、禁联网或用户限定只在隔离 fork/worktree 工作时，先读检查脚本的副作用。当前 `hygiene:check` 默认会 `git fetch --prune`、更新 remote HEAD，并从主 checkout 定位 sibling；此类任务使用 `npm run hygiene:check -- --no-fetch`，另逐个核对实际 active sibling 路径。`--no-fetch` 不验证远程新鲜度，也不会把 sibling 定位自动切到 active fork；不要重复运行默认命令来“留档”，不要回滚其他任务的 Git 元数据。
+
 - desktop main / service / scheduler:
   ```bash
   cd desktop
@@ -56,7 +58,27 @@
 - `desktop` 的 `typecheck` 使用 baseline；不要因为无关历史错误更新 baseline。只有本次改动确实需要改变 baseline 时，才说明原因并更新。
 
 
+## 生成回写与测试命中
+
+- 格式化、代码生成或分片替换不能只凭退出码0回写。写前同时核输入/输出非空、长度下限、语法、预期导出/函数/类成员/测试调用仍存在；异步转换完成后再核当前文件仍等于读取版本，变化则中止，不能用旧全文覆盖协作改动。失败保留原文和原日志。
+- 子集测试必须在原日志中命中预期命名用例，并核实际产品入口的事实文件/子进程结果。Node把空测试文件显示为1个文件通过，不等于任何目标用例已运行；零用例、全跳过、未命中标题或缺实际事实均不得记为该验收通过。恢复误删后重核相关源码与原入口，不迁旧成功日志到新字节。
+- 分片清单的文件数从实际文件数组推导。冻结与启动前逐片核对声明计数、数组长度和实际命令名单，并核所有分片与原枚举集合相等且无重复。追加文件不能只更新总数；结束后按原日志的文件名与 summary 复核。若报告脚本发现计数字段陈旧，保留原清单、日志与失败报告，另出补充审计，不回写原证据或将实际失败改成通过。
+
+## 原生测试的用户配置隔离
+
+- 实际 Services/Store fixture 必须在任何产品模块首次加载前，将 `XIAOK_CONFIG_DIR` 设置为本次私有临时根下的独立目录（0700）；不能仅设置 Electron `userData`，也不能修改 `HOME`。ordinary discovery 会在 Store 出生时写登记，不调用显式设置 API 也有副作用。
+- 运行后核默认 discovery registry 未增加本次临时来源；涉及 `known-directory-writer-fence.persist()` 时另核其实际 OS 用户目录，不能把配置覆盖误当全文件系统隔离。误写后先独立只读留档，按真实 fixture birth log 核精确 SourceId、namespace、目录物理身份和完整原文，再用原锁与原子写入、前后 CAS 清理自己的条目；保留其它来源和原始证据。
+
+## 重复 Native Electron 测试与 Dock 干扰
+
+- `tests/native` 的 Node driver 通过 `tests/native/helpers/electron-executable.mjs` 获取测试可执行文件。它复制原 Electron 到私有临时目录，仅修改副本顶层 plist 的 `LSUIElement=true` 与按私有 cache 派生的独立 `CFBundleIdentifier`，启动前核对完整原树与副本；同 cache 标识稳定，不同 cache 分离。禁止修改共享 app、生产安装包或以 RunAsNode 代替真实 Main。
+- 新增同类 driver 继续使用该入口，不直接解析共享 Electron 路径。缺平台、复制或字节核验失败明确拒绝，不 fallback 原 GUI。fixture 内 `require('electron')` 仍是已经启动的真实 API，不替换。
+- 无 Dock 不代表 Native、签名或安装资格。首次变更核真实 Main、sandbox renderer、`app.dock.isVisible()` 和独立进程 activation policy；不能用启动后 hide/setActivationPolicy 自证。真实 UI 视觉验收仍按其独立任务运行。
+- 收到用户被 GUI 测试打扰的反馈时，先停新出生，再按自己记录的 PID 收尾，保留用户与其它任务应用；报告实际回收与剩余数量，不按命令名批量杀。
+
 ## CLI / Sandbox 验证说明
+
+- 核对 source 与 emitted 两份 Vitest 配置的执行预算、进程池和隔离设置。先查已有批准记录；B1 的 12000ms runner 预算见提交 `8f12a36a`，不能把 emitted 遗漏后的默认 5000ms 当成产品验收要求。对齐已批准预算不改变产品时钟、用例内显式 deadline、断言或用例数量。使用 `process.chdir` / `process.umask` 的原夹具需要 forks；不得通过跳过用例掩盖 threads 不支持的 API。两份配置的有意差异仍须保留，例如 setupFiles 顺序和原 exclude。
 
 - 在 Codex sandbox 中，raw `vitest` 跑 TypeScript source 可能因为 Vite / esbuild 启动 child process 出现 `spawn EPERM`。
 - CLI 侧优先使用 `npm test` 或 `npm run test:sandbox`，它会先把 `src/` 和 `tests/` 编译到 `.test-dist/`，再用 `vitest.sandbox.config.mjs` 跑 emitted JavaScript。

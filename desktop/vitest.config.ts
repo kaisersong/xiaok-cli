@@ -3,6 +3,8 @@ import { resolve } from 'path'
 import { readFileSync } from 'node:fs'
 import { normalizePath } from 'vite'
 
+const workflowJobTestEntry = normalizePath(resolve(__dirname, 'electron/kswarm-dynamic-workflow-script-tool.ts'))
+const githubSessionTestEntry = normalizePath(resolve(__dirname, 'electron/dsh-github-source-session.ts'))
 const servicesTestEntry = normalizePath(resolve(__dirname, 'electron/desktop-services.ts'))
 
 export default defineConfig({
@@ -11,7 +13,12 @@ export default defineConfig({
     name: 'real-private-finalization-test-entry',
     enforce: 'pre',
     load(id) {
-      if (normalizePath(id.split('?')[0]!) !== servicesTestEntry) return
+      const file = normalizePath(id.split('?')[0]!)
+      const workerCore=normalizePath(resolve(__dirname,'electron/workflow-script-worker.ts'))
+      if(file===workerCore)return readFileSync(workerCore,'utf8')+'\nexport {runWorkerCore as __runIsolatedWorkflowScript};\n'
+      if (file === workflowJobTestEntry) return readFileSync(workflowJobTestEntry, 'utf8') + '\nexport {reserveOriginalScriptJob as __reserveOriginalScriptJob};\n'
+      if (file === githubSessionTestEntry) return readFileSync(githubSessionTestEntry, 'utf8') + '\nexport {createSessionCore as __createIsolatedGithubSession};\n'
+      if (file !== servicesTestEntry) return
       return readFileSync(servicesTestEntry, 'utf8') + '\nexport {streamDesktopToolLoopFinalization as __testFinalization};\n'
     },
   }],

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import net from 'node:net';
 import { createBrokerService } from '../../../../intent-broker/src/broker/service.js';
 import { createServer as createBrokerHttpServer } from '../../../../intent-broker/src/http/server.js';
@@ -64,17 +65,24 @@ test('project activity returns to its real conversation without changing a draft
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString()); modelCalls++;
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    const delta = modelCalls === 1 ? { tool_calls: [{ index: 0, id: 'create-project', type: 'function', function: { name: 'create_project',
-      arguments: JSON.stringify({ name: 'Activity E2E project', goal: 'Observe source changes', memberCount: 1 }) } }] } : { content: 'PROJECT_CREATED' };
+    const planning = JSON.stringify(body.messages).includes('KSwarm PO 规划任务。');
+    const delta = planning ? { content: JSON.stringify({ analysis: 'Observe project source activity without executing a worker in this fixture.',
+      phases: [{ id: 'phase', name: 'Observe', items: [{ id: 'observe', title: 'Observe source changes', brief: 'Preserve project activity for the UI scenario.', assignedAgent: 'xiaok-worker', dependencies: [] }] }] }) }
+      : modelCalls === 1 ? { tool_calls: [{ index: 0, id: 'create-project', type: 'function', function: { name: 'create_project',
+        arguments: JSON.stringify({ name: 'Activity E2E project', goal: 'Observe source changes', memberCount: 1 }) } }] } : { content: 'PROJECT_CREATED' };
     response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: modelCalls === 1 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
-    record({ modelCalls, messageCount: body.messages?.length });
+    record({ modelCalls, kind: planning ? 'initial-plan' : 'conversation', messageCount: body.messages?.length });
   });
   await new Promise<void>(resolve => model.listen(0, '127.0.0.1', resolve));
   try {
     const spawnSource = () => { source = spawn(process.execPath, ['src/server/index.js'], { cwd: join(desktop, '..', '..', 'kswarm'),
       env: { ...process.env, HOME: join(root, 'source'), USERPROFILE: join(root, 'source'), KSWARM_DATA_ROOT: join(root, 'source'),
         XIAOK_CONFIG_DIR: join(root, 'config'), KSWARM_PORT: String(sourcePort), BROKER_URL: brokerUrl,
-        KSWARM_DESKTOP_MUTATION_TOKEN: 'fixture', INTENT_BROKER_KSWARM_TOKEN: 'fixture-kswarm' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        KSWARM_DESKTOP_MUTATION_TOKEN: 'fixture', INTENT_BROKER_KSWARM_TOKEN: 'fixture-kswarm',
+        // This fixture starts the real server directly instead of through the
+        // Main service launcher. Provision that launcher's exact fixed scope.
+        KSWARM_DESKTOP_PROFILE_ID: createHash('sha256').update(join(root, 'data')).digest('hex'),
+        KSWARM_DESKTOP_WORKSPACE_ID: createHash('sha256').update(join(root, 'workspace')).digest('hex') }, stdio: ['ignore', 'pipe', 'pipe'] });
     source.stdout!.pipe(sourceLog, { end: false }); source.stderr!.pipe(sourceLog, { end: false });
       return source; };
     spawnSource();
@@ -106,6 +114,7 @@ test('project activity returns to its real conversation without changing a draft
     const composer = () => page.locator('.chat-right-main textarea');
     await expect(composer()).toBeVisible(); await composer().fill('创建一个项目，用于跟进工作进展'); await composer().press('Enter');
     await expect(page.getByTestId('conversation-activity')).toBeVisible({ timeout: 40_000 });
+    record({ phase: 'page-identity', url: page.url(), title: await page.title(), viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight })) });
     await expect(page.getByTestId('activity-toggle')).toHaveAttribute('aria-expanded', 'false');
     await page.screenshot({ path: join(root, 'compact-work-updates.png') });
     await page.getByTestId('activity-toggle').click();
@@ -115,14 +124,22 @@ test('project activity returns to its real conversation without changing a draft
     const initial = await activities();
     const watchId = initial[0].watchId;
     const work = await page.evaluate(id => window.xiaokDesktop.getWorkActivity(id), watchId);
+    expect(work.presentation?.schemaVersion).toBe(1);
     const projectId = work.watch.workId;
     expect(work.watch.origin.threadId).toBe('activity-thread'); expect(work.projection.executionState).not.toBe('completed');
+    // The actual Main producer now owns the initial plan. Wait for its real
+    // owner receipt before changing project controls; do not bypass its guard.
+    await expect.poll(async () => {
+      const result = await fetch(`${sourceUrl}/projects/${projectId}/initial-plan-inputs`, { headers: { 'x-kswarm-mutation-token': 'fixture' } });
+      return (await result.json()).commitReceipt?.outcome;
+    }, { timeout: 20_000 }).toBe('applied');
     const afterCreationCalls = modelCalls;
     const draft = '中文输入保持\n第二行尚未发送'; await composer().fill(draft); await composer().focus();
-    const mutate = async (index: number) => {
+    const mutate = async (index: number, terminal = false) => {
       const response = await fetch(`${sourceUrl}/projects/${projectId}/execution-mode`, { method: 'PATCH',
         headers: { 'content-type': 'application/json', 'x-kswarm-mutation-token': 'fixture' }, body: JSON.stringify({ executionMode: index % 2 ? 'workflow_preferred' : 'direct' }) });
-      expect(response.ok).toBe(true);
+      if (terminal) { expect(response.ok).toBe(false); expect((await response.json()).error).toBe('PROJECT_TERMINAL_REQUIRES_REOPEN'); }
+      else expect(response.ok).toBe(true);
     };
     await mutate(1);
     await expect.poll(async () => (await activities()).at(-1)?.projection.sourceSequence).toBeGreaterThan(work.projection.sourceSequence);
@@ -243,7 +260,7 @@ test('project activity returns to its real conversation without changing a draft
       const thread = page.getByTestId('thread-item-activity-thread'); await thread.hover();
       await thread.getByRole('button', { name: /^删除$|^Delete$/ }).click();
       await thread.getByRole('button', { name: /停止并删除|Stop and delete/ }).click();
-      await expect(thread).toHaveCount(0); await mutate(78);
+      await expect(thread).toHaveCount(0); await mutate(78, true);
       await new Promise(resolve => setTimeout(resolve, 250));
       expect(Number((rowsBeforeDelete.prepare('SELECT COUNT(*) count FROM conversation_activities WHERE thread_id=?').get('activity-thread') as { count: number }).count)).toBe(beforeCount);
       rowsBeforeDelete.close(); expect((await fetch(`${sourceUrl}/projects/${projectId}`)).ok).toBe(true);
@@ -307,4 +324,54 @@ test('project activity returns to its real conversation without changing a draft
     console.log(`activity E2E evidence: ${root}`);
     if (!bodyFailed && mainCleanupErrors.length > 0) throw new AggregateError(mainCleanupErrors, 'activity_main_cleanup_failed');
   }
+});
+
+// Real production Main plugin registry/observer, Core writer, semantic IPC,
+// preload and rendered component. The provider only selects the fixture tool.
+test('live stdio attention dismiss preserves both questions and answers their original SDK owner',async()=>{
+ test.setTimeout(60_000);
+ const root=mkdtempSync(join(tmpdir(),'xiaok-activity-electron-'));
+ for(const folder of ['workspace','config','plugins/attention-input'])mkdirSync(join(root,folder),{recursive:true});
+ writeFileSync(join(root,'plugins/attention-input/plugin.json'),JSON.stringify({name:'attention-input',version:'0.1.0',mcpServers:[{name:'attention-input',type:'stdio',command:'node',args:[join(desktop,'..','tests/support/mcp-tasks-stdio-server.js')],env:{XIAOK_TEST_TWO_INPUTS:'1',XIAOK_TEST_TASK_DELAY_MS:'20'},protocol:{mode:'modern',version:'2026-07-28'}}]}));
+ let calls=0;const records:Array<Record<string,unknown>>=[];const record=(value:Record<string,unknown>)=>{records.push({...value,at:Date.now()});writeFileSync(join(root,'attention-evidence.json'),JSON.stringify(records,null,2));};
+ const model=createHttpServer(async(request,response)=>{
+  const chunks:Buffer[]=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));const body=JSON.parse(Buffer.concat(chunks).toString());calls++;
+  const tool=body.tools?.find((item:{function:{name:string}})=>item.function.name==='mcp__attention-input__work');record({phase:'provider',call:calls,toolPresent:!!tool});
+  const delta=calls===1?{tool_calls:[{index:0,id:'attention-input',type:'function',function:{name:'mcp__attention-input__work',arguments:JSON.stringify({ask:true})}}]}:{content:'异步插件工作已创建。'};
+  response.writeHead(200,{'content-type':'text/event-stream'});response.end(`data: ${JSON.stringify({choices:[{index:0,delta,finish_reason:calls===1?'tool_calls':'stop'}]})}\n\ndata: [DONE]\n\n`);
+ });await new Promise<void>(resolve=>model.listen(0,'127.0.0.1',resolve));
+ let application:ElectronApplication|undefined,child:ChildProcess|undefined,rawClosed:Promise<void>|undefined;
+ try{
+  application=await electron.launch({args:[join(desktop,'tests/e2e/fixtures/multi-agent-electron-main.mjs')],env:{...process.env,NODE_ENV:'test',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_E2E_USER_DATA:join(root,'profile'),XIAOK_MULTI_AGENT_E2E_ROOT:root,
+   XIAOK_MULTI_AGENT_E2E_PROVIDER:`http://127.0.0.1:${(model.address() as net.AddressInfo).port}/v1`,XIAOK_ATTENTION_STDIO_E2E:'1',XIAOK_E2E_BACKGROUND:'1',XIAOK_DISABLE_GLOBAL_PLUGINS:'1',ELECTRON_DISABLE_SECURITY_WARNINGS:'1'}});
+  child=application.process();for(const stream of [child.stdout,child.stderr])stream?.on('data',data=>record({phase:'main-diagnostic',text:data.toString().slice(0,6000)}));rawClosed=new Promise<void>(resolve=>child!.once('close',()=>resolve()));record({phase:'launched',mainPid:child.pid});
+  const page=await application.firstWindow();await page.waitForLoadState('domcontentloaded');const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.evaluate(async()=>{
+   const request=indexedDB.open('xiaok-desktop',1);const db=await new Promise<IDBDatabase>((resolve,reject)=>{request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains('threads'))request.result.createObjectStore('threads',{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+   const tx=db.transaction('threads','readwrite');tx.objectStore('threads').put({id:'attention-thread',title:'Attention E2E',status:'idle',mode:'chat',createdAt:Date.now(),updatedAt:Date.now(),taskIds:[],currentTaskId:null});await new Promise<void>((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});db.close();location.hash='#/t/attention-thread';
+  });
+  const composer=page.locator('.chat-right-main textarea');await expect(composer).toBeVisible();await composer.fill('启动双问题插件任务');await composer.press('Enter');
+  await expect.poll(async()=>page.evaluate(async()=>{const rows=await window.xiaokDesktop.getConversationActivities({threadId:'attention-thread',limit:200});return rows.length;})).toBeGreaterThan(0);
+  record({phase:'work-diagnostic',value:await page.evaluate(async()=>{try{const rows=await window.xiaokDesktop.getConversationActivities({threadId:'attention-thread',limit:200});return await window.xiaokDesktop.getWorkActivity(rows[0].watchId);}catch(error){return String(error);}})});
+  record({phase:'ui-diagnostic',text:(await page.locator('body').innerText()).slice(-6000)});await page.screenshot({path:join(root,'before-inputs.png')});
+  await expect(page.getByText('选择报告格式',{exact:true})).toBeVisible({timeout:20_000});await expect(page.getByText('选择报告范围',{exact:true})).toBeVisible();
+  const card=page.getByTestId(/^activity-work-mcp:/);await expect(card).toHaveCount(1);const id=(await card.getAttribute('data-testid'))!.slice('activity-work-'.length);
+  const view=await page.evaluate(watchId=>window.xiaokDesktop.getWorkActivity(watchId),id);expect(view.presentation?.questions).toHaveLength(2);expect(view.attentionState?.dismissed).toBe(false);record({phase:'two-inputs',watchId:id,projectionVersion:view.presentation?.projectionVersion});
+  const secondReady=application.context().waitForEvent('page');writeFileSync(join(root,'e2e-control.json'),JSON.stringify({action:'second',nonce:Date.now()}));const second=await secondReady;await second.waitForLoadState('domcontentloaded');await second.evaluate(()=>{location.hash='#/t/attention-thread';});
+  const secondCard=second.getByTestId(`activity-work-${id}`);await expect(secondCard.getByText('选择报告范围',{exact:true})).toBeVisible();
+  await composer.fill('保留的草稿');await card.getByRole('button',{name:'关闭此提醒'}).click();await expect(card.getByText('此提醒已关闭，工作状态仍会更新')).toBeVisible();
+  await expect(card.getByText('选择报告格式',{exact:true})).toBeVisible();await expect(card.getByText('选择报告范围',{exact:true})).toBeVisible();await expect(composer).toHaveValue('保留的草稿');
+  await expect(secondCard.getByText('此提醒已关闭，工作状态仍会更新')).toBeVisible();await expect(secondCard.getByText('选择报告格式',{exact:true})).toBeVisible();const secondClosed=second.waitForEvent('close');writeFileSync(join(root,'e2e-control.json'),JSON.stringify({action:'close-second',nonce:Date.now()}));await secondClosed;record({phase:'two-views-dismiss-same-head',watchId:id});
+  await page.screenshot({path:join(root,'two-questions-reminder-dismissed.png')});
+  const format=card.locator('form').filter({has:page.getByText('选择报告格式',{exact:true})});await format.getByRole('combobox').selectOption('pdf');await format.getByRole('spinbutton').fill('2');await format.getByRole('button',{name:'提交',exact:true}).click();
+  await expect(card.getByText('选择报告格式',{exact:true})).toHaveCount(0);await expect(card.getByText('选择报告范围',{exact:true})).toBeVisible();await expect(card.getByRole('button',{name:'关闭此提醒'})).toBeVisible();
+  const remaining=await page.evaluate(watchId=>window.xiaokDesktop.getWorkActivity(watchId),id);expect(remaining.presentation?.questions).toHaveLength(1);expect(remaining.attentionState?.dismissed).toBe(false);await page.screenshot({path:join(root,'one-question-remains.png')});
+  const scope=card.locator('form').filter({has:page.getByText('选择报告范围',{exact:true})});await scope.getByRole('combobox').selectOption('team');await scope.getByRole('button',{name:'提交',exact:true}).click();
+  await expect(card).toContainText('已完成');await expect(card.locator('form')).toHaveCount(0);await expect(composer).toHaveValue('保留的草稿');expect(errors).toEqual([]);expect(calls).toBe(2);
+  const db=new DatabaseSync(join(root,'data','conversation-activity.sqlite'),{readOnly:true});try{record({phase:'canonical-sql',coreFacts:db.prepare('SELECT count(*) AS n FROM activity_attention_core_facts').get(),questionFacts:db.prepare('SELECT count(*) AS n FROM activity_attention_question_facts').get(),heads:db.prepare('SELECT version,dismissed_version FROM activity_attention_heads').all()});}finally{db.close();}
+  await page.screenshot({path:join(root,'live-attention-completed.png')});record({phase:'passed',root});
+ }finally{
+  try{if(application)await application.close();if(rawClosed)await rawClosed;record({phase:'main-closed',mainPid:child?.pid,exitCode:child?.exitCode,signalCode:child?.signalCode});}
+  finally{await new Promise<void>(resolve=>model.close(()=>resolve()));}
+ }
 });

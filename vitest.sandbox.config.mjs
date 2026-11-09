@@ -1,9 +1,22 @@
+import { createRequire } from 'node:module';
+// Emitted Desktop imports use the same real installed Electron package as source.
+// In plain Node it exports its executable path, never a Main app qualification.
+let electronAlias = [];
+try {
+  const desktopRequire = createRequire(new URL('./desktop/package.json', import.meta.url));
+  electronAlias = [{ find: /^electron$/, replacement: desktopRequire.resolve('electron') }];
+} catch (error) {
+  if (error?.code !== 'MODULE_NOT_FOUND') throw error;
+  console.warn('[tests] desktop Electron dependency missing; real package alias unavailable');
+}
+
 export default {
+  resolve: { alias: electronAlias },
   cacheDir: '.test-cache/vitest-sandbox',
   test: {
     globalSetup: ['./tests/support/profile-account.global.mjs'],
     // Host-env scrub snapshots the inherited env first; account isolation then rewrites HOME.
-    setupFiles: ['./.test-dist/tests/support/setup-host-env.js','./tests/support/profile-account.setup.mjs'],
+    setupFiles: ['./.test-dist/tests/support/setup-host-env.js','./tests/support/profile-account.setup.mjs','./.test-dist/tests/support/mock-system-credentials.js'],
     sequence: { setupFiles: 'list' },
     globals: true,
     environment: 'node',
@@ -21,10 +34,11 @@ export default {
     // afterEach 清理临时目录在 Windows 上会因文件句柄重试而超过默认 10s。
     hookTimeout: 30_000,
     fileParallelism: false,
-    // #123：全量“停在第 42 个文件之后”是慢 + 静默，不是该位置挂死（耗时为 forks 诊断轮实测；threads 同条件全量对照记录在 PR #131 评论）：
-    // --no-cache 下按文件大小降序跑，第 26/35/43 位的 verification-host-controller、intent-publication-dependencies、
-    // publication-operation 各跑约 14–29 分钟（慢文件跟 #98/#105），前 42 个文件合计约 3500s，第 43 个在 1h 外层超时内跑不完；
-    // 非 TTY 的 default reporter 只在文件结束时输出，期间日志不动。验收全量请用逐用例 reporter（如 --reporter=verbose --reporter=json --outputFile=<path>），不要设 1h 外层超时。
-    pool: 'threads',
+    // Fixtures use process.chdir/umask, unavailable in threads. Keep verbose
+    // per-case reporting for long files; sandbox slowness alone is not a hang.
+    pool: 'forks',
+    // Same owner-approved B1 runner budget as vitest.config.ts (8f12a36a).
+    // Product deadlines, clocks, populations and assertions remain unchanged.
+    testTimeout: 12000,
   },
 };

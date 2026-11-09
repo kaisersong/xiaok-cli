@@ -326,6 +326,12 @@ describe('buildModelOptions', () => {
       desc: 'DeepSeek',
     });
     expect(config).toEqual(before);
+    const configured = buildModelOptions({ ...config, models: {
+      ...config.models,
+      'saved-vision': { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', label: 'Saved Vision' },
+    } });
+    expect(configured).toContainEqual({ id: 'saved-vision', provider: 'deepseek',
+      model: 'deepseek-v4-flash-vision-exp', label: 'Saved Vision', desc: 'DeepSeek' });
   });
   it('renders the model selector as a multi-line overlay above the footer when a repl renderer is active', async () => {
     const harness = createTtyHarness(60, 24);

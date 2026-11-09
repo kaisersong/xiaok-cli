@@ -1,5 +1,7 @@
 // tests/ai/tools/index.test.ts
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { isSuccessfulModelToolResult, TOOL_CANCELLED_PREFIX, ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Tool } from '../../../src/types.js';
@@ -409,12 +411,16 @@ describe('ToolRegistry', () => {
 
     registry.setAllowedTools(['Read']);
 
-    const result = await registry.executeTool('read', { file_path: 'src/ai/tools/read.ts', limit: 80 });
-
-    // 断言稳定的导出符号，而不是 import 行 —— 后者会因无关的 import 变动而断。
-    expect(result).toContain('export function createReadTool');
-    expect(result).toMatch(/^1\t/);
-    expect(result).not.toContain('is not allowed');
+    const root = mkdtempSync(join(process.cwd(), '.xiaok-read-alias-test-'));
+    try {
+      const file = join(root, 'original-read-alias.txt');
+      writeFileSync(file, 'const originalReadAliasFixture = true;\n');
+      const result = await registry.executeTool('read', { file_path: file, limit: 1 });
+      expect(result).toBe('1\tconst originalReadAliasFixture = true;');
+      expect(result).not.toContain('is not allowed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('runs PermissionRequest hooks before prompt fallback and skips the UI prompt when the hook allows', async () => {

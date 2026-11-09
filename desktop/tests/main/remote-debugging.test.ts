@@ -307,33 +307,7 @@ it('blocks consumers after bootstrap failure and starts streaming only on recove
   } finally { stop(); bridge.dispose(); vi.unstubAllGlobals(); }
 });
 
-import ts from 'typescript';
-
-it('clears the actual Main runtime bridge startup flag after readiness rejection so recovery retries', async () => {
-  const source = readFileSync(join(repoRoot, 'desktop/electron/main.ts'), 'utf8');
-  const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
-  let declaration: ts.VariableDeclaration | undefined;
-  const find = (node: ts.Node) => {
-    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'startRuntimeBridge') declaration = node;
-    ts.forEachChild(node, find);
-  };
-  find(ast);
-  expect(declaration?.initializer).toBeDefined();
-  const compiled = ts.transpileModule(`const startRuntimeBridge = ${declaration!.initializer!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const ready = vi.fn().mockRejectedValueOnce(new Error('fixture startup failure')).mockImplementation(() => new Promise(() => {}));
-  const warning = vi.fn();
-  const actual = new Function('brokerReady', 'console', 'desktopShutdownGate', `
-    let runtimeBridgeStopping, runtimeBridgeStarted = false, runtimeBridgeStartEpoch = 0, runtimeBridgeFallbackTimer = null;
-    ${compiled}
-    return { start: startRuntimeBridge, started: () => runtimeBridgeStarted };
-  `)(ready, { warn: warning }, { isOpen: true });
-  actual.start();
-  await vi.waitFor(() => expect(warning).toHaveBeenCalledTimes(1));
-  expect(actual.started()).toBe(false);
-  actual.start();
-  expect(ready).toHaveBeenCalledTimes(2);
-  expect(actual.started()).toBe(true);
-});
+import './runtime-bridge-readiness.cases.js';
 
 // Keep the existing explicitly selected CI entry and all its port cases.
 import './desktop-child-service-ports.cases.js';

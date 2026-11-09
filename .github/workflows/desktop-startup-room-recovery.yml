@@ -7,6 +7,56 @@ on:
       - 'desktop/**'
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
+      - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'src/runtime/verification/**'
+      - 'tests/native/root-nmp-custody*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-custody*'
+      - 'tests/native/helpers/root-nmp-custody-fixture.mjs'
+      - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'tests/native/root-ledger-source-desktop.test.mjs'
+      - 'scripts/verification/build-root-ledger-source.mjs'
+      - 'src/runtime/verification/original-root-ledger-source-loader.ts'
+      - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
+      - 'tests/native/fixtures/root-nmp-ledger-*'
+      - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
+      - 'tests/native/helpers/application-policy-observer.m'
+      - 'tests/native/helpers/protected-nmp-sql-assets.mjs'
+      - 'tests/native/helpers/electron-executable.mjs'
+      - 'tests/native/fixtures/protected-nmp-sql-fragment.cjs'
+      - 'tests/native/helpers/main-protected-sqlite-fixture.mjs'
+      - 'src/runtime/verification/original-main-native-loader.ts'
+      - 'src/runtime/verification/original-root-nmp-ledger.ts'
+      - 'tests/native/fixtures/protected-core-model-sdk.cjs'
+      - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
+      - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
+      - 'tests/native/fixtures/accepted-root-binding-entry.ts'
+      - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/main-installation/**'
+      - 'scripts/build-main-installation-artifacts.mjs'
+      - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/main-root-enrollment-*.test.mjs'
+      - 'tests/native/fixtures/main-enrollment-*'
+      - 'src/runtime/verification/main-root-enrollment-codec.ts'
+      - 'src/runtime/verification/main-root-activation-claim.ts'
+      - 'tests/native/fixtures/main-installation-*'
+      - 'tests/native/helpers/main-installed-fixture.mjs'
+      - 'native/root-resource-authority/**'
+      - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
@@ -14,6 +64,56 @@ on:
       - 'desktop/**'
       - 'src/runtime/task-host/**'
       - 'tests/runtime/task-host/**'
+      - 'tests/native/accepted-root-candidate-identity.test.mjs'
+      - 'tests/native/protected-core-model-sdk.test.mjs'
+      - 'tests/native/root-nmp-ledger*.test.mjs'
+      - 'src/runtime/verification/**'
+      - 'tests/native/root-nmp-custody*.test.mjs'
+      - 'tests/native/fixtures/root-nmp-custody*'
+      - 'tests/native/helpers/root-nmp-custody-fixture.mjs'
+      - 'tests/native/root-ledger-source-artifact.test.mjs'
+      - 'tests/native/root-ledger-source-desktop.test.mjs'
+      - 'scripts/verification/build-root-ledger-source.mjs'
+      - 'src/runtime/verification/original-root-ledger-source-loader.ts'
+      - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
+      - 'tests/native/fixtures/root-nmp-ledger-*'
+      - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
+      - 'tests/native/helpers/application-policy-observer.m'
+      - 'tests/native/helpers/protected-nmp-sql-assets.mjs'
+      - 'tests/native/helpers/electron-executable.mjs'
+      - 'tests/native/fixtures/protected-nmp-sql-fragment.cjs'
+      - 'tests/native/helpers/main-protected-sqlite-fixture.mjs'
+      - 'src/runtime/verification/original-main-native-loader.ts'
+      - 'src/runtime/verification/original-root-nmp-ledger.ts'
+      - 'tests/native/fixtures/protected-core-model-sdk.cjs'
+      - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
+      - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
+      - 'tests/native/fixtures/accepted-root-binding-entry.ts'
+      - 'tests/native/helpers/accepted-root-candidate-observation.*'
+      - 'native/main-installation/**'
+      - 'scripts/build-main-installation-artifacts.mjs'
+      - 'tests/native/main-installation-*.test.mjs'
+      - 'tests/native/main-root-enrollment-*.test.mjs'
+      - 'tests/native/fixtures/main-enrollment-*'
+      - 'src/runtime/verification/main-root-enrollment-codec.ts'
+      - 'src/runtime/verification/main-root-activation-claim.ts'
+      - 'tests/native/fixtures/main-installation-*'
+      - 'tests/native/helpers/main-installed-fixture.mjs'
+      - 'native/root-resource-authority/**'
+      - 'native/protected-sqlite-facade/**'
+      - 'native/kswarm-authority-source/**'
+      - 'native/broker-authority-source/**'
+      - 'native/sidecar-source-runtime/**'
+      - 'tests/native/sqlite-api-unavailable.test.mjs'
+      - 'tests/native/fixtures/sqlite-api-unavailable-*'
+      - 'tests/native/broker-*.test.mjs'
+      - 'tests/native/kswarm-*.test.mjs'
+      - 'tests/native/main-service-component-boundary.test.mjs'
+      - 'tests/native/fixtures/broker-*'
+      - 'tests/native/fixtures/kswarm-*'
+      - 'tests/native/helpers/broker-*'
+      - 'tests/native/helpers/kswarm-*'
+      - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
   workflow_dispatch: {}
@@ -32,6 +132,13 @@ jobs:
         node: ['22.14.0', '24']
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare the fixed KSwarm test child Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - name: Retain the absolute KSwarm test child executable
+        id: ks_test_node
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'executable=' + process.execPath + '\n')"
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -39,9 +146,27 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      - name: Keep client Node and KSwarm test child Node separate
+        env:
+          KS_TEST_NODE_EXECUTABLE: ${{ steps.ks_test_node.outputs.executable }}
+        run: node -e "const fs=require('node:fs'),path=require('node:path');const child=process.env.KS_TEST_NODE_EXECUTABLE;if(!child||!path.isAbsolute(child))throw Error('ks_test_node_missing');fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE='+child+'\n');console.log(JSON.stringify({clientNode:process.versions.node,clientExecutable:process.execPath,ksChildExecutable:child}));"
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+      - name: Prepare current client Node headers for Native components (macOS)
+        if: runner.os == 'macOS'
+        id: dsh_client_headers
+        uses: ./.github/actions/node-headers
+      - name: Original client and independent KSwarm Node executable probes
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/owned-kswarm-node-runtime.test.ts
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Real host recovery ordering and durable receipts
         run: >
           npm run test:sandbox:run --
@@ -70,6 +195,139 @@ jobs:
           tests/main/kswarm-execution-clock.test.ts
           tests/main/desktop-tool-loop-recovery.test.ts
 
+      - name: Prepare locked Windows absence helper at the source reader layout
+        if: runner.os == 'Windows'
+        run: node desktop/tests/support/prepare-windows-source-absence.mjs
+
+      - name: Loop, CodeX and installed SDK owner boundaries
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/main-installed-owner-sequence.test.ts
+          tests/main/main-installed-root-pool-bridge.test.ts
+          tests/main/codex-native-writer-cutover.test.ts
+          tests/main/codex-task-writer-cutover.test.ts
+          tests/main/codex-native-service.test.ts
+          tests/main/codex-task-bridge.test.ts
+          tests/main/codex-native-approval-inventory.test.ts
+          tests/main/loop-database-owner.test.ts
+          tests/main/loop-database-metadata.test.ts
+          tests/main/loop-database-source-observation.test.ts
+          tests/main/loop-executor.test.ts
+          tests/main/completion-evidence-store.test.ts
+          tests/main/artifact-evidence-regression-loop.test.ts
+          tests/main/kswarm-health-loop.test.ts
+          tests/main/loop-runtime-source-registration.test.ts
+          tests/main/loop-runtime-source-registration-failure.test.ts
+          tests/main/loop-sqlite-autocommit-compat.test.ts
+          tests/main/loop-transaction-rollback.test.ts
+          tests/main/loop-observed-writer.test.ts
+          tests/main/loop-sqlite-bindings.test.ts
+          tests/main/loop-owned-sql-population.test.ts
+          tests/main/windows-source-absence-fixture.test.ts
+          tests/main/loop-database-birth-custody.test.ts
+          tests/main/main-service-component-core.test.ts
+          tests/main/main-service-component-sources.test.ts
+          tests/main/main-core-source-order.test.ts
+          tests/main/main-dsh-service-sources.test.ts
+          tests/main/main-dsh-bootstrap-authority.test.ts
+          tests/main/main-core-split-boundaries.test.ts
+          tests/main/main-core-kswarm-port.test.ts tests/main/main-core-broker-port.test.ts tests/main/main-core-broker-dual-custody.test.ts tests/main/main-source-broker-core-bridge.test.ts tests/main/broker-protected-service-binding.test.ts tests/main/broker-protected-main-wiring.test.ts tests/main/main-core-broker-platform.test.ts
+          tests/main/main-source-kswarm-core-bridge.test.ts
+          tests/main/main-admission-database-selection.test.ts
+
+      - name: Prepare pinned native candidate fixtures (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin 726f3ad82a37814eeb540e343ae5a58510f24516
+          git -C ../intent-broker checkout --detach FETCH_HEAD
+          npm ci --ignore-scripts --omit=dev --prefix ../kswarm
+          npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
+      - name: Desktop model services with the supported KSwarm child (macOS)
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --maxWorkers=1 --minWorkers=1
+          tests/main/desktop-services.test.ts
+          tests/main/desktop-services-model-catalog.test.ts
+          tests/main/desktop-services-pure-node-import.test.ts
+          tests/main/desktop-services-scheduled-task-authority.test.ts
+          tests/renderer/model-recommendations.test.ts
+      - name: Uninstalled candidate and owned preparation boundaries (macOS)
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --maxWorkers=1 --minWorkers=1
+          tests/main/kswarm-owned-preparation-service.test.ts
+          tests/main/kswarm-uninstalled-candidate.test.ts
+      - name: Prepare locked Electron headers for genuine Main (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          electron_version="$(node -p "require('./desktop/node_modules/electron/package.json').version")"
+          headers_root="$(mktemp -d "$RUNNER_TEMP/xiaok-candidate-electron-headers.XXXXXX")"
+          NODE_VERSION="v$electron_version" NODE_ARCH="$(node -p process.arch)" HEADERS_DIR="$headers_root" DIST_URL=https://electronjs.org/headers FALLBACK_DIST_URL=https://electronjs.org/headers bash .github/actions/node-headers/fetch-node-headers.sh
+          test -s "$headers_root/include/node/node_api.h"
+          test -s "$headers_root/include/node/v8.h"
+          echo "XIAOK_MAIN_BOOTSTRAP_TEST_HEADERS=$headers_root/include/node" >> "$GITHUB_ENV"
+      - name: Genuine Main candidate identity and lifecycle (macOS)
+        if: runner.os == 'macOS'
+        run: node --test tests/native/accepted-root-candidate-identity.test.mjs
+
+      - name: Fixed installation certificate and original helper (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/main-installation-certificate.test.mjs
+          tests/native/main-installation-helper.test.mjs
+
+      - name: Genuine Main protected Core model SDK fresh and restored (macOS)
+        if: runner.os == 'macOS'
+        run: node --test tests/native/protected-core-model-sdk.test.mjs
+
+      - name: Complete original RootNMP ledger and genuine Core cold restart (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/root-ledger-source-artifact.test.mjs
+          tests/native/root-nmp-ledger-reader.test.mjs
+          tests/native/root-nmp-custody-hold.test.mjs
+          tests/native/root-nmp-custody-entry.test.mjs
+          tests/native/root-nmp-ledger-main.test.mjs
+
+      - name: Actual Desktop cold ledger build resource in Node and genuine Main (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run build:main --prefix desktop
+          node --test tests/native/root-ledger-source-desktop.test.mjs
+
+      - name: Fixed Native Source and CPP port boundaries (macOS)
+        if: runner.os == 'macOS'
+        env:
+          XIAOK_NATIVE_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_BROKER_TEST_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+          XIAOK_MAIN_COMPONENT_NODE_HEADERS: ${{ steps.dsh_client_headers.outputs.nodedir }}/include/node
+        run: >-
+          node --test --test-concurrency=1
+          tests/native/broker-authority-child.test.mjs
+          tests/native/broker-authority-node.test.mjs
+          tests/native/broker-parent-port.test.mjs
+          tests/native/broker-protected-child-source.test.mjs
+          tests/native/broker-protected-callback-source.test.mjs tests/native/kswarm-protected-child-source.test.mjs tests/native/kswarm-protected-callback-metadata.test.mjs tests/native/broker-authority-resources.test.mjs tests/native/broker-resource-platform.test.mjs tests/native/sqlite-api-unavailable.test.mjs
+          tests/native/kswarm-authority-child.test.mjs
+          tests/native/main-service-component-boundary.test.mjs
+
+      - name: Original MainRoot enrollment codecs and negative consumption (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          npm run build
+          node --test --test-concurrency=1 tests/native/main-root-enrollment-codec.test.mjs tests/native/main-root-enrollment-consume.test.mjs
+
   approved-workflow-deadline:
     name: Approved workflow deadline (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -88,14 +346,17 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
       - name: Prepare pinned workflow issuer and broker
         shell: bash
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 7d1d16299c39c7f3b8fda86af8531914870b3382
+          git -C ../kswarm fetch --depth 1 origin e7d1f8b13c994174f683105d32a36385cdaf585f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker fetch --depth 1 origin 726f3ad82a37814eeb540e343ae5a58510f24516
           git -C ../intent-broker checkout --detach FETCH_HEAD
           npm ci --ignore-scripts --omit=dev --prefix ../kswarm
           npm ci --ignore-scripts --omit=dev --prefix ../intent-broker

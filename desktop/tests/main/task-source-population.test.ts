@@ -1,7 +1,10 @@
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
+// Node lifecycle fixture: no Electron user window exists and no Native/user
+// authority is granted. Actual Native identity has separate Electron coverage.
+vi.mock('electron',()=>({app:{isReady(){return false;}},BrowserWindow:{getAllWindows(){return [];},fromId(){return undefined;},fromWebContents(){return undefined;}},webContents:{fromId(){return undefined;}}}));
 import {mkdtempSync,rmSync,mkdirSync,writeFileSync,realpathSync} from 'node:fs';
-import {createHash} from 'node:crypto';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {createHash} from 'node:crypto';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';
 import {createDesktopServices} from '../../electron/desktop-services.js';
 import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-store.js';
 import {createKSwarmService,computeKSwarmServiceSourceHash,sealAndDrainKSwarmServiceInstance,type KSwarmService} from '../../electron/kswarm-service.js';
@@ -11,6 +14,9 @@ const registeredServices:Array<{service:KSwarmService;requests:Array<{port:strin
 // created by the real factory; no service copy, request replacement or issuer.
 function fixtureKSwarm(root:string):KSwarmService {
  const workFolder=join(root,'project');mkdirSync(workFolder,{recursive:true});
+ // Match the actual DesktopServices scope for this fixture's dataRoot and
+ // default workspace. The original service still issues/checks its read port.
+ const scope={profileId:createHash('sha256').update(resolve(root,'data')).digest('hex'),workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')};
  const serverDir=join(root,'kswarm','src','server');mkdirSync(serverDir,{recursive:true});
  const entryPath=join(serverDir,'index.js');writeFileSync(entryPath,'// Test file leaf; never spawned.\n');
  writeFileSync(join(serverDir,'room-workspace-protocol.json'),JSON.stringify({component:'kswarm',protocols:{room_workspace_v1:{contextVersion:1,resultVersion:1,releaseVersion:1}}}));
@@ -21,6 +27,11 @@ function fixtureKSwarm(root:string):KSwarmService {
   const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);
   if(url.protocol!=='http:'||!['127.0.0.1','localhost'].includes(url.hostname)||!['4400','4318'].includes(url.port)||url.search||url.hash||(init?.method??(typeof input==='object'&&'method' in input?input.method:'GET')).toUpperCase()!=='GET')throw Error('fixture_unowned_fetch_denied');
   requests.push({port:url.port,path:url.pathname});
+  if(url.port==='4400'&&url.pathname==='/projects/project/execution-start-admission'){
+   const headers=new Headers(init?.headers??(input instanceof Request?input.headers:undefined));
+   if(headers.get('x-kswarm-mutation-token')!==service.getDesktopMutationToken()||init?.redirect!=='error'||!(init.signal instanceof AbortSignal))throw Error('fixture_execution_read_auth_denied');
+   return Response.json({ok:true,protocol:'ordinary_project_execution_start_read_v1',projectId:'project',classification:'legacy_ordinary',bindingDigest:null,scope});
+  }
   if(url.pathname==='/health')return Response.json(url.port==='4400'?{ok:true,features:['dynamic_workflows'],service:{entryPath,sourceHash}}:{ok:true});
   // Seed reconciliation is outside TaskHost tests; an unavailable read does not
   // fabricate agents or permit a POST. Every other unlisted request is denied.
@@ -30,7 +41,7 @@ function fixtureKSwarm(root:string):KSwarmService {
   if(match){const runId=match[1];return Response.json({workflowRun:{id:runId,projectId:'project',workflowId:'workflow',status:'running',source:'script_generated',spec:null,scriptSource,scriptHash,scriptMeta:{name:'workflow'},permissions:null,nodes:[{id:'node',kind:'agent_task',status:'running',attempt:1,assignedAgent:'xiaok-worker',runtime:{runId,handoffId:'handoff'+runId.slice(3),participantId:'xiaok-worker'},input:{script:{workflowId:'workflow',workflowRunId:runId,scriptHash,nodeId:'node'}}}]}});}
   throw Error('fixture_unlisted_fetch_denied');
  });
- const service=createKSwarmService({spawnProcess:()=>{throw Error('fixture_external_spawn_denied');},findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_external_kill_denied');}});
+ const service=createKSwarmService({desktopProjectScope:scope,spawnProcess:()=>{throw Error('fixture_external_spawn_denied');},findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_external_kill_denied');}});
  registeredServices.push({service,requests});return service;
 }
 afterEach(async()=>{
@@ -48,7 +59,7 @@ it('closes the actual standard and dynamic KSwarm Host population after the orig
  const service=createDesktopServices({dataRoot:join(root,'data'),kswarmService:fixtureKSwarm(root),
  runner:async input=>{entered();await wait;await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:'turn',intentId:'intent',stepId:'step',note:JSON.stringify({output:{summary:'original completed',artifacts:[]}})});}});
  const handoff={projectId:'project',workflowRunId:'run',workflowId:'workflow',nodeId:'node',nodeKind:'agent_task' as const,nodeTitle:'normal node',attempt:1,handoffId:'handoff',project:{id:'project',name:'project',goal:'normal workflow',status:'active',workFolder:join(root,'project')},input:{prompt:'complete normal workflow'}};
- const running=service.runKSwarmWorkflowNode({handoff});await ready;
+ const running=service.runKSwarmWorkflowNode({handoff});await Promise.race([ready,running.then(()=>{throw Error('fixture_runner_not_entered');})]);
  const closeStore=vi.spyOn(FileTaskSnapshotStore.prototype,'closeAndDrain');const closing=service.closeTaskSourceWritersForMigration();expect(service.closeTaskSourceWritersForMigration()).toBe(closing);
  try{await Promise.resolve();expect(closeStore).not.toHaveBeenCalled();await expect(service.runKSwarmWorkflowNode({handoff})).rejects.toThrow('task_source_population_closing');await expect(service.createTask({prompt:'new standard task',materials:[]})).rejects.toThrow('task_source_closing');}
  finally{release();}

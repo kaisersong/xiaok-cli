@@ -3,8 +3,11 @@ import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-tas
 import {pendingTaskQuestion} from '../lib/pending-task-question';
 import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
+import {emptyNativeQuestionPresentation,nativeQuestionNamespace,nativeQuestionPresentationFromSnapshot,reduceNativeQuestionPresentation,type NativeQuestionPresentation} from '../lib/native-question-state.js';
+import type {UserTaskSubmissionInput} from '../../../shared/user-task-submission-contract.js';
 import { ObservationControls } from './ObservationControls';
 import { ConversationActivityPanel } from './ConversationActivityPanel';
+import {questionOutsideNativeActivity,type NativeActivityCoverage} from './NativeWorkControls';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
@@ -82,6 +85,7 @@ interface DisplaySource {
   terminalSeen: boolean;
   streamEnded: boolean;
   resultSummaryInHistory?: string;
+  questions?: NativeQuestionPresentation;
   release?: () => void;
 }
 interface GoalAttachmentWork {
@@ -319,6 +323,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
   const [currentQuestion, setCurrentQuestion] = useState<NeedsUserQuestion | null>(null);
   const [interruptedTask, setInterruptedTask] = useState<InterruptedTask | null>(null);
+  const [nativeActivityCoverage,setNativeActivityCoverage]=useState<NativeActivityCoverage|null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -463,6 +468,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (event.type === 'execution_health' && event.state === 'recovering') clearUiPreviews();
     if (event.type === 'task_terminal') {
       clearUiPreviews();
+      source.questions=emptyNativeQuestionPresentation();
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
@@ -488,6 +494,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     // Collect all events for Canvas
     allEventsRef.current = [...allEventsRef.current, event];
     currentTaskEventsRef.current = [...currentTaskEventsRef.current, event];
+    source.questions=reduceNativeQuestionPresentation(source.questions??emptyNativeQuestionPresentation(),event,sourceTaskId);
 
     switch (event.type) {
       case 'task_started': {
@@ -519,14 +526,14 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             stage: prog.stage,
           }];
         });
-        setStatus('running');
+        setStatus(source.questions?.native.length?'waiting_user':'running');
         break;
       }
       case 'assistant_delta': {
         const delta = (event as { type: 'assistant_delta'; delta: string }).delta;
         streamRef.current += delta;
         flushStreamingText(source);
-        if (live) setStatus('running');
+        if (live) setStatus(source.questions?.native.length?'waiting_user':'running');
         break;
       }
       case 'task_cancelled': {
@@ -734,14 +741,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'question_resolved': {
         if(event.answerText){const id=`${source.sourceTaskId}:answer:${event.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'user',content:event.answerText!}]);}
-        setCurrentQuestion(question => question?.questionId === event.questionId ? null : question);
-        setStatus('running');
+        setCurrentQuestion(source.questions.current);
+        setStatus(source.questions.current||source.questions.native.length?'waiting_user':'running');
         break;
       }
       case 'needs_user': {
         const id=`${source.sourceTaskId}:question:${event.question.questionId}`;setMessages(previous=>previous.some(m=>m.id===id)?previous:[...previous,{id,role:'assistant',content:event.question.prompt}]);
-        setCurrentQuestion((event as { type: 'needs_user'; question: NeedsUserQuestion }).question);
-        setStatus('waiting_user');
+        if(source.questions.current){setCurrentQuestion(source.questions.current);setStatus('waiting_user');}
         break;
       }
       case 'error': {
@@ -890,11 +896,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         && scope.origin === expected.origin && scope.threadId === expected.threadId && scope.goalId === expected.goalId
         && scope.epoch === expected.epoch && scope.goalTurnId === expected.goalTurnId;
       if (valid && !source.terminalSeen && eventCount === source.eventCount) {
+        source.questions=nativeQuestionPresentationFromSnapshot(snapshot);
         if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
-          setStatus(snapshot.status);
-          if (snapshot.status === 'waiting_user') {
-            setCurrentQuestion(pendingTaskQuestion(snapshot));
-          }
+          setStatus(source.questions.native.length?'waiting_user':snapshot.status);
+          if(!source.questions.native.length)source.questions.current=pendingTaskQuestion(snapshot);
+          setCurrentQuestion(source.questions.current);
         } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
           source.uiPreviewClosed = true;
           clearUiPreviews();
@@ -1448,12 +1454,15 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         if (lastResult) {
           setResult(lastResult);
         }
+        const restoredQuestions=lastSnapshot?nativeQuestionPresentationFromSnapshot(lastSnapshot):emptyNativeQuestionPresentation();
+        if(!restoredQuestions.native.length)restoredQuestions.current=pendingTaskQuestion(lastSnapshot);
+        if(restoredQuestions.native.length)lastStatus='waiting_user';
+        setCurrentQuestion(restoredQuestions.current);
         setStatus(lastStatus);
-        setCurrentQuestion(pendingTaskQuestion(lastSnapshot));
         setInterruptedTask(readTaskInterruption(lastSnapshot, {taskId: lastTaskIdForSub, threadId: taskId}));
         if (lastTaskIdForSub) {
           loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
-            executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
+            questions:restoredQuestions,executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
             terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
           const artifacts = (lastSnapshot?.events ?? []).flatMap(event => event.type === 'artifact_recorded'
             ? [artifactSummaryFromEvent(event, lastTaskIdForSub!)] : []).filter(isInlineUiArtifact);
@@ -1621,17 +1630,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       if (observationDraft && intent === 'composer') {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
-      } else if (files && files.length > 0) {
-        const filePaths = files.map(f => f.filePath);
-        const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles({
-          prompt: text, filePaths, context: submitContext,
-        }));
-        newTaskId = result.taskId;
       } else {
-        const result = await createGoalAwareTaskWithRetry(() => api.createTask({
-          prompt: text, materials: [], context: submitContext,
-        }));
-        newTaskId = result.taskId;
+        // A gesture belongs to this event, outside the technical retry closure.
+        // Main captures the durable identity; React retains only this wire.
+        const wire:UserTaskSubmissionInput={action:'submit_new',gestureId:crypto.randomUUID(),input:files?.length
+          ?{kind:'files',prompt:text,filePaths:files.map(file=>file.filePath),context:submitContext}
+          :{kind:'materials',prompt:text,materials:[],context:submitContext}};
+        newTaskId=(await createGoalAwareTaskWithRetry(()=>api.submitUserTask(wire))).taskId;
       }
       if (!current()) return false;
 
@@ -1652,7 +1657,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       promoteSource(source, release, false);
     } catch (e) {
       if (!current()) return false;
-      const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
+      const errorCode=e instanceof Error?e.message:String(e);
+      const submissionMessage=errorCode.includes('user_submission_conflict')?t.chatShell.submissionConflict
+        :errorCode.includes('user_submission_not_prepared')?t.chatShell.submissionNotPrepared
+        :/user_submission_(?:reconciliation_required|write_unconfirmed|record_invalid|prepared_unverified|prepared_mismatch|prepared_changed|result_invalid|storage_changed|lock_unconfirmed|revision_exhausted)/.test(errorCode)?t.chatShell.submissionReconciliationRequired:undefined;
+      const displayMessage = submissionMessage??sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
       log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
       setMessages(prev => [...prev, {
         id: `msg-${Date.now()}-err`,
@@ -1681,14 +1690,27 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const handleAnswer = async (choiceId: string) => {
     const source = displaySourceRef.current;
     if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source) || admissionPending.current===renderScope) return;
+    const answered=currentQuestion,namespace=nativeQuestionNamespace(answered);
     admissionPending.current=renderScope;
     setActionError(null);
     try {
     await api.answerQuestion({
       taskId: thread.currentTaskId,
-      answer: { questionId: currentQuestion.questionId, type: 'choice', choiceId },
+      answer: { questionId: answered.questionId, type: 'choice', choiceId },
     });
     if (!acceptsSource(source) || source.terminalSeen) return;
+    if(namespace){
+      if(source.questions?.namespace!==namespace)return;
+      source.questions=reduceNativeQuestionPresentation(source.questions,{type:'question_resolved',questionId:answered.questionId},source.sourceTaskId);
+      setCurrentQuestion(source.questions.current);
+      setStatus(source.questions.current||source.questions.native.length?'waiting_user':'running');return;
+    }
+    if(source.questions?.native.length){
+      const state=source.questions,current=state.current;
+      if(current?.owner?.kind!=='codex_native_approval'&&current?.questionId===answered.questionId)source.questions={...state,current:state.native.at(-1)??null};
+      setCurrentQuestion(source.questions.current);setStatus('waiting_user');return;
+    }
+    if(source.questions)source.questions={...source.questions,current:null};
     setCurrentQuestion(null);
     setStatus('running');
     } catch(error) { if (acceptsSource(source)) setActionError(error instanceof Error&&error.message.includes('credential_secure_input_required')?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed); }
@@ -2081,7 +2103,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}
-        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
+        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} onNativeCoverage={setNativeActivityCoverage} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         thread={thread}
@@ -2096,7 +2118,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         streamingText={streamingText}
         uiPreviews={uiPreviews}
         status={status}
-        currentQuestion={currentQuestion}
+        currentQuestion={questionOutsideNativeActivity(currentQuestion,taskId,nativeActivityCoverage)}
         interruptedTask={interruptedTask}
         onInterruptedChoice={handleInterruptedChoice}
         result={result}

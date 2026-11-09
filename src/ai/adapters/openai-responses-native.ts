@@ -1,3 +1,4 @@
+import {createOriginalModelSdkAttemptTransport,finishOriginalModelSdkAttempt} from '../runtime/original-model-sdk-attempt.js';
 import { hasObservationExecutionOwner } from '../../runtime/sol-pi/observation-execution-scope.js';
 import { createTransportAuthorizationError } from '../../runtime/sol-pi/transport-lease.js';
 import type { ProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
@@ -150,6 +151,8 @@ async function postOpenAIResponse(
     throw abortReason(params.signal);
   }
 
+  const modelPhysical=createOriginalModelSdkAttemptTransport(params.signal,undefined,{timeoutMs:Math.min(2147483647,Math.ceil(params.timeoutMs)),maxResponseBytes:MAX_RESPONSE_BYTES});
+  let originalFailure:{raw:unknown}|undefined;
   const controller = new AbortController();
   const onExternalAbort = () => controller.abort(abortReason(params.signal));
   params.signal?.addEventListener('abort', onExternalAbort, { once: true });
@@ -159,14 +162,14 @@ async function postOpenAIResponse(
   const startedAt = Date.now();
 
   try {
-    const response = await fetch(params.endpoint, {
+    const response = await (modelPhysical?.fetch??fetch)(params.endpoint, {
       method: 'POST',
       headers: buildHeaders(params),
       body: JSON.stringify(params.body),
       redirect: 'error',
       signal: controller.signal,
     });
-    const text = await readCappedResponseText(response);
+    const text = modelPhysical?await modelPhysical.readText(response):await readCappedResponseText(response);
     if (!response.ok) {
       throw new Error(`OpenAI native request failed with HTTP ${response.status}`);
     }
@@ -183,9 +186,10 @@ async function postOpenAIResponse(
       ...validated,
       elapsedMs: Math.max(0, Date.now() - startedAt),
     };
-  } finally {
+  } catch(raw){originalFailure={raw};throw raw;} finally {
     clearTimeout(timeout);
     params.signal?.removeEventListener('abort', onExternalAbort);
+    await finishOriginalModelSdkAttempt(modelPhysical,originalFailure);
   }
 }
 

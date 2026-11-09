@@ -1,4 +1,12 @@
 import { Worker } from 'node:worker_threads';
+import {types} from 'node:util';
+import {validateScopedPatterns,permitsSearchPath,type SearchScope} from './search-scope.mjs';
+import {ORIGINAL_BOUNDED_GLOB_WORKER_ENTRY} from './original-glob-worker-source.js';
+import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
+import {loadOriginalProcessSdk} from '../../runtime/verification/original-process-sdk-loader.js';
+const applyOriginal=Reflect.apply,originalAbortThrow=AbortSignal.prototype.throwIfAborted;
+const originalUrlHref=Object.getOwnPropertyDescriptor(URL.prototype,'href')!.get!;
+const originalIsProxy=types.isProxy;
 import type {SearchPathGuard} from '../../platform/sandbox/search-scope.js';
 
 export interface GlobSearchInput {
@@ -8,8 +16,12 @@ export interface GlobSearchInput {
   dot?: boolean;
   ignore?: string[];
   skipInaccessible?: boolean;
+  /** Host-only private context binding, never copied from model input. */
+  searchScope?:SearchScope;
+  /** Existing fixed Native leaf grep payload; ordinary grep uses .grep(). */
+  grep?:{pattern:string;context:number;outputMode:string;directFile?:boolean};
 }
-export interface GlobEntry { path: string; mtimeMs: number }
+export interface GlobEntry { path: string; mtimeMs: number; text?:string }
 export interface GrepSearchInput extends GlobSearchInput {
   grep:{pattern:string; context:number; outputMode:string};
 }
@@ -26,7 +38,7 @@ export const GLOB_LIMITS = Object.freeze({
 });
 export type GlobLimits = { -readonly [K in keyof typeof GLOB_LIMITS]: number };
 const ERROR_CODES = new Set(['glob_scan_limit', 'glob_result_limit', 'glob_search_failed', 'glob_worker_heap_config',
-  'sandbox denied search path', 'grep_invalid_regex', 'grep_invalid_input', 'grep_read_failed', 'grep_read_limit', 'grep_result_limit']);
+  'sandbox denied search path', 'search_scope_denied', 'search_scope_invalid_pattern', 'grep_scan_limit', 'grep_native_regex_profile_unavailable', 'grep_invalid_regex', 'grep_invalid_input', 'grep_read_failed', 'grep_read_limit', 'grep_result_limit']);
 
 /** Host-only options can reduce budgets; tool arguments cannot increase them. */
 export function createBoundedGlobRunner(options: {
@@ -38,17 +50,48 @@ export function createBoundedGlobRunner(options: {
     const value = options.limits?.[key];
     if (value !== undefined && Number.isSafeInteger(value) && value > 0) limits[key] = Math.min(value, limits[key]);
   }
-  const timeoutMs = Math.min(10_000, Math.max(1, options.timeoutMs ?? 10_000));
-  const maxWorkers = Math.min(2, Math.max(1, options.maxWorkers ?? 2));
+  const timeoutMs = Math.min(10_000, Math.max(1,Number.isFinite(options.timeoutMs)?Math.floor(options.timeoutMs!):10_000));
+  const maxWorkers = Math.min(2, Math.max(1,Number.isFinite(options.maxWorkers)?Math.floor(options.maxWorkers!):2));
     async function run<T extends GlobEntry|GrepEntry>(input: GlobSearchInput|GrepSearchInput,
       kind:'glob'|'grep', signal?: AbortSignal, guard?:SearchPathGuard): Promise<SearchResult<T>> {
-      signal?.throwIfAborted();
+      const installed=hasOriginalMainSdkBridgeInstallation();
+      if(installed&&signal!==undefined){if(originalIsProxy(signal))throw Error('glob_abort_signal_required');applyOriginal(originalAbortThrow,signal,[]);}
+      else signal?.throwIfAborted();
+      // Both host controls are intersections. A callback cannot widen an
+      // already authenticated static scope from an older host context.
+      const pathGuard=guard;
+      if(input.searchScope)guard=path=>(!pathGuard||pathGuard(path))&&permitsSearchPath(path,input.searchScope);
       const patterns = typeof input.patterns === 'string' ? [input.patterns] : input.patterns;
       if (!Array.isArray(patterns) || !patterns.length || patterns.some(p => typeof p !== 'string' || !p.length)
         || patterns.join('').length > 2048 || typeof input.cwd !== 'string' || input.cwd.length > 10_240) {
         throw new Error('glob_invalid_input');
       }
+      if(input.searchScope&&(input.searchScope.allowedPaths.length||input.searchScope.deniedPaths.length))validateScopedPatterns(patterns,input.searchScope);
       if (activeCount >= maxWorkers) throw new Error('glob_busy');
+      if(installed){
+        // No regular Worker/rg fallback after the Native ABI was installed or
+        // retired. The fixed Source SDK alone can authorize this OS leaf.
+        if(kind!=='glob')throw Error('glob_native_grep_contract_required');
+        const entry=options.workerUrl??new URL(ORIGINAL_BOUNDED_GLOB_WORKER_ENTRY);
+        if(originalIsProxy(entry)||applyOriginal(originalUrlHref,entry,[])!==ORIGINAL_BOUNDED_GLOB_WORKER_ENTRY)throw Error('glob_native_entry_required');
+        if(guard&&!guard(input.cwd))throw Error('sandbox denied search path');
+        activeCount++;
+        try{
+          const sdk=await loadOriginalProcessSdk();
+          const message=await sdk.runOriginalBoundedReadonlyLeaf({workerData:{input,limits,nativeSearchProfile:'ascii_regex_or_literal_v1',timeoutMs},
+            resourceLimits:{maxOldGenerationSizeMb:96,maxYoungGenerationSizeMb:8,stackSizeMb:2},execArgv:[],stdout:true,stderr:true},signal) as {ok?:boolean;entries?:GlobEntry[];code?:string};
+          if(!message?.ok||!Array.isArray(message.entries)||message.entries.length>limits.maxResults)throw Error(ERROR_CODES.has(message?.code??'')?message.code:'glob_worker_failed');
+          let bytes=0;
+          for(const entry of message.entries){
+            if(!entry||typeof entry.path!=='string'||!Number.isFinite(entry.mtimeMs)||('text' in entry&&typeof entry.text!=='string'))throw Error('glob_worker_failed');
+            bytes+=Buffer.byteLength(entry.path)+(entry.text===undefined?0:Buffer.byteLength(entry.text));
+            if(bytes>limits.maxPathBytes*2)throw Error('glob_result_limit');
+            if(guard&&!guard(entry.path))throw Error('sandbox denied search path');
+          }
+          if(guard&&!guard(input.cwd))throw Error('sandbox denied search path');
+          return message.entries as SearchResult<T>;
+        }finally{activeCount--;}
+      }
       const worker = new Worker(options.workerUrl ?? new URL('./glob-worker.mjs', import.meta.url), {
         workerData: { input, limits, kind, scoped:!!guard },
         // V8 heap failure must terminate the search, never Electron's main isolate.

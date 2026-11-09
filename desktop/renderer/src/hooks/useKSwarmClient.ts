@@ -1,3 +1,4 @@
+import type {DefaultDispatchResult} from '../api/types';
 /**
  * useKSwarmClient — React hook for connecting to the KSwarm API from xiaok desktop renderer.
  *
@@ -301,14 +302,7 @@ export interface KSwarmWorkflowNodeDispatch {
   taskId?: string;
 }
 
-export interface DispatchTasksResult {
-  dispatched: string[];
-  workflowRuns?: KSwarmWorkflowRun[];
-  workflowNodeDispatches?: KSwarmWorkflowNodeDispatch[];
-  skipped?: unknown[];
-  blocked?: unknown[];
-  ok?: boolean;
-}
+export type DispatchTasksResult=DefaultDispatchResult;
 
 export interface KSwarmClientState {
   connected: boolean;
@@ -347,7 +341,7 @@ export interface KSwarmClientActions {
   // Task actions
   humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string; assignedAgent?: string }>): Promise<boolean>;
   createTasks(projectId: string, tasks: Array<{ title: string; description?: string; phase?: number }>): Promise<boolean>;
-  dispatchTasks(projectId: string, fromAgent?: string): Promise<DispatchTasksResult | null>;
+  dispatchTasks(projectId: string): Promise<DispatchTasksResult | null>;
   markTaskDone(projectId: string, taskId: string, fromAgent?: string): Promise<boolean>;
   cancelTask(projectId: string, taskId: string): Promise<boolean>;
   taskFailed(projectId: string, taskId: string, failureReason?: string, errorMessage?: string): Promise<{ ok: boolean; retried?: boolean; retryTaskId?: string; attempt?: number; failureReason?: string } | null>;
@@ -1296,8 +1290,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     return !!result?.ok;
   }, []);
 
-  const dispatchTasks = useCallback(async (projectId: string, fromAgent?: string): Promise<DispatchTasksResult | null> => {
-    return await httpPost<DispatchTasksResult>(`/projects/${projectId}/dispatch`, { fromAgent });
+  const dispatchTasks = useCallback(async (projectId: string): Promise<DispatchTasksResult | null> => {
+    const api=getDesktopApi();
+    if(!api?.captureDefaultDispatchOperation)return {ok:false,error:'DEFAULT_DISPATCH_UNAVAILABLE'};
+    return await api.captureDefaultDispatchOperation({projectId});
   }, []);
 
   const markTaskDone = useCallback(async (projectId: string, taskId: string, fromAgent?: string): Promise<boolean> => {

@@ -20,12 +20,14 @@ import * as publicationProducer from '../../../src/runtime/sol-pi/compound-publi
 // URL to the test-owned compiled production entry; execution and exit are native.
 const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const sourceUrl = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url);
   const source = join(realpathSync(dirname(fileURLToPath(sourceUrl))),basename(fileURLToPath(sourceUrl)));
   const protectionUrl = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url);
   const protectionSource = join(realpathSync(dirname(fileURLToPath(protectionUrl))), basename(fileURLToPath(protectionUrl)));
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       let mapped=false;
       try{const path=typeof filename==='string'?filename:fileURLToPath(filename);mapped=join(realpathSync(dirname(path)),basename(path))===source;}catch{/* Non-owned entry remains native and must not be redirected. */}
@@ -36,7 +38,7 @@ vi.mock('node:worker_threads', async importOriginal => {
       super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
       if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
-  } };
+  }) };
 });
 beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); const protection = await compileProtectionWorkerEntry(); nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root; });
 afterAll(() => {

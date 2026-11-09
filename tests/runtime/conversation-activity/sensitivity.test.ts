@@ -21,6 +21,11 @@ describe('field sensitivity', () => {
     if (name === 'WorkWatch') expected.push(...keys('ActivityOrigin').map(k => `origin.${k}`));
     expect(Object.keys(table).sort()).toEqual(expected.sort());
   });
+  it('never exports Native question handles or owner metadata through the metadata-only projection', () => {
+    expect(projectMetadataOnly('WorkEvent', {eventId:'e', questionId:canary, questionOwner:{approvalToken:canary, requestDigest:canary}})).toEqual({eventId:'e'});
+    expect(WORK_EVENT_SENSITIVITY.questionId).toBe('forbidden');
+    expect(WORK_EVENT_SENSITIVITY.questionOwner).toBe('forbidden');
+  });
   it('classifies all sensitive paths', () => {
     expect(WORK_EVENT_SENSITIVITY.summary).toBe('content');
     expect(WORK_PROJECTION_SENSITIVITY.summary).toBe('content');

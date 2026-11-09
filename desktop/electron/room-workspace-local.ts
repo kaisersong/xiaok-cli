@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { mkdirSync } from 'node:fs';
 import { lstat, realpath, open, mkdir, readdir, rename, unlink } from 'node:fs/promises';
+import type {FileHandle} from 'node:fs/promises';
 import path, { dirname, join, win32 } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -89,6 +91,7 @@ export async function resolveWorkspacePath(binding: WorkspaceRoot, relativePath:
 export async function observeWorkspaceFile(binding: WorkspaceRoot, relativePath: string) {
   const target = await resolveWorkspacePath(binding, relativePath);
   const handle = await open(target, 'r');
+  let bodyFailure:{error:unknown}|undefined;
   try {
     const before = await handle.stat({ bigint: true });
     if (!before.isFile()) throw new Error('workspace_file_required');
@@ -99,26 +102,42 @@ export async function observeWorkspaceFile(binding: WorkspaceRoot, relativePath:
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs || pathname.dev !== after.dev || pathname.ino !== after.ino) throw new Error('workspace_file_changed');
     await verifyRoot(binding);
     return { relativePath, contentHash: hash.digest('hex'), size: Number(after.size), observedAt: new Date().toISOString() };
-  } finally { await handle.close(); }
+  }catch(error){bodyFailure={error};throw error;}finally{await closeWorkspaceHandle(handle,bodyFailure);}
+}
+
+// The original physical writer retains an unconfirmed handle strongly. Neither
+// GC nor a consumed tool error is evidence of close. No retry owns this fd.
+const unconfirmedWorkspaceHandles=new Map<Error,FileHandle>();
+export function isWorkspaceFileCleanupUnconfirmed(error:unknown):error is Error{return error instanceof Error&&unconfirmedWorkspaceHandles.has(error);}
+async function closeWorkspaceHandle(handle:FileHandle,bodyFailure?:{error:unknown}){
+  try{await handle.close();}catch(error){
+    const cause=bodyFailure?new AggregateError([bodyFailure.error,error],'workspace_file_body_and_close_failed',{cause:bodyFailure.error}):error;
+    const failure=new Error('workspace_file_cleanup_unconfirmed',{cause});unconfirmedWorkspaceHandles.set(failure,handle);throw failure;
+  }
 }
 
 // The application-level OS owner gate guards entry to this module; locks here
 // serialize physical paths (not Room IDs) within that sole mutation process.
 const writes = new Map<string, Promise<void>>();
-export async function managedWorkspaceWrite(binding: WorkspaceRoot, relativePath: string, content: string | Uint8Array, expectedHash: string | null) {
+export async function managedWorkspaceWrite(binding: WorkspaceRoot, relativePath: string, content: string | Uint8Array, expectedHash: string | null,beforeEffects?:()=>void) {
+  assertBeforeEffects(beforeEffects);
   const target = await resolveWorkspacePath(binding, relativePath, true);
+  assertBeforeEffects(beforeEffects);
   const key = process.platform === 'win32' ? target.toLowerCase() : target;
   const previous = writes.get(key) ?? Promise.resolve();
   let finish!: () => void;
   const current = new Promise<void>(resolve => { finish = resolve; });
   writes.set(key, current);
   await previous;
-  let temporary: string | undefined;
+  let temporary: string | undefined,cleanupUnknown=false;
   try {
+    assertBeforeEffects(beforeEffects);
     if (await resolveWorkspacePath(binding, relativePath, true) !== target) throw new Error('workspace_identity_changed');
+    assertBeforeEffects(beforeEffects);
     let actual: string | null = null;
     try { actual = (await observeWorkspaceFile(binding, relativePath)).contentHash; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    assertBeforeEffects(beforeEffects);
     if (actual !== expectedHash) throw new Error('workspace_write_conflict');
     // Preserve the ordinary write tool's requested-parent behavior. Resolve
     // and verify each component, never recursively create through an unchecked
@@ -127,20 +146,25 @@ export async function managedWorkspaceWrite(binding: WorkspaceRoot, relativePath
     for (let index=0;index<parentParts.length;index++) {
       const parentRelative=parentParts.slice(0,index+1).join(path.sep);
       const parent=await resolveWorkspacePath(binding,parentRelative,true);
+      assertBeforeEffects(beforeEffects);
       try { await mkdir(parent); }
       catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
+      assertBeforeEffects(beforeEffects);
       if(await resolveWorkspacePath(binding,parentRelative)!==parent||!(await lstat(parent)).isDirectory())throw new Error('workspace_identity_changed');
     }
     if(await resolveWorkspacePath(binding,relativePath,true)!==target)throw new Error('workspace_identity_changed');
+    assertBeforeEffects(beforeEffects);
     temporary = join(dirname(target), `.xiaok-write-${randomUUID()}.tmp`);
     const handle = await open(temporary, 'wx', 0o600);
-    try { await handle.writeFile(content); await handle.sync(); } finally { await handle.close(); }
+    let bodyFailure:{error:unknown}|undefined;
+    try { assertBeforeEffects(beforeEffects);await handle.writeFile(content);assertBeforeEffects(beforeEffects);await handle.sync(); }catch(error){bodyFailure={error};throw error;}finally{await closeWorkspaceHandle(handle,bodyFailure);}
     await resolveWorkspacePath(binding, relativePath, true);
+    assertBeforeEffects(beforeEffects);
     await rename(temporary, target); temporary = undefined;
     return await observeWorkspaceFile(binding, relativePath);
-  } finally {
+  }catch(error){if(isWorkspaceFileCleanupUnconfirmed(error))cleanupUnknown=true;throw error;}finally{
     if (temporary) await unlink(temporary).catch(() => undefined);
-    finish(); if (writes.get(key) === current) writes.delete(key);
+    if(!cleanupUnknown){finish(); if (writes.get(key) === current) writes.delete(key);}
   }
 }
 

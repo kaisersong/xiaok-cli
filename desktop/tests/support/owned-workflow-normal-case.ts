@@ -1,32 +1,95 @@
-import {resolve} from 'node:path';
+import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createOwnedWorkflowNetworkFixture,type OwnedWorkflowTaskInput} from './owned-workflow-network-fixture.mjs';
-import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
+import {mkdtempSync,mkdirSync,rmSync,existsSync,lstatSync} from 'node:fs';
+import {configuredDesktopServicePorts,readDesktopServicePorts} from '../../electron/desktop-service-discovery.js';
+import {tmpdir} from 'node:os';
+import {spawn,type ChildProcess} from 'node:child_process';
+import type {createOwnedWorkflowNetworkFixture,OwnedWorkflowTaskInput} from './owned-workflow-network-fixture.mjs';
+import type {createKSwarmService} from '../../electron/kswarm-service.js';
 import type {createDesktopServices} from '../../electron/desktop-services.js';
-type OwnedWorkflowNormalCaseOptions={project:{id:string;name:string;goal:string}}&(
+type Desktop=ReturnType<typeof createDesktopServices>;
+type ServiceCaseOptions=Parameters<typeof createOwnedWorkflowNetworkFixture>[1]&{originalServiceChild?:boolean};
+type Failure={error:unknown};
+type OwnedWorkflowNormalCaseOptions={project:{id:string;name:string;goal:string};reviewFormat?:'markdown'|'html';originalServiceChild?:boolean}&(
  {issuer?:never;workflowName:string;prompt:string;label:string;phaseTitle:string}|
  {issuer:'po_generated';tasks:[OwnedWorkflowTaskInput]}|
  {issuer:'po_generated_project';tasks:OwnedWorkflowTaskInput[]}
 );
-/** Test-only setup uses a genuine Hub issuer/factory; never grants permission to a caller. */
-export async function openOwnedWorkflowNormalCase(options:OwnedWorkflowNormalCaseOptions) {
- const fixture=await createOwnedWorkflowNetworkFixture(null,options);
- const previous={fetch:globalThis.fetch,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS};
- const repositoryRoot=fileURLToPath(new URL('../../../',import.meta.url));
- process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';globalThis.fetch=fixture.forwardedFetch;
- const restore=()=>{globalThis.fetch=previous.fetch;for(const [key,value] of [['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins]] as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}};
- let kswarmService:ReturnType<typeof createKSwarmService>;
- try{kswarmService=createKSwarmService({spawnProcess:(()=>{throw Error('fixture_foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_foreign_kill_denied');}});}
- catch(error){restore();try{await fixture.close();}catch(cleanup){throw new AggregateError([error,cleanup],'owned_workflow_fixture_setup_and_cleanup_failed',{cause:error});}throw error;}
- let closed=false;
- return {fixture,kswarmService,handoff:{...fixture.issued.dispatches[0],project:{...fixture.project,workFolder:fixture.workspace.path}},
- async close(desktop?:ReturnType<typeof createDesktopServices>){if(closed)return;closed=true;const errors:unknown[]=[];
- if(desktop){
- try{await desktop.closeTaskSourceWritersForMigration();}catch(error){errors.push(error);}
- try{await desktop.disposeMultiAgent();}catch(error){errors.push(error);}
+/** Real manager scope/credential and original Hub/HTTP, without caller capabilities. */
+export async function openOwnedWorkflowServiceCase(permissions:Parameters<typeof createOwnedWorkflowNetworkFixture>[0]=null,options:ServiceCaseOptions={}) {
+ const previous={fetch:globalThis.fetch,config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,broker:process.env.XIAOK_DESKTOP_PORT,brokerAlias:process.env.INTENT_BROKER_PORT,kswarm:process.env.KSWARM_PORT,discovery:process.env.XIAOK_DESKTOP_DISCOVERY_FILE};
+ const configRoot=mkdtempSync(join(tmpdir(),'workflow-service-config-'));
+ const config=join(configRoot,'config');mkdirSync(config,{mode:0o700});
+ // Existing normal callers already own their isolated model configuration.
+ process.env.XIAOK_CONFIG_DIR=previous.config??config;
+ const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
+ process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';
+ const restore=()=>{globalThis.fetch=previous.fetch;for(const [key,value] of [['XIAOK_CONFIG_DIR',previous.config],['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins],['XIAOK_DESKTOP_PORT',previous.broker],['INTENT_BROKER_PORT',previous.brokerAlias],['KSWARM_PORT',previous.kswarm],['XIAOK_DESKTOP_DISCOVERY_FILE',previous.discovery]] as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}};
+ const discovery=join(configRoot,'desktop-service-ports.json');
+ let requested:ReturnType<typeof configuredDesktopServicePorts>|undefined;
+ let observedPorts:string|undefined,routingFailed=false;
+ function selectedPorts(){
+  if(routingFailed)throw Error('fixture_selected_ports_changed');
+  if(!requested)throw Error('fixture_selected_ports_uninitialized');
+  try{
+   if(!existsSync(discovery)){if(observedPorts)throw Error('fixture_selected_ports_missing');return requested;}
+   const before=lstatSync(discovery);
+   if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||(process.platform!=='win32'&&before.uid!==process.getuid!()))throw Error('fixture_selected_ports_file_invalid');
+   const ports=readDesktopServicePorts(discovery),after=lstatSync(discovery);
+   if(before.dev!==after.dev||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs)throw Error('fixture_selected_ports_read_changed');
+   const pair=JSON.stringify(ports);if(observedPorts&&observedPorts!==pair)throw Error('fixture_selected_ports_changed');observedPorts=pair;return ports;
+  }catch(raw){routingFailed=true;throw raw;}
  }
- try{await sealAndDrainKSwarmServiceInstance(kswarmService);}catch(error){errors.push(error);}
- restore();try{await fixture.close();}catch(error){errors.push(error);}
- if(errors.length)throw new AggregateError(errors,'owned_workflow_fixture_cleanup_failed');
- }};
+ const desktopProjectScope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)};
+ let manager:ReturnType<typeof createKSwarmService>|undefined;
+ let fixture:Awaited<ReturnType<typeof createOwnedWorkflowNetworkFixture>>|undefined;
+ let originalChild:ChildProcess|undefined,childClosed:Promise<{code:number|null;signal:NodeJS.Signals|null}>|undefined;
+ let drain:((service:ReturnType<typeof createKSwarmService>)=>Promise<void>)|undefined;
+ async function closeResources(desktop?:Desktop){
+  const errors:unknown[]=[];
+  if(desktop)for(const close of [()=>desktop.closeTaskSourceWritersForMigration(),()=>desktop.disposeMultiAgent()])try{await close();}catch(error){errors.push(error);}
+  if(manager&&drain)try{await drain(manager);}catch(error){errors.push(error);}
+  // A failed Source close cannot leave forwarding fetch or configuration installed.
+  restore();
+  if(fixture)try{await fixture.close({retainRoot:errors.length!==0});console.log(JSON.stringify({fixture:'workflow-service-server-close',...fixture.getOwnedServerState(),reaped:true}));}catch(error){errors.push(error);}
+  if(childClosed){try{const result=await childClosed;console.log(JSON.stringify({fixture:'workflow-source-original-service-child',pid:originalChild?.pid,...result,reaped:true,notNativeQualification:true}));if(result.code!==0||result.signal!==null)errors.push(Error('fixture_original_child_exit_unconfirmed'));}catch(error){errors.push(error);}}
+  if(!errors.length)try{rmSync(configRoot,{recursive:true,force:true});}catch(error){errors.push(error);}
+  if(errors.length)throw new AggregateError(errors,'owned_workflow_fixture_cleanup_failed');
+ }
+ try{
+  requested=configuredDesktopServicePorts();process.env.XIAOK_DESKTOP_DISCOVERY_FILE=discovery;
+  const ks=await import('../../electron/kswarm-service.js');drain=ks.sealAndDrainKSwarmServiceInstance;
+  // Compile original modules before the real server's existing five-second lease.
+  await import('../../electron/desktop-services.js');
+  const network=await import('./owned-workflow-network-fixture.mjs');
+  manager=ks.createKSwarmService({desktopProjectScope,spawnProcess:((_command,_args,spawnOptions)=>{if(!options.originalServiceChild||originalChild)throw Error('fixture_foreign_spawn_denied');originalChild=spawn(process.execPath,['--input-type=module','-e',"process.on('message',()=>{});process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},10000);"],{...spawnOptions,stdio:['ignore','pipe','pipe','ipc']});childClosed=new Promise(yes=>originalChild!.once('close',(code,signal)=>yes({code,signal})));return originalChild;}) as typeof spawn,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_foreign_kill_denied');}});
+  fixture=await network.createOwnedWorkflowNetworkFixture(permissions,{...options,desktopProjectScope,desktopMutationToken:manager.getDesktopMutationToken()});
+  const forwarded=fixture.forwardedFetch;
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);
+   if(url.protocol!=='http:'||url.username||url.password||!['127.0.0.1','localhost'].includes(url.hostname))throw Error('fixture_unowned_fetch_target_denied');
+   const ports=selectedPorts(),port=Number(url.port),isKSwarm=port===ports.kswarm;
+   if(port!==ports.broker&&!isKSwarm)throw Error('fixture_unowned_fetch_target_denied');
+   if(options.originalServiceChild&&isKSwarm&&url.pathname==='/health'&&!originalChild)return new Response('{"ok":false}',{status:503});
+   // Only the original case-owned forwarder sees this projection; it never
+   // connects to the requested origin and still pins its two physical servers.
+   url.port=isKSwarm?'4400':'4318';return forwarded(url,init);
+  };
+ }catch(error){
+  try{await closeResources();}catch(cleanup){throw new AggregateError([error,cleanup],'owned_workflow_fixture_setup_and_cleanup_failed',{cause:error});}throw error;
+ }
+ const owned=fixture,kswarmService=manager;let closing:Promise<void>|undefined;
+ return {fixture:owned,kswarmService,handoff:{...owned.issued.dispatches[0],project:{...owned.project,workFolder:owned.workspace.path}},
+ close(desktop?:Desktop){return closing??=Promise.resolve().then(()=>closeResources(desktop));}};
+}
+/** Preserve the existing normal-case API and genuine manager path. */
+export function openOwnedWorkflowNormalCase(options:OwnedWorkflowNormalCaseOptions){return openOwnedWorkflowServiceCase(null,options);}
+/** Fixture cleanup only: callbacks restore tests, never grant production authority. */
+export async function finishOwnedWorkflowServiceCase(owned:Awaited<ReturnType<typeof openOwnedWorkflowServiceCase>>,desktop:Desktop|undefined,first:Failure|undefined,cleanup:ReadonlyArray<()=>unknown|Promise<unknown>>=[],afterCleanup:ReadonlyArray<()=>unknown|Promise<unknown>>=[]){
+ const errors:unknown[]=[];
+ for(const close of cleanup)try{await close();}catch(error){errors.push(error);}
+ try{await owned.close(desktop);}catch(error){errors.push(error);}
+ for(const close of afterCleanup)try{await close();}catch(error){errors.push(error);}
+ if(first){if(errors.length)throw new AggregateError([first.error,...errors],'owned_workflow_body_and_cleanup_failed',{cause:first.error});throw first.error;}
+ if(errors.length)throw new AggregateError(errors,'owned_workflow_test_cleanup_failed');
 }

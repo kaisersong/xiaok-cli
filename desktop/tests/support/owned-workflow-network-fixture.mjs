@@ -1,9 +1,10 @@
+import {createOwnedKSwarmNodeRuntime} from './owned-kswarm-node-runtime.mjs';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
 const siblingRoot=resolve(repositoryRoot,'..');
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,mkdirSync,realpathSync} from 'node:fs';
+import {mkdtempSync,rmSync,mkdirSync,realpathSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
@@ -22,13 +23,16 @@ const {initProjectWorkspace}=await import(resolve(siblingRoot,'kswarm','src/serv
 // Characterize actual persisted issuer -> actual HTTP GET, without model/network
 // command demonstrations or an invented successful GET response body.
 /** @param {{toolCategories?:string[],deniedCommandIds?:string[],deniedCommands?:string[]}|null} permissions
- * @param {{issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string,tasks?:import('./owned-workflow-network-fixture.mjs').OwnedWorkflowTaskInput[]}} options */
+ * @param {{nodeExecutable?:string,issuer?:string,partialRunWriteDeny?:boolean,project?:{id?:string,name?:string,goal?:string},workflowName?:string,phaseTitle?:string,prompt?:string,label?:string,tasks?:import('./owned-workflow-network-fixture.mjs').OwnedWorkflowTaskInput[]}} options */
 export async function createOwnedWorkflowNetworkFixture(permissions=null,options={}){
-const nativeFetch=globalThis.fetch;
+const nodeRuntime=await createOwnedKSwarmNodeRuntime(options.nodeExecutable,repositoryRoot);
+const nativeFetch=globalThis.fetch,liveWorkflowDispatch=options.liveWorkflowDispatch===true;
 const root=realpathSync(mkdtempSync(join(tmpdir(),'workflow-real-get-')));
 const data=join(root,'data');mkdirSync(data);mkdirSync(join(root,'config'));
 let child,childClosed,deadline,broker,brokerHTTP,recipient,recipientFailure,poTarget,original,serverStartedAt,serverStartedMonotonic,protectionTriggered=false;
 const receivedHandoffs=[];
+// A failed Source drain may still own files beneath this fixture root.
+let retainRootOnClose=false;
 let handoffArrived;
 const net=createServer();await new Promise((resolve,reject)=>{net.once('error',reject);net.listen(0,'127.0.0.1',resolve);});
 const port=net.address().port;await new Promise(resolve=>net.close(resolve));
@@ -68,7 +72,7 @@ async function closePoOwners(primary){
  // Never turn a cleared notifier map into proof that its callbacks completed.
  if(joined&&!errors.length)for(const close of [()=>broker?.close(),()=>brokerHTTP?.close(),()=>hub.closePersistence()])try{await close();}catch(error){errors.push(error);}
  if(recipientFailure&&(!failed||recipientFailure!==primary)&&!errors.includes(recipientFailure))errors.push(recipientFailure);
- if(!errors.length)try{rmSync(root,{recursive:true,force:true});}catch(error){errors.push(error);}
+ if(!errors.length&&!retainRootOnClose)try{rmSync(root,{recursive:true,force:true});}catch(error){errors.push(error);}
  if(errors.length)throw new AggregateError([...(failed?[primary]:[]),...errors],'owned_workflow_protocol_cleanup_failed',{...(failed?{cause:primary}:{})});
  if(failed)throw primary;
 }
@@ -76,6 +80,15 @@ try{
  const project=hub.createProject({id:options.project?.id??'project',name:options.project?.name??'Temporary project',goal:options.project?.goal??'Read temporary state',poAgent:'xiaok-po',members:['xiaok-worker'],autoAssignPo:false});
  hub.createProject({id:'other',name:'Other temporary project',goal:'Other',poAgent:'xiaok-po',members:[],autoAssignPo:false});
  const workspace=initProjectWorkspace(new Map(),join(data,'projects'),project.id);
+ if(options.reviewFormat){
+  const format=options.reviewFormat;assert.ok(['markdown','html'].includes(format));
+  const added=hub.handleHumanAddTasks(project.id,[{id:'item-1',title:format==='markdown'?'Write Markdown IR':'Render final HTML',brief:format==='markdown'?'Produce the complete Markdown IR; a following task renders HTML.':'Use the report renderer to produce the final HTML.',acceptanceCriteria:format==='markdown'?'Complete Markdown sections with dated sources; HTML belongs to the next task.':'A real HTML artifact rendered from the full report must be present.',requiredOutputs:[format],assignedAgent:'xiaok-worker'},{id:'item-2',title:'Following delivery step',brief:'Render HTML and validate delivery.',dependencies:['item-1'],assignedAgent:'xiaok-worker'}],{requestSource:'user'});
+  assert.equal(added.ok,true);assert.equal(hub.handleApprove(project.id).ok,true);
+  const board=hub.getBoard(project.id),task=board.getAllTasks()[0],file=join(workspace.path,'artifacts','report.md');mkdirSync(join(workspace.path,'artifacts'),{recursive:true});writeFileSync(file,'# Original review fixture\nComplete content awaiting independent review.\n');
+  const result={summary:'Original result awaiting independent task-scoped review.',artifacts:[{path:file}],workFolder:workspace.path};
+  for(const status of ['dispatched','accepted','in_progress','submitted'])assert.equal(board.transition(task.id,status,{result}).ok,true);
+  hub.persistState();
+ }
  let issued;
  if(options.issuer==='builtin-smoke'){
   issued=hub.startAgentReviewSmokeWorkflow(project.id,{requestedBy:'human'});assert.equal(issued.ok,true);assert.equal(issued.workflowRun.source,'builtin-smoke');assert.equal(issued.workflowRun.workflowId,'agent-review-smoke');
@@ -85,7 +98,7 @@ try{
   assert.equal(permissions,null);assert.notEqual(options.partialRunWriteDeny,true);
   assert.ok(Array.isArray(options.tasks));
   if(options.issuer==='po_generated')assert.equal(options.tasks.length,1);
-  const added=hub.handleHumanAddTasks(project.id,options.tasks);assert.equal(added.ok,true);
+  const added=hub.handleHumanAddTasks(project.id,options.tasks, {requestSource: 'user'});assert.equal(added.ok,true);
   assert.equal(added.taskIds.length,options.tasks.length);
   const approved=hub.handleApprove(project.id);assert.equal(approved.ok,true);
   poTarget={workflowId:options.issuer==='po_generated'?'po-generated-task-workflow':'po-generated-project-workflow',taskId:options.issuer==='po_generated'?added.taskIds[0]:null};
@@ -105,10 +118,10 @@ try{
   assert.deepEqual(original,expected,'only existing aggregate restriction changes');hub.persistState();
  }
  hub.closePersistence();
- broker=createBrokerService({dbPath:join(root,'broker.sqlite')});brokerHTTP=createBrokerHTTPServer({broker,roomService:broker.room});if(poTarget)broker.attachWebSocket(brokerHTTP.raw());await brokerHTTP.listen(0,'127.0.0.1');
+ broker=createBrokerService({dbPath:join(root,'broker.sqlite')});brokerHTTP=createBrokerHTTPServer({broker,roomService:broker.room});if(poTarget||liveWorkflowDispatch)broker.attachWebSocket(brokerHTTP.raw());await brokerHTTP.listen(0,'127.0.0.1');
  const brokerBase=`http://127.0.0.1:${brokerHTTP.address().port}`;
  const base=`http://127.0.0.1:${port}`;
- if(poTarget){
+ if(poTarget||liveWorkflowDispatch){
   // Hosted xiaok-worker dispatches are delivered to the actual Desktop recipient.
   // This socket only receives the real broker event; it runs no model or command.
   const registered=await nativeFetch(brokerBase+'/participants/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({participantId:'xiaok-desktop',kind:'desktop',alias:'owned-workflow-desktop',roles:['worker'],capabilities:[],inboxMode:'realtime'})});
@@ -119,7 +132,8 @@ try{
   await once(recipient,'open');
  }
  async function startOwnedServer(){
- child=spawn(process.execPath,['--import',fileURLToPath(new URL('./owned-workflow-child-account-preload.mjs',import.meta.url)),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:'temporary-test-token',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
+ child=spawn(nodeRuntime.executable,['--import',fileURLToPath(new URL('./owned-workflow-child-account-preload.mjs',import.meta.url)),'src/server/index.js'],{cwd:resolve(siblingRoot,'kswarm'),env:{...process.env,XIAOK_WORKFLOW_FIXTURE_HOME:root,KSWARM_DATA_ROOT:data,KSWARM_PORT:String(port),BROKER_URL:brokerBase,KSWARM_DESKTOP_MUTATION_TOKEN:options.desktopMutationToken??'temporary-test-token',KSWARM_DESKTOP_PROFILE_ID:options.desktopProjectScope?.profileId??'',KSWARM_DESKTOP_WORKSPACE_ID:options.desktopProjectScope?.workspaceId??'',XIAOK_CONFIG_DIR:join(root,'config'),XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},stdio:['ignore','pipe','pipe']});
+ nodeRuntime.recordChild(child);
  childClosed=new Promise(resolve=>child.once('close',resolve));
  // Own child is unconditionally stopped before existing 8s recovery/worker timer.
  let logs='';child.stdout.on('data',bytes=>{logs+=bytes.toString();});child.stderr.on('data',bytes=>{logs+=bytes.toString();});
@@ -127,7 +141,7 @@ try{
  let ready=false;
  for(let attempt=0;attempt<30;attempt++){
   if(child.exitCode!==null)throw Error(`owned server exited ${child.exitCode}: ${logs}`);
-  try{const health=await nativeFetch(base+'/health',{signal:AbortSignal.timeout(100)});if(health.ok&&(!poTarget||(await health.json()).brokerConnected===true)){ready=true;break;}}catch{}
+  try{const health=await nativeFetch(base+'/health',{signal:AbortSignal.timeout(100)});if(health.ok&&(!(poTarget||liveWorkflowDispatch)||(await health.json()).brokerConnected===true)){ready=true;break;}}catch{}
   await new Promise(resolve=>setTimeout(resolve,25));
  }
  assert.equal(ready,true,'actual owned server must be ready');
@@ -135,7 +149,7 @@ try{
  await startOwnedServer();
  if(poTarget){
   const prefix=base+'/projects/'+encodeURIComponent(project.id)+'/workflows/'+encodeURIComponent(poTarget.workflowId);
-  const post=async(path,body)=>{const response=await nativeFetch(path,{method:'POST',headers:{'content-type':'application/json','x-kswarm-mutation-token':'temporary-test-token'},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1,5000-(Date.now()-serverStartedAt)))});const result=await response.json();assert.equal(response.ok,true,JSON.stringify(result));assert.equal(result.ok,true);return result;};
+  const post=async(path,body)=>{const response=await nativeFetch(path,{method:'POST',headers:{'content-type':'application/json','x-kswarm-mutation-token':options.desktopMutationToken??'temporary-test-token'},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1,5000-(Date.now()-serverStartedAt)))});const result=await response.json();assert.equal(response.ok,true,JSON.stringify(result));assert.equal(result.ok,true);return result;};
   // Run creation belongs to the already-started server's single actual Hub.
   // Startup recovery must not consume a pre-created task run as interrupted work.
   const proposal=await post(prefix+'/proposal',{taskId:poTarget.taskId,requestedBy:'human'});
@@ -185,11 +199,11 @@ try{
   assert.deepEqual(fresh.workflowRun.nodes.find(node=>node.id===issued.dispatches[0].nodeId).input.permissions,validated.permissions);
  }
  let disposed=false;
- const close=async()=>{if(disposed)return;disposed=true;if(poTarget)return closePoOwners();try{hub.closePersistence();}catch{}
-  await stopOwnedServer();await brokerHTTP?.close();broker?.close();rmSync(root,{recursive:true,force:true});};
- return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),getOwnedServerState:()=>({protectionTriggered,elapsedMs:performance.now()-serverStartedMonotonic,exitCode:child?.exitCode,signalCode:child?.signalCode}),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
+ const close=async(closeOptions={})=>{retainRootOnClose ||= closeOptions.retainRoot===true;if(disposed)return;disposed=true;if(poTarget||liveWorkflowDispatch)return closePoOwners();try{hub.closePersistence();}catch{}
+  await stopOwnedServer();await brokerHTTP?.close();broker?.close();if(!retainRootOnClose)rmSync(root,{recursive:true,force:true});};
+ return {root,base,brokerBase,workspace,project,original,issued,getReceivedHandoffs:()=>structuredClone(receivedHandoffs),getOwnedServerState:()=>({pid:child?.pid,protectionTriggered,elapsedMs:performance.now()-serverStartedMonotonic,exitCode:child?.exitCode,signalCode:child?.signalCode}),forwardedFetch,nativeFetch,requestLog,close,tightenToReadonly,durableMutations};
 }catch(error){
- if(options.issuer==='po_generated'||options.issuer==='po_generated_project')return closePoOwners(error);
+ if(options.issuer==='po_generated'||options.issuer==='po_generated_project'||liveWorkflowDispatch)return closePoOwners(error);
  clearTimeout(deadline);try{hub.closePersistence();}catch{}
  if(child&&child.exitCode===null){child.kill('SIGTERM');await Promise.race([once(child,'exit'),new Promise(resolve=>setTimeout(()=>{child.kill('SIGKILL');resolve();},1000))]);}
  try{await brokerHTTP?.close();}catch{}try{broker?.close();}catch{}

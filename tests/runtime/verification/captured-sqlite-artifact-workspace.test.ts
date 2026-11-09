@@ -160,12 +160,32 @@ it.each([':memory:',''])('keeps the original nonpersistent workspace %j out of d
  const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js'),before=readOrdinaryProfileSources();const store=new ArtifactWorkspaceStore({dbPath});
  try{expect(store.getOrCreateWorkspace({conversationId:'temporary',workspaceRootId:'root'}).id).toBeTruthy();}finally{store.close();}expect(readOrdinaryProfileSources()).toEqual(before);
 });
-it('retains original source identity on replacement and permits reopening after the original file is restored',async()=>{
- const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');const path=fixture(),before=readOrdinaryProfileSources(),backup=path+'.original',replacement=path+'.replacement';renameSync(path,backup);
- let wrong:ArtifactWorkspaceStore|undefined;
- try{expect(()=>{wrong=new ArtifactWorkspaceStore({dbPath:path});}).toThrow('profile_source_registry_identity');}finally{wrong?.close();}
- expect(readOrdinaryProfileSources()).toEqual(before);renameSync(path,replacement);renameSync(backup,path);
- const reopened=new ArtifactWorkspaceStore({dbPath:path});try{expect(reopened.listWorkspaces()).toHaveLength(1);}finally{reopened.close();}expect(readOrdinaryProfileSources()).toEqual(before);
+it('rebinds ordinary discovery on replacement and restore without reviving the original captured workspace identity',async()=>{
+ const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');
+ const path=fixture(),before=readOrdinaryProfileSources()!,backup=path+'.original',replacement=path+'.replacement';
+ const original=before.sources.find(source=>source.directory.canonicalPath===dirname(path)&&source.database?.basename===basename(path))!;
+ expect(original).toBeDefined();expect(before.legacyInventoryRequired).toBe(true);
+ renameSync(path,backup);
+ const next=new ArtifactWorkspaceStore({dbPath:path});try{expect(next.listWorkspaces()).toEqual([]);}finally{next.close();}
+ const rebound=readOrdinaryProfileSources()!,changed=rebound.sources.find(source=>source.namespaceId===original.namespaceId)!;
+ expect(changed.sourceId).not.toBe(original.sourceId);expect(changed.database!.inode).toBe(String(statSync(path,{bigint:true}).ino));
+ expect(changed.componentHistory).toEqual(original.componentHistory);expect(rebound.legacyInventoryRequired).toBe(true);
+ expect(BigInt(rebound.generation)).toBe(BigInt(before.generation)+1n);
+ renameSync(path,replacement);renameSync(backup,path);
+ const reopened=new ArtifactWorkspaceStore({dbPath:path});try{expect(reopened.listWorkspaces()).toHaveLength(1);}finally{reopened.close();}
+ const restored=readOrdinaryProfileSources()!,current=restored.sources.find(source=>source.namespaceId===original.namespaceId)!;
+ expect(current).toEqual(original);expect(restored.legacyInventoryRequired).toBe(true);
+ expect(BigInt(restored.generation)).toBe(BigInt(rebound.generation)+1n);
+ // A genuine capture holds SQLite custody; test namespace replacement without opening a competing writer.
+ const owner=await startProfileSourceCapture({uid:process.getuid!(),directoryHelper,sqliteHelper,
+  sources:[{sourceId:original.sourceId,kind:'sqlite-db',snapshotFormat:'artifact-workspace-sqlite-v1',directory:original.directory,database:original.database!}],signal:new AbortController().signal});
+ try{
+  const token=await owner.capture();expect(readProfileSourceCapture(owner,token).sources).toHaveLength(1);
+  renameSync(path,backup);writeFileSync(path,readFileSync(backup));
+  await expect(owner.checkCurrent()).rejects.toThrow();expect(()=>readProfileSourceCapture(owner,token)).toThrow();
+  renameSync(path,path+'.custody-replacement');renameSync(backup,path);
+  expect(()=>readProfileSourceCapture(owner,token)).toThrow();
+ }finally{await owner.close();}
 });
 it('carries the real registered live WAL source through review parsing and native capture without losing its latest commit',async()=>{
  const {readOrdinaryProfileSources}=await import('../../../src/runtime/verification/ordinary-profile-source-registry.js');const {parseProfileSourceReview}=await import('../../../src/runtime/verification/profile-source-review.js');const {canonicalVerificationJson}=await import('../../../src/runtime/verification/protocol.js');const {iterateCapturedSQLiteArtifactWorkspaceSources:read}=await import('../../../src/runtime/verification/captured-sqlite-artifact-workspace.js');

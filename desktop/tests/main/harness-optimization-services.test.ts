@@ -1,10 +1,18 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices } from '../../electron/desktop-services.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
+
+// This Node component fixture has no Electron Main or live renderer authority.
+// Keep Native sources closed while exercising the original services/worker path.
+vi.mock('electron', () => ({
+  app: { isReady: () => false },
+  BrowserWindow: { getAllWindows: () => [], fromId: () => null, fromWebContents: () => null },
+  webContents: { fromId: () => null },
+}));
 
 describe.skipIf(process.platform !== 'darwin')('real Desktop services D0 ownership', () => {
   it('denies a forged actor before lazy initialization and binds the trusted main actor once', async () => {

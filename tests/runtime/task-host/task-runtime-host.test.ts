@@ -623,6 +623,7 @@ describe('InProcessTaskRuntimeHost', () => {
 
   it('rejects unknown materials, stale answers, and missing task recovery', async () => {
     const host = createHost(async () => undefined);
+    try {
 
     await expect(host.createTask({
       prompt: '生成 A 客户方案 PPT',
@@ -640,6 +641,7 @@ describe('InProcessTaskRuntimeHost', () => {
     })).rejects.toThrow(/question not found/i);
 
     await expect(host.recoverTask('missing_task')).rejects.toThrow(/task not found/i);
+    } finally { await host.drain(); }
   });
 
   it('cancels active execution and aborts the runner', async () => {

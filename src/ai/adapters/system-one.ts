@@ -1,3 +1,4 @@
+import {createOriginalModelSdkAttemptTransport,finishOriginalModelSdkAttempt} from '../runtime/original-model-sdk-attempt.js';
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { resolveClonedCapabilityOverrides, type AdapterCatalogIdentity } from './catalog-identity.js';
@@ -174,6 +175,8 @@ export class SystemOneAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const modelPhysical=createOriginalModelSdkAttemptTransport(options?.signal);let originalFailure:{raw:unknown}|undefined;
+    try {
     const body = buildSystemOneRequest(this.model, messages, tools, systemPrompt);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -185,7 +188,7 @@ export class SystemOneAdapter implements ModelAdapter {
 
     let resp: Response;
     try {
-      resp = await fetch(this.endpoint(), {
+      resp = await (modelPhysical?.fetch??fetch)(this.endpoint(), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
@@ -204,11 +207,11 @@ export class SystemOneAdapter implements ModelAdapter {
     clearTimeout(timer);
 
     if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
+      const detail = await (modelPhysical?modelPhysical.readText(resp):resp.text()).catch(() => '');
       throw new Error(`System One 请求失败 (${resp.status})${detail ? `: ${detail}` : ''}`);
     }
 
-    const result = (await resp.json()) as SystemOneResponse;
+    const result = (await (modelPhysical?modelPhysical.readJSON(resp):resp.json())) as SystemOneResponse;
     const answers = result.answers ?? {};
 
     const lines: string[] = [];
@@ -236,5 +239,6 @@ export class SystemOneAdapter implements ModelAdapter {
     }
 
     yield { type: 'done' };
+    }catch(raw){originalFailure={raw};throw raw;}finally{await finishOriginalModelSdkAttempt(modelPhysical,originalFailure);}
   }
 }

@@ -110,6 +110,48 @@ function actualUserHistory() {
 }
 
 describe('main-owned conversation project creation', () => {
+  it('preserves a completed legacy receipt after tightening negative-intent admission without replaying its creation',async()=>{
+    const f=fixture();writeFileSync(join(f.dataRoot,'conversation-projects','task-old.json'),JSON.stringify({schemaVersion:2,taskId:'task-old',prompt:'设计一个工作流并交付报告，先不建项目',startPolicy:'activate_and_dispatch_after_plan',clientRequestKey:'legacy-history',result:{ok:true,projectId:'old-project',project:{id:'old-project'}}}));
+    expect(await f.service.create(f.proposal,{requestSource:'agent',taskId:'task-old'})).toMatchObject({ok:true,projectId:'old-project',reused:true});
+    expect(f.request).not.toHaveBeenCalled();expect(f.roomClient.createRoom).not.toHaveBeenCalled();
+  });
+  it('negotiates Main ownership before create and enqueues only the exact protected owner binding',async()=>{
+    const enqueued:any[]=[];const f=fixture({initialPlanBootstrap:{enqueue:(input:any)=>{enqueued.push(input);return {ok:true,status:'queued'};}}});
+    const scope={profileId:createHash('sha256').update(f.dataRoot).digest('hex'),workspaceId:createHash('sha256').update(process.cwd()).digest('hex')};
+    const old=f.request.getMockImplementation()!;
+    f.request.mockImplementation(async(path:string,init?:RequestInit)=>{
+      if(path==='/desktop/project-protocol')return Response.json({ok:true,protocol:'ordinary_initial_plan_v1',producer:'desktop_main_v1',scope});
+      if(path==='/projects/proj-real/initial-plan-inputs')return Response.json({ok:true,startPolicy:'plan_only',ownerBinding:{protocol:'ordinary_initial_plan_v1',projectId:'proj-real',...scope,canonicalCreateOperationId:f.projects[0].clientRequestKey,canonicalCreateDigest:'c'.repeat(64),enqueueKey:'initial-plan:'+'d'.repeat(64),planGeneration:1}});
+      const response=await old(path,init);
+      if(path==='/projects/room-first')expect(JSON.parse(String(init?.body)).initialPlanProducer).toMatchObject({protocol:'ordinary_initial_plan_v1',...scope});
+      return response;
+    });
+    await f.authorize('创建一个项目，只做计划');
+    const result=await f.service.create(f.proposal,{requestSource:'agent',taskId:'task_user'});
+    expect(result).toMatchObject({ok:true,planningStart:{sent:false,status:'queued',reason:'desktop_main_bootstrap'}});
+    expect(enqueued).toHaveLength(1);expect(enqueued[0]).toMatchObject({projectId:'proj-real',startPolicy:'plan_only',ownerBinding:{planGeneration:1}});
+    const restarted=new ConversationProjectService({dataRoot:f.dataRoot,kswarmService:f.gateway as never,initialPlanBootstrap:{enqueue:(input)=>{enqueued.push(input);return {ok:true,status:'queued'};}}});
+    await restarted.recoverActivityBindings();expect(enqueued).toHaveLength(2);
+    expect(enqueued[1]).toEqual(enqueued[0]);expect(f.projects).toHaveLength(1);
+  });
+  it('does not create a Room or POST a project when the server has not acknowledged Main-only production',async()=>{
+    const enqueue=vi.fn();const f=fixture({initialPlanBootstrap:{enqueue}});await f.authorize();
+    f.request.mockImplementation(async(path:string)=>{if(path==='/desktop/project-protocol')return Response.json({error:'not_found'},{status:404});throw Error('unexpected_side_effect');});
+    expect(await f.service.create(f.proposal,{requestSource:'agent',taskId:'task_user'})).toMatchObject({ok:false});
+    expect(f.roomClient.createRoom).not.toHaveBeenCalled();expect(enqueue).not.toHaveBeenCalled();expect(f.projects).toHaveLength(0);
+  });
+  it('a forged or mismatched owner binding cannot enqueue a second planning producer after create',async()=>{
+    const enqueue=vi.fn();const f=fixture({initialPlanBootstrap:{enqueue}});await f.authorize();
+    const scope={profileId:createHash('sha256').update(f.dataRoot).digest('hex'),workspaceId:createHash('sha256').update(process.cwd()).digest('hex')};
+    const old=f.request.getMockImplementation()!;
+    f.request.mockImplementation(async(path:string,init?:RequestInit)=>{
+      if(path==='/desktop/project-protocol')return Response.json({ok:true,protocol:'ordinary_initial_plan_v1',producer:'desktop_main_v1',scope});
+      if(path.endsWith('/initial-plan-inputs'))return Response.json({ok:true,startPolicy:'activate_and_dispatch_after_plan',ownerBinding:{protocol:'ordinary_initial_plan_v1',projectId:'proj-real',...scope,canonicalCreateOperationId:'wrong'}});
+      return old(path,init);
+    });
+    expect(await f.service.create(f.proposal,{requestSource:'agent',taskId:'task_user'})).toMatchObject({ok:true,planningStart:{sent:false,reason:'initial_plan_owner_binding_unverified'}});
+    expect(enqueue).not.toHaveBeenCalled();expect(f.projects).toHaveLength(1);
+  });
   it('creates and starts the report workflow requested in a single user turn', async () => {
     const f = fixture();
     expect(await f.authorize('设计一个工作流：资料收集、撰写、评审后交付xiaok介绍报告')).toBe(true);
@@ -141,6 +183,14 @@ describe('main-owned conversation project creation', () => {
       expect(await restarted.create(f.proposal,{requestSource:'agent',taskId:confirmed.taskId})).toMatchObject({projectId:'proj-real'});
       expect(f.projects).toHaveLength(1);
     } finally {await f.close();}
+  });
+  it('confirmation does not discard the prior genuine user turn plan-only intent',async()=>{
+    const f=actualUserHistory();try{
+      const prior=await f.prepare('设计一个工作流：只做计划');await f.complete(prior.taskId);
+      const confirmed=await f.prepare('同意');expect(confirmed.authorized).toBe(true);
+      expect(await f.service.create(f.proposal,{requestSource:'agent',taskId:confirmed.taskId})).toMatchObject({ok:true});
+      expect(f.projects[0].requestedStartPolicy).toBe('plan_only');
+    }finally{await f.close();}
   });
 
   it.each(['同意吗？', '不同意', '同意，但不要创建项目', '同意，但不用创建项目', '同意，先说说风险', '请总结：同意', '同意，先不要执行'])(

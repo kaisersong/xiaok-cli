@@ -1,7 +1,11 @@
 import {it,expect,afterEach} from 'vitest';
-import {mkdirSync,mkdtempSync,writeFileSync,symlinkSync,rmSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,writeFileSync,symlinkSync,rmSync,existsSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {fileURLToPath} from 'node:url';
-const sourceRoot=fileURLToPath(new URL('../../../',import.meta.url));import {join} from 'node:path';
+import {join,resolve,dirname,basename} from 'node:path';
+const moduleRoot=resolve(fileURLToPath(new URL('../../../',import.meta.url)));
+// Emitted tests live below .test-dist; the paired selector needs the actual candidate source and its local SDK.
+const sourceRoot=basename(moduleRoot)==='.test-dist'?dirname(moduleRoot):moduleRoot;
+if(!existsSync(join(sourceRoot,'node_modules','tsx','dist','esm','api','index.mjs'))||JSON.parse(readFileSync(join(sourceRoot,'package.json'),'utf8')).name!=='xiaokcode')throw Error('recipe_test_original_source_root_required');
 import {isRegisteredRecipeManifest,selectRecipeManifestPath} from '../../../src/runtime/sol-pi/recipe-environment-registration.js';
 import {selectRegisteredRecipeManifest} from '../../../scripts/evals/sol-pi/paired-environment.mjs';
 const qualified=['8fff26fce52fc249b30c4d18c758f0c93aca9ec03d36d2a029cb56d231e3cb35','03e80e3e4a52a5125131dce25c21096202e73088745c06e33e84baa4619b98f8'] as const;

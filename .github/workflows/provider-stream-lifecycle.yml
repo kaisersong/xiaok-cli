@@ -23,6 +23,8 @@ jobs:
       - shell: bash
         run: bash .github/scripts/retry.sh npm ci
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test:sandbox:run -- .test-dist/tests/ai/adapters/openai-stream-lifecycle.test.js .test-dist/tests/ai/adapters/openai.test.js .test-dist/tests/ai/adapters/claude.test.js .test-dist/tests/ai/runtime/agent-model-recovery.test.js .test-dist/tests/runtime/task-host/task-recovery-race.test.js
       - run: node --expose-gc --max-old-space-size=192 tests/e2e/provider-stream-memory.mjs .test-dist/src
       - run: node --expose-gc --max-old-space-size=192 tests/e2e/provider-stream-memory.mjs .test-dist/src --hold-open

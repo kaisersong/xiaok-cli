@@ -11,16 +11,18 @@ import { compileProtectionWorkerEntry, PROTECTION_WORKER_COMPILE_TIMEOUT_MS } fr
 const physical = vi.hoisted(() => ({ entry: '', starts: 0, exits: 0 }));
 vi.mock('node:fs', async original => ({ ...await original<typeof fs>(), lstatSync: vi.fn((await original<typeof fs>()).lstatSync) }));
 vi.mock('node:worker_threads', async original => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await original<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(file: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const owned = String(file) === source;
       if (owned && !physical.entry) throw Error('production worker compilation required');
       super(owned ? physical.entry : file, options);
       if (owned) { physical.starts++; this.once('exit', () => physical.exits++); }
     }
-  } };
+  }) };
 });
 
 describe('ordinary protection reads preserve the original reader and Worker contract', () => {

@@ -11,31 +11,18 @@ import type { SkillCatalog } from '../../src/ai/skills/loader.js';
 import type { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import type { MaterialRecord } from '../../src/runtime/task-host/types.js';
 import type { TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
-import { buildSynthesizedProviderContext, isStrictKimiK3Adapter, projectProviderPrivateMessages } from '../../src/ai/runtime/provider-private-projection.js';
-import { completedForkMessages } from '../../src/ai/agents/completed-fork-messages.js';
+import { isStrictKimiK3Adapter } from '../../src/ai/runtime/provider-private-projection.js';
 import { randomUUID } from 'node:crypto';
 import type { DesktopAgentExecutionContext } from './desktop-multi-agent-service.js';
 import { runDesktopToolLoop } from './desktop-services.js';
 import {bindCompoundFinalPublicationConsumer,runCompoundTurnInput} from '../../src/runtime/sol-pi/compound-publication-producer.js';
 import {getCompoundPublicationOwnerBinding} from '../../src/runtime/sol-pi/compound-managed-lifecycle.js';
 
-export interface DesktopAgentFork {
-  mode: 'none' | 'completed_prefix' | 'synthesized'; truncated: boolean; messages: Message[];
-}
-
-export function buildDesktopAgentFork(adapter: object, parent: readonly Message[], enabled: boolean): DesktopAgentFork {
-  if (!enabled) return { mode: 'none', truncated: false, messages: [] };
-  const complete = completedForkMessages(parent);
-  if (!isStrictKimiK3Adapter(adapter)) return { mode: 'completed_prefix', truncated: complete.length !== parent.length, messages: structuredClone([...complete]) };
-  // Use the existing strict schema/visibility projection, never stringify private
-  // provider blocks or infer strictness from a caller-controlled model name.
-  const visible = projectProviderPrivateMessages(complete);
-  const envelope = buildSynthesizedProviderContext('subagent', visible);
-  const records = (JSON.parse(envelope) as { records: Array<{ ordinal: number }> }).records;
-  const firstVisible = visible.findIndex(message => message.content.length > 0);
-  const truncated = complete.length !== parent.length || firstVisible >= 0 && (records.length === 0 || records[0].ordinal > firstVisible);
-  return { mode: 'synthesized', truncated, messages: [{ role: 'user', content: [{ type: 'text', text: envelope }] }] };
-}
+export {buildDesktopAgentFork,type DesktopAgentFork} from './desktop-managed-agent-fork.js';
+import {buildDesktopAgentFork,type DesktopAgentFork} from './desktop-managed-agent-fork.js';
+const originalManagedSessions=new WeakSet<object>(),managedSessionHas=WeakSet.prototype.has,managedSessionAdd=WeakSet.prototype.add,managedSessionApply=Reflect.apply;
+export function isOriginalDesktopManagedAgentSession(value:unknown):boolean{return !!value&&(typeof value==='object')&&managedSessionApply(managedSessionHas,originalManagedSessions,[value]);}
+export function disposeOriginalDesktopManagedAgentSession(this:unknown):Promise<void>{if(!isOriginalDesktopManagedAgentSession(this))throw Error('TASK_MANAGED_SESSION_REQUIRED');return managedSessionApply(originalManagedSessionDispose,this,[]);}
 
 export interface DesktopManagedAgentSessionOptions {
   observationOwner?: ObservationSessionOwner;
@@ -92,6 +79,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
   private lastTurnId?: string;
 
   constructor(private readonly options: DesktopManagedAgentSessionOptions) {
+    managedSessionApply(managedSessionAdd,originalManagedSessions,[this]);
     if (options.model !== undefined || options.modelCapability !== undefined) throw new Error('desktop_multi_agent_model_override_unsupported');
     const fork = buildDesktopAgentFork(options.adapter, options.parentMessages ?? [], options.forkContext !== false);
     this.fork = Object.freeze({ mode: fork.mode, truncated: fork.truncated });
@@ -270,3 +258,5 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
   }
 
 }
+
+const originalManagedSessionDispose=DesktopManagedAgentSession.prototype.dispose;

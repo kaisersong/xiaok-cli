@@ -22,7 +22,7 @@ import type {
 } from '../../src/runtime/goal/types.js';
 import type { GoalToolHost } from '../../src/ai/tools/goal.js';
 import type { ToolExecutionContext } from '../../src/types.js';
-import type { TaskIdentityReservation, PersistedTaskEvent } from '../../src/runtime/task-host/task-runtime-host.js';
+import type { TaskIdentityReservation, PersistedTaskEvent, NativePersistedTaskEventReceipt, TaskSourceShutdownDrainedReceipt } from '../../src/runtime/task-host/task-runtime-host.js';
 import type { HostDeliveryRecoveryReceipt } from '../../src/runtime/task-host/delivery-types.js';
 import type {
   GoalTurnExecutionScope,
@@ -80,6 +80,9 @@ export interface DesktopGoalCoordinatorOptions {
   prepareThread?(threadId: string): Promise<void>;
   /** Fixed main-only service closure; ownerId/source strings never authorize recovery. */
   authorizeRecoveredDelivery?(input: HostDeliveryRecoveryReceipt): void;
+  /** Actual Main population verifier; no renderer flag or serialized receipt. */
+  assertNativePersistedEvent?(input:PersistedTaskEvent,receipt:NativePersistedTaskEventReceipt):void;
+  assertTaskSourceShutdownDrainedReceipt?(receipt:TaskSourceShutdownDrainedReceipt):void;
 }
 
 export class DesktopGoalCoordinator {
@@ -97,6 +100,8 @@ export class DesktopGoalCoordinator {
   private publicationEpoch = 0;
   private readonly nativeGenerations = new Map<string, number>();
   private closed = false;
+  private nativeTailUnconfirmed = false;
+  private nativeTailSealed=false;
   private operations = 0;
   private readonly drainWaiters = new Set<() => void>();
 
@@ -123,8 +128,22 @@ export class DesktopGoalCoordinator {
     });
   }
 
+  /** Observe original admitted operations without extending a caller deadline. */
+  whenShutdownDrained():Promise<boolean> {
+    if(this.nativeTailUnconfirmed)return Promise.resolve(false);
+    if(this.isShutdownDrained())return Promise.resolve(true);
+    return new Promise(resolve=>{
+      const check=()=>{
+        if(this.nativeTailUnconfirmed || this.isShutdownDrained()){
+          this.drainWaiters.delete(check);resolve(!this.nativeTailUnconfirmed);
+        }
+      };
+      this.drainWaiters.add(check);check();
+    });
+  }
+
   private isShutdownDrained(): boolean {
-    return this.closed && this.operations === 0 && this.threadChains.size === 0 && this.publicationThreads.size === 0;
+    return this.closed && !this.nativeTailUnconfirmed && this.operations === 0 && this.threadChains.size === 0 && this.publicationThreads.size === 0;
   }
 
   private notifyDrain(): void { for (const waiter of this.drainWaiters) waiter(); }
@@ -668,6 +687,63 @@ export class DesktopGoalCoordinator {
     };
   }
 
+  sealNativePersistedTail(receipt:TaskSourceShutdownDrainedReceipt):void {
+    if(!this.options.assertTaskSourceShutdownDrainedReceipt)throw Error('task_source_shutdown_receipt_invalid');
+    this.options.assertTaskSourceShutdownDrainedReceipt(receipt);
+    if(!this.isShutdownDrained())throw Error('goal_shutdown_not_drained');
+    this.nativeTailSealed=true;
+  }
+
+  /** Registered original Host consumer only. Closing admission never grants a
+   * new Goal decision, continuation, evaluator or publication from this tail. */
+  async handleNativePersistedTaskEvent(input:PersistedTaskEvent,receipt:NativePersistedTaskEventReceipt):Promise<void> {
+    const verify=()=>{
+      if(!this.options.assertNativePersistedEvent)throw Error('task_persisted_event_unverified');
+      this.options.assertNativePersistedEvent(input,receipt);
+    };
+    verify();
+    if(this.nativeTailSealed)throw Error('goal_native_tail_sealed');
+    if(!this.closed){
+      try{await this.handlePersistedTaskEvent(input);}
+      catch(error){if(!this.closed || !(error instanceof Error) || error.message!=='goal_coordinator_closed')throw error;}
+      if(!this.closed)return;
+    }
+    verify();
+    if(input.event.type!=='task_terminal')return;
+    const terminalEvent=input.event;
+    this.operations++;
+    try{
+      const binding=this.options.store.getTaskBinding(input.taskId);
+      if(!binding)return;
+      const previous=this.threadChains.get(binding.threadId) ?? Promise.resolve();
+      const tail=previous.catch(()=>undefined).then(async()=>{
+        verify();
+        const scope=input.snapshot.executionScope;
+        if(scope?.kind!=='goal_turn' || input.snapshot.taskId!==input.taskId || input.snapshot.status!==terminalEvent.status
+          || scope.threadId!==binding.threadId || scope.goalId!==binding.goalId || scope.epoch!==binding.epoch
+          || scope.goalTurnId!==binding.goalTurnId || scope.origin!==binding.origin)throw Error('goal_native_tail_scope_mismatch');
+        const document=await this.requireDocument(binding.threadId);verify();
+        if(document.state.goalId!==binding.goalId || document.state.epoch!==binding.epoch)throw Error('goal_native_tail_generation_unconfirmed');
+        // Task metadata retains unknown usage. The current Goal ledger cannot
+        // represent unknown cost, so preserve every dependent writer and pin.
+        const usage=input.snapshot.usage;
+        if(!usage?.known)throw Error('goal_native_tail_usage_unconfirmed');
+        if(document.turns.some(turn=>turn.turnId===binding.goalTurnId))return;
+        if(document.state.status!=='active')throw Error('goal_native_tail_state_unconfirmed');
+        await this.service.settleTurn(this.context(binding.threadId,'runtime',document.state.revision),{
+          turnId:binding.goalTurnId,tokensUsed:usage.inputTokens+usage.outputTokens,
+          activeWallClockMs:Math.max(0,input.snapshot.updatedAt-input.snapshot.createdAt),
+          evidence:[],terminalDecision:{kind:'paused',reason:'app_shutdown'},
+        });
+        if(this.runningByThread.get(binding.threadId)===input.taskId)this.runningByThread.delete(binding.threadId);
+        this.pendingBlocked.delete(input.taskId);this.activation.delete(binding.threadId);
+      });
+      this.threadChains.set(binding.threadId,tail);
+      try{await tail;}finally{if(this.threadChains.get(binding.threadId)===tail)this.threadChains.delete(binding.threadId);}
+    }catch(error){this.nativeTailUnconfirmed=true;throw error;}
+    finally{this.operations--;this.notifyDrain();}
+  }
+
   async handlePersistedTaskEvent(input: PersistedTaskEvent): Promise<void> {
     return this.withOperation(async () => {
       const publicationEpoch = this.publicationEpoch;
@@ -753,6 +829,9 @@ export class DesktopGoalCoordinator {
           };
         }
 
+        if(this.closed && !input.snapshot.usage?.known){
+          this.nativeTailUnconfirmed=true;throw Error('goal_native_tail_usage_unconfirmed');
+        }
         const state = await this.service.settleTurn(
           this.context(binding.threadId, 'runtime', document.state.revision),
           {

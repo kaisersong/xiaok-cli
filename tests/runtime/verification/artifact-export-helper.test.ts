@@ -1,18 +1,25 @@
 import {afterAll,beforeAll,expect,it} from 'vitest';
 import {execFile,spawn,spawnSync,type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createRequire} from 'node:module';
 import {copyFileSync,realpathSync,mkdtempSync,mkdirSync,readFileSync,writeFileSync,existsSync,statSync,renameSync,symlinkSync,linkSync,rmSync,openSync,writeSync,closeSync,truncateSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createHash,randomUUID,randomBytes} from 'node:crypto';
 const root=resolve(import.meta.dirname,'../../..'),work=realpathSync(mkdtempSync(join(tmpdir(),'xiaok-export-helper-'))),binary=join(work,process.platform==='win32'?'export.exe':'export'),children=new Set<ChildProcessWithoutNullStreams>();
 const hash=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
+const buildInputs=['scripts/verification/build-artifact-export-helper.mjs','scripts/verification/publish-artifact-export-build.mjs','scripts/verification/artifact-export-toolchain.lock.json',...['go.mod','main.go','identity_unix.go','identity_windows.go'].map(name=>join('desktop','native','artifact-export-helper',name))];
+const originalInputs=new Map<string,{bytes:Buffer;mtimeNs:bigint}>();
 beforeAll(async()=>{
  const lock=JSON.parse(readFileSync(join(root,'scripts/verification/artifact-export-toolchain.lock.json'),'utf8'));
  const host=lock.hosts[`${process.platform}-${process.arch}`];
  const archive=process.env.XIAOK_EXPORT_HELPER_TOOLCHAIN_ARCHIVE??join(root,'.artifacts/solpi-build-tools',host.filename);
  const target=`${process.platform}-${process.arch}`;
- const built=await promisify(execFile)(process.execPath,[join(root,'scripts/verification/build-artifact-export-helper.mjs'),'--target',target,'--toolchain-archive',archive],{env:{...process.env,TAR_OPTIONS:'--invalid-inherited-tar-option',GOROOT:join(work,'untrusted-sdk'),GOFLAGS:'-overlay=invalid-inherited-overlay.json',GOCACHEPROG:'must-not-execute'},encoding:'utf8',timeout:150000,maxBuffer:1024*1024});
+ const buildRoot=join(work,'original-build-input');mkdirSync(buildRoot);
+ for(const name of buildInputs){const source=join(root,name),bytes=readFileSync(source);originalInputs.set(name,{bytes,mtimeNs:statSync(source,{bigint:true}).mtimeNs});const target=join(buildRoot,name);mkdirSync(resolve(target,'..'),{recursive:true});copyFileSync(source,target);expect(readFileSync(target)).toEqual(bytes);}
+ const dependencies=createRequire(import.meta.url).resolve.paths('tar')?.find(dir=>existsSync(join(dir,'tar'))&&existsSync(join(dir,'adm-zip')));
+ expect(dependencies,'original locked build dependencies').toBeTruthy();symlinkSync(realpathSync(dependencies!),join(buildRoot,'node_modules'),'junction');
+ const built=await promisify(execFile)(process.execPath,[join(buildRoot,'scripts/verification/build-artifact-export-helper.mjs'),'--target',target,'--toolchain-archive',archive],{env:{...process.env,TAR_OPTIONS:'--invalid-inherited-tar-option',GOROOT:join(work,'untrusted-sdk'),GOFLAGS:'-overlay=invalid-inherited-overlay.json',GOCACHEPROG:'must-not-execute'},encoding:'utf8',timeout:150000,maxBuffer:1024*1024});
  // execFile rejects on startup, timeout and nonzero exit after the owned child closes.
  expect(built.stderr).toBe('');
  const {output}=JSON.parse(built.stdout.trim()),manifest=JSON.parse(readFileSync(join(output,'manifest.json'),'utf8'));
@@ -20,7 +27,7 @@ beforeAll(async()=>{
  copyFileSync(join(output,manifest.filename),binary);
  expect(hash(readFileSync(binary))).toBe(manifest.sha256);
 },180000);
-afterAll(()=>{for(const child of children)child.kill('SIGKILL');rmSync(work,{recursive:true,force:true});});
+afterAll(()=>{for(const child of children)child.kill('SIGKILL');try{for(const[name,fact]of originalInputs){const file=join(root,name);expect(readFileSync(file)).toEqual(fact.bytes);expect(statSync(file,{bigint:true}).mtimeNs).toBe(fact.mtimeNs);}}finally{rmSync(work,{recursive:true,force:true});}});
 function launch(content:Buffer,options:{parent?:string;target?:string;digest?:string;wrongIdentity?:boolean}={}){
  const ownershipToken=randomBytes(32).toString('hex');const parent=options.parent??join(work,randomUUID());mkdirSync(parent,{recursive:true});const temporary='.xiaok-export-'+randomUUID(),target=options.target??'result.bin',info=statSync(parent,{bigint:true});
  const child=spawn(binary,[parent,temporary,target,String(content.length),options.digest??hash(content),String(info.dev),String(options.wrongIdentity?0n:info.ino),ownershipToken],{stdio:'pipe'});children.add(child);

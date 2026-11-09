@@ -1,0 +1,30 @@
+import {app,BrowserWindow,ipcMain} from 'electron';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {writeFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const root=process.env.XIAOK_DSH_BOOTSTRAP_ROOT,bundle=process.env.XIAOK_DSH_BOOTSTRAP_BUNDLE;
+if(!root||!bundle)throw Error('isolated_fixture_paths_required');
+app.on('window-all-closed',()=>{});
+app.whenReady().then(async()=>{
+ const api=await import(pathToFileURL(bundle).href),realm=api.createMainDshBootstrapAuthority();
+ const scope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)},html=join(root,'index.html'),preload=join(root,'preload.cjs');
+ writeFileSync(preload,"const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('enroll',()=>ipcRenderer.invoke('fixture:dsh-enroll'));\n");
+ writeFileSync(html,'<!doctype html><body><button id="enroll">Enable configured source</button><output id="result"></output><script>document.querySelector("button").onclick=async()=>{try{document.querySelector("output").textContent=JSON.stringify(await window.enroll());}catch(e){document.querySelector("output").textContent=JSON.stringify({error:String(e)});}}</script>');
+ const window=new BrowserWindow({show:false,webPreferences:{preload,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ const user=api.createMainDshControlSource({window,scope,isTrustedUrl:()=>true});
+ const store=new api.DesktopMultiAgentStore(join(root,'groups.sqlite'),{dshAdmissionSource:realm,dshUserControlSource:user});
+ realm.bindStore(store);user.bindStore(store);store.claimBootOwnership();const port=api.readOriginalDshAdmissionPort(store,realm);
+ assert.equal(port.initialize(realm.openBootstrap('initialize'),{requestSource:'user'}).ok,true);
+ assert.equal(port.upgradeAdmission(realm.openBootstrap('migrate_admission'),{requestSource:'user'}).ok,true);
+ const proof=api.readOriginalMainDshBootstrapAuthority(realm,store,realm);proof.assertCurrent();proof.assertLocal();
+ const commands=[['openReadBasis','read_basis'],['openReadHistory','read_history'],['openAssessmentReserve','assessment_reserve'],['openAssessmentResult','assessment_result'],['openAdmissionCommit','admission_commit'],['openOwnerReconcile','owner_reconcile'],['openSourceScan','source_scan'],['openAdmissionWindow','admission_window'],['openControlReceipt','control_receipt'],['openSourceControl','source_control'],['openClaimCommand','claim_command'],['openGithubSourceRead','github_source_read'],['openGithubSourceSetup','github_source_setup']];
+ for(const [method,purpose] of commands){const data={schemaVersion:1,id:'original-command'},opaque=Object.freeze({});const frame=realm[method](data,{ownerObservation:opaque});data.id='changed';assert.equal(realm.resolve(frame,purpose).data.id,'original-command');assert.equal(Object.isFrozen(realm.resolve(frame,purpose).data),true);assert.throws(()=>realm.resolve(frame,purpose==='read_history'?'read_basis':'read_history'));assert.equal(api.readOriginalDshAdmissionReferences(realm,frame,purpose).ownerObservation,opaque);}
+ let getterHits=0;assert.throws(()=>realm.openReadBasis({}, {get ownerObservation(){getterHits++;return {};}}));assert.equal(getterHits,0);
+ let hits=0;const fake=new Proxy({},{get(){hits++;throw Error('trap');}});assert.throws(()=>api.readOriginalMainDshBootstrapAuthority(fake,fake,fake));assert.equal(hits,0);
+ assert.throws(()=>realm.resolve(realm.openBootstrap('initialize'),'enroll_authority'));
+ const reader=new api.DatabaseSync(join(root,'groups.sqlite'),{readOnly:true});let floor;try{floor=reader.prepare('PRAGMA user_version').get().user_version;}finally{reader.close();}assert.equal(floor,6);
+ ipcMain.handle('fixture:dsh-enroll',event=>{const frame=user.open(event,'enroll_authority',{schemaVersion:1,expectedDomainRevision:0,ownerDomainIds:[]},'user');try{return port.enrollAuthority(frame.proof,{requestSource:'user',bodyHash:frame.bodyHash,bootstrapAuthority:realm});}finally{frame.release();}});
+ await window.loadFile(html);
+ globalThis.dshBootstrapNative={ready:true,facts:{nativeMain:true,originalStore:true,independentUserSource:true,floor,namedCommands:commands.length,notNativeNQualification:true},async close(){realm.seal();assert.throws(()=>proof.assertCurrent());assert.throws(()=>proof.assertLocal());assert.throws(()=>realm.openBootstrap('initialize'));await user.drain();store.close();ipcMain.removeHandler('fixture:dsh-enroll');window.destroy();return{revoked:true};}};
+}).catch(error=>{globalThis.dshBootstrapNative={ready:true,error:String(error),stack:error.stack};console.error(error);});

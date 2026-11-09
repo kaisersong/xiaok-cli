@@ -1831,13 +1831,16 @@ describe('sidecar environment launch boundaries', () => {
       return new Response(JSON.stringify({ ok: true, features: ['dynamic_workflows'], agents: [], service: { entryPath: name === 'broker' ? broker : ks } }),
         { status: url.pathname === '/health' && !launched.has(name) ? 503 : 200 });
     }));
-    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null });
+    const projectScope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)};
+    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null, desktopProjectScope:projectScope });
+    projectScope.workspaceId='c'.repeat(64);
     const check = (env: NodeJS.ProcessEnv, name: string) => {
       expect(env).toMatchObject({ KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh', ELECTRON_RUN_AS_NODE: '1' });
       for (const key of ['GH_TOKEN', 'ANTHROPIC_API_KEY', 'BROKER_SERVER_PATH']) expect(env).not.toHaveProperty(key);
       expect(env.INTENT_BROKER_KSWARM_TOKEN).toEqual(expect.any(String));
       if (name === 'broker') { expect(env.PORT).toBe('4318'); expect(env.INTENT_BROKER_DESKTOP_TOKEN).toBe(service.getIntentBrokerRoomToken()); }
-      else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken()); }
+      else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken());
+        expect(env.KSWARM_DESKTOP_PROFILE_ID).toBe('a'.repeat(64));expect(env.KSWARM_DESKTOP_WORKSPACE_ID).toBe('b'.repeat(64)); }
     };
     try {
       await service.start(); expect(spawnMock).toHaveBeenCalledTimes(2);

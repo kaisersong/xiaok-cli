@@ -39,3 +39,9 @@ it.each(['publication.recoverRequest','publication.lookupRequest','publication.r
   verification:{prepare:asyncCapture,dispatch:asyncCapture},completion:{invoke(){throw Error('unexpected_completion');}},execution:{async invoke(_method,payload,peer){capture(payload,peer);}}});
  await router.invoke(method,payload,peer,new AbortController().signal); expect(calls).toEqual([original]);expect(renewals).toBe(0);
 });
+
+it.each(['completion.prepare-main-root-family','completion.authorize-main-root-family','completion.read-main-root-family','completion.recover-main-root-family','completion.cancel-main-root-family'] as const)('routes pending-only control %s with authenticated lifetime but without renewing an execution engine',async method=>{
+ let renewals=0,calls=0;const deny=()=>{throw Error('wrong owner');};
+ const router=createControllerOperationRouting({assertCurrent(){},async renew(){renewals++;throw Error('engine unavailable');},publication:{prepare:deny,approve:async()=>deny(),reconcile:async()=>deny(),recoverExpired:async()=>deny(),observeOwner:async()=>deny(),readOwnerPayload:async()=>deny()},verification:{prepare:async()=>deny(),dispatch:async()=>deny()},completion:{invoke(actual,payload,peer){expect(actual).toBe(method);expect(payload).toEqual({operationId:'operation'});expect(peer.uid).toBe(501);calls++;return {pendingOnly:true};}},execution:{invoke:async()=>deny()}});
+ expect(await router.invoke(method,{operationId:'operation'},{uid:501,gid:20,auditSessionId:7},new AbortController().signal)).toEqual({pendingOnly:true});expect(renewals).toBe(0);expect(calls).toBe(1);
+});

@@ -17,6 +17,13 @@ import { DesktopGoalCoordinator } from '../../electron/desktop-goal-coordinator.
 import { SqliteGoalStore } from '../../electron/goal-store-sqlite.js';
 import type { ManagedAgentSession } from '../../../src/ai/agents/multi-agent-coordinator.js';
 
+// Node exercises the original stores and owners with Native user authority closed.
+vi.mock('electron', () => ({
+  app: { isReady: () => false },
+  BrowserWindow: { getAllWindows: () => [], fromId: () => null, fromWebContents: () => null },
+  webContents: { fromId: () => null },
+}));
+
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('BDD: thread deletion retains ownership until real work is settled', () => {

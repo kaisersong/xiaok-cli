@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRoomExecutionRouter } from '../../electron/room-execution-router.js';
 
 describe('main-owned Room execution capability routing', () => {
+  it('checks the original per-request guard after installation discovery before calling the probe',async()=>{
+    let allowed=true;const sentinel=Error('original_room_route_revoked'),probe=vi.fn(async(runtime:any)=>({protocol:'room_discussion_v1' as const,runtime,supported:true}));
+    const router=createRoomExecutionRouter({request:async path=>({ok:true,json:async()=>path==='/agents'?{agents:[{id:'a',runtimeType:'qoder',execution:{mode:'self_running',participantId:'a'}}]}:{runtimes:[{type:'qoder',path:'/owned/qoder'}]}}),canonicalExecutable:async path=>{allowed=false;return path;},makeAdapter:()=>({probe,execute:vi.fn()})});
+    let failure:unknown;try{await Reflect.apply(router.resolve,router,['a',()=>{if(!allowed)throw sentinel;}]);}catch(error){failure=error;}
+    expect(probe).not.toHaveBeenCalled();expect(failure).toBe(sentinel);
+  });
+  it('preserves the original guard failure instead of retrying it into unavailable metadata',async()=>{
+    let installed=false,thrown=false;const sentinel=Error('original_guard_io_unknown'),probe=vi.fn();
+    const router=createRoomExecutionRouter({request:async path=>({ok:true,json:async()=>path==='/agents'?{agents:[{id:'a',runtimeType:'qoder',execution:{mode:'self_running',participantId:'a'}}]}:{runtimes:[{type:'qoder',path:'/owned/qoder'}]}}),canonicalExecutable:async path=>{installed=true;return path;},makeAdapter:()=>({probe,execute:vi.fn()})});
+    let failure:unknown;try{await router.resolve('a',()=>{if(installed&&!thrown){thrown=true;throw sentinel;}});}catch(error){failure=error;}
+    expect(probe).not.toHaveBeenCalled();expect(failure).toBe(sentinel);
+  });
   it('binds actual KSwarm runtime identity, never a display name or renderer path', async () => {
     const probe = vi.fn(async (runtime) => ({ protocol: 'room_discussion_v1', runtime, supported: true, proof: { freshSession: true, toolsDisabled: true, mcpDisabled: true, hooksDisabled: true } }));
     const execute = vi.fn(async () => ({ text: 'real CLI', resourcesReleased: true }));

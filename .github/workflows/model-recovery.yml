@@ -57,6 +57,8 @@ jobs:
       - name: Test temporary metadata-only Kimi diagnostics
         run: node --test tests/scripts/kimi-wire-diagnostic.test.mjs
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Test Kimi diagnostics, retries, cancellation and completed tools
         run: >
           npm run test:sandbox:run --

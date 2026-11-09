@@ -26,6 +26,21 @@ return await agent(\`综合 \${reviews.map((item) => item.summary).join('、')}�
 `;
 
 describe('workflow script runtime', () => {
+  it('does not expose a host Function constructor through computed intrinsic or DSL properties',async()=>{
+    for(const expression of ["Object['con'+'structor']('return typeof process')()","agent['con'+'structor']('return typeof process')()","(await Promise.resolve(agent('second')).then(value=>value))['con'+'structor']['con'+'structor']('return typeof process')()","agent('second')['con'+'structor']['con'+'structor']('return typeof process')()","this['con'+'structor']['con'+'structor']('return typeof process')()"]){
+      await expect(runWorkflowScript(`export const meta={name:'computed_constructor_probe',description:'No external side effect'}\nawait agent('inert fixture')\nreturn ${expression}`,{controller:{async createAgentNode(){return {ok:true};}}})).rejects.toBeDefined();
+    }
+  });
+  it('keeps captured Promise.then species executors and thrown controller errors in the VM realm',async()=>{
+    for(const body of [
+      "let leaked;const base=Promise;const p=agent('inert');p.constructor={[Symbol.species]:function(executor){leaked=executor['con'+'structor']('return typeof process')();return new base(executor)}};await p;return leaked",
+      "try { await agent('inert') } catch(error) { return error['con'+'structor']['con'+'structor']('return typeof process')() }",
+      "return await parallel([()=>({then(resolve){return resolve['con'+'structor']('return typeof process')()}})])",
+    ])await expect(runWorkflowScript(`export const meta={name:'promise_species_probe',description:'No external side effect'}\n${body}`,{controller:{async createAgentNode(){if(body.startsWith('try'))throw Error('controller fixture failure');return {ok:true};}}})).rejects.toBeDefined();
+  });
+  it('does not expose external-memory or Wasm allocators outside the JSON orchestration contract',async()=>{
+    const result=await runWorkflowScript("export const meta={name:'bounded_allocators',description:'JSON only'}\nawait agent('inert')\nreturn {buffer:typeof ArrayBuffer,shared:typeof SharedArrayBuffer,typed:typeof Uint8Array,wasm:typeof WebAssembly}",{controller:{async createAgentNode(){return {ok:true};}}});expect(result.result).toEqual({buffer:'undefined',shared:'undefined',typed:'undefined',wasm:'undefined'});
+  });
   it('executes safe Pi-style orchestration primitives through an injected controller', async () => {
     const phases: string[] = [];
     const calls: Array<{ label: string; phaseTitle: string | null; prompt: string }> = [];

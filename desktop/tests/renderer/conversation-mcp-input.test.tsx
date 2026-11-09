@@ -7,6 +7,12 @@ vi.mock('../../renderer/src/shared/desktop',()=>({getDesktopApi:()=>({getMcpTask
 afterEach(()=>{cleanup();vi.clearAllMocks();});
 const form={inputId:'question',expectedDigest:'digest',prompt:'<img src=x onerror=alert(1)>选择格式',fields:[{key:'format',title:'格式',type:'choice',required:true,options:['html','pdf']}]};
 describe('rendered pending MCP input controls',()=>{
+ it('clears prior forms when the same watch question reader fails on a newer revision',async()=>{
+  mock.inputs.mockResolvedValue([form]);const {rerender}=render(<LocaleProvider><McpWorkControls watchId="watch" needsInput revision={1}/></LocaleProvider>);
+  expect(await screen.findByRole('combobox')).toBeVisible();mock.inputs.mockRejectedValue(new Error('activity_source_forbidden'));
+  rerender(<LocaleProvider><McpWorkControls watchId="watch" needsInput revision={2}/></LocaleProvider>);await waitFor(()=>expect(screen.getByRole('alert')).toBeVisible());
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();expect(screen.queryByText(form.prompt)).not.toBeInTheDocument();expect(mock.answer).not.toHaveBeenCalled();
+ });
  it('keeps the input pending without any automatic answer, escapes its text, and submits only the user choice',async()=>{
   mock.inputs.mockResolvedValue([form]);mock.answer.mockResolvedValue(undefined);
   const {container}=render(<LocaleProvider><textarea aria-label="draft" defaultValue={'中文\n草稿'}/><McpWorkControls watchId="watch" needsInput revision={1}/></LocaleProvider>);

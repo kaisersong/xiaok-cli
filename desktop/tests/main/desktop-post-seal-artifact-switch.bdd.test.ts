@@ -9,20 +9,22 @@ import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-con
 
 const nativeWorker = vi.hoisted(() => ({ output: '', root: '' }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
       if (mapped && !nativeWorker.output) throw new Error('test compiled Worker entry is not ready');
       super(mapped ? nativeWorker.output : filename, options);
     }
-  } };
+  }) };
 });
 beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
 afterAll(() => { if (nativeWorker.root) syncFs.rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 }); });
 
-vi.mock('node:fs', async original => { const actual = await original<typeof import('node:fs')>(); return { ...actual, openSync: vi.fn(actual.openSync) }; });
+vi.mock('node:fs', async original => { const actual = await original<typeof import('node:fs')>(); return { ...actual, openSync: vi.fn(actual.openSync),open:vi.fn(actual.open) }; });
 vi.mock('node:fs/promises', async original => { const actual = await original<typeof import('node:fs/promises')>(); return { ...actual, open: vi.fn(actual.open) }; });
 
 describe('R4 compatibility: existing explicit artifactEvidence switch does not disable plan/empty rules', () => {
@@ -69,7 +71,7 @@ describe('R4 compatibility: existing explicit artifactEvidence switch does not d
       }) }); fixtures.push(f);
     path = join(f.root, 'saved.pdf'); syncFs.writeFileSync(path, '%PDF-1.7');
     const taskId = await f.start(); await bounded(f.host.drain());
-    const opens = [...vi.mocked(syncFs.openSync).mock.calls, ...vi.mocked(asyncFs.open).mock.calls].filter(args => String(args[0]) === path);
+    const opens = [...vi.mocked(syncFs.openSync).mock.calls,...vi.mocked(syncFs.open).mock.calls,...vi.mocked(asyncFs.open).mock.calls].filter(args => [path,syncFs.realpathSync(path)].includes(String(args[0])));
     expect(opens).toHaveLength(enabled ? 1 : 0);
     expect((await f.host.inspectTask(taskId))?.status).toBe('completed');
   });

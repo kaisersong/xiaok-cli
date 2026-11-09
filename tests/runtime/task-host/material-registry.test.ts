@@ -1,10 +1,16 @@
 import { createHash } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendFileSync, closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it,vi } from 'vitest';
+import { appendFileSync, closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync,rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
+const importFrame=vi.hoisted(()=>({afterStat:undefined as undefined|((path:unknown)=>void),afterLstat:undefined as undefined|(()=>void),afterIndexCommit:undefined as undefined|(()=>void)}));
+vi.mock('../../../src/utils/atomic-file.js',async load=>{const actual=await load<typeof import('../../../src/utils/atomic-file.js')>();return{...actual,writeFileAtomicallySync:(...args:Parameters<typeof actual.writeFileAtomicallySync>)=>{const result=actual.writeFileAtomicallySync(...args);if(String(args[0]).endsWith('materials-index.json'))importFrame.afterIndexCommit?.();return result;}};});
+vi.mock('node:fs/promises',async load=>{
+  const actual=await load<typeof import('node:fs/promises')>();
+  return {...actual,lstat:async(...args:unknown[])=>{const result=await Reflect.apply(actual.lstat,undefined,args);importFrame.afterLstat?.();return result;},stat:async(...args:unknown[])=>{const result=await Reflect.apply(actual.stat,undefined,args);importFrame.afterStat?.(args[0]);return result;}};
+});
 
 describe('MaterialRegistry', () => {
   let rootDir: string;
@@ -20,7 +26,43 @@ describe('MaterialRegistry', () => {
   });
 
   afterEach(() => {
+    importFrame.afterStat=undefined;importFrame.afterLstat=undefined;importFrame.afterIndexCommit=undefined;
     rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('returns the actual durable import receipt after its index commit even if the next effect is revoked',async()=>{
+    const source=join(sourceDir,'source.md');writeFileSync(source,'# Actual import');const registry=new MaterialRegistry({workspaceRoot,maxBytes:1024});let allowed=true;
+    const sentinel=Error('next_effect_after_import_revoked');const guard=()=>{if(!allowed)throw sentinel;};
+    importFrame.afterIndexCommit=()=>{queueMicrotask(()=>{allowed=false;});};
+    try{
+      const record=await registry.importMaterial({taskId:'committed-import',sourcePath:source,role:'customer_material',roleSource:'user'},guard);
+      expect(allowed).toBe(false);expect(registry.get(record.materialId)).toEqual(record);
+      expect(JSON.parse(readFileSync(join(workspaceRoot,'materials-index.json'),'utf8')).records).toContainEqual(record);
+      await expect(registry.updateMaterialExtraction(record.materialId,{parseStatus:'parsed'},'# next',guard)).rejects.toBe(sentinel);
+    }finally{importFrame.afterIndexCommit=undefined;await registry.sealAndDrainInstanceMutations();}
+  });
+
+  it('checks the original cache writer after path validation before extracted text or index publication',async()=>{
+    const source=join(sourceDir,'source.md');writeFileSync(source,'# Source');const registry=new MaterialRegistry({workspaceRoot,maxBytes:1024});
+    const record=await registry.importMaterial({taskId:'cache-guard',sourcePath:source,role:'customer_material',roleSource:'user'});
+    let allowed=true,observed=false;const sentinel=Error('original_cache_writer_revoked');
+    importFrame.afterLstat=()=>{observed=true;allowed=false;};
+    try{
+      await expect(Reflect.apply(registry.updateMaterialExtraction,registry,[record.materialId,{parseStatus:'parsed',extractorVersion:3},'# Must not commit',()=>{if(!allowed)throw sentinel;}])).rejects.toBe(sentinel);
+      expect(observed).toBe(true);expect(registry.get(record.materialId)?.parseStatus).not.toBe('parsed');
+      expect(readdirSync(join(workspaceRoot,'cache-guard','materials'))).not.toContain(`${record.materialId}.extracted.txt`);
+    }finally{importFrame.afterLstat=undefined;await registry.sealAndDrainInstanceMutations();}
+  });
+
+  it('rechecks the private import guard after the actual source stat before task directories or copied bytes',async()=>{
+    const sourcePath=join(sourceDir,'source.md');writeFileSync(sourcePath,'# Actual source');
+    const registry=new MaterialRegistry({workspaceRoot,maxBytes:1024});let allowed=true;const sentinel=Error('original_project_import_revoked');
+    let observedStat=false;importFrame.afterStat=path=>{expect(realpathSync(String(path))).toBe(realpathSync(sourcePath));observedStat=true;allowed=false;};
+    let failure:unknown;
+    try{
+      try{await Reflect.apply(registry.importMaterial,registry,[{taskId:'task_revoked',sourcePath,role:'customer_material',roleSource:'user'},()=>{if(!allowed)throw sentinel;}]);}catch(error){failure=error;}
+      expect(observedStat).toBe(true);expect(existsSync(join(workspaceRoot,'task_revoked'))).toBe(false);expect(registry.list('task_revoked')).toEqual([]);expect(failure).toBe(sentinel);
+    }finally{await registry.sealAndDrainInstanceMutations();}
   });
 
   it('imports a supported file into the task workspace and exposes only safe view fields', async () => {

@@ -263,7 +263,7 @@ describe('chat CLI smoke', () => {
 
       const firstRun = await run('1');
       expect(JSON.parse(firstRun.stdout)).toMatchObject({ text: 'PONG' });
-      const registryPath = join(homeDir, '.xiaok', 'profile-sources', 'registry.json');
+      const registryPath = join(configDir, 'profile-sources', 'registry.json');
       const canonicalSessionRoot = realpathSync(sessionRoot);
       const firstRegistry = JSON.parse(readFileSync(registryPath, 'utf8')) as { generation: string; sources: Array<{ sourceId: string; directory: { canonicalPath: string; device: string; inode: string } }> };
       const firstSource = firstRegistry.sources.find(source => source.directory.canonicalPath === canonicalSessionRoot)!;

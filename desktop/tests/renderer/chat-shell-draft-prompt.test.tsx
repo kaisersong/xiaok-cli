@@ -3,9 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
-  mockCreateTask: vi.fn(),
-  mockCreateTaskWithFiles: vi.fn(),
+const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion } = vi.hoisted(() => ({
+  mockSubmitUserTask: vi.fn(),
+  mockAnswerQuestion: vi.fn(),
   mockGetThread: vi.fn(),
   mockRecoverTask: vi.fn(),
   mockSubscribeTask: vi.fn(() => () => {}),
@@ -15,9 +15,8 @@ const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask,
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
-    getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })),
-    createTask: mockCreateTask,
-    createTaskWithFiles: mockCreateTaskWithFiles,
+    submitUserTask: mockSubmitUserTask,
+    answerQuestion: mockAnswerQuestion,
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
     getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
@@ -34,6 +33,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
   ChatView: ({
     prompt,
     queuedText,
+    currentQuestion,
     status,
     onQueue,
     onSubmit,
@@ -42,9 +42,11 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     result,
     streamingText,
     onToggleCanvas,
+    onAnswer,
     historyContent,
   }: {
     prompt: string;
+    currentQuestion?: {questionId:string}|null;
     queuedText?: string | null;
     status?: string;
     onQueue?: (text: string) => void;
@@ -60,12 +62,14 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
     streamingText?: string;
     onToggleCanvas?: () => void;
+    onAnswer?: (choiceId:string)=>void;
     historyContent?: ReactNode;
   }) => (
     <div>
       {historyContent}
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
+      <div data-testid="current-question">{currentQuestion?.questionId??''}</div>
       <div data-testid="queued-text">{queuedText ?? ''}</div>
       <div data-testid="chat-messages">{messages?.map((message) => (
         <div key={message.id}>
@@ -93,6 +97,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
       <button type="button" onClick={() => onSubmit?.('带附件提交', [{ filePath: '/tmp/context.md', name: 'context.md' }])}>submit-files</button>
       <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
       <button type="button" onClick={onToggleCanvas}>open-canvas</button>
+      <button type="button" onClick={()=>onAnswer?.('approve')}>answer-current</button>
     </div>
   ),
 }));
@@ -171,7 +176,7 @@ describe('ChatShell draft prompt navigation state', () => {
     await screen.findByText('history prompt task_0');
     expect(mockRecoverTask).toHaveBeenCalledTimes(45);
     expect(screen.queryByRole('button', { name: /加载更早记录/ })).toBeNull();
-    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
   });
   it('keeps a failed older page retryable without duplicating the successful records', async () => {
     setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
@@ -259,7 +264,7 @@ describe('ChatShell draft prompt navigation state', () => {
     </LocaleProvider></MemoryRouter>);
     expect(await screen.findByText(/唯一同标题的成功历史记录（task_old）/)).toBeInTheDocument();
     expect(await screen.findByText(/真实项目已经创建 proj-original/)).toBeInTheDocument();
-    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
   });
   it('shows an explicit notice instead of silently opening an empty missing history', async () => {
     mockGetThread.mockResolvedValue({ id: 'thread-missing', title: '历史项目会话', status: 'idle',
@@ -269,7 +274,7 @@ describe('ChatShell draft prompt navigation state', () => {
       <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
     </LocaleProvider></MemoryRouter>);
     expect(await screen.findByText(/历史任务记录暂时无法读取/)).toBeInTheDocument();
-    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
   });
 
   it('hides the Goal task panel while Artifact canvas owns the right side and restores it after close', async () => {
@@ -530,7 +535,7 @@ describe('ChatShell draft prompt navigation state', () => {
       subscribedHandler = handler as typeof subscribedHandler;
       return () => {};
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-second' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-second' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
 
     render(
@@ -559,11 +564,11 @@ describe('ChatShell draft prompt navigation state', () => {
     });
 
     await waitFor(() => {
-      expect(mockCreateTask).toHaveBeenCalledWith({
+      expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',
         prompt: '第二条输入',
         materials: [],
         context: { threadId: 'thread-queued', taskIds: ['task-running'] },
-      });
+      }});
     });
     expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-queued', 'task-second');
   });
@@ -595,7 +600,7 @@ describe('ChatShell draft prompt navigation state', () => {
         updatedAt: 1,
       },
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-new' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-new' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
 
     render(
@@ -615,11 +620,11 @@ describe('ChatShell draft prompt navigation state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
 
     await waitFor(() => {
-      expect(mockCreateTask).toHaveBeenCalledWith({
+      expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',
         prompt: '触发提交',
         materials: [],
         context: { threadId: 'thread-existing', taskIds: ['task-old'] },
-      });
+      }});
     });
     expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-existing', 'task-new');
   });
@@ -651,7 +656,7 @@ describe('ChatShell draft prompt navigation state', () => {
         updatedAt: 1,
       },
     });
-    mockCreateTaskWithFiles.mockResolvedValue({ taskId: 'task-file-new' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-file-new' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
 
     render(
@@ -671,11 +676,11 @@ describe('ChatShell draft prompt navigation state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'submit-files' }));
 
     await waitFor(() => {
-      expect(mockCreateTaskWithFiles).toHaveBeenCalledWith({
+      expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'files',
         prompt: '带附件提交',
         filePaths: ['/tmp/context.md'],
         context: { threadId: 'thread-files', taskIds: ['task-old'] },
-      });
+      }});
     });
     expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('thread-files', 'task-file-new');
   });
@@ -725,7 +730,7 @@ describe('ChatShell draft prompt navigation state', () => {
         updatedAt: 1,
       },
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-new' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-new' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
 
     render(
@@ -745,11 +750,11 @@ describe('ChatShell draft prompt navigation state', () => {
     fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
 
     await waitFor(() => {
-      expect(mockCreateTask).toHaveBeenCalledWith({
+      expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',
         prompt: '触发提交',
         materials: [],
         context: { threadId: 'thread-artifact-scope', taskIds: ['task-old'] },
-      });
+      }});
     });
     expect(screen.getByTestId('chat-status')).toHaveTextContent('running');
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('old-turn.md');
@@ -794,7 +799,7 @@ describe('ChatShell draft prompt navigation state', () => {
         updatedAt: 1,
       },
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-new' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-new' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
     mockSubscribeTask.mockImplementation((_taskId, handler) => {
       subscribedHandler = handler as typeof subscribedHandler;
@@ -909,7 +914,7 @@ describe('ChatShell draft prompt navigation state', () => {
       currentTaskId: null,
       taskIds: [],
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-a2ui-live' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-a2ui-live' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
     mockUpdateThreadTitle.mockResolvedValue(undefined);
     mockSubscribeTask.mockImplementation((_taskId, handler) => {
@@ -1046,7 +1051,7 @@ describe('ChatShell draft prompt navigation state', () => {
       taskIds: [],
     });
     mockUpdateThreadTitle.mockResolvedValue(undefined);
-    mockCreateTask.mockRejectedValue(new Error('Error: 401 {"error":{"type":"authentication_error","message":"The API Key appears to be invalid or may have expired. Please verify your credentials and try again."},"type":"error"}'));
+    mockSubmitUserTask.mockRejectedValue(new Error('Error: 401 {"error":{"type":"authentication_error","message":"The API Key appears to be invalid or may have expired. Please verify your credentials and try again."},"type":"error"}'));
 
     render(
       <MemoryRouter initialEntries={['/t/thread-auth-error']}>
@@ -1139,7 +1144,7 @@ describe('ChatShell draft prompt navigation state', () => {
       prompt: '检查示例状态', materials: [], createdAt: 1, updatedAt: 2,
       events: [{ type: 'assistant_delta', eventId: 'prefix', delta: '保留的执行前缀。' },
         { type: 'error', message: 'MODEL_TEXT_REPETITION_DETECTED' }, { type: 'task_terminal', status: 'failed' }] } });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-repeat' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-repeat' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
     mockSubscribeTask.mockImplementation((_id, callback) => { handler = callback; return () => {}; });
     render(<MemoryRouter initialEntries={['/t/thread-repeat']}><LocaleProvider><Routes>
@@ -1177,7 +1182,7 @@ describe('ChatShell draft prompt navigation state', () => {
       currentTaskId: null,
       taskIds: [],
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-live-failed' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-live-failed' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
     mockSubscribeTask.mockImplementation((_taskId, handler) => {
       subscribedHandler = handler as typeof subscribedHandler;
@@ -1235,7 +1240,7 @@ describe('ChatShell draft prompt navigation state', () => {
       createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox', pinnedAt: null,
       currentTaskId: null, taskIds: [],
     });
-    mockCreateTask.mockResolvedValue({ taskId: 'task-stream-coalesce' });
+    mockSubmitUserTask.mockResolvedValue({ taskId: 'task-stream-coalesce' });
     mockUpdateThreadTaskId.mockResolvedValue(undefined);
     mockSubscribeTask.mockImplementation((_taskId, handler) => {
       subscribedHandler = handler as typeof subscribedHandler;
@@ -1275,16 +1280,57 @@ describe('ChatShell draft prompt navigation state', () => {
 });
 
 it('uses the explicit assistant thread on /assistant and applies draft requests without recovering again or starting execution', async () => {
- mockCreateTask.mockResolvedValue({taskId:'task-assistant-first'});mockUpdateThreadTaskId.mockResolvedValue(undefined);
+ mockSubmitUserTask.mockResolvedValue({taskId:'task-assistant-first'});mockUpdateThreadTaskId.mockResolvedValue(undefined);
  let next!:(event:unknown)=>void;mockSubscribeTask.mockImplementation((_id,handler)=>{next=handler;return ()=>{};});
  mockGetThread.mockResolvedValue({id:'assistant-dedicated',title:'Assistant',status:'idle',mode:'work',createdAt:1,updatedAt:1,currentTaskId:null,taskIds:[]});
  const ui=(draftRequest?:{id:number;text:string})=><MemoryRouter initialEntries={['/assistant']}><LocaleProvider><ChatShell threadId="assistant-dedicated" draftRequest={draftRequest} /></LocaleProvider></MemoryRouter>;
  const view=render(ui()); await screen.findByLabelText('chat-input'); expect(mockGetThread).toHaveBeenCalledWith('assistant-dedicated');
  const reads=mockGetThread.mock.calls.length;view.rerender(ui({id:1,text:'请继续跟进日程'}));await waitFor(()=>expect(screen.getByLabelText('chat-input')).toHaveValue('请继续跟进日程'));
- expect(mockGetThread).toHaveBeenCalledTimes(reads);expect(mockCreateTask).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'submit-now'}));await waitFor(()=>expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated'}})));
+ expect(mockGetThread).toHaveBeenCalledTimes(reads);expect(mockSubmitUserTask).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'submit-now'}));await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({action:'submit_new',gestureId:expect.any(String),input:expect.objectContaining({context:{threadId:'assistant-dedicated'}})})));
  expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('assistant-dedicated','task-assistant-first');
  await act(async()=>next({type:'result',result:{summary:'第一条回复',artifacts:[]}}));
- mockCreateTask.mockResolvedValue({taskId:'task-assistant-followup'});fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
- await waitFor(()=>expect(mockCreateTask).toHaveBeenLastCalledWith(expect.objectContaining({context:{threadId:'assistant-dedicated',taskIds:['task-assistant-first']}})));
+ mockSubmitUserTask.mockResolvedValue({taskId:'task-assistant-followup'});fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+ await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenLastCalledWith(expect.objectContaining({action:'submit_new',gestureId:expect.any(String),input:expect.objectContaining({context:{threadId:'assistant-dedicated',taskIds:['task-assistant-first']}})})));
+});
+
+const nativeWaitingQuestion=(questionId:string)=>({type:'needs_user',question:{questionId,taskId:'task_codex_wait',kind:'assumption_approval',prompt:questionId,choices:[{id:'approve',label:'Allow'},{id:'deny',label:'Deny'}],owner:{schemaVersion:1,kind:'codex_native_approval',taskSessionId:'native-wait-session',nativeIncarnation:'11111111-1111-4111-8111-111111111111',nativeSessionId:'22222222-2222-4222-8222-222222222222',nativeThreadId:'native-thread',nativeTurnId:'native-turn',nativeTurnGeneration:1,approvalToken:questionId,requestDigest:'a'.repeat(64)}}});
+function mountNativeWaiting(events:unknown[]=[]){
+ mockGetThread.mockResolvedValue({id:'thread-native-wait',title:'Native wait',status:'running',mode:'work',createdAt:1,updatedAt:2,currentTaskId:'task_codex_wait',taskIds:['task_codex_wait']});
+ mockRecoverTask.mockResolvedValue({snapshot:{taskId:'task_codex_wait',sessionId:'native-wait-session',status:'running',prompt:'Original native task',materials:[],events,createdAt:1,updatedAt:2}});
+ let handler:((event:any)=>void)|undefined;mockSubscribeTask.mockImplementation((_id,next)=>{handler=next;return()=>{};});
+ const view=render(<MemoryRouter initialEntries={['/t/thread-native-wait']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+ return{view,handler:()=>handler};
+}
+it.each(['A','B'])('retains actual Native waiting state and the remaining fallback when %s resolves first',async first=>{
+ const f=mountNativeWaiting();await waitFor(()=>expect(f.handler()).toBeTypeOf('function'));
+ await act(async()=>{f.handler()!(nativeWaitingQuestion('A'));f.handler()!(nativeWaitingQuestion('B'));});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');
+ const remaining=first==='A'?'B':'A';await act(async()=>{f.handler()!({type:'question_resolved',questionId:first});});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');expect(screen.getByTestId('current-question')).toHaveTextContent(remaining);
+ await act(async()=>{f.handler()!({type:'progress',message:'Other independent progress',eventId:'still-pending'});f.handler()!({type:'assistant_delta',delta:'Partial message',eventId:'partial'});});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');
+ await act(async()=>{f.handler()!({type:'question_resolved',questionId:remaining});});expect(screen.getByTestId('chat-status')).toHaveTextContent('running');expect(screen.getByTestId('current-question')).toBeEmptyDOMElement();
+ await act(async()=>{f.handler()!({type:'task_terminal',status:'completed'});f.handler()!(nativeWaitingQuestion('late'));});expect(screen.getByTestId('chat-status')).toHaveTextContent('completed');expect(screen.getByTestId('current-question')).toBeEmptyDOMElement();
+});
+it('rebuilds pending Native questions from the latest live snapshot despite its coarse running status',async()=>{
+ const f=mountNativeWaiting([nativeWaitingQuestion('A'),nativeWaitingQuestion('B'),{type:'question_resolved',questionId:'B'}]);await waitFor(()=>expect(f.handler()).toBeTypeOf('function'));
+ expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');expect(screen.getByTestId('current-question')).toHaveTextContent('A');await act(async()=>{f.handler()!({type:'question_resolved',questionId:'A'});});expect(screen.getByTestId('chat-status')).toHaveTextContent('running');expect(screen.getByTestId('current-question')).toBeEmptyDOMElement();
+});
+
+it('an old Native answer ACK cannot clear the different question retained by later actual stream events',async()=>{
+ const f=mountNativeWaiting();await waitFor(()=>expect(f.handler()).toBeTypeOf('function'));let resolve!:()=>void;mockAnswerQuestion.mockReturnValue(new Promise<void>(yes=>{resolve=yes;}));
+ await act(async()=>{f.handler()!(nativeWaitingQuestion('A'));});fireEvent.click(screen.getByText('answer-current'));expect(mockAnswerQuestion).toHaveBeenCalledWith({taskId:'task_codex_wait',answer:{questionId:'A',type:'choice',choiceId:'approve'}});
+ await act(async()=>{f.handler()!({type:'question_resolved',questionId:'A'});f.handler()!(nativeWaitingQuestion('B'));});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');
+ await act(async()=>{resolve();});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');expect(screen.getByTestId('current-question')).toHaveTextContent('B');
+});
+it('a delayed Native answer ACK cannot cross a newer original Native turn namespace',async()=>{
+ const f=mountNativeWaiting();await waitFor(()=>expect(f.handler()).toBeTypeOf('function'));let resolve!:()=>void;mockAnswerQuestion.mockReturnValue(new Promise<void>(yes=>{resolve=yes;}));await act(async()=>{f.handler()!(nativeWaitingQuestion('A'));});fireEvent.click(screen.getByText('answer-current'));
+ const next=nativeWaitingQuestion('C');next.question.owner.nativeTurnId='new-native-turn';next.question.owner.nativeTurnGeneration=2;await act(async()=>{f.handler()!(next);f.handler()!({type:'question_resolved',questionId:'not-this-source-token'});});await act(async()=>{resolve();});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');expect(screen.getByTestId('current-question')).toHaveTextContent('C');
+ await act(async()=>{f.handler()!({type:'question_resolved',questionId:'C'});});expect(screen.getByTestId('chat-status')).toHaveTextContent('running');expect(screen.getByTestId('current-question')).toBeEmptyDOMElement();
+});
+it('a retained terminal snapshot never revives its old Native question events',async()=>{
+ mockGetThread.mockResolvedValue({id:'thread-native-terminal',title:'Done native',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:'task_codex_wait',taskIds:['task_codex_wait']});mockRecoverTask.mockResolvedValue({snapshot:{taskId:'task_codex_wait',sessionId:'native-wait-session',status:'completed',prompt:'Original task',materials:[],events:[nativeWaitingQuestion('A')],createdAt:1,updatedAt:2}});
+ render(<MemoryRouter initialEntries={['/t/thread-native-terminal']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);await screen.findByText('Original task');expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');expect(screen.getByTestId('current-question')).toBeEmptyDOMElement();
+});
+it('an older ordinary answer ACK preserves a Native question received on the same source while awaiting that ACK',async()=>{
+ const f=mountNativeWaiting();await waitFor(()=>expect(f.handler()).toBeTypeOf('function'));let resolve!:()=>void;mockAnswerQuestion.mockReturnValue(new Promise<void>(yes=>{resolve=yes;}));const {owner:_,...ordinary}=nativeWaitingQuestion('ordinary-A').question;
+ await act(async()=>{f.handler()!({type:'needs_user',question:ordinary});});fireEvent.click(screen.getByText('answer-current'));await act(async()=>{f.handler()!(nativeWaitingQuestion('Native-B'));});await act(async()=>{resolve();});expect(screen.getByTestId('chat-status')).toHaveTextContent('waiting_user');expect(screen.getByTestId('current-question')).toHaveTextContent('Native-B');
 });

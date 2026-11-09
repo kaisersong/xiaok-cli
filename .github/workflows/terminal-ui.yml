@@ -141,6 +141,8 @@ jobs:
           node -e "const j=require('nodejieba');j.load();const o=j.cut('南京市长江大桥').join(' ');console.log(o);if(o!=='南京市 长江大桥'){console.error('nodejieba cut mismatch='+o);process.exit(1)}"
       - run: npm run build:release
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: node --test tests/package/build-info.test.mjs
       - name: Test image layout, questions and actual chat entry
         run: >

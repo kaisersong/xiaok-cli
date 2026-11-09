@@ -3,8 +3,14 @@ import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
 import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
 import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
 import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
+import type {DefaultDispatchInput,DefaultDispatchResult} from '../shared/default-dispatch-ipc-contract.js';
+import type {NativeActivityQuestionForm,NativeActivityAnswer} from '../shared/native-activity-question-contract.js';
+import type {WriterControlResult} from '../shared/kswarm-writer-control-ipc-contract.js';
+import type {RoomConversionCaptureInput,RoomConversionCaptureOutput,RoomConversionCaptureReference,RoomConversionObserveInput} from '../shared/room-conversion-input-contract.js';
+import type {UserTaskSubmissionInput,UserTaskSubmissionOutput} from '../shared/user-task-submission-contract.js';
 import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
+import type { ProjectPlanningInput, ProjectPlanningOutput } from '../shared/project-planning-ipc-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
 import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
@@ -42,7 +48,7 @@ import type {LoopPublicationActionDto,LoopPublicationActionResultDto,LoopPublica
 import type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
 export type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
 import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
-import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
+import type { ConversationActivity, WorkWatch, ConversationWorkView, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
@@ -122,6 +128,9 @@ export const PRELOAD_API_KEYS = [
   'stopObservationTask',
   'revokeObservationTask',
   'getObservationTaskStatus',
+  'submitUserTask',
+  'captureRoomConversion',
+  'observeRoomConversion',
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
@@ -131,6 +140,9 @@ export const PRELOAD_API_KEYS = [
   'subscribeConversationActivityOverview',
   'subscribeConversationActivities',
   'getWorkActivity',
+  'dismissWorkAttention',
+  'getNativeActivityQuestions',
+  'answerNativeActivityQuestion',
   'getMcpTaskInputs',
   'answerMcpTaskInput',
   'cancelMcpWork',
@@ -246,6 +258,10 @@ export const PRELOAD_API_KEYS = [
   'saveKswarmConfig',
   'getSkillStats',
   'getServiceStatus',
+  'inspectWriterConfiguration',
+  'prepareWriterConfiguration',
+  'migrateWriterConfiguration',
+  'captureDefaultDispatchOperation',
   'restartRelatedService',
   'kswarmGetStatus',
   'kswarmStart',
@@ -428,6 +444,7 @@ export const KSWARM_PROXY_KEYS = [
 ] as const;
 
 export const EXTRA_KEYS = [
+  'dsh',
   'showSaveDialog',
   'saveFile',
   'listPrinciples',
@@ -494,12 +511,20 @@ export const LOCAL_CONSTANT_KEYS = [
   'systemUsername',
 ] as const;
 
+/** Nested semantic APIs have their own method/channel contract. */
+export const NAMESPACE_API_KEYS = ['dsh'] as const;
+export const DSH_CHANNEL_BY_METHOD = {
+  getState:'desktop:dsh:getState',setMode:'desktop:dsh:setMode',configureSetup:'desktop:dsh:configureSetup',
+  connect:'desktop:dsh:connect',disconnect:'desktop:dsh:disconnect',reconcile:'desktop:dsh:reconcile',configureBudget:'desktop:dsh:configureBudget',publishMandate:'desktop:dsh:publishMandate',publishEgressPolicy:'desktop:dsh:publishEgressPolicy',
+} as const;
+
 // `INVOKE_API_KEYS` are the strict subset of preload keys that map 1:1 to a
 // `ipcMain.handle()` channel and use `ipcRenderer.invoke()` from renderer.
 // Computed at module load by removing event/local categories from the full
 // surface so it remains in sync with the canonical lists above.
 export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
   (key) => !EVENT_SUBSCRIPTION_KEYS.includes(key as typeof EVENT_SUBSCRIPTION_KEYS[number])
+    && !NAMESPACE_API_KEYS.includes(key as typeof NAMESPACE_API_KEYS[number])
     && !LOCAL_CONSTANT_KEYS.includes(key as typeof LOCAL_CONSTANT_KEYS[number]),
 );
 
@@ -511,6 +536,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getConversationActivityUnread: 'desktop:activity:unread',
   markConversationActivitiesRead: 'desktop:activity:read',
   getWorkActivity: 'desktop:activity:work',
+  dismissWorkAttention: 'desktop:activity:attention:dismiss',
+  getNativeActivityQuestions: 'desktop:activity:nativeQuestions',
+  answerNativeActivityQuestion: 'desktop:activity:nativeAnswer',
   getMcpTaskInputs: 'desktop:activity:mcpInputs',
   answerMcpTaskInput: 'desktop:activity:mcpAnswer',
   cancelMcpWork: 'desktop:activity:mcpCancel',
@@ -565,6 +593,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   stopObservationTask: 'desktop:stopObservationTask',
   revokeObservationTask: 'desktop:revokeObservationTask',
   getObservationTaskStatus: 'desktop:getObservationTaskStatus',
+  submitUserTask: 'desktop:submitUserTask',
+  captureRoomConversion:'desktop:roomConversion:capture',
+  observeRoomConversion:'desktop:roomConversion:observe',
   createTask: 'desktop:createTask',
   createTaskWithFiles: 'desktop:createTaskWithFiles',
   getGoal: 'desktop:goal:get',
@@ -646,6 +677,10 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveKswarmConfig: 'desktop:saveKswarmConfig',
   getSkillStats: 'desktop:getSkillStats',
   getServiceStatus: 'desktop:services:getStatus',
+  inspectWriterConfiguration:'desktop:kswarm:writer:inspect',
+  prepareWriterConfiguration:'desktop:kswarm:writer:prepare',
+  migrateWriterConfiguration:'desktop:kswarm:writer:migrate',
+  captureDefaultDispatchOperation:'desktop:kswarm:default-dispatch:capture',
   restartRelatedService: 'desktop:services:restart',
   kswarmGetStatus: 'desktop:kswarm:getStatus',
   kswarmStart: 'desktop:kswarm:start',
@@ -1256,6 +1291,7 @@ export interface DesktopGoalChangedEvent {
 }
 
 export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
+  dsh: import('../../src/shared/dsh-desktop.js').DshDesktopApi;
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
@@ -1285,6 +1321,9 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   stopObservationTask(taskId:string): Promise<{mode:string}>;
   revokeObservationTask(taskId:string): Promise<{mode:string}>;
   getObservationTaskStatus(taskId:string): Promise<{mode:string;semantic?:SemanticCompactionStatus;compound?:CompoundExecutionStatus}>;
+  submitUserTask(input:UserTaskSubmissionInput):Promise<UserTaskSubmissionOutput>;
+  captureRoomConversion(input:RoomConversionCaptureInput):Promise<RoomConversionCaptureOutput>;
+  observeRoomConversion(input:RoomConversionObserveInput):Promise<RoomConversionCaptureReference>;
   createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -1316,7 +1355,10 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   subscribeConversationActivityOverview(handler: (change: { threadId: string; watchId?: string }) => void): () => void;
   getConversationActivities(input: { threadId: string; afterLocalSeq?: number; limit?: number }): Promise<ConversationActivity[]>;
   subscribeConversationActivities(threadId: string, handler: (change: { threadId: string; watchId?: string }) => void): () => void;
-  getWorkActivity(watchId: string): Promise<{ watch: WorkWatch; projection: WorkProjection }>;
+  getWorkActivity(watchId: string): Promise<ConversationWorkView>;
+  dismissWorkAttention(input: { watchId: string; expectedProjectionVersion: number; expectedPresentationIncarnation: string }): Promise<ConversationWorkView>;
+  getNativeActivityQuestions(watchId:string):Promise<NativeActivityQuestionForm[]>;
+  answerNativeActivityQuestion(input:{watchId:string}&NativeActivityAnswer):Promise<void>;
   getMcpTaskInputs(watchId: string): Promise<McpInputForm[]>;
   answerMcpTaskInput(input: { watchId: string; inputId: string; expectedDigest: string; action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }): Promise<void>;
   cancelMcpWork(watchId: string): Promise<{ requested: true }>;
@@ -1393,13 +1435,17 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   saveKswarmConfig(input: { maxConcurrentTasks: number }): Promise<{ maxConcurrentTasks: number }>;
   getSkillStats(): Promise<DesktopSkillStats[]>;
   getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
+  inspectWriterConfiguration():Promise<WriterControlResult>;
+  prepareWriterConfiguration():Promise<WriterControlResult>;
+  migrateWriterConfiguration():Promise<WriterControlResult>;
+  captureDefaultDispatchOperation(input:DefaultDispatchInput):Promise<DefaultDispatchResult>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   kswarmGetStatus(): Promise<KswarmReadonlyStatus>;
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
-  kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  kswarmStartProjectPlanning(input: ProjectPlanningInput): Promise<ProjectPlanningOutput>;
   getPrivateMemorySettings(legacy?:Record<string,unknown>):Promise<Record<string,unknown>>;
   savePrivateMemorySettings(input:Record<string,unknown>):Promise<Record<string,unknown>>;
   listCredentialInputs():Promise<import('../shared/credential-input-contract.js').CredentialRequest[]>;
@@ -1669,6 +1715,17 @@ interface IpcRendererLike {
 
 export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = ''): FullDesktopApi {
   return {
+    dsh: {
+      getState: () => ipcRenderer.invoke('desktop:dsh:getState') as ReturnType<DesktopApi['dsh']['getState']>,
+      setMode: input => ipcRenderer.invoke('desktop:dsh:setMode', input) as ReturnType<DesktopApi['dsh']['setMode']>,
+      configureSetup: input => ipcRenderer.invoke('desktop:dsh:configureSetup', input) as ReturnType<DesktopApi['dsh']['configureSetup']>,
+      connect: input => ipcRenderer.invoke('desktop:dsh:connect', input) as ReturnType<DesktopApi['dsh']['connect']>,
+      disconnect: input => ipcRenderer.invoke('desktop:dsh:disconnect', input) as ReturnType<DesktopApi['dsh']['disconnect']>,
+      reconcile: input => ipcRenderer.invoke('desktop:dsh:reconcile', input) as ReturnType<DesktopApi['dsh']['reconcile']>,
+      configureBudget: input => ipcRenderer.invoke('desktop:dsh:configureBudget', input) as ReturnType<DesktopApi['dsh']['configureBudget']>,
+      publishMandate: input => ipcRenderer.invoke('desktop:dsh:publishMandate', input) as ReturnType<DesktopApi['dsh']['publishMandate']>,
+      publishEgressPolicy: input => ipcRenderer.invoke('desktop:dsh:publishEgressPolicy', input) as ReturnType<DesktopApi['dsh']['publishEgressPolicy']>,
+    },
     ...createMultiAgentPreload(ipcRenderer),
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
@@ -1706,6 +1763,9 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     stopObservationTask: taskId => ipcRenderer.invoke('desktop:stopObservationTask',{taskId}) as ReturnType<DesktopApi['stopObservationTask']>,
     revokeObservationTask: taskId => ipcRenderer.invoke('desktop:revokeObservationTask',{taskId}) as ReturnType<DesktopApi['revokeObservationTask']>,
     getObservationTaskStatus: taskId => ipcRenderer.invoke('desktop:getObservationTaskStatus',{taskId}) as ReturnType<DesktopApi['getObservationTaskStatus']>,
+    submitUserTask: input => ipcRenderer.invoke('desktop:submitUserTask',input) as ReturnType<DesktopApi['submitUserTask']>,
+    captureRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:capture',input) as ReturnType<DesktopApi['captureRoomConversion']>,
+    observeRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:observe',input) as ReturnType<DesktopApi['observeRoomConversion']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
     getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
@@ -1742,7 +1802,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       return () => { ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
     },
     getConversationActivities: input => ipcRenderer.invoke('desktop:activity:list', input) as Promise<ConversationActivity[]>,
-    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }) as Promise<{ watch: WorkWatch; projection: WorkProjection }>,
+    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }) as Promise<ConversationWorkView>,
+    dismissWorkAttention: input => ipcRenderer.invoke('desktop:activity:attention:dismiss', input) as Promise<ConversationWorkView>,
+    getNativeActivityQuestions: watchId => ipcRenderer.invoke('desktop:activity:nativeQuestions', {watchId}) as Promise<NativeActivityQuestionForm[]>,
+    answerNativeActivityQuestion: input => ipcRenderer.invoke('desktop:activity:nativeAnswer', input) as Promise<void>,
     getMcpTaskInputs: watchId => ipcRenderer.invoke('desktop:activity:mcpInputs', { watchId }) as Promise<McpInputForm[]>,
     answerMcpTaskInput: input => ipcRenderer.invoke('desktop:activity:mcpAnswer', input) as Promise<void>,
     cancelMcpWork: watchId => ipcRenderer.invoke('desktop:activity:mcpCancel', { watchId }) as Promise<{ requested: true }>,
@@ -1926,13 +1989,17 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     saveKswarmConfig: (input) => ipcRenderer.invoke('desktop:saveKswarmConfig', input) as Promise<{ maxConcurrentTasks: number }>,
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
     getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
+    inspectWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:inspect') as Promise<WriterControlResult>,
+    prepareWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:prepare') as Promise<WriterControlResult>,
+    migrateWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:migrate') as Promise<WriterControlResult>,
+    captureDefaultDispatchOperation:input=>ipcRenderer.invoke('desktop:kswarm:default-dispatch:capture',input) as Promise<DefaultDispatchResult>,
     restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
     kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KswarmReadonlyStatus>,
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
-    kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<ProjectPlanningOutput>,
     getPrivateMemorySettings:legacy=>ipcRenderer.invoke('desktop:credentialInput:memoryGet',legacy) as ReturnType<DesktopApi['getPrivateMemorySettings']>,
     savePrivateMemorySettings:input=>ipcRenderer.invoke('desktop:credentialInput:memorySave',input) as ReturnType<DesktopApi['savePrivateMemorySettings']>,
     listCredentialInputs:()=>ipcRenderer.invoke('desktop:credentialInput:list') as ReturnType<DesktopApi['listCredentialInputs']>,

@@ -1,0 +1,10 @@
+export * from './room-root-composition-entry.js';
+export {OpenAIAdapter} from '../../../src/ai/adapters/openai.js';
+export {readOptionalOriginalMainSdkBridge} from '../../../src/runtime/verification/original-main-sdk-bridge.js';
+export {buildOpenAIHarnessContext,resolveKimiHarnessFeatureFlags} from '../../../src/ai/providers/model-harness-profile.js';
+export {OpenAIResponsesAdapter} from '../../../src/ai/adapters/openai-responses.js';
+export {SystemOneAdapter} from '../../../src/ai/adapters/system-one.js';
+export {ClaudeAdapter} from '../../../src/ai/adapters/claude.js';
+export {APIError as OriginalOpenAiApiError} from 'openai/core/error';
+export {APIPromise as OriginalOpenAiApiPromise} from 'openai/core/api-promise';
+export {createStatelessOpenAIResponse,compactOpenAIResponsesContext} from '../../../src/ai/adapters/openai-responses-native.js';

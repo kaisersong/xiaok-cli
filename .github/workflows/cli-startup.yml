@@ -43,6 +43,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build:release
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Stage recorded MCP catalogs for compiled tests
         run: >
           node --input-type=module -e "import { cpSync } from 'node:fs'; import { join } from 'node:path'; cpSync(join('tests', 'fixtures'), join('.test-dist', 'tests', 'fixtures'), { recursive: true });"

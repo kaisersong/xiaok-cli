@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 import { mkdtemp, writeFile, mkdir, readFile, rm } from 'node:fs/promises';
@@ -5,8 +6,10 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { createRoomExternalDiscussionAdapter } from '../../electron/room-external-discussion-adapter.js';
+const probeFrame=vi.hoisted(()=>({afterRealpath:undefined as undefined|(()=>void)}));
+vi.mock('node:fs/promises',async load=>{const actual=await load<typeof import('node:fs/promises')>();return{...actual,realpath:async(...args:unknown[])=>{const result=await Reflect.apply(actual.realpath,undefined,args);probeFrame.afterRealpath?.();return result;}};});
 
-const roots:string[]=[];afterEach(async()=>{for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
+const roots:string[]=[];afterEach(async()=>{probeFrame.afterRealpath=undefined;for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
 describe('external discussion platform boundary', () => {
   it('rejects Windows before probing or spawning a configured external executable', async () => {
     const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
@@ -21,6 +24,25 @@ describe('external discussion platform boundary', () => {
   });
 });
 describe.skipIf(process.platform === 'win32')('owned external Room discussion adapter',()=>{
+  it('rechecks the synchronous guard after actual executable realpath before starting even the capability probe',async()=>{
+    const root=await mkdtemp(join(tmpdir(),'room-probe-fence-'));roots.push(root);const marker=join(root,'probe-started'),fixture=join(root,'probe.cjs');
+    await writeFile(fixture,`require('node:fs').writeFileSync(${JSON.stringify(marker)},'started');console.log(JSON.stringify({protocol:'room_discussion_v1',runtime:'xiaok',freshSession:true,toolsDisabled:true,mcpDisabled:true,hooksDisabled:true}));`);
+    const adapter=createRoomExternalDiscussionAdapter({profiles:{xiaok:{executable:process.execPath,argsPrefix:[fixture]}},temporaryRoot:root});
+    let allowed=true,observed=false;const sentinel=Error('original_room_probe_revoked');probeFrame.afterRealpath=()=>{observed=true;allowed=false;};let failure:unknown,result:unknown;
+    try{result=await Reflect.apply(adapter.probe,adapter,['xiaok',()=>{if(!allowed)throw sentinel;}]);}catch(error){failure=error;}
+    expect({observed,result,failure}).toMatchObject({observed:true});await expect(readFile(marker)).rejects.toMatchObject({code:'ENOENT'});expect(failure).toBe(sentinel);
+  });
+  it.each(['prepared_return','started_return'] as const)('refuses an original guard revoked at %s before delivering CLI input and waits for its real cleanup',async frame=>{
+    const root=await mkdtemp(join(tmpdir(),'room-process-fence-'));roots.push(root);const marker=join(root,'model-started'),fixture=join(root,'fixture.cjs');
+    await writeFile(fixture,`if(process.argv.includes('--probe'))console.log(JSON.stringify({protocol:'room_discussion_v1',runtime:'xiaok',freshSession:true,toolsDisabled:true,mcpDisabled:true,hooksDisabled:true}));else{require('node:fs').writeFileSync(${JSON.stringify(marker)},'bad');console.log(JSON.stringify({text:'must not start'}));}`);
+    const adapter=createRoomExternalDiscussionAdapter({profiles:{xiaok:{executable:process.execPath,argsPrefix:[fixture]}},temporaryRoot:root});let allowed=true;const sentinel=Error('original_room_process_revoked');
+    let started: {pid:number;processGroupId:number}|undefined,exited=false,notSpawned=false,failure:unknown;
+    const input={operationId:'original-fence',runtime:'xiaok' as const,prompt:'not delivered',signal:new AbortController().signal,beforeEffects:()=>{if(!allowed)throw sentinel;},onPrepared:async()=>{if(frame==='prepared_return')allowed=false;},onStarted:async(record:any)=>{started=record;if(frame==='started_return')allowed=false;},onExited:async()=>{exited=true;},onNotSpawned:async()=>{notSpawned=true;}};
+    try{await adapter.execute(input);}catch(error){failure=error;}
+    await expect(readFile(marker)).rejects.toMatchObject({code:'ENOENT'});expect(failure).toBe(sentinel);
+    if(frame==='prepared_return'){expect(started).toBeUndefined();expect(notSpawned).toBe(true);expect(exited).toBe(false);}
+    else{expect(started).toBeDefined();expect(exited).toBe(true);expect(()=>process.kill(-started!.processGroupId,0)).toThrow();}
+  });
   it('runs the real dedicated xiaok CLI with zero tools, no previous context and a durable input gate',async()=>{
     const root=await mkdtemp(join(tmpdir(),'room-external-cli-'));roots.push(root);const configRoot=join(root,'config');await mkdir(configRoot);
     const requests:any[]=[];

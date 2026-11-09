@@ -25,6 +25,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test:sandbox:run -- .test-dist/tests/platform/sandbox/native-search-scope.test.js .test-dist/tests/platform/sandbox/tool-wrappers.test.js .test-dist/tests/ai/tools/glob.test.js .test-dist/tests/ai/tools/bounded-glob.test.js .test-dist/tests/ai/tools/index.test.js .test-dist/tests/ai/runtime/tool-timeout-recovery.test.js
       - run: npm run test:full -- tests/ai/tools/grep.test.ts tests/runtime/verification/netdevice-transmit-disabled.test.ts
       - run: npm run build:release

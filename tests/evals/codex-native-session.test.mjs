@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { SessionProbe, resolveLaunch } from '../../scripts/evals/codex-native-session/session-probe.mjs';
 
 const fixture = `
@@ -98,3 +99,14 @@ test('missing executable rejects handshake and cleanup still completes', async (
 });
 
 test('interrupt retries only explicit not-yet-active rejection and waits for terminal',async t=>{const p=await setup(t);await p.start('late');assert.equal((await p.interrupt()).params.turn.status,'interrupted');});
+
+for(const expected of [undefined,null,false,0,''])test('an original process error '+String(expected)+' rejects waiters with that same raw cause',async t=>{
+ const childProcess=createRequire(import.meta.url)('node:child_process'),originalSpawn=childProcess.spawn;let actualChild;
+ childProcess.spawn=function(...args){actualChild=Reflect.apply(originalSpawn,this,args);return actualChild;};syncBuiltinESMExports();
+ try{
+  const probe=await setup(t);let rejected=false,raw=Symbol('not observed');
+  const waiting=probe.waitFor('missing',()=>true).then(()=>{},error=>{rejected=true;raw=error;});
+  actualChild.emit('error',expected);await waiting;
+  assert.equal(rejected,true);assert.equal(raw,expected);
+ }finally{childProcess.spawn=originalSpawn;syncBuiltinESMExports();}
+});

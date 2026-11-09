@@ -9,6 +9,7 @@ vi.mock('../../../src/runtime/conversation-activity/owner-launcher.js', async im
 }));
 import { createDesktopServices } from '../../electron/desktop-services.js';
 import { ConversationActivityOwnerClient } from '../../../src/runtime/conversation-activity/owner-client.js';
+import {ConversationActivitySources} from '../../../src/runtime/conversation-activity/sources.js';
 import { ConversationActivityService, type ActivityActor, type ActivityChange } from '../../../src/runtime/conversation-activity/service.js';
 
 const roots: string[] = [];
@@ -44,9 +45,9 @@ describe('desktop activity owner attach failure', () => {
       const connection = api.projectConnectionChanged('connected').finally(() => { settled = true; });
       const project = api.projectChanged('p');
       await Promise.resolve(); expect(settled).toBe(false);
-      const client = { request: vi.fn(async () => ({})), dispose: vi.fn(), ownerEpoch: 'e1' };
+      const client = { request: vi.fn(async () => ({})), dispose: vi.fn(), ownerEpoch: 'e1',hintProject:vi.fn(async()=>{}),projectConnectionChanged:vi.fn(async()=>{}) };
       resolve(client); await attachment; await connection; await project;
-      expect(client.request).toHaveBeenCalledWith('hint', { source: 'kswarm', workId: 'p' });
+      expect(client.hintProject).toHaveBeenCalledExactlyOnceWith('p');expect(client.projectConnectionChanged).toHaveBeenCalledExactlyOnceWith('connected');
     } finally { await services.disposeMultiAgent(); }
   });
 
@@ -150,10 +151,20 @@ describe('all public activity facades share the existing owner attachment gate',
       const api = services.conversationActivity, profile = services.multiAgent;
       if (!api || !profile) throw new Error('activity_fixture_unavailable');
       const identity: ActivityActor = { requestSource: 'user', actorId: `desktop-user:${profile.profileId}` };
+      profile.service.registerThread({threadId:'thread',profileId:profile.profileId,workspaceId:profile.workspaceId,cwd:profile.cwd,activeGroupId:null,threadRevision:0});
+      // Script a real ordinary DTO at the transport boundary. Undefined is
+      // not a work response; current WorkReader keeps its real actor guards.
+      request.mockImplementation(async method=>method==='work'?{
+        watch:{operationId:'op',watchId:'watch',source:'agent_group',logicalSourceId:'local-group',sourceDataEpoch:'epoch',workId:'group',origin:{profileId:profile.profileId,workspaceId:profile.workspaceId,threadId:'thread',actorId:identity.actorId},status:'active',generation:0,preference:'normal',policyRevision:0,nextReportDueAt:0},
+        projection:{watchId:'watch',executionState:'running',businessOutcome:'unknown',freshness:'fresh',sourceSequence:1,revision:1,lastProgressAt:null,lastHeartbeatAt:null,lastReportAt:null,evidenceRefs:[]}
+      }:undefined);
+
       ensure.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => retry.promise);
       const attachment = observe(() => services.attachConversationActivityOwner(sourceConfig)); pending.push(attachment.outcome);
       await vi.waitFor(() => expect(ensure).toHaveBeenCalledTimes(1));
-      expect(disposed).toHaveBeenCalledTimes(1);
+      // Explicit sealing and the owner's close both call idempotent dispose.
+      // The gate must retire the one original owner before the launcher runs.
+      expect(disposed).toHaveBeenCalled();expect(new Set(disposed.mock.instances).size).toBe(1);
       for (const spy of localCalls) spy.mockClear();
       const firstCall = observe(() => invokeFacade(name, api, identity, callback)); pending.push(firstCall.outcome);
       await checkpoint();
@@ -193,9 +204,9 @@ describe('all public activity facades share the existing owner attachment gate',
         expect(request).toHaveBeenCalledWith('unsubscribe', request.mock.calls[0][1]);
       } else {
         const expected: Record<Exclude<FacadeName, 'overview'>, unknown[][]> = {
-          mcpInputs: [['work', { watchId: 'watch' }], ['mcpInputs', { watchId: 'watch' }]],
+          mcpInputs: [['work', { watchId: 'watch' }], ['work', { watchId: 'watch' }], ['mcpInputs', { watchId: 'watch' }]],
           unread: [['unread']], read: [['read', { threadId: 'thread', through: 37 }]],
-          getWork: [['work', { watchId: 'watch' }]],
+          getWork: [['work', { watchId: 'watch' }], ['work', { watchId: 'watch' }]],
           reporting: [['reporting', { watchId: 'watch', preference: 'quiet', revision: 7 }]],
           stop: [['stop', { watchId: 'watch', revision: 7 }]],
         };
@@ -223,4 +234,13 @@ describe('all public activity facades share the existing owner attachment gate',
       expect(ensure).not.toHaveBeenCalled();
     } finally { await services.disposeMultiAgent(); }
   });
+});
+
+it('keeps a project hint pending across the actual disposed local Source close and forwards it to the newly attached owner',async()=>{
+ ensure.mockReset();const{services,root}=await makeServices(),client=new ConversationActivityOwnerClient(join(root,'data'),'producer'),hint=vi.spyOn(client,'hintProject').mockResolvedValue(undefined),close=ConversationActivitySources.prototype.close;
+ let entered!:()=>void,release!:()=>void;const began=new Promise<void>(yes=>{entered=yes;}),held=new Promise<void>(yes=>{release=yes;});
+ const closing=vi.spyOn(ConversationActivitySources.prototype,'close').mockImplementationOnce(function(this:ConversationActivitySources){const original=close.call(this);entered();return Promise.all([original,held]).then(()=>undefined);});
+ let attachment:Promise<void>|undefined,changed:Promise<void>|undefined;
+ try{ensure.mockResolvedValue(client);attachment=services.attachConversationActivityOwner(sourceConfig);await began;let settled=false;changed=services.conversationActivity!.projectChanged('p').finally(()=>{settled=true;});await checkpoint();const premature=settled;release();await Promise.all([attachment,changed]);expect(premature).toBe(false);expect(hint).toHaveBeenCalledExactlyOnceWith('p');}
+ finally{release();await Promise.allSettled([attachment,changed].filter(Boolean));closing.mockRestore();await services.disposeMultiAgent();client.dispose();}
 });

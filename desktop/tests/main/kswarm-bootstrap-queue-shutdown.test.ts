@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   JsonKSwarmInitialPlanBootstrapStore,
   KSwarmInitialPlanBootstrapQueue,
+  createKSwarmBootstrapShutdownOwner,
   type KSwarmInitialPlanBootstrapPayload,
 } from '../../electron/kswarm-initial-plan-bootstrap.js';
 
@@ -35,6 +36,17 @@ describe('KSwarmInitialPlanBootstrapQueue shutdown ownership', () => {
     planningGuidance: 'none',
     poAgent: 'po',
     members: ['worker-1'],
+  });
+
+  it('the actual shutdown owner closes ingress and reports a live execution as undrained without releasing it',async()=>{
+    const store=makeStore();let started!:()=>void,finish!:()=>void;const begins=new Promise<void>(resolve=>started=resolve),pending=new Promise<void>(resolve=>finish=resolve);
+    let aborted=false;
+    const queue=new KSwarmInitialPlanBootstrapQueue(store,async(_job,signal)=>{signal.addEventListener('abort',()=>{aborted=true;},{once:true});started();await pending;return {ok:false,error:'stopped',launchOutcome:'unknown'};});
+    store.upsertPending(payload('live'),Date.now());const run=queue.runOnce();await begins;
+    const owner=createKSwarmBootstrapShutdownOwner(queue);owner.stopAccepting();owner.abortAllActive('app_shutdown');
+    expect(aborted).toBe(true);expect(await owner.drain(1)).toBe(false);expect(store.list()[0].status).toBe('running');
+    expect(queue.enqueue(payload('late'))).toEqual({ok:false,error:'bootstrap_queue_stopped'});
+    finish();await run;expect(await owner.drain(0)).toBe(true);expect(store.list()[0].status).toBe('launch_unknown');
   });
 
   it('holds a run token for the whole run and releases it in finally', async () => {

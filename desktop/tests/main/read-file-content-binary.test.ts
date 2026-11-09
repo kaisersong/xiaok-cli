@@ -12,6 +12,8 @@ const { electronMocks } = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/xiaok-electron-test' },
+  BrowserWindow: undefined,
+  webContents: undefined,
   clipboard: { read: vi.fn(), readImage: vi.fn() },
   dialog: { showOpenDialog: electronMocks.showOpenDialog, showSaveDialog: electronMocks.showSaveDialog },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
@@ -34,6 +36,7 @@ describe('desktop file content IPC binary handling', () => {
     const window = { isDestroyed: () => false, webContents: { send: vi.fn() } };
     const services = {
       getDataRoot: () => join(rootDir, 'data'),
+      getProjectPlanningTriggerOwner: () => undefined,
     };
 
     await registerDesktopIpc(ipcMain as never, window as never, services as never);

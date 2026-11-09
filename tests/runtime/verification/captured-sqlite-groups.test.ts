@@ -2,12 +2,24 @@ import {setProfileTestHome} from '../../support/profile-home-env.js';
 import{afterAll,afterEach,beforeAll,expect,it,vi}from'vitest';
 import{execFileSync}from'node:child_process';
 import{mkdtempSync,realpathSync,statSync,rmSync,writeFileSync,mkdirSync,existsSync}from'node:fs';import{tmpdir}from'node:os';import{join,resolve,basename,dirname}from'node:path';
-const discovery=vi.hoisted(()=>({home:'',route:'ordinary',failSync:false,flipRoute:false}));
+const discovery=vi.hoisted(()=>({home:'',route:'ordinary',failSync:false,flipRoute:false,connections:[] as Array<{path:unknown;db:{prepare(sql:string):unknown}}> }));
+// Observe actual Native constructor instances; the production close method is
+// module-captured, so a late prototype spy cannot establish physical closure.
+vi.mock('node:sqlite', async load => {
+ const actual = await load<typeof import('node:sqlite')>();
+ class ObservedDatabaseSync extends actual.DatabaseSync {
+  constructor(...args:ConstructorParameters<typeof actual.DatabaseSync>) {
+   super(...args);
+   discovery.connections.push({path:args[0],db:this});
+  }
+ }
+ return {...actual,DatabaseSync:ObservedDatabaseSync};
+});
 vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>();return {...actual,userInfo:()=>({...actual.userInfo(),homedir:discovery.home})};});
 vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,fsyncSync:(fd:number)=>{if(actual.fstatSync(fd).isDirectory()){if(discovery.failSync)throw Error('registry_fsync_fixture');if(discovery.flipRoute)discovery.route='protected';}return actual.fsyncSync(fd);}};});
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:()=>({kind:'ordinary'})}));
 vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({...await load<typeof import('../../../src/runtime/verification/migration-markers.js')>(),readInstalledCurrentProfile:()=>({kind:discovery.route})}));
-import{DesktopMultiAgentStore}from'../../../desktop/electron/desktop-multi-agent-store.js';
+import{readOriginalDshAdmissionPort,DesktopMultiAgentStore}from'../../../desktop/electron/desktop-multi-agent-store.js';
 import{startProfileSourceCapture,readProfileSourceCapture,openProfileSqliteReader,closeProfileSqliteReader,iterateProfileSqliteReaderRows}from'../../../src/runtime/verification/profile-source-capture.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-sqlite-groups-'))),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');let serial=0;const closes:Array<()=>unknown>=[];
 afterEach(async()=>{for(const close of closes.splice(0).reverse())await close();});afterAll(()=>rmSync(root,{recursive:true,force:true}));
@@ -17,14 +29,14 @@ async function captured(path:string){const d=statSync(dirname(path),{bigint:true
 it('captures the original Groups producer through its dedicated native format',async()=>{const{path}=fixture(),{owner,token}=await captured(path);expect(readProfileSourceCapture(owner,token).sources).toHaveLength(1);const reader=openProfileSqliteReader(owner,token,'original-groups');closeProfileSqliteReader(reader);await owner.checkCurrent();});
 it('reads the original user_version from the same opaque parser and caches only the fixed statement',async()=>{const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups'),api=await import('../../../src/runtime/verification/profile-source-capture.js'),{default:Sqlite}=await import('better-sqlite3');const read=(api as unknown as{readProfileSqliteReaderUserVersion:(reader:object)=>number}).readProfileSqliteReaderUserVersion;expect(typeof read).toBe('function');const original=Sqlite.prototype.prepare,connections=new Set<object>();let prepares=0;const spy=vi.spyOn(Sqlite.prototype,'prepare').mockImplementation(function(this:object,...args:Parameters<typeof original>){connections.add(this);prepares++;return original.apply(this,args);});try{for(let i=0;i<100;i++)expect(read(reader)).toBe(4);expect(prepares).toBe(1);expect(connections.size).toBe(1);expect(()=>read({...reader})).toThrow();}finally{spy.mockRestore();closeProfileSqliteReader(reader);}expect(()=>read(reader)).toThrow();});
 
-it('reads every original Groups table and denies another source family projection',async()=>{const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');const{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');try{const names=Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-'));expect(names).toHaveLength(13);const counts:Record<string,number>={};for(const id of names)counts[id]=[...iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)].length;expect(counts['groups:agents']).toBe(2);expect(counts['groups:messages']).toBe(1);expect(counts['groups:thread_bindings']).toBe(1);expect(()=>[...iterateProfileSqliteReaderRows(reader,'loop:loop_definitions')]).toThrow('source_sqlite_query');}finally{closeProfileSqliteReader(reader);}});
+it('reads every original Groups table and denies another source family projection',async()=>{const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');const{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');try{const names=Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-')&&!id.startsWith('groups:dsh_a_'));expect(names).toHaveLength(13);const counts:Record<string,number>={};for(const id of names)counts[id]=[...iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)].length;expect(counts['groups:agents']).toBe(2);expect(counts['groups:messages']).toBe(1);expect(counts['groups:thread_bindings']).toBe(1);expect(()=>[...iterateProfileSqliteReaderRows(reader,'loop:loop_definitions')]).toThrow('source_sqlite_query');}finally{closeProfileSqliteReader(reader);}});
 
 async function legacyFixture(columns:number){const{DatabaseSync}=await import('node:sqlite'),original=DatabaseSync.prototype.exec,statements:string[]=[];const spy=vi.spyOn(DatabaseSync.prototype,'exec').mockImplementation(function(this:InstanceType<typeof DatabaseSync>,sql:string){statements.push(sql);return original.call(this,sql);});try{fixture();}finally{spy.mockRestore();}const base=statements.find(sql=>sql.includes('CREATE TABLE IF NOT EXISTS thread_bindings'));expect(base).toBeTruthy();const path=join(root,`groups-legacy-${serial++}.sqlite`),db=new DatabaseSync(path);try{db.exec(base!);const alters=statements.filter(sql=>sql.startsWith('ALTER TABLE thread_bindings ADD COLUMN'));for(const sql of alters.slice(0,columns))db.exec(sql);db.exec('PRAGMA user_version=1');}finally{db.close();}return path;}
 it('captures exact original v1 schema branches before normal producer migration',async()=>{const{DatabaseSync}=await import('node:sqlite'),api=await import('../../../src/runtime/verification/profile-source-capture.js');const schemas:unknown[]=[];for(let columns=0;columns<3;columns++){const path=await legacyFixture(columns),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{expect(api.readProfileSqliteReaderUserVersion(reader)).toBe(1);schemas.push({version:1,columns,schema:api.readProfileSqliteReaderSchema(reader)});}finally{closeProfileSqliteReader(reader);await owner.close();}const migrated=new DesktopMultiAgentStore(path);migrated.close();const db=new DatabaseSync(path);try{expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(4);}finally{db.close();}}const current=fixture(),db=new DatabaseSync(current.path);try{schemas.push({version:4,schema:db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()});}finally{db.close();}writeFileSync(join(root,'original-schema-variants.json'),JSON.stringify(schemas,null,2));});
 
 it('validates original schema variants and rejects additional persistent schema',async()=>{const modulePath='../../../src/runtime/verification/groups-source-schema.js';const api=await import(modulePath),native=await import('../../../src/runtime/verification/profile-source-capture.js');for(const path of[fixture().path,await legacyFixture(0),await legacyFixture(1),await legacyFixture(2)]){const{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{expect(api.readCapturedGroupsSchema(native.readProfileSqliteReaderSchema(reader),native.readProfileSqliteReaderUserVersion(reader)).tables.length).toBe(native.readProfileSqliteReaderUserVersion(reader)===4?13:native.readProfileSqliteReaderUserVersion(reader)!==1?11:10);const schema=native.readProfileSqliteReaderSchema(reader);expect(()=>api.readCapturedGroupsSchema([...schema,{type:'table',name:'unknown',tbl_name:'unknown',sql:'CREATE TABLE unknown(id TEXT)'}],native.readProfileSqliteReaderUserVersion(reader))).toThrow();}finally{closeProfileSqliteReader(reader);await owner.close();}}});
 
-it('checks original indexed JSON rows without changing their historical values',async()=>{const modulePath='../../../src/runtime/verification/captured-sqlite-groups-row.js',api=await import(modulePath),{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{let checked=0;for(const id of Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-'))){for(const row of iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)){const result=api.readCapturedGroupsRow(id.slice(7),row);expect(result.cells).toBe(row.record);if(row.record.data_json){checked++;expect(()=>api.readCapturedGroupsRow(id.slice(7),{...row,record:{...row.record,logical_bytes:{type:'integer',value:'0'}}})).toThrow();}}}expect(checked).toBeGreaterThan(3);}finally{closeProfileSqliteReader(reader);}});
+it('checks original indexed JSON rows without changing their historical values',async()=>{const modulePath='../../../src/runtime/verification/captured-sqlite-groups-row.js',api=await import(modulePath),{METADATA_SESSION_QUERIES}=await import('../../../src/runtime/verification/metadata-session-query-manifest.js');const{path}=fixture(),{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups');try{let checked=0;for(const id of Object.keys(METADATA_SESSION_QUERIES).filter(id=>id.startsWith('groups:')&&!id.includes('-v1-')&&!id.startsWith('groups:dsh_a_'))){for(const row of iterateProfileSqliteReaderRows(reader,id as keyof typeof METADATA_SESSION_QUERIES)){const result=api.readCapturedGroupsRow(id.slice(7),row);expect(result.cells).toBe(row.record);if(row.record.data_json){checked++;expect(()=>api.readCapturedGroupsRow(id.slice(7),{...row,record:{...row.record,logical_bytes:{type:'integer',value:'0'}}})).toThrow();}}}expect(checked).toBeGreaterThan(3);}finally{closeProfileSqliteReader(reader);}});
 
 it.each(['index','duplicate-json','content-hash'] as const)('rejects original durable row corruption: %s',async(kind)=>{const{path}=fixture(),{DatabaseSync}=await import('node:sqlite'),{encodeMultiAgentRow}=await import('../../../desktop/electron/desktop-multi-agent-store.js'),db=new DatabaseSync(path);try{if(kind==='index')db.exec('UPDATE agents SET created_at=created_at+0.5');else if(kind==='duplicate-json')db.exec(`UPDATE operations SET data_json='{"groupId":"one","groupId":"two"}'`);else{const found=db.prepare('SELECT content_id,data_json FROM contents').get()!;const value=JSON.parse(String(found.data_json));value.sha256='0'.repeat(64);const raw=encodeMultiAgentRow(value);db.prepare('UPDATE contents SET data_json=?,logical_bytes=? WHERE content_id=?').run(raw,Buffer.byteLength(raw),found.content_id!);}}finally{db.close();}const{owner,token}=await captured(path),reader=openProfileSqliteReader(owner,token,'original-groups'),api=await import('../../../src/runtime/verification/captured-sqlite-groups-row.js'),query=kind==='index'?'groups:agents':kind==='duplicate-json'?'groups:operations':'groups:contents';try{expect(()=>{for(const row of iterateProfileSqliteReaderRows(reader,query))api.readCapturedGroupsRow(query.slice(7),row);}).toThrow();}finally{closeProfileSqliteReader(reader);}});
 
@@ -72,8 +84,8 @@ it.each(['protected','unavailable'])('rejects the %s route before creating the G
  try{expect(()=>new DesktopMultiAgentStore(path)).toThrow('ordinary_source_route');expect(existsSync(dirname(path))).toBe(false);}finally{discovery.route='ordinary';}
 });
 it.each(['failure','reentry'])('closes the actual Groups connection before schema on registry %s',async mode=>{
- const{DatabaseSync}=await import('node:sqlite'),path=join(root,'registration-'+mode,'groups.sqlite'),close=vi.spyOn(DatabaseSync.prototype,'close');discovery.failSync=mode==='failure';discovery.flipRoute=mode==='reentry';
- try{expect(()=>new DesktopMultiAgentStore(path)).toThrow(mode==='failure'?'registry_fsync_fixture':'ordinary_source_route');expect(close).toHaveBeenCalledTimes(1);}finally{discovery.failSync=false;discovery.flipRoute=false;discovery.route='ordinary';close.mockRestore();}
+ const{DatabaseSync}=await import('node:sqlite'),path=join(root,'registration-'+mode,'groups.sqlite');discovery.failSync=mode==='failure';discovery.flipRoute=mode==='reentry';
+ try{expect(()=>new DesktopMultiAgentStore(path)).toThrow(mode==='failure'?'registry_fsync_fixture':'ordinary_source_route');const original=discovery.connections.findLast(entry=>entry.path===path);expect(original).toBeDefined();expect(()=>original!.db.prepare('SELECT 1')).toThrow(/closed|not open/);}finally{discovery.failSync=false;discovery.flipRoute=false;discovery.route='ordinary';}
  expect(existsSync(path)).toBe(true);const db=new DatabaseSync(path);try{expect(db.prepare('SELECT name FROM sqlite_master').all()).toEqual([]);}finally{db.close();}
 });
 
@@ -195,3 +207,350 @@ it.each(['identity','bytes','member-group','version','extra-index','missing-tabl
   expect(events.some(event=>event.kind==='complete')).toBe(false);
  }finally{await owner.close();}
 });
+
+async function a1SourceDatabase(secondBinding = false, authority = false) {
+  const path = join(root, `groups-a1-${serial++}.sqlite`),
+    frames = new WeakMap<
+      object,
+      {
+        purpose: string;
+        data: unknown;
+      }
+    >(),
+    source = {
+      resolve(frame: object, purpose: string) {
+        const e = frames.get(frame);
+        if (!e || e.purpose !== purpose)
+          throw Error("PRIVATE_A1_SOURCE_REQUIRED");
+        return { data: e.data, assertCurrent() {} };
+      },
+    },
+    store = new DesktopMultiAgentStore(path, { dshAdmissionSource: source });
+  const issue = (purpose: string, data: unknown) => {
+    const frame = Object.freeze(Object.create(null));
+    frames.set(frame, { purpose, data });
+    return frame;
+  };
+  try {
+    store.claimBootOwnership();
+    const port = readOriginalDshAdmissionPort(store, source),
+      authScope = {
+        tenantId: "tenant",
+        workspaceId: "workspace",
+        connectionId: "connection",
+        providerAccountId: "account",
+        repositoryId: "repo",
+        credentialEpoch: 1,
+      };
+    port.initialize(issue("initialize", { schemaVersion: 1 }), {
+      requestSource: "user",
+    });
+    port.establishSourceBinding(
+      issue("bind_source", {
+        bindingId: "binding",
+        provider: "github",
+        authScope,
+        sourceBindingVersion: 1,
+        roleMappingVersion: 1,
+        provenanceVersion: 1,
+      }),
+      { requestSource: "user" },
+    );
+    if (secondBinding)
+      port.establishSourceBinding(
+        issue("bind_source", {
+          bindingId: "second-binding",
+          provider: "github",
+          authScope: { ...authScope, repositoryId: "second-repo" },
+          sourceBindingVersion: 1,
+          roleMappingVersion: 1,
+          provenanceVersion: 1,
+        }),
+        { requestSource: "user" },
+      );
+    port.importVerifiedInput(
+      issue("import_input", {
+        bindingId: "binding",
+        expectedBindingRevision: 1,
+        envelope: {
+          thread: {
+            sourceBindingId: "binding",
+            tenantId: "tenant",
+            workspaceId: "workspace",
+            provider: "github",
+            repositoryId: "repo",
+            kind: "issue",
+            threadId: "42",
+          },
+          authScope,
+          providerEventId: null,
+          objectKind: "issue",
+          objectId: "42",
+          providerRevision: "r1",
+          contentHash: "a".repeat(64),
+          receivedAt: "2026-11-06T00:00:00.000Z",
+          objectAuthorId: null,
+          actorEvidence: {
+            kind: "verified_event",
+            eventRef: "event",
+            triggerActorId: "actor",
+          },
+          actorMappingVersion: 1,
+          provenanceVersion: 1,
+          actorEvidenceHash: "b".repeat(64),
+          kind: "created",
+          trust: "external_untrusted",
+          snapshotRef: "owned-source-ref",
+          completeness: "complete",
+          paginationComplete: true,
+          authorizationCheckedAt: "2026-11-06T00:00:00.000Z",
+        },
+        comparison: null,
+      }),
+      { requestSource: "scheduler" },
+    );
+    if (authority) {
+      const {DSH_A_DIGEST} = await import('../../../src/runtime/multi-agent/dsh-admission-data.js');
+      (port as unknown as {upgradeAdmission:(frame:object,ctx:unknown)=>unknown}).upgradeAdmission(
+        issue('migrate_admission',{schemaVersion:1,expectedProfileDigest:DSH_A_DIGEST}),
+        {requestSource:'user'},
+      );
+    }
+  } finally {
+    store.close();
+  }
+  return path;
+}
+it.each([
+  "proof_version",
+  "proof_scope",
+  "proof_actor",
+  "head_content",
+  "head_evidence",
+  "head_kind",
+  "head_revision",
+  "freeze_hash",
+] as const)(
+  "refuses real cold schema5 corruption %s with recalculated JSON/hash/bytes",
+  async (change) => {
+    const path = await a1SourceDatabase(),
+      { DatabaseSync } = await import("node:sqlite"),
+      { DSH_A_FUNCTION, DSH_A_DIGEST, dshAJson, dshAHash } = await import(
+        "../../../src/runtime/multi-agent/dsh-admission-data.js"
+      ),
+      db = new DatabaseSync(path);
+    try {
+      db.function(DSH_A_FUNCTION, () => DSH_A_DIGEST);
+      if (change === "proof_version")
+        db.exec("UPDATE dsh_a_input_proofs SET proof_version=9");
+      else {
+        const proof = change === "proof_scope" || change === "proof_actor",
+          table = proof ? "dsh_a_input_proofs" : "dsh_a_object_heads",
+          row = db.prepare("SELECT rowid,data_json FROM " + table).get() as {
+            rowid: number;
+            data_json: string;
+          },
+          body = JSON.parse(row.data_json);
+        if (change === "proof_scope")
+          body.authScope = {
+            ...body.authScope,
+            connectionId: "wrong-connection",
+          };
+        if (change === "proof_actor")
+          body.actorEvidence = {
+            kind: "bogus",
+            auditRef: "audit",
+            triggerActorId: "actor",
+          };
+        if (change === "head_content") body.state.current.contentHash = "bad";
+        if (change === "head_evidence")
+          body.state.current.sourceEvidenceHash = "bad";
+        if (change === "head_kind") body.state.current.kind = "bad";
+        if (change === "head_revision") body.state.current.providerRevision = 7;
+        if (change === "freeze_hash")
+          body.state.freeze = {
+            reasonCode: "REVISION_ORDER_UNPROVEN",
+            observationHash: "bad",
+          };
+        const raw = dshAJson(body);
+        db.prepare(
+          "UPDATE " +
+            table +
+            " SET data_json=?,logical_bytes=?" +
+            (proof ? ",proof_hash=?" : "") +
+            " WHERE rowid=?",
+        ).run(
+          ...(proof
+            ? [raw, Buffer.byteLength(raw), dshAHash(body), row.rowid]
+            : [raw, Buffer.byteLength(raw), row.rowid]),
+        );
+      }
+    } finally {
+      db.close();
+    }
+    const { owner, token } = await captured(path),
+      { iterateCapturedSQLiteGroupsSources } = await import(
+        "../../../src/runtime/verification/captured-sqlite-groups.js"
+      );
+    expect(() => [
+      ...iterateCapturedSQLiteGroupsSources(owner, token),
+    ]).toThrow();
+  },
+  30000,
+);
+it("finishes actual original schema5 through native capture, references and the full mapper with explicit restore gaps", async () => {
+  const path = await a1SourceDatabase();
+  const { owner, token } = await captured(path);
+  const { iterateCapturedSQLiteGroupsSources } = await import(
+    "../../../src/runtime/verification/captured-sqlite-groups.js"
+  );
+  const { iterateCapturedProfileDeclarations } = await import(
+    "../../../src/runtime/verification/captured-profile-mapper.js"
+  );
+  const events = [...iterateCapturedSQLiteGroupsSources(owner, token)];
+  expect(events[0]).toMatchObject({ kind: "source-start", userVersion: 5 });
+  expect(events.filter((event) => event.kind === "table-end")).toHaveLength(18);
+  expect(events.at(-1)?.kind).toBe("complete");
+  const rows = activityRows(events);
+  for (const table of [
+    "dsh_a_profile",
+    "dsh_a_source_bindings",
+    "dsh_a_inbox",
+    "dsh_a_input_proofs",
+    "dsh_a_object_heads",
+  ]) {
+    expect(rows.filter((row) => row.table === table)).toHaveLength(1);
+  }
+  const inbox = rows.find((row) => row.table === "dsh_a_inbox")!;
+  expect(inbox.references).toContainEqual({
+    namespace: "dsh-source-binding",
+    id: "binding",
+    path: "data_json.envelope.thread.sourceBindingId",
+  });
+  expect(inbox.unmapped).toContain(
+    "data_json.derived_identities_require_original_A_rebinding",
+  );
+  const mapped = [];
+  for await (const event of iterateCapturedProfileDeclarations(owner, token))
+    mapped.push(event);
+  expect(mapped.at(-1)).toMatchObject({
+    kind: "complete",
+    enumerationComplete: true,
+  });
+  expect(mapped.some((event) => event.kind === "gap")).toBe(true);
+  expect(
+    mapped.filter(
+      (event) =>
+        event.kind === "family-fact" &&
+        (
+          event.fact as {
+            table?: string;
+            kind?: string;
+          }
+        ).table === "dsh_a_inbox" &&
+        (
+          event.fact as {
+            kind?: string;
+          }
+        ).kind === "row",
+    ),
+  ).toHaveLength(1);
+  await owner.checkCurrent();
+});
+
+it.each(["binding_scope", "head_binding"] as const)(
+  "rejects original schema5 related %s corruption after true Source/Store birth",
+  async (change) => {
+    const path = await a1SourceDatabase(true),
+      { DatabaseSync } = await import("node:sqlite"),
+      { DSH_A_FUNCTION, DSH_A_DIGEST, dshAJson } = await import(
+        "../../../src/runtime/multi-agent/dsh-admission-data.js"
+      ),
+      db = new DatabaseSync(path);
+    try {
+      db.function(DSH_A_FUNCTION, () => DSH_A_DIGEST);
+      if (change === "binding_scope") {
+        const row = db
+            .prepare(
+              "SELECT data_json FROM dsh_a_source_bindings WHERE binding_id='binding'",
+            )
+            .get() as { data_json: string },
+          body = JSON.parse(row.data_json);
+        body.binding.authScope.connectionId = "changed-connection";
+        const raw = dshAJson(body);
+        db.prepare(
+          "UPDATE dsh_a_source_bindings SET data_json=?,logical_bytes=? WHERE binding_id='binding'",
+        ).run(raw, Buffer.byteLength(raw));
+      } else
+        db.exec("UPDATE dsh_a_object_heads SET binding_id='second-binding'");
+    } finally {
+      db.close();
+    }
+    const { owner, token } = await captured(path),
+      { iterateCapturedSQLiteGroupsSources } = await import(
+        "../../../src/runtime/verification/captured-sqlite-groups.js"
+      );
+    expect(() => [
+      ...iterateCapturedSQLiteGroupsSources(owner, token),
+    ]).toThrow();
+  },
+  30000,
+);
+
+
+it('finishes real migrated A6 ancestry and binding history through original Native capture',async()=>{
+  const path=await a1SourceDatabase(false,true);
+  const {owner,token}=await captured(path);
+  const {iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');
+  const {iterateCapturedProfileDeclarations}=await import('../../../src/runtime/verification/captured-profile-mapper.js');
+  const events=[...iterateCapturedSQLiteGroupsSources(owner,token)];
+  expect(events[0]).toMatchObject({kind:'source-start',userVersion:6});
+  expect(events.filter(event=>event.kind==='table-end')).toHaveLength(51);
+  for(const table of ['dsh_a_source_configurations','dsh_a_source_configuration_heads','dsh_a_source_setups','dsh_a_source_scans','dsh_a_source_reads','dsh_a_source_snapshots','dsh_a_source_read_sets','dsh_a_source_content_checkpoints','dsh_a_budget_account_memberships'])expect(events.some(event=>event.kind==='table-end'&&event.table===table)).toBe(true);
+  const rows=activityRows(events);
+  expect(rows.filter(row=>row.table==='dsh_a_profile_migrations')).toHaveLength(1);
+  expect(rows.filter(row=>row.table==='dsh_a_source_binding_revisions')).toHaveLength(1);
+  expect(events.at(-1)?.kind).toBe('complete');
+  const mapped=[];
+  for await(const event of iterateCapturedProfileDeclarations(owner,token))mapped.push(event);
+  expect(mapped.at(-1)).toMatchObject({kind:'complete',enumerationComplete:true});
+  expect(mapped.some(event=>event.kind==='gap')).toBe(true);
+  await owner.checkCurrent();
+});
+
+
+it.each(['ancestry_pk','ancestry_store','binding_pk','binding_body'] as const)(
+  'rejects real A6 cold %s corruption after original same-owner migration',async change=>{
+    const path=await a1SourceDatabase(false,true);
+    const {DatabaseSync}=await import('node:sqlite');
+    const {DSH_A_AUTHORITY_FUNCTION,DSH_A_AUTHORITY_DIGEST,dshProfileAncestryHash,dshAuthorityRowHash}=await import('../../../src/runtime/multi-agent/dsh-admission-authority-data.js');
+    const {dshAJson}=await import('../../../src/runtime/multi-agent/dsh-admission-data.js');
+    const table=change.startsWith('ancestry')?'dsh_a_profile_migrations':'dsh_a_source_binding_revisions';
+    const db=new DatabaseSync(path);
+    try{
+      db.function(DSH_A_AUTHORITY_FUNCTION,()=>DSH_A_AUTHORITY_DIGEST);
+      const trigger=table==='dsh_a_profile_migrations'?'dsh_a6_profile_migrations_no_update':'dsh_a6_source_binding_revisions_no_update';
+      const original=db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(trigger) as {sql:string};
+      db.exec('DROP TRIGGER '+trigger);
+      try{
+        if(change==='ancestry_pk')db.exec("UPDATE dsh_a_profile_migrations SET migration_id='wrong-id'");
+        else if(change==='binding_pk')db.exec('UPDATE dsh_a_source_binding_revisions SET binding_revision=2');
+        else{
+          const row=db.prepare('SELECT data_json FROM '+table).get() as {data_json:string};
+          const body=JSON.parse(row.data_json);
+          if(change==='ancestry_store'){
+            body.storeId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+            const {dshAHash}=await import('../../../src/runtime/multi-agent/dsh-admission-data.js');
+            body.migrationId=dshAHash(['dsh-a-profile-migration-v1',body.storeId,body.fromDigest,body.toDigest]);
+          }else body.binding.roleMappingVersion++;
+          const raw=dshAJson(body),hash=table==='dsh_a_profile_migrations'?dshProfileAncestryHash(body):dshAuthorityRowHash(table,body);
+          if(change==='ancestry_store')db.prepare('UPDATE '+table+' SET migration_id=?,store_id=?,data_json=?,body_hash=?,logical_bytes=?').run(body.migrationId,body.storeId,raw,hash,Buffer.byteLength(raw));
+          else db.prepare('UPDATE '+table+' SET data_json=?,body_hash=?,logical_bytes=?').run(raw,hash,Buffer.byteLength(raw));
+        }
+      }finally{db.exec(original.sql);}
+    }finally{db.close();}
+    const {owner,token}=await captured(path);
+    const {iterateCapturedSQLiteGroupsSources}=await import('../../../src/runtime/verification/captured-sqlite-groups.js');
+    expect(()=>[...iterateCapturedSQLiteGroupsSources(owner,token)]).toThrow();
+  },
+);

@@ -145,11 +145,24 @@ jobs:
         run: bash .github/scripts/retry.sh npm ci
 
       - name: Install desktop dependencies
-        # --ignore-scripts skips the better-sqlite3/electron native postinstall,
-        # which is unnecessary for these unit tests + renderer build and whose
-        # bash `$(...)` step is fragile under npm's cmd.exe script shell on Windows.
+        # Keep native rebuild lifecycle scripts disabled. Real Electron imports
+        # need the separate locked installer below, even in ordinary Node tests.
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      - name: Compile the real main graph for the memory close regression
+        working-directory: desktop
+        shell: bash
+        run: |
+          node node_modules/typescript/bin/tsc -p tsconfig.electron.json
+          node ../scripts/copy-harness-runtime.mjs
+          node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Run cross-platform path tests
         run: >
@@ -268,6 +281,10 @@ jobs:
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
 
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
       - name: Build nodejieba native binding for packaged segmentation (#150 M6)
         # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
         # packaged app would ship without build/Release/nodejieba.node and the
@@ -285,10 +302,10 @@ jobs:
           git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm fetch --depth 1 origin fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker fetch --depth 1 origin a323d728ed979570dc81b2fad3be57715ce7e6eb
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies

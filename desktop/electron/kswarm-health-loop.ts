@@ -1,4 +1,4 @@
-import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
+import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
@@ -116,7 +116,7 @@ export class KSwarmServiceHealthScanner {
     this.probe = options.probe;
     this.logPaths = options.logPaths ?? [];
     this.connection.recordComponent('healthScanner');
-    }catch(error){this.connection.close();throw error;}
+    }catch(error){try{this.connection.close();}catch{/* Owner-held cleanup must not replace the construction error. */}throw error;}
   }
 
   close(): void {
@@ -221,7 +221,7 @@ export class KSwarmServiceHealthScanner {
     const existing = this.getAnomalyByKind(input.kind);
     const metadataJson = JSON.stringify(input.metadata);
     if (existing) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update evidence_anomalies
         set status = 'open',
             last_seen_at = ?,
@@ -232,14 +232,14 @@ export class KSwarmServiceHealthScanner {
             evidence_ids_json = ?,
             metadata_json = ?
         where id = ?
-      `).run(now, input.message, JSON.stringify([]), metadataJson, existing.id);
+      `, now, input.message, JSON.stringify([]), metadataJson, existing.id);
       const updated = this.getAnomalyById(existing.id);
       if (!updated) throw new Error('KSwarm health anomaly update did not persist.');
       return updated;
     }
 
     const id = randomUUID();
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into evidence_anomalies (
         id, loop_id, owner_kind, owner_id, kind, status, first_seen_at, last_seen_at,
         last_resolved_at, seen_count, ignored_until, message, evidence_ids_json, metadata_json
@@ -247,7 +247,7 @@ export class KSwarmServiceHealthScanner {
         @id, @loopId, 'loop_run', @ownerId, @kind, 'open', @firstSeenAt, @lastSeenAt,
         null, 1, null, @message, @evidenceIdsJson, @metadataJson
       )
-    `).run({
+    `, {
       id,
       loopId: KSWARM_SERVICE_HEALTH_LOOP_ID,
       ownerId: KSWARM_SERVICE_HEALTH_OWNER_ID,
@@ -273,11 +273,11 @@ export class KSwarmServiceHealthScanner {
     let resolved = 0;
     for (const row of rows) {
       if (activeKinds.has(row.kind)) continue;
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update evidence_anomalies
         set status = 'resolved', last_resolved_at = ?, ignored_until = null
         where id = ? and status in ('open', 'ignored')
-      `).run(now, row.id);
+      `, now, row.id);
       resolved += Number(result.changes);
     }
     return resolved;
@@ -338,7 +338,7 @@ export class KSwarmServiceHealthScanner {
   }
 
   private applySchema(): void {
-    this.db.exec(`
+    this.connection.execWrite(`
       create table if not exists evidence_anomalies (
         id text primary key,
         loop_id text not null,
@@ -385,14 +385,16 @@ export class KSwarmServiceHealthScanner {
   }
 
   private transaction<T>(fn: () => T): T {
-    this.db.exec('begin immediate');
+    const rollbackDatabase = this.db;
+    this.connection.execWrite('begin immediate');
     try {
       const result = fn();
-      this.db.exec('commit');
+      this.connection.execWrite('commit');
       return result;
     } catch (error) {
+      retainOriginalLoopDatabaseFailure(this.connection,rollbackDatabase,error);
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        rollbackOriginalLoopDatabase(this.connection,rollbackDatabase);
       } catch { /* ignore rollback errors */ }
       throw error;
     }

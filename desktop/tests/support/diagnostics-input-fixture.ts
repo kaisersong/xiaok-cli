@@ -1,4 +1,5 @@
 // Real service, registrar, shutdown gate and Main authorizer; SDK data/network are controlled.
+import {createHash} from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as os from 'node:os';
@@ -33,7 +34,7 @@ afterEach(async () => {
   if (previousConfig === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = previousConfig;
   vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers();
 });
-export async function fixture(status = 200) {
+export async function fixture(status = 200, {authorizeTaskActor=false}: {authorizeTaskActor?:boolean} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'diagnostics-input2-owned-')), data = join(root, 'data');
   roots.push(root); mkdirSync(data); process.env.XIAOK_CONFIG_DIR = join(root, 'config');
   const detail = {
@@ -44,7 +45,7 @@ export async function fixture(status = 200) {
   };
   const requests: string[] = [];
   let response: (path: string) => Response | Promise<Response> = () => status === 200 ? Response.json(detail) : new Response('{}', { status });
-  const sdk = { start: async () => {}, stop: async () => {}, restart: async () => {},
+  const sdk = { getDesktopMutationToken:()=> 'fixture-desktop-token', start: async () => {}, stop: async () => {}, restart: async () => {},
     getStatus: () => ({ running: false, port: 4400, pid: null, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {}, request: async (path: string) => { requests.push(path); return response(path); } };
   const service = createDesktopServices({ dataRoot: data, kswarmService: sdk as never, runner: async () => { throw Error('input2_must_not_execute_task'); } });
@@ -61,7 +62,9 @@ export async function fixture(status = 200) {
     { webContents: sender, isDestroyed: () => false }, { ownsWebContents: (value: unknown) => value === recorder }, isTrustedDesktopRendererUrl, join, dirname, { env: {} });
   const listeners = new Map<string, IpcHandlerListener>(), gate = new DesktopShutdownGate();
   const ipc = new ShutdownAwareIpcMain({ handle: (name, listener) => { expect(listeners.has(name)).toBe(false); listeners.set(name, listener); } }, gate, authority.authorize);
-  await registerDesktopIpc(ipc, { isDestroyed: () => false, webContents: { id: 1, send() {} } } as never, service);
+  await registerDesktopIpc(ipc, { isDestroyed: () => false, webContents: { id: 1, send() {} } } as never, service,authorizeTaskActor?{multiAgentAuthorize(event){
+    try{authority.authorize(event);if(event.sender!==sender)return null;return{actorId:'desktop-user:'+createHash('sha256').update(resolve(data)).digest('hex')};}catch{return null;}
+  }}:{});
   const invokeEvent = (method: Method, event: unknown, ...args: unknown[]) => Reflect.apply(listeners.get(CHANNELS[method])!, undefined, [event, ...args]);
   const invoke = (method: Method, ...args: unknown[]) => invokeEvent(method, { sender, senderFrame: frame }, ...args);
   const transport = { invoke: (channel: string, ...args: unknown[]) => Reflect.apply(listeners.get(channel)!, undefined, [{ sender, senderFrame: frame }, ...args]), on() {}, off() {}, removeListener() {} };

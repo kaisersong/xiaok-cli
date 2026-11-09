@@ -1,6 +1,10 @@
+import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
+import {getSearchScope} from './search-scope-context.js';
+import {permitsSearchPath,type SearchScope} from './search-scope.mjs';
+import {statSync} from 'node:fs';
 import {isNativeReadonlyExecutionContext} from './native-readonly-context.js';
 import { spawnSync } from 'child_process';
-import { runBoundedGrep, formatSearchPath, type GrepTruncation } from './bounded-glob.js';
+import { runBoundedGlob, runBoundedGrep, formatSearchPath, type GrepTruncation } from './bounded-glob.js';
 import {getSandboxSearchGuard,type SearchPathGuard} from '../../platform/sandbox/search-scope.js';
 import { resolve } from 'path';
 import type { Tool } from '../../types.js';
@@ -23,6 +27,21 @@ function canRunCommand(command: string): boolean {
   return result.status === 0 && !result.error;
 }
 
+function supportsNativeGrepPattern(pattern:unknown):boolean {
+ if(typeof pattern!=='string'||pattern.length>2048||pattern.includes('\\')||pattern.includes('(?')||pattern.includes('{')||pattern.includes('}'))return false;
+ let meta=false,inClass=false;
+ for(let i=0;i<pattern.length;i++){
+  const code=pattern.charCodeAt(i),char=pattern[i]!;
+  if(code>=0xd800&&code<=0xdbff){const next=pattern.charCodeAt(++i);if(!(next>=0xdc00&&next<=0xdfff))return false;continue;}
+  if(code>=0xdc00&&code<=0xdfff)return false;
+  if(inClass){if(char===']')inClass=false;else if(char==='['||char===':'||char==='&'||char==='|'||char==='~')return false;}
+  else if(char==='['){meta=true;inClass=true;}
+  else if('.^$*+?()|'.includes(char))meta=true;
+ }
+ if(meta)for(let i=0;i<pattern.length;i++)if(pattern.charCodeAt(i)>127)return false;
+ return !inClass&&!pattern.includes('[]')&&!pattern.includes('[^]');
+}
+
 export async function runFallbackGrepSearch(input: {
   pattern: string;
   path?: string;
@@ -32,6 +51,7 @@ export async function runFallbackGrepSearch(input: {
   type?: string;
   signal?: AbortSignal;
   guard?:SearchPathGuard;
+  searchScope?:SearchScope;
 }): Promise<string[] & {truncated?: GrepTruncation[]}> {
   const {
     pattern,
@@ -42,8 +62,22 @@ export async function runFallbackGrepSearch(input: {
     type,
   } = input;
   const patterns=fileGlob?[fileGlob]:type?(TYPE_GLOBS[type]??[`**/*.${type}`]):['**/*'];
+  if(hasOriginalMainSdkBridgeInstallation()){
+    if(!supportsNativeGrepPattern(pattern))throw Error('grep_native_regex_profile_unavailable');
+    const root=resolve(searchPath);
+    if(input.guard&&!input.guard(root))throw Error('sandbox denied search path');
+    if(!permitsSearchPath(root,input.searchScope))throw Error('search_scope_denied');
+    const entries=await runBoundedGlob({cwd:root,patterns,dot:true,skipInaccessible:true,ignore:['**/.git/**','**/node_modules/**'],
+      searchScope:input.searchScope,grep:{pattern,context,outputMode:output_mode,directFile:statSync(root).isFile()}},input.signal,input.guard);
+    return entries.map(entry=>{
+      const text=entry.text;if(typeof text!=='string'||!(text===entry.path||text.startsWith(entry.path+':')))throw Error('glob_worker_failed');
+      // The authority path is entry.path, never a path parsed from output text.
+      return formatSearchPath(entry.path)+text.slice(entry.path.length);
+    });
+  }
+
   const entries=await runBoundedGrep({cwd:resolve(searchPath),patterns,dot:true,skipInaccessible:true,
-    ignore:['**/.git/**','**/node_modules/**'],grep:{pattern,context,outputMode:output_mode}},input.signal,input.guard);
+    ignore:['**/.git/**','**/node_modules/**'],searchScope:input.searchScope,grep:{pattern,context,outputMode:output_mode}},input.signal,input.guard);
   const lines=entries.map(entry=>{
     const file=formatSearchPath(entry.path);
     return output_mode==='files'?file:output_mode==='count'?`${file}:${entry.count}`:`${file}:${entry.lineNo}:${entry.text}`;
@@ -106,11 +140,22 @@ export const grepTool: Tool = {
     };
 
     const guard=getSandboxSearchGuard(toolContext);
-    if(guard){
+    const searchScope=getSearchScope(toolContext);
+    const installed=hasOriginalMainSdkBridgeInstallation();
+    if(installed){
+      // Preserve the Source SDK's original rejection/first value; a Native
+      // failure is never converted into a successful ordinary Worker result.
+      if(!supportsNativeGrepPattern(pattern))return 'Error: grep_native_regex_profile_unavailable';
+      const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard,searchScope});
+      if(!lines.length)return '（无匹配结果）';
+      const page=paginateItems(lines,offset,head_limit);
+      return appendPaginationNotice(truncateText(page.items.join('\n'),max_chars).text,page.nextOffset);
+    }
+    if(guard||searchScope){
       try{
         // Never probe external programs or hand them a recursively searched root
         // when the host has installed a per-invocation sandbox policy.
-        const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard});
+        const lines=await runFallbackGrepSearch({pattern,path:searchPath,glob:fileGlob,context,output_mode,type,signal:toolContext?.signal,guard,searchScope});
         const notice=grepTruncationNotice(lines.truncated);
         if(!lines.length)return notice?notice.trimStart():'（无匹配结果）';
         const page=paginateItems(lines,offset,head_limit);
@@ -118,7 +163,7 @@ export const grepTool: Tool = {
       }catch(error){
         toolContext?.signal?.throwIfAborted();
         const code=error instanceof Error?error.message:'';
-        return `Error: ${/^(?:glob_[a-z_]+|grep_[a-z_]+|native_readonly_sandbox_changed)$/.test(code)||code==='sandbox denied search path'?code:'grep_search_failed'}`;
+        return `Error: ${/^(?:glob_[a-z_]+|grep_[a-z_]+|search_scope_[a-z_]+|native_readonly_sandbox_changed)$/.test(code)||code==='sandbox denied search path'?code:'grep_search_failed'}`;
       }
     }
     // 非 sandbox 调用保留 rg → grep → worker Node fallback。

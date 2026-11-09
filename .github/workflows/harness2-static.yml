@@ -116,6 +116,9 @@ jobs:
             xiaok-cli/desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm ci --ignore-scripts --prefix desktop
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: xiaok-cli/desktop
+        run: node node_modules/electron/install.js
       - run: npm ci --ignore-scripts --omit=dev --prefix ../kswarm
       - run: npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
       - run: npm run build:harness-owner-lock

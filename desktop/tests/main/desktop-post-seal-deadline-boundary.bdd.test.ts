@@ -14,8 +14,10 @@ interface NativeOwner {
 }
 const sdk = vi.hoisted(() => ({ output: '', workers: [] as NativeOwner[], onCreated: undefined as ((owner: NativeOwner) => void) | undefined }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       // The sole substitution is resolution of the fixed production .js URL
       // to its real compiled source. Worker execution/events/exit are native.
@@ -33,7 +35,7 @@ vi.mock('node:worker_threads', async importOriginal => {
         terminateCalls: () => terminate.mock.calls.length };
       sdk.workers.push(owner); sdk.onCreated?.(owner);
     }
-  } };
+  }) };
 });
 
 interface CapturedTimer { delay: number; fire(): void; isPending(): boolean }

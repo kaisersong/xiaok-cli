@@ -62,6 +62,40 @@ for (const name of ['go.mod', 'main.go', 'identity_unix.go', 'identity_windows.g
   await cp(join(root, nativeRel, name), join(out, nativeRel, name));
 }
 
+// 5) Fixed Desktop main runtime assets imported by emitted TS consumers.
+// Only plain files directly in this source directory qualify; never traverse
+// node_modules/build, sibling trees, private JSON/env, or symlink entries.
+const desktopRuntimeRel = join('desktop', 'electron');
+const desktopRuntimeSource = join(root, desktopRuntimeRel);
+for (const directory of [join(root, 'desktop'), desktopRuntimeSource]) {
+  const state = await lstat(directory);
+  if (!state.isDirectory() || state.isSymbolicLink()) throw new Error('test_asset_desktop_runtime_source_not_plain');
+}
+const desktopRuntimeOut = join(out, desktopRuntimeRel);
+for (const directory of [out, join(out, 'desktop'), desktopRuntimeOut]) {
+  await mkdir(directory, { recursive: true });
+  const state = await lstat(directory);
+  if (!state.isDirectory() || state.isSymbolicLink()) throw new Error('test_asset_desktop_runtime_target_not_plain');
+}
+let desktopRuntimeCopied = 0;
+for (const entry of await readdir(desktopRuntimeSource, { withFileTypes: true })) {
+  if (!entry.isFile() || entry.name.startsWith('.') || !/\.(?:mjs|cjs)$/.test(entry.name)) continue;
+  const source = join(desktopRuntimeSource, entry.name);
+  const target = join(desktopRuntimeOut, entry.name);
+  const sourceState = await lstat(source);
+  if (!sourceState.isFile() || sourceState.isSymbolicLink() || sourceState.nlink !== 1) throw new Error('test_asset_desktop_runtime_input_not_plain');
+  try {
+    const targetState = await lstat(target);
+    if (!targetState.isFile() || targetState.isSymbolicLink() || targetState.nlink !== 1) throw new Error('test_asset_desktop_runtime_output_not_plain');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  await cp(source, target, { dereference: false });
+  const copied = await lstat(target);
+  if (!copied.isFile() || copied.isSymbolicLink() || copied.nlink !== 1) throw new Error('test_asset_desktop_runtime_output_not_plain');
+  desktopRuntimeCopied++;
+}
+
 // The emitted reader resolves its real Windows absence pair beside itself,
 // independently of dist/. Reuse the build verifier and its atomic publisher.
 // Builder-only fixtures have no emitted reader and need no runtime carrier.
@@ -76,4 +110,4 @@ if (hasWindowsAbsenceReader) {
   const { copyWindowsAbsence } = await import('./verification/copy-windows-absence.mjs');
   copyWindowsAbsence(root, { target: 'sandbox' });
 }
-console.log(`copy-test-assets: tests=${testsCopied} srcTs=${srcCopied} scripts=${scriptsCopied} nativeSources=4`);
+console.log(`copy-test-assets: tests=${testsCopied} srcTs=${srcCopied} scripts=${scriptsCopied} desktopRuntime=${desktopRuntimeCopied} nativeSources=4`);

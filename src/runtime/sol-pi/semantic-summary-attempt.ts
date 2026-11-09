@@ -22,6 +22,12 @@ interface State { input: Input; qualification: 'test-fixture'|'official-deepseek
  priceQualification?:SemanticPriceQualification;priceBinding:SemanticPriceBinding;
  reservation:SemanticReservation;providerScopeUsed?:boolean;maxOutputTokens: number; finished: boolean; resolved: boolean; committed?: boolean; fetch?: typeof fetch }
 const attempts = new WeakMap<object, State>();
+const modelTransports=new WeakMap<object,{fetch:typeof fetch;physicalFetch:typeof fetch}>();
+const readModelTransport=WeakMap.prototype.get,writeModelTransport=WeakMap.prototype.set,applyModelTransport=Reflect.apply;
+export function readOriginalSemanticSummaryModelTransport(ref:unknown):Readonly<{fetch:typeof fetch;physicalFetch:typeof fetch}>{
+ const row=applyModelTransport(readModelTransport,modelTransports,[ref]) as {fetch:typeof fetch;physicalFetch:typeof fetch}|undefined;
+ if(!row)throw Error('SEMANTIC_SUMMARY_ORIGINAL_TRANSPORT_REQUIRED');return row;
+}
 const grants = new WeakMap<object, { sessionId: string; grantId: string }>();
 function denied(reason = 'INVALID'): never { throw Error(`SEMANTIC_SUMMARY_${reason}`); }
 function current(attempt: SemanticSummaryAttempt): State {
@@ -83,26 +89,30 @@ export async function prepareSemanticSummaryAttempt(input: Input): Promise<Seman
  return attempt;
 }
 /** Actual adapter path. Test counter capabilities never produce a live provider transport. */
-export function resolveSemanticSummaryAttempt(attempt: SemanticSummaryAttempt): {fetch:typeof fetch;maxOutputTokens:number} {
+export function resolveSemanticSummaryAttempt(attempt: SemanticSummaryAttempt): {fetch:typeof fetch;maxOutputTokens:number;modelTransport:object} {
  const value=current(attempt);
  if(value.qualification!=='official-deepseek-recipe'||!value.priceQualification)denied('QUALIFICATION');
  assertSemanticPriceQualification(value.priceQualification,value.priceBinding);
  if(value.finished || value.resolved)denied('ALREADY_USED');
  value.input.lease.assertCurrent();value.resolved=true;
- const raw=createSingleRequestHttpsFetch({destination:value.input.destination,expectedBody:value.input.serializedBody,
-  timeoutMs:120000,maxResponseBytes:16*1024*1024,signal:value.input.signal,
-  trackPhysicalDrain:work=>{value.input.lease.trackInFlight(work);}});
- let claimed=false;
- const guarded:typeof fetch=async(input,init)=>{
-  if(claimed || value.finished)denied('ALREADY_USED');claimed=true;
+ const assertSourceCurrent=()=>{
   value.input.lease.assertCurrent();value.input.signal?.throwIfAborted();
   assertSynchronousSessionHook(value.input.assertBoundaryCurrent);
   const policy=describeProductObservationPolicy(value.input.policy).semanticCompaction;
   if(!policy || Date.now()>=policy.expiresAt || Date.now()>=policy.pricing.validUntil)denied('EXPIRED');
   assertSemanticPriceQualification(value.priceQualification!,value.priceBinding);
-  return raw(input,init);
  };
- value.fetch=guarded;return {fetch:guarded,maxOutputTokens:value.maxOutputTokens};
+ const raw=createSingleRequestHttpsFetch({destination:value.input.destination,expectedBody:value.input.serializedBody,
+  timeoutMs:120000,maxResponseBytes:16*1024*1024,signal:value.input.signal,
+  trackPhysicalDrain:work=>{value.input.lease.trackInFlight(work);},
+  sourceHooks:{beforeTransport(){assertSourceCurrent();},observeRawFailure(){}}});
+ let claimed=false;
+ const guarded:typeof fetch=async(input,init)=>{
+  if(claimed || value.finished)denied('ALREADY_USED');claimed=true;
+  assertSourceCurrent();return raw(input,init);
+ };
+ const modelTransport=Object.freeze(Object.create(null));applyModelTransport(writeModelTransport,modelTransports,[modelTransport,Object.freeze({fetch:guarded,physicalFetch:raw})]);
+ value.fetch=guarded;return {fetch:guarded,maxOutputTokens:value.maxOutputTokens,modelTransport};
 }
 /** Failure remains charged. This never rewrites conversation history or refunds money. */
 export async function finishSemanticSummaryAttempt(attempt:SemanticSummaryAttempt,status:'settled'|'unknown'):Promise<StoredSessionSnapshot>{

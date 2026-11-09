@@ -1,22 +1,36 @@
 // @vitest-environment node
-import {it,expect,vi} from 'vitest';
-import {mkdirSync,writeFileSync,readFileSync,existsSync} from 'node:fs';import {join,resolve,relative,isAbsolute} from 'node:path';import {fileURLToPath} from 'node:url';
+import {it,expect,vi,afterAll} from 'vitest';
+import {mkdirSync,writeFileSync,readFileSync,existsSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve,relative,isAbsolute} from 'node:path';
 import {setTimeout as realDelay} from 'node:timers/promises';
-import {createOwnedWorkflowNetworkFixture} from '../support/owned-workflow-network-fixture.mjs';
-vi.mock('electron',()=>({app:{isPackaged:false}}));
-const repositoryRoot=process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT||fileURLToPath(new URL('../../../',import.meta.url));
-// Cold module compilation must not consume the owned server's real 5s protection lease.
-const ksModule=await import('../../electron/kswarm-service.ts');
-const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
+import {tmpdir} from 'node:os';
+import {openOwnedWorkflowServiceCase,finishOwnedWorkflowServiceCase} from '../support/owned-workflow-normal-case.js';
+vi.mock('electron',()=>({app:{isPackaged:false},BrowserWindow:undefined,webContents:undefined}));
+// Keep cold module evaluation in collection, outside both the case's 8s budget
+// and the original server's 5s protection. Real owners/effects remain in the case.
+const collectionRoot=mkdtempSync(join(tmpdir(),'workflow-deadline-collection-'));
+const collectionConfig=join(collectionRoot,'config');mkdirSync(collectionConfig,{mode:0o700});
+const previousCollectionConfig=process.env.XIAOK_CONFIG_DIR;
+afterAll(()=>{rmSync(collectionRoot,{recursive:true,force:true});});
+process.env.XIAOK_CONFIG_DIR=collectionConfig;
+try{
+ await import('../../electron/kswarm-service.ts');
+ await import('../../electron/desktop-services.ts');
+ await import('../../../src/ai/adapters/openai.ts');
+ await import('../../electron/desktop-execution-coordinator.ts');
+ await import('../support/owned-workflow-network-fixture.mjs');
+}finally{
+ if(previousCollectionConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previousCollectionConfig;
+}
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
 async function waitFor(test:()=>boolean){const started=performance.now();while(!test()){if(performance.now()-started>2000)throw Error('fixture_condition_timeout');await realDelay(10);}}
 for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-setup','late-prepared','retry-budget','worker-then-reviewer'] as const)it(`actual approved workflow budget: ${mode}`,async()=>{
- const fixture=await createOwnedWorkflowNetworkFixture(null,{issuer:mode==='expired-approved'?'po_generated_project':'po_generated',tasks:[{title:'Fictional report',assignedAgent:'xiaok-worker',requiredOutputs:['markdown']}]});
- const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let ks:any,desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any;let retryWaits=0,providerFailed=false;
- try{
+ const owned=await openOwnedWorkflowServiceCase(null,{issuer:mode==='expired-approved'?'po_generated_project':'po_generated',tasks:[{title:'Fictional report',assignedAgent:'xiaok-worker',requiredOutputs:['markdown']}]});
+ const {fixture,kswarmService:ks}=owned;let first:{error:unknown}|undefined;
+ const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
+ const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any;let retryWaits=0,providerFailed=false;
+ try{await (async()=>{
  const config=join(fixture.root,'config');writeFileSync(join(config,'config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture',model:'fixture-model'}},channels:{}}));
- process.env.XIAOK_CONFIG_DIR=config;process.env.KSWARM_SERVER_PATH=resolve(repositoryRoot,'..','kswarm','src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';globalThis.fetch=fixture.forwardedFetch;
- ks=ksModule.createKSwarmService({spawnProcess:(()=>{throw Error('foreign_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('foreign_kill_denied');}});
+ process.env.XIAOK_CONFIG_DIR=config;
  if(mode==='delayed-setup'){let shifted=false;
   globalThis.fetch=async(input,init)=>{const response=await fixture.forwardedFetch(input,init);if(new URL(String(input)).pathname==='/agents'&&!shifted){shifted=true;vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(fixture.issued.workflowRun.startedAt+14*60000);}return response;};
  }
@@ -64,9 +78,9 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
   if(mode==='queued-fifteen'){expect(calls).toBe(0);expect(coordinator.snapshot().waiting).toBe(0);lease.release();lease=undefined;await realDelay(30);expect(calls).toBe(0);}
   else{expect(providerSignal?.aborted).toBe(true);expect(closed).toBe(1);}
  }
- }finally{
- vi.useRealTimers();release.resolve();lease?.release();if(desktop){await desktop.closeTaskSourceWritersForMigration();await desktop.disposeMultiAgent();}if(outcome)await outcome;mock?.mockRestore();prepareMock?.mockRestore();retryTimerMock?.mockRestore();
- if(ks){const module=await import('../../electron/kswarm-service.ts');await module.sealAndDrainKSwarmServiceInstance(ks);}globalThis.fetch=fixture.nativeFetch;
- for(const [key,value]of [['XIAOK_CONFIG_DIR',previous.config],['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins],['XIAOK_MODEL_RECOVERY_WINDOW_MS',previous.recovery]]as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}await fixture.close();
- }
+ })();}catch(error){first={error};}
+ await finishOwnedWorkflowServiceCase(owned,desktop,first,[
+ ()=>vi.useRealTimers(),()=>release.resolve(),()=>lease?.release(),
+ ()=>{for(const [key,value]of [['XIAOK_CONFIG_DIR',previous.config],['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins],['XIAOK_MODEL_RECOVERY_WINDOW_MS',previous.recovery]]as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+ ],[()=>outcome,()=>mock?.mockRestore(),()=>prepareMock?.mockRestore(),()=>retryTimerMock?.mockRestore()]);
 },8000);

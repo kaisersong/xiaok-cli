@@ -1,156 +1,25 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { promisify } from 'node:util';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
-import { assertOpenAIToolProtocol, type OpenAIToolProtocolMessage } from '../support/openai-tool-protocol.js';
-
-const execFileAsync = promisify(execFile);
-const cliEntryPath = process.env.XIAOK_MULTI_AGENT_E2E_CLI_ENTRY
-  ?? join(process.cwd(), '.test-dist', 'src', 'index.js');
-const profileAccountChildSetupPath = join(process.cwd(), 'tests', 'support', 'profile-account-child.setup.mjs');
-
-type ProviderRequest = {
-  messages?: OpenAIToolProtocolMessage[];
-  tools?: Array<{ function?: { name?: string } }>;
-};
-
-type ProviderEvent = Record<string, unknown>;
-
-function canSpawnChildProcesses(): boolean {
-  const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
-  return !result.error && result.status === 0;
-}
-
-function writeConfig(configDir: string, baseUrl: string): void {
-  mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, 'config.json'), JSON.stringify({
-    schemaVersion: 1,
-    defaultModel: 'custom',
-    models: {
-      custom: {
-        baseUrl,
-        apiKey: 'test-key',
-        model: 'gpt-multi-agent-e2e',
-      },
-    },
-    defaultMode: 'interactive',
-    contextBudget: 8_000,
-    channels: {},
-  }, null, 2), 'utf8');
-}
-
-function ensureTestDistPackageJson(): void {
-  const packageJsonPath = join(process.cwd(), '.test-dist', 'package.json');
-  if (!existsSync(packageJsonPath)) mkdirSync(join(process.cwd(), '.test-dist'), { recursive: true });
-  writeFileSync(packageJsonPath, JSON.stringify({ version: '0.0.0-test', type: 'module' }, null, 2), 'utf8');
-}
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-function toolCallEvents(name: string, input: Record<string, unknown>, callId: string): ProviderEvent[] {
-  return toolBatchEvents([{ name, input, callId }]);
-}
-
-function toolBatchEvents(calls: Array<{ name: string; input: Record<string, unknown>; callId: string }>): ProviderEvent[] {
-  return [
-    {
-      choices: [{
-        index: 0,
-        delta: {
-          tool_calls: calls.map((call, index) => ({ index, id: call.callId, function: { name: call.name, arguments: '' } })),
-        },
-        finish_reason: null,
-      }],
-    },
-    {
-      choices: [{
-        index: 0,
-        delta: {
-          tool_calls: calls.map((call, index) => ({ index, function: { arguments: JSON.stringify(call.input) } })),
-        },
-        finish_reason: null,
-      }],
-    },
-    { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
-  ];
-}
-
-function textEvents(text: string): ProviderEvent[] {
-  return [
-    { choices: [{ index: 0, delta: { content: text }, finish_reason: null }] },
-    { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
-  ];
-}
-
-function sendEvents(res: ServerResponse, events: ProviderEvent[]): void {
-  res.writeHead(200, {
-    'content-type': 'text/event-stream',
-    'cache-control': 'no-cache',
-    connection: 'close',
-  });
-  for (const event of events) res.write(`data: ${JSON.stringify(event)}\n\n`);
-  res.write('data: [DONE]\n\n');
-  res.end();
-}
-
-function requestText(request: ProviderRequest): string {
-  return JSON.stringify(request.messages ?? []);
-}
-
-function lastMessage(request: ProviderRequest): OpenAIToolProtocolMessage | undefined {
-  return request.messages?.at(-1);
-}
-
-function parseLastToolResult(request: ProviderRequest): Record<string, unknown> {
-  const message = lastMessage(request);
-  if (message?.role !== 'tool' || typeof message.content !== 'string') return {};
-  try {
-    return JSON.parse(message.content) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-function toolNames(request: ProviderRequest): string[] {
-  return (request.tools ?? [])
-    .map((tool) => tool.function?.name)
-    .filter((name): name is string => typeof name === 'string');
-}
-
-function spawnedAgentId(request: ProviderRequest, taskName: string): string {
-  for (const message of request.messages ?? []) {
-    if (message.role !== 'tool' || typeof message.content !== 'string') continue;
-    try {
-      const result = JSON.parse(message.content);
-      if (result.taskName === taskName) return result.id;
-    } catch { /* Other tools may return plain text. */ }
-  }
-  return '';
-}
+import {createServer,type ServerResponse} from 'node:http';
+import {readFileSync,readdirSync,rmSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {afterAll,afterEach,beforeAll,describe,expect,it} from 'vitest';
+import {assertOpenAIToolProtocol} from '../support/openai-tool-protocol.js';
+import {canSpawnChildProcesses,createCliWorkspace,captureCliBuildMetadata,listenProvider,runFixtureCli,
+  readBody,requestText,lastMessage,parseLastToolResult,toolNames,spawnedAgentId,
+  toolCallEvents,toolBatchEvents,textEvents,sendEvents,writeConfig,type ProviderRequest} from '../support/chat-cli-multi-agent-fixture.js';
 
 describe('chat CLI multi-agent process e2e', () => {
   const tempDirs: string[] = [];
   const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
+  let assertMetadataUnchanged: (()=>void)|undefined;
+  beforeAll(()=>{assertMetadataUnchanged=captureCliBuildMetadata();});
+  afterAll(()=>{assertMetadataUnchanged?.();});
 
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 
   itIfCanSpawn.each(['AskUserQuestion', 'ask_user'] as const)('delivers the CLI policy and refuses unavailable user input through %s', async (tool) => {
-    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), `xiaok-delegation-question-${tool}-`)));
-    tempDirs.push(rootDir);
-    const configDir = join(rootDir, 'config');
-    const homeDir = join(rootDir, 'home');
-    const projectDir = join(rootDir, 'project');
-    mkdirSync(homeDir, { recursive: true });
-    mkdirSync(projectDir, { recursive: true });
+    const {configDir,homeDir,projectDir}=createCliWorkspace(`xiaok-delegation-question-${tool}-`,tempDirs);
     let requests = 0;
     const errors: string[] = [];
     const server = createServer(async (req, res) => {
@@ -175,14 +44,9 @@ describe('chat CLI multi-agent process e2e', () => {
         sendEvents(res, textEvents('QUESTION_BOUNDARY_FAILED'));
       }
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('missing local address');
-    writeConfig(configDir, `http://127.0.0.1:${address.port}/v1`);
+    writeConfig(configDir,await listenProvider(server,'missing local address'));
     try {
-      const { stdout } = await execFileAsync(process.execPath, ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'Review the implementation and coverage.'], {
-        cwd: projectDir, env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir }, timeout: 15_000,
-      });
+      const {stdout}=await runFixtureCli({projectDir,homeDir,configDir,prompt:'Review the implementation and coverage.',timeout:15_000});
       expect(errors).toEqual([]);
       expect(requests).toBe(2);
       expect(JSON.parse(stdout)).toMatchObject({ text: 'NO_APPROVAL_INVENTED' });
@@ -193,13 +57,7 @@ describe('chat CLI multi-agent process e2e', () => {
   }, 20_000);
 
   itIfCanSpawn('reports a stalled real child as failed and persists live progress before main completes', async () => {
-    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-agent-stall-')));
-    tempDirs.push(rootDir);
-    const configDir = join(rootDir, 'config');
-    const homeDir = join(rootDir, 'home');
-    const projectDir = join(rootDir, 'project');
-    mkdirSync(homeDir, { recursive: true });
-    mkdirSync(projectDir, { recursive: true });
+    const {configDir,homeDir,projectDir}=createCliWorkspace('xiaok-agent-stall-',tempDirs);
     let step = 0;
     let sawChildRequest = false;
     let sawFailed = false;
@@ -246,16 +104,10 @@ describe('chat CLI multi-agent process e2e', () => {
         sendEvents(res, textEvents('E2E_STALL_ERROR'));
       }
     });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('missing local address');
-    writeConfig(configDir, `http://127.0.0.1:${address.port}/v1`);
+    writeConfig(configDir,await listenProvider(server,'missing local address'));
     try {
-      const { stdout } = await execFileAsync(process.execPath, ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'STALL_TEST'], {
-        cwd: projectDir,
-        env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir, XIAOK_MAX_AGENT_THREADS: '2', XIAOK_SUBAGENT_IDLE_TIMEOUT_MS: '1000', XIAOK_SUBAGENT_TURN_TIMEOUT_MS: '5000' },
-        timeout: 15_000,
-      });
+      const {stdout}=await runFixtureCli({projectDir,homeDir,configDir,prompt:'STALL_TEST',timeout:15_000,
+        limits:{XIAOK_MAX_AGENT_THREADS:'2',XIAOK_SUBAGENT_IDLE_TIMEOUT_MS:'1000',XIAOK_SUBAGENT_TURN_TIMEOUT_MS:'5000'}});
       expect(errors).toEqual([]);
       expect(JSON.parse(stdout)).toMatchObject({ text: 'E2E_STALL_HANDLED' });
       expect(sawChildRequest).toBe(true);
@@ -271,16 +123,9 @@ describe('chat CLI multi-agent process e2e', () => {
 
   itIfCanSpawn.each(['isolated', 'default_fork', 'default_fork_same_batch', 'live_message'] as const)(
     'runs concurrent children, bidirectional messages, persistent follow-up and close: %s', async (mode) => {
-    const rootDir = realpathSync(mkdtempSync(join(tmpdir(), `xiaok-multi-agent-e2e-${mode}-`)));
-    const configDir = join(rootDir, 'config');
-    const homeDir = join(rootDir, 'home');
-    const projectDir = join(rootDir, 'project');
-    tempDirs.push(rootDir);
-    mkdirSync(projectDir, { recursive: true });
-    mkdirSync(homeDir, { recursive: true });
+    const {configDir,homeDir,projectDir}=createCliWorkspace(`xiaok-multi-agent-e2e-${mode}-`,tempDirs);
     const parentFactPath = join(projectDir, 'parent-context.txt');
     writeFileSync(parentFactPath, 'PARENT_COMPLETED_TOOL_FACT_7K9', 'utf8');
-    ensureTestDistPackageJson();
 
     let mainStep = -1;
     let childAId = '';
@@ -507,21 +352,10 @@ describe('chat CLI multi-agent process e2e', () => {
       sendEvents(res, textEvents('UNEXPECTED_ROUTE'));
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('failed to bind fake provider');
-    writeConfig(configDir, `http://127.0.0.1:${address.port}/v1`);
+    writeConfig(configDir,await listenProvider(server,'failed to bind fake provider'));
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        process.execPath,
-        ['--import', profileAccountChildSetupPath, cliEntryPath, 'chat', '--auto', '--json', 'E2E_MULTI_AGENT_START'],
-        {
-          cwd: projectDir,
-          env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, XIAOK_CONFIG_DIR: configDir, XIAOK_TEST_ACCOUNT_HOME: homeDir },
-          timeout: 20_000,
-        },
-      );
+      const {stdout,stderr}=await runFixtureCli({projectDir,homeDir,configDir,prompt:'E2E_MULTI_AGENT_START',timeout:20_000});
       expect(protocolErrors).toEqual([]);
       expect(JSON.parse(stdout)).toMatchObject({ text: 'E2E_MULTI_AGENT_PASS' });
       expect(stderr).not.toContain('UNEXPECTED_ROUTE');

@@ -1,4 +1,5 @@
 import { realpath, stat } from 'node:fs/promises';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { extname, isAbsolute } from 'node:path';
 import { XIAOK_DESKTOP_HOST_PARTICIPANT_ID, XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
 import type { RoomExternalDiscussionAdapter, RoomExternalDiscussionCapability, RoomExternalDiscussionRuntime } from '../shared/room-external-discussion.js';
@@ -7,6 +8,10 @@ import type { RoomAgentExecutionCapability } from './collaboration-room-service.
 type Profile = { executable: string; argsPrefix?: readonly string[] };
 type Agent = { id: string; participantId?: string; runtimeType?: string; runtimePath?: string; runtimeSource?: string; archivedAt?: unknown; execution?: { mode?: string; hostParticipantId?: string; participantId?: string } };
 type Resolution = (RoomExternalDiscussionCapability & { logicalAgentId: string }) | null;
+function effectGuard(beforeEffects?:()=>void){
+  let failure:{error:unknown}|undefined;
+  return {check(){try{assertBeforeEffects(beforeEffects);}catch(error){failure={error};throw error;}},failed(error:unknown){return Boolean(failure&&Object.is(error,failure.error));}};
+}
 
 /** Uses KSwarm runtime identity, not names or caller-supplied executable paths. */
 export function createRoomExecutionRouter(options: {
@@ -46,7 +51,8 @@ export function createRoomExecutionRouter(options: {
     }
     return pending;
   }
-  async function resolveWith(logicalAgentId: string, rows: Agent[]): Promise<Resolution> {
+  async function resolveWith(logicalAgentId: string, rows: Agent[],guard=effectGuard()): Promise<Resolution> {
+    guard.check();
     if (logicalAgentId === XIAOK_WORKER_SEED_ID || logicalAgentId === 'xiaok-po') return null;
     const agent = rows.find(row => row.id === logicalAgentId && !row.archivedAt);
     if (!agent) return unavailable(logicalAgentId);
@@ -60,15 +66,18 @@ export function createRoomExecutionRouter(options: {
     if (agent.execution?.mode !== 'self_running' || !agent.execution.participantId || (runtime !== 'qoder' && runtime !== 'xiaok')) return unavailable(logicalAgentId, runtime === 'kiro' ? runtime : undefined);
     try {
       const installed = await installation(runtime);
-      if (agent.runtimePath && await canonical(agent.runtimePath) !== installed.path) return unavailable(logicalAgentId, runtime, 'runtime_identity_mismatch');
-      return { ...await installed.adapter.probe(runtime), logicalAgentId };
-    } catch { return unavailable(logicalAgentId, runtime, 'not_installed'); }
+      guard.check();
+      if (agent.runtimePath){const current=await canonical(agent.runtimePath);guard.check();if(current!==installed.path)return unavailable(logicalAgentId, runtime, 'runtime_identity_mismatch');}
+      const capability=await installed.adapter.probe(runtime,guard.check);guard.check();
+      return { ...capability, logicalAgentId };
+    } catch(error) { if(guard.failed(error))throw error;return unavailable(logicalAgentId, runtime, 'not_installed'); }
   }
   return {
-    async resolve(logicalAgentId: string): Promise<Resolution> {
+    async resolve(logicalAgentId: string,beforeEffects?:()=>void): Promise<Resolution> {
+      const guard=effectGuard(beforeEffects);guard.check();
       if (logicalAgentId === XIAOK_WORKER_SEED_ID || logicalAgentId === 'xiaok-po') return null;
-      try { return await resolveWith(logicalAgentId, await agents()); }
-      catch { return unavailable(logicalAgentId); }
+      try { const rows=await agents();guard.check();return await resolveWith(logicalAgentId,rows,guard); }
+      catch(error) { if(guard.failed(error))throw error;return unavailable(logicalAgentId); }
     },
     async capabilities(ids?: string[]): Promise<RoomAgentExecutionCapability[]> {
       const rows = await agents().catch(() => []);
@@ -80,9 +89,10 @@ export function createRoomExecutionRouter(options: {
       }));
     },
     async execute(input: Parameters<RoomExternalDiscussionAdapter['execute']>[0]) {
+      assertBeforeEffects(input.beforeEffects);
       const installed = installations.get(input.runtime);
       if (!installed) throw new Error('discussion_protocol_unavailable');
-      return (await installed).adapter.execute(input);
+      const current=await installed;assertBeforeEffects(input.beforeEffects);return current.adapter.execute(input);
     },
   };
 }

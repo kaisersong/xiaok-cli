@@ -1,4 +1,6 @@
 export type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../../../shared/mail-connectors-ipc-contract.js';
+export type {DefaultDispatchInput,DefaultDispatchResult,DefaultDispatchPreparationObservationView} from '../../../shared/default-dispatch-ipc-contract.js';
+export type {NativeActivityQuestionForm,NativeActivityAnswer} from '../../../shared/native-activity-question-contract.js';
 import type {ScheduledActionDto,ScheduledBindingDto,ScheduledLoopCreateDto} from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../../../shared/knowledge-ipc-contract.js';
@@ -277,3 +279,5 @@ export type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDel
 export type { ProxyJsonResult, ProxyTextResult, ProxyDeleteResult, ProxyHttpBody, ProxyStreamResult, ProxyStatusResult, ProxyHealthResult } from '../../../shared/kswarm-proxy-ipc-contract';
 
 export type { ModelConfigResult, SaveModelConfigInput, UpdateModelRuntimeInput, SystemOneConfigResult, SystemOneConfigPatch, ManagedAgentInput, ManagedAgentResult, ProviderConnectionInput, ProviderConnectionResult, AvailableModelResult } from '../../../shared/model-provider-ipc-contract.js';
+export type {WriterControlResult} from '../../../shared/kswarm-writer-control-ipc-contract.js';
+export type {DshDesktopApi,DshDesktopState,DshDesktopMode,DshDesktopSetModeInput,DshDesktopConfigureSetupInput,DshDesktopConnectInput,DshDesktopDisconnectInput,DshDesktopReconcileInput,DshDesktopConfigureBudgetInput,DshDesktopPublishMandateInput,DshDesktopPublishEgressPolicyInput} from '../../../shared/dsh-desktop';

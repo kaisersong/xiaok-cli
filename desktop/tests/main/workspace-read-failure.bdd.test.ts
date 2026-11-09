@@ -12,10 +12,12 @@ import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-wor
 // effects, message/error/exit and the actual host settlement remain native.
 const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
   const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
       const protectionMapped = String(filename) === protectionSource;
@@ -24,7 +26,7 @@ vi.mock('node:worker_threads', async importOriginal => {
       super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
       if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
-  } };
+  }) };
 });
 beforeAll(async () => {
   Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));

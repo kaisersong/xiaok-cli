@@ -16,6 +16,12 @@ import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
 import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
 import { YzjCliAuthService } from './yzj-cli-auth-service.js';
 import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
+import {bindOriginalMainDshBrokerService} from './broker-protected-service-binding.js';
+import {createDefaultDispatchPreparationNativeSource} from './default-dispatch-preparation-native-source.js';
+import {createDefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
+import {createDefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
+import {createDesktopDispatchLaunchCapsule} from './default-dispatch-native-bootstrap.js';
+import {registerDefaultDispatchIpc} from './default-dispatch-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
 import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
@@ -35,6 +41,10 @@ import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
 import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
 import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
+import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
+import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
+import {registerKSwarmWriterControlIpc} from './kswarm-writer-control-typed-ipc.js';
 import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
 import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import {deferLoopArtifactPickerWindowDestroy} from './loop-artifact-save-picker.js';
@@ -51,14 +61,24 @@ import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import {createScheduledTaskDeliveryReconciler} from './scheduled-task-delivery.js';
 import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
+import {registerUnavailableDshSettingsIpc,registerDshSettingsIpc} from './dsh-settings-typed-ipc.js';
+import {readOriginalProductionRootResourceQualification} from './root-resource-production-qualification.js';
+import {createOriginalMainDshServiceSources,prepareOriginalMainDshServiceSources,readOriginalMainDshPreparedSources,closeOriginalMainDshStartupSources} from './main-dsh-service-sources.js';
+import {bindOriginalMainDshKSwarmService} from './kswarm-protected-service-binding.js';
+import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOriginalMainDshRuntimePolling,rejectOriginalMainDshRuntimeStartup} from './main-dsh-runtime-composition.js';
+import {createMainDshControlSource} from './main-dsh-control-source.js';
+import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
+import {resolveDesktopServiceScope} from './desktop-service-scope.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import {
   createDesktopServices,
+  startOriginalMainDshServicesRecovery,
+  startOriginalMainDshServicesRemoteRecovery,
   getDesktopMemoryBackend,
   closeDesktopMemoryStore,
   getDesktopMemoryStore,
@@ -133,11 +153,11 @@ import {
 } from './kswarm-semantic-service.js';
 import { registerSemanticDesktopIpc } from './semantic-ipc.js';
 import { createCollaborationRoomService } from './collaboration-room-service.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
 import { setRoomHistoryBrokerClient } from './room-history-page-tool.js';
 import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
-import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
+import { createCollaborationRoomWakeDispatcher,bindOriginalScopedRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
 import { RoomWorkspaceLocalStore } from './room-workspace-local.js';
 import { createRoomWorkspaceService } from './room-workspace-service.js';
 import { createRoomWorkspaceBrokerClient } from './room-workspace-broker-client.js';
@@ -146,7 +166,6 @@ import { createRoomExecutionRouter } from './room-execution-router.js';
 import { createRoomExternalDiscussionAdapter } from './room-external-discussion-adapter.js';
 import { createRoomWorkspaceRecovery } from './room-workspace-recovery.js';
 import { createRoomWorkspaceProjectAdapter } from './room-workspace-project-adapter.js';
-import { createRoomWorkspaceProjectDispatch } from './room-workspace-project-dispatch.js';
 import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
@@ -796,9 +815,49 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     return meetingRecorderController!.close();
   });
   registerRecorderWindowIpc(shutdownAwareIpc, recorderWindowProducers, { isMainWindowSender, isRecorderWindowSender });
+  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
+  const dataRoot = getConfigDir('desktop');
+  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
+  const serviceScope=resolveDesktopServiceScope({dataRoot});
+  const mainUserControlSource=createMainDshControlSource({windowOwner:applicationWindowOwner,scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  desktopIngressOwners.push(mainUserControlSource.ingress);
+  if(desktopShutdownCoordinator.isQuitting)mainUserControlSource.seal();
+  // Only the original installed profile may enter. There is no env/UI opt-in.
+  const dshQualification=readOriginalProductionRootResourceQualification();
+  const dshSources=dshQualification.qualified?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
+  let dshServicesTransferred=false;
+  if(dshSources){
+    desktopFinalLifetimeSteps.push({name:'main-dsh-startup-sources',async run(){if(!dshServicesTransferred)await closeOriginalMainDshStartupSources(dshSources);}});
+    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,harnessUserActor});}
+    catch(raw){
+      try{await closeOriginalMainDshStartupSources(dshSources,{raw});}catch{/* The original Sources retains cleanup faults and all physical tails. */}
+      throw raw;
+    }
+    if(!desktopShutdownGate.isOpen)return window;
+  }
+  const dshPrepared=dshSources?readOriginalMainDshPreparedSources(dshSources):undefined;
+  const writerScope=()=>({profileId:createHash('sha256').update(resolve(getConfigDir('desktop'))).digest('hex'),workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
+  const preparationNativeSource=createDefaultDispatchPreparationNativeSource({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  const preparationOwner=createDefaultDispatchPreparationOwner(preparationNativeSource);
+  desktopIngressOwners.push(preparationOwner.ingress);
+  desktopFinalLifetimeSteps.push({name:'default-dispatch-preparation-owner',run:()=>preparationOwner.drain()});
+  const defaultDispatchController=createDefaultDispatchBusinessController({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer}),preparationRecipient:preparationOwner});
+  // Register the passive owner before the first capsule can call Native SDKs.
+  desktopIngressOwners.push(defaultDispatchController.ingress);
+  desktopFinalLifetimeSteps.push({name:'default-dispatch-controller',run:()=>defaultDispatchController.drain()});
+  const writerSource=createKSwarmWriterControlSource({getWindow:()=>mainWindow,getScope:writerScope,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, { activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
-  if (!kswarmService) return window;
+  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, {
+    activityOwnerPending: !dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    ...(dshPrepared?{ownedDshAdmission:dshPrepared.businessSource.admission}:{}),
+    desktopProjectScope:writerScope(),ownedControlAdmission:writerSource.admission,ownedBusinessAdmission:defaultDispatchController.businessAdmission,ownedPreparationSource:preparationOwner.transportSource,ownedPreparationAdmission:preparationOwner.transportAdmission,
+  });
+  if (!kswarmService) {writerSource.seal();defaultDispatchController.seal();preparationOwner.seal();return window;}
+  try{preparationOwner.bindService(kswarmService);}catch(error){preparationOwner.seal();console.warn('[default-dispatch-preparation] service binding unavailable',error);}
+  writerSource.bindService(kswarmService);defaultDispatchController.bindService(kswarmService);desktopIngressOwners.push(writerSource.ingress);
+  const defaultDispatchBootstrap={controller:defaultDispatchController,capsule:createDesktopDispatchLaunchCapsule(defaultDispatchController,kswarmService)};
+  const writerControlBootstrap={source:writerSource,capsule:createDesktopWriterControlLaunchCapsule({source:writerSource,service:kswarmService,window})};
+  registerKSwarmWriterControlIpc(shutdownAwareIpc,createKSwarmWriterControlService({source:writerSource,service:kswarmService}));
   let kswarmStartPromise: Promise<void>;
   registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
   const runtimeActions = createDesktopRuntimeActionService({
@@ -830,13 +889,13 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
 
-  const kswarmStreamBridge = new KSwarmStreamBridge(() => `${desktopServiceUrl('kswarm').replace(/^http/, 'ws')}/ws`);
+  const kswarmStreamBridge = new KSwarmStreamBridge(() => dshSources ? 'ws://127.0.0.1:4400/ws' : `${desktopServiceUrl('kswarm').replace(/^http/, 'ws')}/ws`);
   const stopStreamReadiness = startKSwarmStreamWhenReady(kswarmService, kswarmStreamBridge);
   registerLifetimeDisposerStep('kswarm-stream-readiness', async () => stopStreamReadiness());
 
   let dispatchWorkspaceProject: (projectId: string, body?: unknown) => Promise<Record<string, unknown> | null> = async () => { throw new Error('workspace_initializing'); };
   registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService, {
-    dispatchProject: (projectId, body) => dispatchWorkspaceProject(projectId, body),
+    dispatchProject: async () => ({ok:false,code:'default_dispatch_requires_user_action'}),
     authorize: event => {
       const source = event as { sender?: unknown; senderFrame?: unknown };
       return !!mainWindow && !mainWindow.isDestroyed() && source.sender === mainWindow.webContents
@@ -845,8 +904,6 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
   });
 
-  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
-  const dataRoot = getConfigDir('desktop');
   await loadConfig();await readProtectedJson(join(dataRoot,'connectors.json'));
   let credentialInputs:ReturnType<typeof createCredentialInputOwner>|undefined;
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
@@ -857,13 +914,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
   if (!desktopShutdownGate.isOpen) return window;
-  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
     credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
     mailConnectors,
     assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
     onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
+    writerControlBootstrap,defaultDispatchBootstrap,defaultDispatchPreparationOwner:preparationOwner,
     harnessOptimizationUserActor: harnessUserActor,
+    ...(dshSources?{dshServiceSources:dshSources}:{}),
+    modelProbeUserSource:mainUserControlSource,
+    materialUserSource:mainUserControlSource,
     dataRoot,
     kswarmService,
     notifyConversationActivity: async activity => {
@@ -891,7 +951,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
-  // Initialization starts inside the factory. Own its original completion before
+  dshServicesTransferred=!!dshSources;
+  // Ordinary initialization starts inside the factory; DSH uses its private barrier.
+  // Own its original completion before
   // any later await, including renderer load failure or shutdown during loading.
   const taskInitialization = startDesktopTaskRecovery(desktopShutdownGate, async () => {
     debugMain('task-initialization:started');
@@ -902,15 +964,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     debugMain('task-initialization:failed');
     console.error('[main] task initialization failed:', error);
   });
-  desktopIngressOwners.push(services.goalShutdown.ingress);
-  desktopDurableStores.push(services.goalShutdown.durable);
-  if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
+  registerDefaultDispatchIpc(shutdownAwareIpc,defaultDispatchController,preparationOwner);
+  desktopIngressOwners.push(services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress);
+  desktopDurableStores.push(services.taskShutdown.durable);
+  if(desktopShutdownCoordinator.isQuitting){
+    for(const owner of [services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress]){owner.stopAccepting();owner.abortAllActive('app_shutdown');}
+  }
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
-  kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
-    process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
-    error => {
+  const startMainKSwarm = () => startDesktopKSwarmService(desktopShutdownGate, kswarmService,
+    !dshSources && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    dshSources?undefined:error => {
       const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
       console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
       activityOwnerNoticeOnce(code);
@@ -919,12 +984,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     const status = kswarmService.getStatus();
     if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
   }).catch(error => {
+    if (dshSources) throw error;
     const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
     console.error('[main] Service bootstrap refused:', message);
     dialog.showErrorBox('xiaok — 服务启动失败 / Service startup failed', message);
   });
+  if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
-  registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
+  if(!dshSources)registerLifetimeDisposerStep('multi-agent-runtime', async () => { await services.disposeMultiAgent(); });
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
   });
@@ -1210,11 +1277,15 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
 
 
-  try {
+  const reconcileStartupArtifacts=async()=>{try {
     await services.reconcileArtifactWorkspace();
   } catch (err) {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
-  }
+  }};
+  if(!dshSources)await reconcileStartupArtifacts();
+
+  // Current installed P4 is unavailable; this branch creates no DSH resources.
+  if(!dshSources)registerUnavailableDshSettingsIpc(shutdownAwareIpc);
 
   registerHarnessOptimizationIpc(shutdownAwareIpc, services, event => {
     return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
@@ -1495,6 +1566,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   const collaborationRoomBrokerClient = scopedRoomClients.roomClient;
   services.bindConversationProjectRoomClient(collaborationRoomBrokerClient);
+  services.bindRoomConversionBroker(collaborationRoomBrokerClient);
   const roomWorkspaceBroker = scopedRoomClients.workspaceBroker;
   setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const ensureWorkspaceProtocol = () => ensureRoomWorkspaceProtocol({
@@ -1510,15 +1582,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     makeAdapter: options => createRoomExternalDiscussionAdapter(options),
   });
   const roomWorkspaceRuntime = createRoomWorkspaceRuntime({
+    kswarmService,
     store: roomWorkspaceStore, broker: roomWorkspaceBroker, wake: collaborationRoomBrokerClient,
-    execute: (envelope, token, workspace, signal) => services.runCollaborationRoomAgentTask(envelope, token, workspace, signal),
+    execute: services.runCollaborationRoomAgentTask,
     projectAdapter: roomWorkspaceProjectAdapter,
     externalDiscussion: {
-      resolve: logicalAgentId => roomExecutionRouter.resolve(logicalAgentId),
+      resolve: (logicalAgentId,beforeEffects) => roomExecutionRouter.resolve(logicalAgentId,beforeEffects),
       execute: input => roomExecutionRouter.execute(input),
       getHostIdentity: roomId => rawRoomWorkspaceBroker.getHost(roomId),
     },
-    executeProject: input => services.runWorkspaceProjectTask(input),
+    executeProject: services.runWorkspaceProjectTask,
     ensureProtocol: ensureWorkspaceProtocol, notify: emitCollaborationRoomEvent,
     flushOutbox: () => roomWorkspaceService.flushOutbox(),
   });
@@ -1532,7 +1605,6 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       return ('projects' in snapshot ? snapshot.projects : []) ?? [];
     },
   });
-  dispatchWorkspaceProject = createRoomWorkspaceProjectDispatch({ adapter: roomWorkspaceProjectAdapter, runtime: roomWorkspaceRuntime });
   const roomWorkspaceRecovery = createRoomWorkspaceRecovery({
     store: roomWorkspaceStore, broker: roomWorkspaceBroker,
     isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true,
@@ -1544,7 +1616,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
     notify: roomId => emitCollaborationRoomEvent({ type: 'workspace_changed', kind: 'workspace_changed', roomId }),
   });
-  roomWorkspaceRecovery.start();
+  if(!dshSources)roomWorkspaceRecovery.start();
   registerLifetimeDisposerStep('room-workspace', async () => {
     await roomWorkspaceRecovery.stop();
     await roomWorkspaceRuntime.shutdown();
@@ -1563,7 +1635,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       const external = await roomExecutionRouter.resolve(logicalAgentId);
       return external === null || external.supported;
     },
-    execute: (input, claimToken) => services.runCollaborationRoomAgentTask(input, claimToken),
+    execute: services.runCollaborationRoomAgentTask,
     // Wake failures are otherwise invisible (dispatcher settles silently); keep
     // a main-debug trace so stalls like a drifted workspace root stay diagnosable.
     executeTurn: async input => {
@@ -1576,6 +1648,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
     onEvent: emitCollaborationRoomEvent,
   });
+  if(dshSources)bindOriginalScopedRoomWakeDispatcher(collaborationRoomWakeDispatcher,kswarmService);
   const collaborationRoomService = createCollaborationRoomService({
     prepareRoomDefaults: (input,signal) => prepareCollaborationRoomDefaults(input, {signal,llm:loopLlmPort,loadAgents:async()=>{const response=await kswarmService.request('/agents');if(!response.ok)throw Error('room_agents_unavailable');const body=await response.json();return Array.isArray(body.agents)?body.agents:[];}}),
     brokerClient: collaborationRoomBrokerClient,
@@ -1620,12 +1693,67 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       },
     },
   });
+  const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
+  const createMainRuntimeBridge = (brokerUrl = 'http://127.0.0.1:4318') => createKSwarmRuntimeBridge({
+    kswarmService,
+    allowedRoots: kswarmHandoffRoots,
+    runDesktopTask: services.runKSwarmHandoffTask,
+    runWorkspaceTask: input => roomWorkspaceRuntime.runProjectTask(input),
+    runWorkflowNode: services.runKSwarmWorkflowNode,
+    submitResult: (input) => submitKSwarmRuntimeResultToBroker({
+      brokerUrl,
+      participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+      logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+      projectId: input.projectId,
+      taskId: input.taskId,
+      runId: input.runId,
+      result: input.result,
+    }),
+    submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
+      brokerUrl,
+      participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+      logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+      handoff: input.handoff,
+      output: input.output,
+      reviewDecision: input.reviewDecision,
+    }),
+    });
+  const dshRuntimeBridge=dshSources?createMainRuntimeBridge():undefined;
+  const materialSourceCreation=createMainMaterialSource({userSource:mainUserControlSource,services});
+  desktopFinalLifetimeSteps.push({name:'main-material-source',async run(){await sealAndDrainMainMaterialSource(await materialSourceCreation);}});
+  const mainMaterialSource=await materialSourceCreation;
+  if(desktopShutdownCoordinator.isQuitting){await sealAndDrainMainMaterialSource(mainMaterialSource);return window;}
+  if(dshSources){
+    const composition=await composeOriginalMainDshRuntime({services,sources:dshSources,roomRuntime:roomWorkspaceRuntime,roomDispatcher:collaborationRoomWakeDispatcher,directBridge:dshRuntimeBridge!,materialSource:mainMaterialSource,brokerClient:rawCollaborationRoomBrokerClient});
+    const original=readOriginalMainDshRuntimeBinding(services,dshSources,composition);
+    await bindOriginalMainDshKSwarmService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    await bindOriginalMainDshBrokerService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    desktopIngressOwners.push(original.ingress);
+    if(!desktopShutdownGate.isOpen){original.ingress.stopAccepting();return window;}
+    registerDshSettingsIpc(shutdownAwareIpc,original.controller,mainUserControlSource);
+    await startOriginalMainDshServicesRecovery(services,dshSources,composition);
+    if(!desktopShutdownGate.isOpen)return window;
+    kswarmStartPromise=startMainKSwarm().then(async()=>{
+      if(!desktopShutdownGate.isOpen)return;
+      await startOriginalMainDshServicesRemoteRecovery(services,dshSources,composition);
+      await startOriginalMainDshRuntimePolling(services,dshSources,composition);
+      if(!desktopShutdownGate.isOpen)return;
+      roomWorkspaceRecovery.start();
+    }).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    // Retain the rejection before later callers await the same startup.
+    void kswarmStartPromise.catch(()=>undefined);
+    await reconcileStartupArtifacts();
+  }
+
   await registerDesktopIpc(shutdownAwareIpc, window, services, {
+    materialSource:mainMaterialSource,
+    materialUserSource:mainUserControlSource,
+    modelProbeUserSource:mainUserControlSource,
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
     getMainWindow: () => mainWindow,
     registerLifetimeDisposer: dispose => registerLifetimeDisposerStep('desktop-ipc-views', async () => { dispose(); }),
     multiAgentAuthorize: event => {
-      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender.isDestroyed() || event.sender !== mainWindow.webContents
         || event.senderFrame !== mainWindow.webContents.mainFrame
         || !isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })) return null;
       return { actorId: `desktop-user:${services.multiAgent?.profileId ?? 'unavailable'}` };
@@ -1704,32 +1832,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
-      const brokerUrl = desktopServiceUrl('broker');
-      const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
+      const brokerUrl = dshSources ? 'http://127.0.0.1:4318' : desktopServiceUrl('broker');
+      const originalRuntimeBridge=dshRuntimeBridge??createMainRuntimeBridge(brokerUrl);
       const runtimeBridge = {
-        ...createKSwarmRuntimeBridge({
-        allowedRoots: kswarmHandoffRoots,
-        runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
-        runWorkspaceTask: input => roomWorkspaceRuntime.runProjectTask(input),
-        runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
-        submitResult: (input) => submitKSwarmRuntimeResultToBroker({
-          brokerUrl,
-          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
-          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
-          projectId: input.projectId,
-          taskId: input.taskId,
-          runId: input.runId,
-          result: input.result,
-        }),
-        submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
-          brokerUrl,
-          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
-          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
-          handoff: input.handoff,
-          output: input.output,
-          reviewDecision: input.reviewDecision,
-        }),
-        }),
+        ...originalRuntimeBridge,
         handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo({ ...input, startAfterPlanning: true }),
         handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReviewSubmission(input),
         handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
@@ -1737,6 +1843,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       };
       runtimeBridgeClients.push(
         createKSwarmRuntimeBridgeBrokerClient({
+          kswarmService,
           brokerUrl,
           participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
           participantKind: 'service',
@@ -1754,6 +1861,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         });
       }
     }).catch(error => {
+      if (dshSources) { debugMain('runtime-bridge:startup-unconfirmed'); return; }
       if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
       console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
     });

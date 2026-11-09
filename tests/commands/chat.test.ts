@@ -19,16 +19,18 @@ describe('chat terminal layout', () => {
       'writeError(error.code);',
       expectedGuard,
     );
-    const crashReport = source.indexOf(
-      "await import('../utils/crash-reporter.js')",
-      actionCatch,
-    );
+    const stableExit = source.indexOf('process.exit(1);', stableOutput);
+    const crashReport = source.indexOf('await handleFatalError(error);', actionCatch);
 
     expect(source).toContain('KimiK3DurableResumeUnsupportedError');
     expect(actionCatch).toBeGreaterThan(-1);
     expect(expectedGuard).toBeGreaterThan(actionCatch);
     expect(stableOutput).toBeGreaterThan(expectedGuard);
-    expect(crashReport).toBeGreaterThan(stableOutput);
+    expect(stableExit).toBeGreaterThan(stableOutput);
+    expect(crashReport).toBeGreaterThan(stableExit);
+    expect(source.slice(expectedGuard, crashReport)).toMatch(
+      /writeError\(error.code\);\s*process.exit\(1\);\s*}/,
+    );
   });
 
   it('preflights strict K3 fork before mutation and delegates cross-profile model switching to the runtime', () => {

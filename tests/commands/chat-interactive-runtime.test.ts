@@ -11,6 +11,17 @@ import { createTeardownSteps } from '../support/teardown-steps.js';
 import { listActivityOwnerProcesses, removeTempDirWithRetry, retireActivityOwnersUnder, TEARDOWN_BUDGET_MS, teardownCaseOwners, teardownOverrunError } from '../support/activity-owner-teardown.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
+import {createActivityOwnerTestScope,type ActivityOwnerTestScope} from '../support/activity-owner-test-cleanup.js';
+const fixtureActivityOwners=vi.hoisted(()=>({current:undefined as ActivityOwnerTestScope|undefined}));
+vi.mock('../../src/runtime/conversation-activity/owner-launcher.js',async original=>{
+ const actual=await original<typeof import('../../src/runtime/conversation-activity/owner-launcher.js')>();
+ return {...actual,ensureConversationActivityOwner:(config:Parameters<typeof actual.ensureConversationActivityOwner>[0],options:Parameters<typeof actual.ensureConversationActivityOwner>[1]={})=>{
+  const scope=fixtureActivityOwners.current;if(!scope)throw Error('fixture_activity_owner_scope_required');
+  if(config.identity.kind!=='cli'||options.spawn!==undefined)throw Error('fixture_activity_owner_original_producer_required');
+  scope.assertOwnedPath(config.identity.path);
+  return scope.runOriginalLaunch(config.dataRoot,spawn=>actual.ensureConversationActivityOwner(config,{...options,spawn}));
+ }};
+});
 import { normalizeConfig } from '../../src/ai/providers/normalize.js';
 
 const watchdogEvents = vi.hoisted(() => [] as string[]);
@@ -908,17 +919,54 @@ function findReadyPromptIndex(lines: string[]): number {
 }
 
 async function waitForInputTurnReady(harness: ReturnType<typeof createTtyHarness>): Promise<void> {
-  await waitFor(() => {
-    expectPromptVisible(harness);
-    expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
-    const lines = harness.screen.lines();
-    const hasLiveActivity = lines.some((line) => {
-      const trimmed = line.trim();
-      return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
-    });
-    expect(hasLiveActivity).toBe(false);
-  }, { timeoutMs: 3_000 });
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  const startedAt = performance.now();
+  let phase: 'prompt-visible' | 'data-listener' | 'idle-activity' | 'settle' = 'prompt-visible';
+  try {
+    await waitFor(() => {
+      phase = 'prompt-visible';
+      expectPromptVisible(harness);
+      phase = 'data-listener';
+      expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+      phase = 'idle-activity';
+      const lines = harness.screen.lines();
+      const hasLiveActivity = lines.some((line) => {
+        const trimmed = line.trim();
+        return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])\s+(?:Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context)\b/u.test(trimmed);
+      });
+      expect(hasLiveActivity).toBe(false);
+    }, { timeoutMs: 3_000 });
+    phase = 'settle';
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } catch (raw) {
+    try {
+      const lines = harness.screen.lines();
+      const firstRow = Math.max(0, lines.length - 24);
+      // Closed chrome facts only: never print row text, credentials or transcript.
+      const screen = lines.slice(firstRow).map((line, index) => ({
+        row: firstRow + index,
+        codeUnits: line.length,
+        blank: line.trim() === '',
+        prompt: line.includes('❯'),
+        asciiPrompt: /^\s*>\s*/.test(line),
+        welcome: line.includes('欢迎使用 xiaok code!'),
+        activity: /Thinking|Exploring codebase|Tracing references|Running command|Answering|Compacting context/u.test(line),
+        inputPlaceholder: line.includes('Type your message...'),
+        busyPlaceholder: line.includes('Finishing response...'),
+        status: line.includes('project') && line.includes('%'),
+        questionHint: line.includes('1-6 select'),
+      }));
+      rawStderrWrite(`[fixture-input-ready-failure] ${JSON.stringify({
+        kind: 'fixture_input_ready_failure_v1',
+        phase,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        dataListeners: harness.emitter.listenerCount('data'),
+        endListeners: harness.emitter.listenerCount('end'),
+        frameRows: lines.length,
+        screen,
+      })}\n`);
+    } catch { /* Diagnostics must not replace the original failure, including undefined. */ }
+    throw raw;
+  }
 }
 
 function findLineIndex(lines: string[], pattern: string | RegExp): number {
@@ -1202,6 +1250,7 @@ vi.mock('../../src/ui/model-selector.js', () => ({
 // Windows CI runners spend 7.6-9.9s median per case here; 20s keeps occasional slow cases (Node 24) from timing out.
 describe('chat interactive runtime', { timeout: 20_000 }, () => {
   const tempDirs: string[] = [];
+  const retainedUnknownActivityRoots=new Set<string>();
   let originalConfigDir: string | undefined;
   let originalHome: string | undefined;
   let originalDisableGlobalPlugins: string | undefined;
@@ -1267,6 +1316,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
   };
 
   beforeEach(() => {
+    fixtureActivityOwners.current=createActivityOwnerTestScope(()=>tempDirs.filter(root=>!retainedUnknownActivityRoots.has(root)));
     resetAdapterState();
     watchdogEvents.length=0;
     mockSelectModel.mockReset();
@@ -1298,6 +1348,12 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const teardownDeadline = teardownStartedAt + TEARDOWN_BUDGET_MS;
     const teardown = createTeardownSteps('用例收尾（#145）');
     const step = teardown.step;
+    const activityScope=fixtureActivityOwners.current;
+    await step(async()=>{await activityScope?.close();});
+    let ownersPhysicallyClosed=true;
+    await step(()=>{try{activityScope?.assertClosed();}catch(raw){ownersPhysicallyClosed=false;throw raw;}});
+    fixtureActivityOwners.current=undefined;
+    if(!ownersPhysicallyClosed)for(const dir of tempDirs)retainedUnknownActivityRoots.add(dir);
     await step(() => observeOwnCrashReports());
     await step(() => { cwdSpy?.mockRestore(); cwdSpy = undefined; });
     await step(() => {
@@ -1307,7 +1363,12 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
       else process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = originalDisableGlobalPlugins;
     });
 
-    const caseDirs = tempDirs.splice(0);
+    const retained:string[]=[];
+    const caseDirs = tempDirs.splice(0).filter(dir=>{
+      if(retainedUnknownActivityRoots.has(dir)){retained.push(dir);return false;}
+      return true;
+    });
+    tempDirs.push(...retained);
     // #145：删目录前先收掉本用例拉起的 activity owner（detached，空闲 20 分钟才退），否则
     // 一个文件跑完累积几十个常驻进程。还在启动中的 owner 先等它的 status 落盘再收；收不掉的按原因判本用例失败（闸门）。
     // 删目录之后按删除前算好的前缀（原始路径 + realpath）再扫一次，把仍在的 owner 全部回收（SIGTERM + 确认退出）。

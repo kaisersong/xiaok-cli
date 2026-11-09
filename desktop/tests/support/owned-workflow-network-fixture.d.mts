@@ -16,6 +16,10 @@ export interface OwnedWorkflowTaskInput {
   assignedAgent?: string;
 }
 export interface OwnedWorkflowNetworkFixtureOptions {
+  /** Actual test launcher audience/credential; not a business capability. */
+  desktopProjectScope?:{profileId:string;workspaceId:string};
+  desktopMutationToken?:string;
+  reviewFormat?:'markdown'|'html';
   issuer?: string;
   partialRunWriteDeny?: boolean;
   project?: { id?: string; name?: string; goal?: string };

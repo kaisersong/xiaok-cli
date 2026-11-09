@@ -9,15 +9,17 @@ import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-con
 
 const nativeWorker = vi.hoisted(() => ({ output: '', root: '' }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
       if (mapped && !nativeWorker.output) throw new Error('test compiled Worker entry is not ready');
       super(mapped ? nativeWorker.output : filename, options);
     }
-  } };
+  }) };
 });
 beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
 afterAll(() => { if (nativeWorker.root) rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 }); });

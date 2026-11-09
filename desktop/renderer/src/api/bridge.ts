@@ -1,9 +1,13 @@
+import type {DefaultDispatchInput,DefaultDispatchResult} from './types';
+import type {RoomConversionCaptureInput,RoomConversionCaptureOutput,RoomConversionCaptureReference,RoomConversionObserveInput} from '../../../shared/room-conversion-input-contract.js';
+import type {UserTaskSubmissionInput,UserTaskSubmissionOutput} from '../../../shared/user-task-submission-contract.js';
 import { emitThreadDeletionPhase, type ThreadDeletionPhase } from './thread-deletion-diagnostics';
 import { ASSISTANT_THREAD_ID } from '../lib/assistant-thread';
 import { AUTOMATION_CONFIG_SCHEMA, AUTOMATION_OVERVIEW_SCHEMA } from '../../../shared/automation-config-ipc-contract';
 import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
 import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
 import type { ProxyHttpBody } from './types';
+import type {WriterControlResult} from './types';
 import type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
 import type {LoopPublicationAction} from '../../../shared/loop-publication-types.js';
 import { createLogger } from '../lib/logger';
@@ -218,6 +222,17 @@ const threadDeletionDiagnosticState = { active: false };
 let threadDeletionDiagnosticAttemptOrdinal = 0;
 
 export const api = {
+  dsh: {
+    getState: async () => window.xiaokDesktop.dsh.getState(),
+    setMode: async (input: import('../../../shared/dsh-desktop').DshDesktopSetModeInput) => window.xiaokDesktop.dsh.setMode(input),
+    configureSetup: async (input: import('../../../shared/dsh-desktop').DshDesktopConfigureSetupInput) => window.xiaokDesktop.dsh.configureSetup(input),
+    connect: async (input: import('../../../shared/dsh-desktop').DshDesktopConnectInput) => window.xiaokDesktop.dsh.connect(input),
+    disconnect: async (input: import('../../../shared/dsh-desktop').DshDesktopDisconnectInput) => window.xiaokDesktop.dsh.disconnect(input),
+    reconcile: async (input: import('../../../shared/dsh-desktop').DshDesktopReconcileInput) => window.xiaokDesktop.dsh.reconcile(input),
+    configureBudget: async (input: import('../../../shared/dsh-desktop').DshDesktopConfigureBudgetInput) => window.xiaokDesktop.dsh.configureBudget(input),
+    publishMandate: async (input: import('../../../shared/dsh-desktop').DshDesktopPublishMandateInput) => window.xiaokDesktop.dsh.publishMandate(input),
+    publishEgressPolicy: async (input: import('../../../shared/dsh-desktop').DshDesktopPublishEgressPolicyInput) => window.xiaokDesktop.dsh.publishEgressPolicy(input),
+  },
   // ---------------------
   // Auth API (mocked)
   // ---------------------
@@ -463,6 +478,9 @@ export const api = {
   stopObservationTask: (taskId:string) => window.xiaokDesktop.stopObservationTask(taskId),
   revokeObservationTask: (taskId:string) => window.xiaokDesktop.revokeObservationTask(taskId),
   getObservationTaskStatus: (taskId:string) => window.xiaokDesktop.getObservationTaskStatus(taskId),
+  submitUserTask: (input:UserTaskSubmissionInput):Promise<UserTaskSubmissionOutput> => window.xiaokDesktop.submitUserTask(input),
+  captureRoomConversion:(input:RoomConversionCaptureInput):Promise<RoomConversionCaptureOutput>=>window.xiaokDesktop.captureRoomConversion(input),
+  observeRoomConversion:(input:RoomConversionObserveInput):Promise<RoomConversionCaptureReference>=>window.xiaokDesktop.observeRoomConversion(input),
   async createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -1327,6 +1345,10 @@ export const api = {
   async getServiceStatus(): Promise<DesktopServiceStatusSnapshot> {
     return window.xiaokDesktop.getServiceStatus();
   },
+  async captureDefaultDispatchOperation(input:DefaultDispatchInput):Promise<DefaultDispatchResult>{return window.xiaokDesktop.captureDefaultDispatchOperation(input);},
+  async inspectWriterConfiguration():Promise<WriterControlResult>{return window.xiaokDesktop.inspectWriterConfiguration();},
+  async prepareWriterConfiguration():Promise<WriterControlResult>{return window.xiaokDesktop.prepareWriterConfiguration();},
+  async migrateWriterConfiguration():Promise<WriterControlResult>{return window.xiaokDesktop.migrateWriterConfiguration();},
   async restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void> {
     return window.xiaokDesktop.restartRelatedService(serviceId);
   },

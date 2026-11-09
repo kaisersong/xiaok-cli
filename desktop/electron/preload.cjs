@@ -138,6 +138,17 @@ function sanitizeKSwarmSemanticInput(kind, input) {
 }
 
 contextBridge.exposeInMainWorld('xiaokDesktop', {
+  dsh: {
+    getState: () => ipcRenderer.invoke('desktop:dsh:getState'),
+    setMode: input => ipcRenderer.invoke('desktop:dsh:setMode', input),
+    configureSetup: input => ipcRenderer.invoke('desktop:dsh:configureSetup', input),
+    connect: input => ipcRenderer.invoke('desktop:dsh:connect', input),
+    disconnect: input => ipcRenderer.invoke('desktop:dsh:disconnect', input),
+    reconcile: input => ipcRenderer.invoke('desktop:dsh:reconcile', input),
+    configureBudget: input => ipcRenderer.invoke('desktop:dsh:configureBudget', input),
+    publishMandate: input => ipcRenderer.invoke('desktop:dsh:publishMandate', input),
+    publishEgressPolicy: input => ipcRenderer.invoke('desktop:dsh:publishEgressPolicy', input),
+  },
   ...createMultiAgentPreload(ipcRenderer),
   systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
@@ -176,6 +187,9 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   stopObservationTask: taskId => ipcRenderer.invoke('desktop:stopObservationTask',{taskId}),
   revokeObservationTask: taskId => ipcRenderer.invoke('desktop:revokeObservationTask',{taskId}),
   getObservationTaskStatus: taskId => ipcRenderer.invoke('desktop:getObservationTaskStatus',{taskId}),
+  submitUserTask: input => ipcRenderer.invoke('desktop:submitUserTask',input),
+  captureRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:capture',input),
+  observeRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:observe',input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
   getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }),
   getGoalNativeMutation: (threadId) => ipcRenderer.invoke('desktop:goal:getNativeMutation', { threadId }),
@@ -213,7 +227,11 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       return () => { ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
     },
     getConversationActivities: input => ipcRenderer.invoke('desktop:activity:list', input),
+    // Preserve the main-validated optional unified presentation verbatim.
     getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }),
+    dismissWorkAttention: input => ipcRenderer.invoke('desktop:activity:attention:dismiss', input),
+    getNativeActivityQuestions: watchId => ipcRenderer.invoke('desktop:activity:nativeQuestions', {watchId}),
+    answerNativeActivityQuestion: input => ipcRenderer.invoke('desktop:activity:nativeAnswer', input),
     getMcpTaskInputs: watchId => ipcRenderer.invoke('desktop:activity:mcpInputs', { watchId }),
     answerMcpTaskInput: input => ipcRenderer.invoke('desktop:activity:mcpAnswer', input),
     cancelMcpWork: watchId => ipcRenderer.invoke('desktop:activity:mcpCancel', { watchId }),
@@ -338,6 +356,10 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   recordArtifactWorkspaceEvent: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:recordArtifactWorkspaceEvent', sanitizeArtifactWorkspaceInput(input)),
   getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats'),
   getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus'),
+  inspectWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:inspect'),
+  prepareWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:prepare'),
+  migrateWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:migrate'),
+  captureDefaultDispatchOperation:input=>ipcRenderer.invoke('desktop:kswarm:default-dispatch:capture',input),
   restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId),
   kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus'),
   kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start'),

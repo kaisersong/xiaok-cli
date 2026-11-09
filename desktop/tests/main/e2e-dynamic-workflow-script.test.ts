@@ -1,6 +1,7 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -10,7 +11,9 @@ import {
   REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE,
   createKSwarmRunDynamicWorkflowScriptTool,
 } from '../../electron/kswarm-dynamic-workflow-script-tool.js';
-import type { KSwarmService } from '../../electron/kswarm-service.js';
+import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
+import {sealAndDrainKSwarmWorkflowScriptJobs} from '../../electron/kswarm-dynamic-workflow-script-tool.js';
+import {createHash} from 'node:crypto';
 import {
   createKSwarmRuntimeBridge,
   createKSwarmRuntimeBridgeBrokerClient,
@@ -106,9 +109,11 @@ async function waitForCondition<T>(
 async function startKSwarmForE2E(input: {
   brokerUrl: string;
   tempHome: string;
+  mutationToken:string;
+  scope:{profileId:string;workspaceId:string};
 }): Promise<{ kswarm: StartedProcess; kswarmUrl: string; mutationToken: string }> {
   let lastLogs = '';
-  const mutationToken = `desktop-e2e-${Date.now()}`;
+  const mutationToken = input.mutationToken;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const kswarmPort = await reservePort();
     const kswarmUrl = `http://127.0.0.1:${kswarmPort}`;
@@ -120,6 +125,8 @@ async function startKSwarmForE2E(input: {
         BROKER_URL: input.brokerUrl,
         KSWARM_PORT: String(kswarmPort),
         KSWARM_DESKTOP_MUTATION_TOKEN: mutationToken,
+        KSWARM_DESKTOP_PROFILE_ID:input.scope.profileId,
+        KSWARM_DESKTOP_WORKSPACE_ID:input.scope.workspaceId,
         HOME: input.tempHome,
         USERPROFILE: input.tempHome,
       },
@@ -139,29 +146,6 @@ async function startKSwarmForE2E(input: {
     }
   }
   throw new Error(`failed to start kswarm after port retries\n${lastLogs}`);
-}
-
-function createKSwarmHttpService(baseUrl: string, mutationToken: string): KSwarmService {
-  return {
-    start: async () => {},
-    stop: async () => {},
-    restart: async () => {},
-    getStatus: () => ({
-      running: true,
-      port: Number(new URL(baseUrl).port),
-      pid: 1,
-      restartCount: 0,
-      lastError: null,
-    }),
-    onStatusChange: () => () => {},
-    request: async (path: string, init?: RequestInit) => fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        ...Object.fromEntries(new Headers(init?.headers).entries()),
-        'x-kswarm-mutation-token': mutationToken,
-      },
-    }),
-  };
 }
 
 const workflowScript = REPORT_FINAL_REVIEW_WORKFLOW_SCRIPT_EXAMPLE;
@@ -207,7 +191,12 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         USERPROFILE: tempHome,
       },
     );
-    const clients: Array<{ stop(): void }> = [];
+    const clients: Array<{ stop(): void|Promise<void> }> = [];
+    const previous={fetch:globalThis.fetch,entry:process.env.KSWARM_SERVER_PATH,brokerEntry:process.env.BROKER_SERVER_PATH};
+    process.env.KSWARM_SERVER_PATH=join(__dirname,'..','..','..','..','kswarm','src','server','index.js');
+    process.env.BROKER_SERVER_PATH=join(__dirname,'..','..','..','..','intent-broker','src','cli.js');
+    const scope={profileId:createHash('sha256').update(tempHome).digest('hex'),workspaceId:createHash('sha256').update(tempWorkFolder).digest('hex')};
+    const kswarmService=createKSwarmService({desktopProjectScope:scope,spawnProcess:(()=>{throw Error('fixture_unowned_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_unowned_kill_denied');}});
 
     try {
       await waitForCondition(
@@ -215,12 +204,13 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         (value) => value.ok === true,
         20_000,
       );
-      const startedKSwarm = await startKSwarmForE2E({ brokerUrl, tempHome });
+      const startedKSwarm = await startKSwarmForE2E({ brokerUrl, tempHome,scope,mutationToken:kswarmService.getDesktopMutationToken() });
       kswarm = startedKSwarm.kswarm;
       const { kswarmUrl, mutationToken } = startedKSwarm;
-      const kswarmService = createKSwarmHttpService(kswarmUrl, mutationToken);
+      globalThis.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);const local=url.hostname==='127.0.0.1'||url.hostname==='localhost';const destination=local&&url.port==='4400'?kswarmUrl:local&&url.port==='4318'?brokerUrl:undefined;return previous.fetch(destination?destination+url.pathname+url.search:input,init);};
 
       const bridge = createKSwarmRuntimeBridge({
+        kswarmService,
         runDesktopTask: async () => {
           throw new Error('unexpected_task_handoff');
         },
@@ -280,6 +270,7 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         }),
       });
       const desktopHostClient = createKSwarmRuntimeBridgeBrokerClient({
+        kswarmService,
         brokerUrl,
         participantId: 'xiaok-desktop',
         participantKind: 'service',
@@ -431,9 +422,10 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
       });
       expect(detail.project.deliverable ?? null).toBeNull();
       expect(detail.tasks.map(task => task.status)).toEqual(['done']);
+      // Project detail enriches existing artifact records with actual filesystem paths.
       expect(detail.tasks[0].result?.artifacts?.map(artifact => artifact.path)).toEqual([
-        'artifacts/workflow-report.html',
-        'artifacts/workflow-report.pdf',
+        join(realpathSync(tempWorkFolder),'artifacts','workflow-report.html'),
+        join(realpathSync(tempWorkFolder),'artifacts','workflow-report.pdf'),
       ]);
     } catch (error) {
       let brokerReplay = '';
@@ -454,9 +446,15 @@ describe('e2e: dynamic workflow script through KSwarm, broker, and desktop runti
         kswarm?.logs() ?? '',
       ].join('\n'));
     } finally {
-      for (const client of clients) client.stop();
-      await kswarm?.stop();
-      await broker.stop();
+      const outcomes=await Promise.allSettled([
+        ...clients.map(client=>client.stop()),
+        sealAndDrainKSwarmWorkflowScriptJobs(kswarmService),
+      ]);
+      const shutdown=await Promise.allSettled([sealAndDrainKSwarmServiceInstance(kswarmService),kswarm?.stop(),broker.stop()]);
+      globalThis.fetch=previous.fetch;
+      for(const [key,value] of [['KSWARM_SERVER_PATH',previous.entry],['BROKER_SERVER_PATH',previous.brokerEntry]] as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+      const errors=[...outcomes,...shutdown].filter((item):item is PromiseRejectedResult=>item.status==='rejected');
+      if(errors.length)throw new AggregateError(errors.map(item=>item.reason),'dynamic_workflow_fixture_cleanup_unconfirmed');
     }
   }, 90_000);
 });

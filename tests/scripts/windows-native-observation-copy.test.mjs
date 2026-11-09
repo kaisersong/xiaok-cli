@@ -116,7 +116,10 @@ test('actual test asset build invokes the sandbox carrier and preserves the CLI 
   const builder=path.join(f.root,'scripts/copy-test-assets.mjs');fs.copyFileSync(path.join(repository,'scripts/copy-test-assets.mjs'),builder);
   const native=path.join(f.root,'desktop/native/artifact-export-helper');fs.mkdirSync(native,{recursive:true});
   for(const name of ['go.mod','main.go','identity_unix.go','identity_windows.go'])fs.copyFileSync(path.join(repository,'desktop/native/artifact-export-helper',name),path.join(native,name));
+  const runtime=path.join(f.root,'desktop','electron');fs.mkdirSync(runtime,{recursive:true});
+  const runtimeBytes='export const fixture = true;\n';fs.writeFileSync(path.join(runtime,'fixture-runtime.mjs'),runtimeBytes);
   const result=spawnSync(process.execPath,[builder],{cwd:f.root,encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);
+  assert.equal(fs.readFileSync(path.join(f.root,'.test-dist','desktop','electron','fixture-runtime.mjs'),'utf8'),runtimeBytes);
   for(const arch of ['x64','arm64'])for(const name of names)assert.deepEqual(fs.readFileSync(path.join(destination(arch),name)),fs.readFileSync(path.join(f.directory(arch),name)));
   absent(f);
 }));

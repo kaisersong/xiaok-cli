@@ -16,6 +16,7 @@ import {
 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { deriveFixedNodejiebaEdges } from './fixed-nodejieba-edge.mjs';
 
 const SUPPORTED_EXTENSIONS = ['', '.js', '.mjs', '.cjs', '.json', '.node'];
 const BUILTINS = new Set([
@@ -142,6 +143,7 @@ export async function inspectModuleEdges(importerPath) {
     true,
     scriptKind,
   );
+  const fixedTargets = deriveFixedNodejiebaEdges(importerPath, sourceFile);
   const importerSha256 = sha256(sourceBytes);
   const constStrings = collectConstStrings(sourceFile);
   const createRequireNames = collectCreateRequireNames(sourceFile);
@@ -201,7 +203,7 @@ export async function inspectModuleEdges(importerPath) {
       importerSha256,
       astLocation: astLocation(sourceFile, node),
       pattern: node.getText(sourceFile),
-      runtimeTargets: runtimeTarget === undefined ? null : [runtimeTarget],
+      runtimeTargets: fixedTargets.get(node) ?? (runtimeTarget === undefined ? null : [runtimeTarget]),
     });
   }
 

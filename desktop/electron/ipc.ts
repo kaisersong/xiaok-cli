@@ -1,3 +1,6 @@
+import {registerRoomConversionCaptureIpc} from './room-conversion-typed-ipc.js';
+import {registerUserTaskSubmissionIpc} from './user-task-submission-typed-ipc.js';
+import {expandSelectedMaterialPaths} from './material-selection.js';
 import { registerGoalTaskMutationsIpc } from './goal-task-mutation-typed-ipc.js';
 import { createGoalAttachmentNativeTransportIpc } from './goal-attachment-native-typed-ipc.js';
 import { registerGoalPublicationIpc } from './goal-publication-typed-ipc.js';
@@ -51,6 +54,8 @@ import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs
 import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
+import {readOriginalMainMaterialServicesBinding} from './desktop-services.js';
+import {dispatchSourceExtract,readOriginalMainMaterialSourceBinding} from './main-material-source.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { MeetingTranscriber } from './meeting-service.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
@@ -505,6 +510,9 @@ function invokeArtifactWorkspaceIpcOperation(
 }
 
 interface RegisterDesktopIpcOptions {
+  materialSource?:object;
+  materialUserSource?:import('./main-dsh-control-source.js').MainDshControlSource;
+  modelProbeUserSource?:import('./main-dsh-control-source.js').MainDshControlSource;
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'evidenceStore' | 'scanner' | 'runner' | 'listAnomalies'>;
   multiAgentAuthorize?: (event: MultiAgentIpcEvent) => { actorId: string } | null;
   getMainWindow?: () => BrowserWindow | null;
@@ -803,7 +811,7 @@ export async function registerDesktopIpc(
   const primaryWindow = () => options.getMainWindow?.() ?? window;
   const taskActor = (event: IpcMainInvokeEvent) => {
     const actor = options.multiAgentAuthorize?.(event);
-    if (!actor) throw new Error('task_actor_forbidden');
+    if (!actor || event.sender.isDestroyed()) throw new Error('task_actor_forbidden');
     return { ...actor, requestSource: 'user' as const };
   };
   const recheckTaskActor = (event: IpcMainInvokeEvent, actor: { actorId: string }) => {
@@ -987,13 +995,14 @@ export async function registerDesktopIpc(
   artifactHandler('recordArtifactWorkspaceEvent', async (rawInput, _event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'recordArtifactWorkspaceEvent', rawInput);
   });
-  registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2]);
-  registerProjectPlanningIpc(ipcMain, async (_event, input) => {
-    log('info', 'startProjectPlanning', { projectId: input?.projectId });
-    const r = services.startProjectPlanning(input, 'user');
-    log('info', 'startProjectPlanning ok', { ok: r?.ok });
+  registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2],options.modelProbeUserSource);
+  registerProjectPlanningIpc(ipcMain, async (event, input,triggerProof) => {
+    const actor=taskActor(event),current=()=>recheckTaskActor(event,actor);
+    current();log('info', 'startProjectPlanning', { projectId: input?.projectId });
+    const r = await services.startProjectPlanning(input, 'user',current,triggerProof);
+    current();log('info', 'startProjectPlanning ok', { ok: r?.ok });
     return r;
-  });
+  },{beforeInput(event){taskActor(event);return undefined;},beforeOutput(event){taskActor(event);return undefined;},nativeTrigger:{owner:services.getProjectPlanningTriggerOwner(),authorize:taskActor}});
   fileHandler('desktop:readClipboardFilePaths', ignoredClipboardInput, clipboardFilePathsResult, ['clipboard', 'fs-read'], async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)), 2);
   const materialAccessProducers = new Map<string, IpcHandlerListener>([
     ['desktop:readClipboardImage', async () => {
@@ -1142,7 +1151,7 @@ export async function registerDesktopIpc(
     const actor = taskActor(_event);
     const clean = sanitizeTaskCreateInput(input);
     log('info', 'createTask', { prompt: clean.prompt.slice(0, 50) });
-    const r = captureTask7Output('createTask', await callTask7Producer(() => services.createTask(clean, actor)));
+    const r = captureTask7Output('createTask', await callTask7Producer(() => services.createTask(clean, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
   });
@@ -1203,7 +1212,7 @@ export async function registerDesktopIpc(
   task7Producers.set('desktop:answerQuestion', async (_event, input) => {
     const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = captureTask7Output('answerQuestion', await callTask7Producer(() => services.answerQuestion(input, actor)));
+    const r = captureTask7Output('answerQuestion', await callTask7Producer(() => services.answerQuestion(input, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'answerQuestion ok');
     return r;
   });
@@ -1251,7 +1260,7 @@ export async function registerDesktopIpc(
       return { content: '', error: String(e) };
     }
   });
-  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null);
+  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null,{authorize:taskActor});
   options.registerLifetimeDisposer?.(disposeActivity);
   const activeTaskSubs = new Map<string, AbortController>();
   const activeTaskSubIds = new Map<string, string>();
@@ -1373,11 +1382,13 @@ export async function registerDesktopIpc(
       prompt: input.prompt,
       filePaths: expanded,
       ...(context ? { context } : {}),
-    }, actor)));
+    }, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
   registerTask7Ipc(ipcMain, task7Producers, event => { taskActor(event); });
+  registerUserTaskSubmissionIpc(ipcMain, (event,input)=>{const actor=taskActor(event);return services.submitUserTask(input,actor,()=>recheckTaskActor(event,actor));}, event=>{taskActor(event);});
+  registerRoomConversionCaptureIpc(ipcMain,services,taskActor);
   registerDiagnosticsIpc(ipcMain, services);
 
   registerLoopManagementIpc(ipcMain, options.loopRuntime);
@@ -1637,8 +1648,12 @@ export async function registerDesktopIpc(
   const { createChunker } = await import('./kb-chunker.js');
   const { createSourceExtractor } = await import('./kb-source-extractor.js');
   const { app } = await import('electron');
+  const materialBinding=options.materialSource ? (()=>{
+    readOriginalMainMaterialSourceBinding(options.materialSource,services);
+    return readOriginalMainMaterialServicesBinding(services,options.materialUserSource);
+  })() : null;
   const kbSourceExtractor = createSourceExtractor({
-    officeParser: { parse: input => services.parseOfficeDocument(input) },
+    officeParser: { parse: materialBinding ? materialBinding.parseOfficeDocument as typeof services.parseOfficeDocument : input => services.parseOfficeDocument(input) },
   });
   const kbChunker = createChunker();
 
@@ -1717,7 +1732,7 @@ export async function registerDesktopIpc(
                 store.updateSourceParseResult(src.id, {
                   parseStatus: 'failed',
                   errorCode: 'io_error',
-                  errorMessage: error instanceof Error ? error.message : String(error),
+                  errorMessage: '',
                 }, 'scheduler');
               } catch {
                 // Another recovery path already finalized this source.
@@ -1754,7 +1769,14 @@ export async function registerDesktopIpc(
     return getKbStore().listSources(collectionId);
   });
 
-  knowledgeIpc.handle('desktop:kb:addSource', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:addSource', async (event, input) => {
+    const materialFrame=input?.kind==='file'&&options.materialSource ? (()=>{
+      if(!options.materialUserSource)throw Error('MAIN_MATERIAL_ORIGINAL_SOURCE_REQUIRED');
+      return options.materialUserSource.openMaterialRead(event,{schemaVersion:1,purpose:'kb_add_source_file',input},'user');
+    })() : undefined;
+    let primaryPresent=false,primary:unknown,response:unknown;
+    try {
+    response=await (async()=>{
     log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
     const store = getKbStore();
     const unsafeMetadata = input?.metadata && typeof input.metadata === 'object'
@@ -1779,7 +1801,8 @@ export async function registerDesktopIpc(
       if (input?.kind === 'paste' && input?.text) {
         extractResult = kbSourceExtractor.extractFromText(input.text, input.title || '粘贴文本');
       } else if (input?.kind === 'file' && input?.filePath) {
-        extractResult = await kbSourceExtractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
+        extractResult = materialFrame ? await dispatchSourceExtract(options.materialSource!,materialFrame.proof,store,source,kbSourceExtractor)
+          : await kbSourceExtractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
       } else if (input?.kind === 'url' && input?.uri) {
         extractResult = await kbSourceExtractor.extractFromUrl(input.uri);
       }
@@ -1790,18 +1813,23 @@ export async function registerDesktopIpc(
       }, 'user');
       return captureKnowledgeOutput('addSource', finalized);
     } catch (e) {
-      log('error', 'kb:addSource processing failed', String(e));
+      log('error', 'kb:addSource processing failed', {code:'knowledge_source_extraction_unconfirmed',sourceId:source.id});
       try {
         store.updateSourceParseResult(source.id, {
           parseStatus: 'failed',
           errorCode: 'io_error',
-          errorMessage: e instanceof Error ? e.message : String(e),
+          errorMessage: '',
         }, 'user');
       } catch {
         // The source may already have reached a terminal parse state.
       }
     }
     return captureKnowledgeOutput('addSource', store.getSource(source.id) ?? source);
+    })();
+    } catch(raw) {primaryPresent=true;primary=raw;}
+    if(materialFrame)try{materialFrame.release();}catch(raw){if(!primaryPresent){primaryPresent=true;primary=raw;}}
+    if(primaryPresent)throw primary;
+    return response;
   });
 
   knowledgeIpc.handle('desktop:kb:pickFiles', async () => {
@@ -2150,35 +2178,4 @@ function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
-export async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
-  const files = new Set<string>();
-  for (const path of paths) {
-    try {
-      const entry = await stat(path);
-      if (entry.isFile()) {
-        files.add(path);
-      } else if (entry.isDirectory()) {
-        for (const file of await listFilesInDirectory(path)) files.add(file);
-      }
-    } catch {
-      // Skip non-existent paths (e.g. pasted text that looks like a path)
-    }
-  }
-  return [...files].sort();
-}
-
-async function listFilesInDirectory(directory: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await listFilesInDirectory(path));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
-}
+export {expandSelectedMaterialPaths} from './material-selection.js';

@@ -82,6 +82,7 @@ export interface NeedsUserQuestion {
   choices?: Array<{ id: string; label: string }>;
   expectedAttachments?: MaterialRole[];
   staleAfterEventId?: string;
+  owner?:import('./native-approval-owner.js').NativeApprovalOwnerMetadata;
 }
 
 export type UserAnswer =
@@ -235,6 +236,8 @@ export interface TaskMultiAgentPreparation {
 }
 
 export interface TaskSnapshot {
+  /** Original durable prepare fact; never an execution/launch capability. */
+  originalChildPreparation?: import('./default-dispatch-preparation.js').OriginalChildPreparation;
   /** Fresh read observation only; omitted for ordinary tasks, never persisted or used as a write grant. */
   readonly currentCompletion?: Exclude<InstalledCompletionObservation,{kind:'ordinary'}>;
   /** Sticky host CAS marker; recovery requires explicit execution reauthorization even before an archive exists. */

@@ -27,7 +27,7 @@ export interface IpcSchemaEntry {
   payloadMode: 'single' | 'tuple';
   inputStage: 'beforeHandler' | 'afterHostAuthorization';
   wireInput?: ZodSchema;
-  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37;
+  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39;
   riskTags: RiskTag[];
 }
 
@@ -52,7 +52,7 @@ export function resetIpcSchemaRegistryForTests(): void {
 
 export interface IpcStageHelpers<I> {
   parseInput(snapshot: unknown): I;
-  onFailure(cleanup: () => void): void;
+  onFailure(cleanup: (error:unknown) => void): void;
   fail(error: unknown): never;
 }
 export interface IpcCleanupFailure { channel: string; originalError: unknown; cleanupError: unknown }
@@ -62,7 +62,7 @@ export interface IpcRegistrationOptions<I, O> {
   input: ZodSchema<I>;
   output: ZodSchema<O>;
   sourceFile: string;
-  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37;
+  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39;
   riskTags?: RiskTag[];
   handler: (input: I, event: IpcMainInvokeEvent, helpers?: IpcStageHelpers<I>) => Promise<O>;
   /** Main-owned adapters preserve domain error envelopes without granting caller authority. */
@@ -76,6 +76,9 @@ export interface IpcRegistrationOptions<I, O> {
   beforeOutput?: (event: IpcMainInvokeEvent) => undefined;
   captureOutput?: (result: O) => O;
   outputCheck?: (result: O) => undefined;
+  /** Original delivery admission, after validation (including any production
+   * fallback). No schema, await or SDK runs after this final synchronous hook. */
+  afterOutputValidation?: (result: O | {ok:false;error:string}) => undefined;
   cleanupFailureReporter?: (failure: IpcCleanupFailure) => void;
 }
 export function registerIpcHandler<I extends unknown[], O>(opts: Omit<IpcRegistrationOptions<I, O>, 'payloadMode'> & { payloadMode: 'tuple' }): void;
@@ -124,9 +127,14 @@ export function registerIpcHandler<I, O>(opts: IpcRegistrationOptions<I, O>): vo
     }
     return result;
   };
+  const finalizeOutput=(result:O):O|{ok:false;error:string}=>{
+    const validated=validateOutput(result);
+    if(opts.afterOutputValidation&&opts.afterOutputValidation(validated)!==undefined)throw new Error('ipc_final_output_admission_must_be_synchronous');
+    return validated;
+  };
   registrar.handle(opts.channel, async (event: IpcMainInvokeEvent, ...rawArgs: unknown[]) => {
     const raw = opts.payloadMode === 'tuple' ? rawArgs : rawArgs[0];
-    const cleanups: Array<() => void> = [];
+    const cleanups: Array<(error:unknown) => void> = [];
     let failed = false, parsedFull = false;
     const report = (originalError: unknown, cleanupError: unknown) => {
       const failure = { channel: opts.channel, originalError, cleanupError };
@@ -141,7 +149,7 @@ export function registerIpcHandler<I, O>(opts: IpcRegistrationOptions<I, O>): vo
       if (failed) return;
       failed = true;
       for (const cleanup of cleanups) {
-        try { cleanup(); } catch (cleanupError) { report(error, cleanupError); }
+        try { cleanup(error); } catch (cleanupError) { report(error, cleanupError); }
       }
     };
     const helpers: IpcStageHelpers<I> = {
@@ -159,14 +167,14 @@ export function registerIpcHandler<I, O>(opts: IpcRegistrationOptions<I, O>): vo
         parsed = (opts.inputStage ? opts.wireInput! : opts.input).parse(raw);
       } catch (error) {
         if (!opts.inputError) throw error;
-        return validateOutput(opts.inputError(error));
+        return finalizeOutput(opts.inputError(error));
       }
       const result = opts.inputStage ? await opts.handler(parsed, event, helpers) : await opts.handler(parsed, event);
       if (opts.inputStage && !parsedFull) throw new Error('ipc_staged_input_not_validated');
       if (opts.beforeOutput && opts.beforeOutput(event) !== undefined) throw new Error('ipc_output_admission_must_be_synchronous');
       const captured = opts.captureOutput ? opts.captureOutput(result) : result;
       if (opts.outputCheck && opts.outputCheck(captured) !== undefined) throw new Error('ipc_output_check_must_be_synchronous');
-      return validateOutput(captured);
+      return finalizeOutput(captured);
     } catch (error) {
       runFailure(error); throw error;
     }

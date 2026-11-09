@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { mkdirSync, readFileSync, appendFileSync, writeFileSync, existsSync, watchFile, unwatchFile } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {createNativeApprovalFixture} from './native-approval-client.mjs';
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const compiled = join(desktop, 'dist', 'main', 'desktop', 'electron');
@@ -75,6 +76,7 @@ ipcMain.handle = (channel, listener) => registerHandler(channel, async (event, .
 process.on('uncaughtException', error => { log('uncaught', String(error), error.stack); app.exit(1); });
 process.on('unhandledRejection', error => { log('unhandled', String(error)); });
 const activityKswarmUrl = process.env.XIAOK_ACTIVITY_E2E_KSWARM_URL;
+const nativeApprovalFixture=process.env.XIAOK_NATIVE_APPROVAL_E2E==='1'?createNativeApprovalFixture(root):undefined;
 const kswarm = { start: async () => {}, stop: async () => {}, restart: async () => {}, onStatusChange: () => () => {},
   getStatus: () => ({ running: false, port: 0, pid: null, restartCount: 0, lastError: null }), getDesktopMutationToken: () => 'fixture',
   getIntentBrokerRoomToken: () => 'fixture', request: async (path, init) => activityKswarmUrl
@@ -90,15 +92,17 @@ async function createView() {
 const owner = new DesktopApplicationWindowOwner({ current: () => window && !window.isDestroyed() ? window : null,
   bootstrap: async () => {
     services = createDesktopServices({ dataRoot: join(root, 'data'), knowledgeDbPath: join(root, 'knowledge.sqlite'), workspaceRoot: join(root, 'workspace'),
-      pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService: kswarm });
+      pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService: kswarm,
+      ...(nativeApprovalFixture?{codexClientFactory:nativeApprovalFixture}:{}) });
     // Main-only observer. Retain only frozen scalar diagnostic DATA in memory.
     services.multiAgent.service.options.onThreadDeletionDiagnostic = fact => {
       deletionDiagnostics.push({ ...fact, ...(fact.facts ? { facts: { ...fact.facts } } : {}) });
     };
     await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' }, undefined, 'user');
     await services.multiAgent.ready;
+    if(process.env.XIAOK_NATIVE_APPROVAL_E2E==='1')await services.saveModelConfig({providerId:'local-codex',modelId:'local-codex'},{requestSource:'user',actorId:`desktop-user:${services.multiAgent.profileId}`},'user');
     if (process.env.XIAOK_ACTIVITY_E2E_OWNER === 'daemon') {
-      await services.attachConversationActivityOwner({ kswarm: { url: activityKswarmUrl, mutationToken: 'fixture', brokerUrl: process.env.XIAOK_ACTIVITY_E2E_BROKER_URL, roomToken: 'fixture' } });
+      await services.attachConversationActivityOwner(activityKswarmUrl?{ kswarm: { url: activityKswarmUrl, mutationToken: 'fixture', brokerUrl: process.env.XIAOK_ACTIVITY_E2E_BROKER_URL, roomToken: 'fixture' } }:{});
     }
     // The unrelated KSwarm port stays disconnected in this isolated fixture;
     // register its real semantic proxy so AppLayout does not see missing IPC.
@@ -113,6 +117,9 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
       }));
       disposers.push(bridge.observeConnection(status => { void services.conversationActivity.projectConnectionChanged(status); }));
       bridge.start();
+    }
+    if (process.env.XIAOK_ATTENTION_STDIO_E2E === '1') {
+      const registration=await services.registerMcpTools();disposers.push(()=>registration.dispose());
     }
     // Register against the actual window before renderer startup can invoke IPC.
     window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: showWindows, width: 1440, height: 940 });
@@ -131,6 +138,7 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
     await window.loadFile(rendererFile); log('ready'); return window;
   }, createView });
 globalThis.multiAgentE2E = {
+  releaseNativeApprovals:()=>nativeApprovalFixture?.releaseApprovals(),
   reopen: async () => { window?.destroy(); return owner.open(); }, getServices: () => services,
   holdNextContent: () => { holdContent = true; },
   releaseContent: () => releaseContent(),

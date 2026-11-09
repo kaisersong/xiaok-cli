@@ -39,7 +39,7 @@ vi.mock('node:worker_threads', async importOriginal => {
   const sourceUrl = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url);
   const source = join(realpathSync(dirname(fileURLToPath(sourceUrl))),basename(fileURLToPath(sourceUrl)));
   const protectionSource=new URL('../../../src/runtime/task-host/protection-read-worker.ts',import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  class CompiledEntryWorker extends actual.Worker {
     private readonly originalEntry: {entry:string,protection:boolean,start:number,exit?:number,exitCode?:number,terminateCalls:number};
     override terminate():Promise<number>{this.originalEntry.terminateCalls++;return super.terminate();}
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
@@ -54,7 +54,16 @@ vi.mock('node:worker_threads', async importOriginal => {
       this.originalEntry=originalEntry;this.once('exit',(code)=>{originalEntry.exit=Date.now();originalEntry.exitCode=code;});
       if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
-  } };
+  }
+  // The SDK captures own native getter descriptors. Preserve that class shape
+  // on this entry-remapping subclass without constructing a Worker or adding a
+  // replacement getter implementation.
+  for (const key of ['stdout', 'stderr', 'stdin', 'threadId'] as const) {
+    const getter = Object.getOwnPropertyDescriptor(actual.Worker.prototype, key);
+    if (!getter?.get) throw Error('test original Worker getter missing: ' + key);
+    Object.defineProperty(CompiledEntryWorker.prototype, key, getter);
+  }
+  return { ...actual, Worker: CompiledEntryWorker };
 });
 beforeAll(async()=>{Object.assign(nativeWorker,await compileVerifierEntry('delivery-verifier-worker.ts'));const protection=await compileProtectionWorkerEntry();nativeWorker.protectionOutput=protection.output;nativeWorker.protectionRoot=protection.root;});
 afterAll(() => {
@@ -62,6 +71,18 @@ afterAll(() => {
   finally { for(const root of [nativeWorker.root,nativeWorker.protectionRoot])if(root)rmSync(root,{recursive:true,force:true,maxRetries:3}); }
 });
 
+
+it('the compiled-entry Worker fixture exposes original own getters without starting a native worker', async () => {
+  const actual = await vi.importActual<typeof import('node:worker_threads')>('node:worker_threads');
+  const observed = await import('node:worker_threads');
+  const before = { starts: nativeWorker.starts, entries: nativeWorker.originalEntries.length };
+  for (const key of ['stdout', 'stderr', 'stdin', 'threadId'] as const) {
+    const expected = Object.getOwnPropertyDescriptor(actual.Worker.prototype, key);
+    expect(expected?.get).toBeTypeOf('function');
+    expect(Object.getOwnPropertyDescriptor(observed.Worker.prototype, key)).toEqual(expected);
+  }
+  expect({ starts: nativeWorker.starts, entries: nativeWorker.originalEntries.length }).toEqual(before);
+});
 
 function sqlLiteral(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
 function installNativeSqlFault(store: DesktopMultiAgentStore, table: 'operations' | 'root_turns', groupId: string, predicate: string, error: string) {
@@ -1160,6 +1181,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const owner = fixture.service.bindApprovalTransport(transport);
     try {
       const taskId = await fixture.start(); await entered.promise;
+      expect((await fixture.host.inspectTask(taskId))?.status).toBe('waiting_user');
       await vi.advanceTimersByTimeAsync(31 * 60_000);
       expect(root.memberTicket.deadlineAt).toBeUndefined();
       expect(root.effectiveDeadline).toBe(Infinity); expect(child.effectiveDeadline).toBe(Infinity);
@@ -1171,7 +1193,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
         expect(context.signal.aborted).toBe(false);
         expect(fixture.store.getAgent(context.groupId, context.agentId)).toMatchObject({ status: 'running', executionActive: true });
       }
-      expect((await fixture.host.inspectTask(taskId))?.status).toBe('running');
+      expect((await fixture.host.inspectTask(taskId))?.status).toBe('waiting_user');
       expect(fixture.coordinator.snapshot()).toMatchObject({ active: 1, waiting: 0 });
     } finally {
       releaseChild.resolve('done'); releaseRoot.resolve(); await fixture.host.drain();
@@ -2159,6 +2181,30 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     let rejected:unknown;try{await core!.waitForDisposedResources();}catch(error){rejected=error;}
     expect(rejected).toBeInstanceOf(AggregateError);expect((rejected as AggregateError).errors).toContain(rawFailure);
     expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
+  });
+
+  it('staged shutdown waits the actual child session close while keeping original store facts open',async()=>{
+    const entered=deferred<void>(),release=deferred<void>(),rootEntered=deferred<void>(),rootRelease=deferred<void>();let childId='',groupId='';
+    const f=await setup(async()=>({run:async(_message,signal)=>{await new Promise<void>(resolve=>{if(signal?.aborted)resolve();else signal?.addEventListener('abort',()=>resolve(),{once:true});});return 'original child stopped';},dispose:async()=>{entered.resolve();await release.promise;}}),async context=>{
+      groupId=context.groupId;const result=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'original-shutdown-child',taskName:'shutdown_child',message:'original child'});childId=result.targetAgentId!;rootEntered.resolve();await rootRelease.promise;
+    });
+    try{
+      await f.start();await rootEntered.promise;f.host.stopAccepting();f.host.abortAllActive();f.service.beginShutdown();rootRelease.resolve();const original=f.service.quiesceShutdown();expect(f.service.quiesceShutdown()).toBe(original);await entered.promise;
+      expect(await f.service.drainShutdown(10)).toBe(false);expect(f.store.isClosed()).toBe(false);expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
+      await expect(f.service.prepareRoot(f.host,'t1',{prompt:'late replacement root',materials:[]})).rejects.toThrow();
+    }finally{release.resolve();rootRelease.resolve();}
+    await f.service.quiesceShutdown();await f.host.drain();expect(await f.service.drainShutdown(1000)).toBe(true);expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(true);
+  });
+  it('staged shutdown accepts the original delayed Host delivery before final authority revocation',async()=>{
+    const entered=deferred<void>(),release=deferred<void>();
+    const f=await setup(async()=>({run:async()=>'',dispose:async()=>{}}),async(_context,input)=>{await input.emitUsage({inputTokens:1,outputTokens:2});await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'original',stepId:'original',note:'Original completed root answer.'});});
+    const record=f.service.recordHostDelivery.bind(f.service);let first=true;
+    const reports=vi.spyOn(f.service,'recordHostDelivery').mockImplementation(async input=>{if(first){first=false;entered.resolve();await release.promise;}return record(input);});
+    cleanup.push(()=>reports.mockRestore());
+    const taskId=await f.start();await entered.promise;
+    try{f.host.stopAccepting();f.host.abortAllActive();f.service.beginShutdown();await f.service.quiesceShutdown();expect(await f.service.drainShutdown(10)).toBe(false);expect(f.store.isClosed()).toBe(false);}
+    finally{release.resolve();}
+    await f.host.drain();expect(await f.service.drainShutdown(1000)).toBe(true);expect(f.store.getRootBinding(taskId)?.delivery?.hostSettlement).toBe('committed');
   });
 
 });

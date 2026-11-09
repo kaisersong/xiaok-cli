@@ -1,6 +1,7 @@
 import {isAbsolute,relative,sep} from 'node:path';
 import {realpath,stat} from 'node:fs/promises';
 import {workspaceDigest} from './room-workspace-local.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import type {RoomWorkspaceExecutionContext} from './room-workspace-executor.js';
 
 export interface WorkspaceProjectMapping {
@@ -21,7 +22,7 @@ export interface WorkspaceProjectAdapter {
   listDispatchCandidates(projectId:string):Promise<{roomId:string;tasks:Array<{taskId:string;logicalAgentId:string}>}|null>;
   resolve(input:{roomId:string;projectId:string;logicalAgentId:string;taskId?:string}):Promise<WorkspaceProjectResolution>;
   authorize(context:RoomWorkspaceExecutionContext,taskId?:string):Promise<WorkspaceProjectResolution>;
-  dispatch(context:RoomWorkspaceExecutionContext,taskId:string,signal?:AbortSignal):Promise<Record<string,unknown>>;
+  dispatch(context:RoomWorkspaceExecutionContext,taskId:string,signal?:AbortSignal,beforeEffects?:()=>void):Promise<Record<string,unknown>>;
   submit(context:RoomWorkspaceExecutionContext,taskId:string,result:Record<string,unknown>):Promise<Record<string,unknown>>;
   retryPending():Promise<void>;
 }
@@ -98,8 +99,10 @@ export function createRoomWorkspaceProjectAdapter(options:{
       const candidates=Array.isArray(value.dispatchCandidates)?value.dispatchCandidates as WorkspaceProjectTask[]:[];
       return {roomId:project.primaryRoomId,tasks:candidates.filter(t=>typeof t.id==='string'&&typeof t.assignedAgent==='string').map(t=>({taskId:t.id,logicalAgentId:t.assignedAgent!}))};
     },
-    async dispatch(context,taskId,signal){
+    async dispatch(context,taskId,signal,beforeEffects){
+      assertBeforeEffects(beforeEffects);
       const value=await authorize(context,taskId);
+      assertBeforeEffects(beforeEffects);
       signal?.throwIfAborted();
       if(!value.task||context.taskId!==value.task.id)throw new Error('workspace_project_task_claim_mismatch');
       return post(value.mapping.projectId,'dispatch',{taskId:value.task.id,claimId:context.claimId,redeliver:true});

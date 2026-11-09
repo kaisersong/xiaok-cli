@@ -15,4 +15,5 @@ it('loads actual DesktopServices in a fresh ordinary Node process without creati
   ], { cwd: process.cwd(), timeout: 15000 });
   expect(result.stdout).toBe('');
   expect(result.stderr).not.toContain('does not provide an export named');
-});
+// Keep the child process's 15s import deadline authoritative, including on cold CI.
+}, 20000);

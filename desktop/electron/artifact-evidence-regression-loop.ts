@@ -1,4 +1,4 @@
-import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
+import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { validateCompletionEvidence } from '../../src/runtime/guards/completion-evidence.js';
@@ -163,7 +163,7 @@ export class ArtifactEvidenceRegressionScanner {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try{this.applySchema();this.connection.recordComponent('artifactScanner');}catch(error){this.connection.close();throw error;}
+    try{this.applySchema();this.connection.recordComponent('artifactScanner');}catch(error){try{this.connection.close();}catch{/* Owner-held cleanup must not replace the construction error. */}throw error;}
   }
 
   close(): void {
@@ -214,11 +214,11 @@ export class ArtifactEvidenceRegressionScanner {
   }
 
   ignoreAnomaly(id: string, ignoredUntil: number, now: number): EvidenceAnomaly | undefined {
-    const result = this.db.prepare(`
+    const result = this.connection.runWrite(`
       update evidence_anomalies
       set status = 'ignored', ignored_until = ?, last_resolved_at = null
       where id = ? and status != 'resolved'
-    `).run(ignoredUntil, id);
+    `, ignoredUntil, id);
     if (result.changes === 0) {
       return undefined;
     }
@@ -403,7 +403,7 @@ export class ArtifactEvidenceRegressionScanner {
     const evidenceIdsJson = JSON.stringify(input.evidenceIds);
     const metadataJson = JSON.stringify(input.metadata);
     if (existing) {
-      this.db.prepare(`
+      this.connection.runWrite(`
         update evidence_anomalies
         set status = 'open',
             last_seen_at = ?,
@@ -414,7 +414,7 @@ export class ArtifactEvidenceRegressionScanner {
             evidence_ids_json = ?,
             metadata_json = ?
         where id = ?
-      `).run(now, input.message, evidenceIdsJson, metadataJson, existing.id);
+      `, now, input.message, evidenceIdsJson, metadataJson, existing.id);
       const updated = this.getAnomalyById(existing.id);
       if (!updated) {
         throw new Error('Evidence anomaly update did not persist a record.');
@@ -423,7 +423,7 @@ export class ArtifactEvidenceRegressionScanner {
     }
 
     const id = randomUUID();
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into evidence_anomalies (
         id, loop_id, owner_kind, owner_id, kind, status, first_seen_at, last_seen_at,
         last_resolved_at, seen_count, ignored_until, message, evidence_ids_json, metadata_json
@@ -431,7 +431,7 @@ export class ArtifactEvidenceRegressionScanner {
         @id, @loopId, @ownerKind, @ownerId, @kind, 'open', @firstSeenAt, @lastSeenAt,
         null, 1, null, @message, @evidenceIdsJson, @metadataJson
       )
-    `).run({
+    `, {
       id,
       loopId: ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID,
       ownerKind: input.ownerKind,
@@ -474,25 +474,25 @@ export class ArtifactEvidenceRegressionScanner {
       if (activeAnomalyKeys.has(anomalyKeyOf(row.loop_id, row.owner_kind, row.owner_id, row.kind))) {
         continue;
       }
-      const result = this.db.prepare(`
+      const result = this.connection.runWrite(`
         update evidence_anomalies
         set status = 'resolved', last_resolved_at = ?, ignored_until = null
         where id = ? and status in ('open', 'ignored')
-      `).run(now, row.id);
+      `, now, row.id);
       resolved += Number(result.changes);
     }
     return resolved;
   }
 
   private resolveSourceUnavailable(now: number): number {
-    const result = this.db.prepare(`
+    const result = this.connection.runWrite(`
       update evidence_anomalies
       set status = 'resolved', last_resolved_at = ?, ignored_until = null
       where loop_id = ?
         and owner_kind = 'loop_run'
         and kind = 'source_unavailable'
         and status in ('open', 'ignored')
-    `).run(now, ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID);
+    `, now, ARTIFACT_EVIDENCE_REGRESSION_LOOP_ID);
     return Number(result.changes);
   }
 
@@ -578,7 +578,7 @@ export class ArtifactEvidenceRegressionScanner {
   }
 
   private applySchema(): void {
-    this.db.exec(`
+    this.connection.execWrite(`
       create table if not exists evidence_anomalies (
         id text primary key,
         loop_id text not null,
@@ -606,14 +606,16 @@ export class ArtifactEvidenceRegressionScanner {
   }
 
   private transaction<T>(fn: () => T): T {
-    this.db.exec('begin immediate');
+    const rollbackDatabase = this.db;
+    this.connection.execWrite('begin immediate');
     try {
       const result = fn();
-      this.db.exec('commit');
+      this.connection.execWrite('commit');
       return result;
     } catch (error) {
+      retainOriginalLoopDatabaseFailure(this.connection,rollbackDatabase,error);
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        rollbackOriginalLoopDatabase(this.connection,rollbackDatabase);
       } catch { /* ignore rollback errors */ }
       throw error;
     }

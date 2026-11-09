@@ -1,3 +1,4 @@
+import {sessionReadSdk,sessionReadStatKind} from './source-read-sdk.js';
 import {createKnownDirectoryWriterFence} from '../../../runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../../../runtime/verification/ordinary-source-writer-observation.js';
 import {constants,openSync,closeSync,fstatSync,readSync,lstatSync,existsSync,realpathSync,mkdirSync,unlinkSync,opendirSync} from 'node:fs';
@@ -21,20 +22,23 @@ export function captureSessionAlias(value:SessionAliasBinding):SessionAliasBindi
  if(!Number.isSafeInteger(next.domainGeneration)||Number(next.domainGeneration)<1)fail('generation');
  return next as unknown as SessionAliasBinding;
 }
-function read(path:string,limit:number):unknown {
- const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
- try{const stat=fstatSync(fd);if(!stat.isFile()||stat.size>limit)fail('file_limit');const buffer=Buffer.alloc(limit+1);let n=0;
-  while(n<buffer.length){const count=readSync(fd,buffer,n,buffer.length-n,null);if(!count)break;n+=count;}
-  if(n>limit)fail('file_limit');return JSON.parse(buffer.subarray(0,n).toString('utf8'));
- }finally{closeSync(fd);}
+function read(path:string,limit:number,context?:object):unknown {
+ const fd=sessionReadSdk(context,'fd-open-read',openSync,[path,constants.O_RDONLY|constants.O_NOFOLLOW]);
+ let bodyFailure:{error:unknown}|undefined,result:unknown;
+ try{const stat=sessionReadSdk(context,'fd-stat',fstatSync,[fd]);if(!sessionReadStatKind(stat,'file')||stat.size>limit)fail('file_limit');const buffer=Buffer.alloc(limit+1);let n=0;
+  while(n<buffer.length){const count=sessionReadSdk(context,'fd-read',readSync,[fd,buffer,n,buffer.length-n,null]);if(!count)break;n+=count;}
+  if(n>limit)fail('file_limit');result=JSON.parse(buffer.subarray(0,n).toString('utf8'));
+ }catch(error){bodyFailure={error};}
+ try{sessionReadSdk(context,'fd-close',closeSync,[fd]);}catch(error){if(bodyFailure)throw new AggregateError([bodyFailure.error,error],'session_read_and_close_failed',{cause:bodyFailure.error});throw error;}
+ if(bodyFailure)throw bodyFailure.error;return result;
 }
 const index=(root:string)=>join(root,'.session-aliases.json');
 const enabled=(root:string)=>join(root,'.session-aliases-enabled');
-export function readSessionAliases(root:string):SessionAliasRow[]{
- if(!existsSync(index(root))){if(existsSync(enabled(root)))fail('inventory_missing');return [];}
- if(!existsSync(enabled(root)))fail('inventory_unregistered');
- if(read(enabled(root),64)!==1)fail('inventory_marker');
- return parseSessionAliasRows(read(index(root),INDEX_LIMIT));
+export function readSessionAliases(root:string,context?:object):SessionAliasRow[]{
+ if(!sessionReadSdk(context,'boolean',existsSync,[index(root)])){if(sessionReadSdk(context,'boolean',existsSync,[enabled(root)]))fail('inventory_missing');return [];}
+ if(!sessionReadSdk(context,'boolean',existsSync,[enabled(root)]))fail('inventory_unregistered');
+ if(read(enabled(root),64,context)!==1)fail('inventory_marker');
+ return parseSessionAliasRows(read(index(root),INDEX_LIMIT,context));
 }
 /** Original index schema, shared with captured bytes without filesystem reads. */
 export function parseSessionAliasRows(value:unknown):SessionAliasRow[]{
@@ -77,8 +81,8 @@ function write(root:string,rows:SessionAliasRow[]){
 }
 function marker(root:string,binding:SessionAliasBinding){return {version:1,canonicalRoot:resolve(root),binding};}
 function markerPath(binding:SessionAliasBinding){return join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY,createHash('sha256').update(binding.holderId).digest('hex')+'.json');}
-function verifyHolder(binding:SessionAliasBinding){const stat=lstatSync(binding.holderRoot);if(!stat.isDirectory()||stat.isSymbolicLink()||realpathSync(binding.holderRoot)!==binding.holderRoot)fail('holder_changed');
- const directory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);if(existsSync(directory)){const dir=lstatSync(directory);if(!dir.isDirectory()||dir.isSymbolicLink())fail('holder_changed');}}
+function verifyHolder(binding:SessionAliasBinding,context?:object){const stat=sessionReadSdk(context,'stat',lstatSync,[binding.holderRoot]);if(!sessionReadStatKind(stat,'directory')||sessionReadStatKind(stat,'symlink')||sessionReadSdk(context,'string',realpathSync,[binding.holderRoot])!==binding.holderRoot)fail('holder_changed');
+ const directory=join(binding.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY);if(sessionReadSdk(context,'boolean',existsSync,[directory])){const dir=sessionReadSdk(context,'stat',lstatSync,[directory]);if(!sessionReadStatKind(dir,'directory')||sessionReadStatKind(dir,'symlink'))fail('holder_changed');}}
 /** Caller holds the shared FileSessionStore root mutation lock and actual target
  * execution lease. This low-level identity transaction does not issue grants. */
 function assertAliasWriterOpen(root:string,binding:SessionAliasBinding){
@@ -125,16 +129,16 @@ export function assertNoSessionAliases(root:string,sessionId:string){
 }
 /** Read-only route. Missing/retired/uncertain marker never falls back to an old
  * holder snapshot and never produces an execution lease or writable store. */
-export function readSessionAliasBinding(root:string,input:{holderRoot:string;holderId:string}):SessionAliasBinding|null {
- const rows=readSessionAliases(root),row=rows.find(item=>item.holderRoot===input.holderRoot&&item.holderId===input.holderId);
+export function readSessionAliasBinding(root:string,input:{holderRoot:string;holderId:string},context?:object):SessionAliasBinding|null {
+ const rows=readSessionAliases(root,context),row=rows.find(item=>item.holderRoot===input.holderRoot&&item.holderId===input.holderId);
  if(!row){
   // Ordinary task IDs and relative host roots retain their old contract. A
   // missing alias does not impose the stricter registration schema on them.
   const path=join(input.holderRoot,SESSION_ALIAS_HOLDER_DIRECTORY,createHash('sha256').update(input.holderId).digest('hex')+'.json');
-  if(existsSync(path))fail('unregistered_marker');return null;
+  if(sessionReadSdk(context,'boolean',existsSync,[path]))fail('unregistered_marker');return null;
  }
  if(row.state!=='active')fail('route_unavailable');
- const binding=captureSessionAlias(row);verifyHolder(binding);
- if(!existsSync(markerPath(binding))||!isDeepStrictEqual(read(markerPath(binding),MARKER_LIMIT),marker(root,binding)))fail('route_unavailable');
+ const binding=captureSessionAlias(row);verifyHolder(binding,context);
+ if(!sessionReadSdk(context,'boolean',existsSync,[markerPath(binding)])||!isDeepStrictEqual(read(markerPath(binding),MARKER_LIMIT,context),marker(root,binding)))fail('route_unavailable');
  return Object.freeze(binding);
 }

@@ -29,7 +29,8 @@ it('does not overwrite completion when a recovery read returns an older running 
     recovery = host.recoverTask('fictional-task');
     await readStarted;
     finish();
-    await vi.waitFor(() => expect(host.inFlightTaskIds()).toHaveLength(0));
+    await host.drain();
+    expect(host.inFlightTaskIds()).toHaveLength(0);
     expect((await actualRead('fictional-task'))?.status).toBe('completed');
     releaseRead();
     const { snapshot } = await recovery;

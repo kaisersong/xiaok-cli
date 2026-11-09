@@ -15,7 +15,7 @@ export type RuntimeEvent =
   | { type: 'assistant_delta'; sessionId: string; turnId: string; intentId: string; stepId: string; delta: string }
   | { type: 'receipt_emitted'; sessionId: string; turnId: string; intentId: string; stepId: string; note: string }
   | { type: 'salvage_emitted'; sessionId: string; turnId: string; intentId: string; summary: string[]; reason?: string }
-  | { type: 'approval_required'; sessionId: string; turnId: string; approvalId: string; prompt?: string; choices?: Array<{ id: string; label: string }> }
+  | { type: 'approval_required'; sessionId: string; turnId: string; approvalId: string; prompt?: string; choices?: Array<{ id: string; label: string }>;owner?:import('./task-host/native-approval-owner.js').NativeApprovalOwnerMetadata }
   | { type: 'approval_resolved'; sessionId: string; turnId: string; approvalId: string }
   | { type: 'tool_started'; sessionId: string; turnId: string; toolName: string; toolInput: Record<string, unknown> }
   | { type: 'tool_finished'; sessionId: string; turnId: string; invocationId: string; toolName: string; ok: boolean; invoked?: boolean }

@@ -7,6 +7,8 @@ on:
       - 'src/runtime/goal/**'
       - 'tests/runtime/verification/**'
       - 'tests/support/**'
+      - 'scripts/verification/**'
+      - 'tests/verification/**'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
@@ -17,6 +19,8 @@ on:
       - 'src/runtime/goal/**'
       - 'tests/runtime/verification/**'
       - 'tests/support/**'
+      - 'scripts/verification/**'
+      - 'tests/verification/**'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.ts'
@@ -25,6 +29,39 @@ on:
 permissions:
   contents: read
 jobs:
+  runtime-archives:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+        python: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact event head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Check original runtime archive and required QEMU payload
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests/verification -p 'test_runtime_*.py' -v 2>&1 | tee runtime-archive-tests.log
+      - name: Preserve actual archive regression cases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-archives-${{ matrix.os }}-python-${{ matrix.python }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime-archive-tests.log
+          if-no-files-found: error
   registration:
     strategy:
       fail-fast: false

@@ -1,0 +1,43 @@
+{
+  "close": "local handles only; no resource deletion or release",
+  "exports": [
+    "buildInfo",
+    "openOriginal",
+    "installFresh",
+    "readPolicy",
+    "close"
+  ],
+  "guardFlags": [
+    "SQLITE_UTF8",
+    "SQLITE_INNOCUOUS"
+  ],
+  "guardFunction": "xiaok_root_resource_reservation_writer_v1",
+  "guardRequires": "Native installing frame, healthy original session and physical identity",
+  "knownOpenParents": [
+    "enqueue/claim/consume/finish",
+    "actual Main original issuer and subjects",
+    "precompiled old writer floor migration",
+    "same-UID DDL/function forgery/file isolation",
+    "atomic VFS custody and sidecar inventory",
+    "Windows",
+    "installed artifact allowlist/final HEAD"
+  ],
+  "policy": {
+    "capacity": 5,
+    "claimSeq": 0,
+    "enqueueSeq": 0,
+    "humanBurst": 0,
+    "issuerEpoch": 1,
+    "queueLimit": 256
+  },
+  "profile": "ordinary_runtime_root_resource_reservation_floor_component_v1",
+  "schemaVersion": 1,
+  "scope": "Darwin Native connection floor component, not qualified product N",
+  "tables": [
+    "root_resource_floor",
+    "root_resource_policy",
+    "root_resources",
+    "root_launch_outbox",
+    "root_resource_receipts"
+  ]
+}

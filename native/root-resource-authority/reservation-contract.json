@@ -1,0 +1,148 @@
+{
+  "cancelQueued": "Original same-session subject membership and exact owned row/hash/sequence, independent of positive deadline eligibility; queued -> cancelled_before_launch plus immutable exact receipt in one COMMIT; no policy/outbox/claim changes; exact terminal receipt replay; active refuses without refund and remains consumable",
+  "claim": "Actual four active states count against capacity; original locally eligible subject ref; FIFO within priority; human burst max3 then background; CAS + outbox + immutable receipt + fairness atomic",
+  "close": "Only local handles, never resource deletion/refund/exit certificate",
+  "consume": "Original same-session opaque reservation only; pending outbox consumed once; immutable launch receipt replay never reissues launch permission",
+  "enqueue": "Same execution key and metadata hash idempotent; distinct metadata rejected; bounded queue; original sequence only for new row",
+  "exports": [
+    "buildInfo",
+    "openOriginal",
+    "installFresh",
+    "readPolicy",
+    "enqueue",
+    "claimNext",
+    "consumeLaunch",
+    "cancelQueued",
+    "readRecord",
+    "close",
+    "finishOriginalRoot",
+    "bootstrapOriginalMainPool"
+  ],
+  "failure": "No returned grant after commit/projection failure; sticky unknown and original Native cause/SQL truth; no inferred refund",
+  "fixtureOnlyExport": "fixtureSubject(session, bounded integer index) only with compiled finite metadata facts",
+  "freshOwner": "Original Main bootstrap only: fresh requires original O_EXCL birth of BOTH lock and database plus empty schema; restore requires exact v7 identity/schema/all resource graphs under original lock and read transaction, without recreating old eligibility or capabilities",
+  "guardFlags": [
+    "SQLITE_UTF8",
+    "SQLITE_INNOCUOUS"
+  ],
+  "guardFunction": "xiaok_root_resource_reservation_writer_v6",
+  "guardRequires": "Original Native private transaction, complete typed OLD/NEW expected cells, each write once, original session/floor/physical identity",
+  "knownOpenParents": [
+    "Actual Main original issuer and five real business subject sources",
+    "Qualified Native SDK roots and entire operational SDK inventory",
+    "Physical exit/finish/cancel/recovery and dynamic policy",
+    "Global physical N domain/all5N+9nonN/M/P",
+    "Precompiled old writer floor migration",
+    "Same-UID DDL/function forgery/file isolation and atomic VFS/sidecar custody",
+    "Windows",
+    "Installed artifact full build allowlist/CI/final HEAD"
+  ],
+  "knownProtocolRejections": "Conflicting hash or full queue: successful verified pre-write rollback preserves healthy issuer; any SQL/rollback/floor/identity uncertainty remains sticky unknown",
+  "opaqueChildren": "Per-addon/thread/env/session birth membership before dereference; strong parent reference; eligibility persists independently of JS token GC",
+  "policy": {
+    "capacity": 5,
+    "initialClaimSeq": 0,
+    "initialEnqueueSeq": 0,
+    "initialHumanBurst": 0,
+    "issuerEpoch": 1,
+    "queueLimit": 256
+  },
+  "profile": "ordinary_runtime_root_resource_reservation_writer_v7",
+  "receiptHistory": "Both binding_hash and receipt_json must be SQLite TEXT with exact expected byte length and complete memcmp equality; BLOB or embedded NUL suffix never counts as immutable history",
+  "schemaVersion": 3,
+  "scope": "Darwin Native reservation SQL protocol component; not qualified product N",
+  "tables": [
+    "root_resource_floor",
+    "root_resource_policy",
+    "root_resources",
+    "root_launch_outbox",
+    "root_resource_receipts",
+    "root_pool_identity"
+  ],
+  "testBuildBoundary": "Only finite subject construction, fixed typed-cell/after-write/COMMIT-wrapper fault seams and read-only fixture claim write-count projection are fixture conditional; the same original enqueue, physical claim, process-intent construction and history validation run in production and fixture. Original bootstrap finite failure points 1..5 occur after each actual guarded install write; point6 occurs after actual COMMIT. None is available in production or accepts SQL/callback/grant.",
+  "subjectV2": {
+    "contractSha256": "9a491206943d556a51abc76e82d8685e8601f7235e1b7d2b8f4a171026108e82",
+    "mainOnlyExport": "importOriginalRoomTurnSubject",
+    "legacy": "No installed floor auto-upgrade; compile-only finite legacy subjects remain fixture data",
+    "additionalMainOnlyExport": "importOriginalDshDraftSubject",
+    "additionalMainOnlyExports": [
+      "importOriginalDshDraftSubject",
+      "importOriginalKSwarmTaskSubject",
+      "importOriginalRoomProjectSubject",
+      "importOriginalWorkflowRootSubject"
+    ]
+  },
+  "physical": {
+    "M": 4,
+    "P": 2,
+    "queueLimit": 256,
+    "owner": "Same original Main C session, separate Native accounting domains",
+    "tables": [
+      "root_physical_policy",
+      "root_physical_resources",
+      "root_physical_receipts"
+    ],
+    "nativeScope": "Role/session/private context and accounting only; actual TS SDK physical receipt independently required",
+    "unknown": "No timeout/GC/close/cold refund or remint",
+    "workflowGang": {
+      "api": "enqueueOriginalWorkflowVmProcess(context, actualInvocationId, actualSpecHash)",
+      "capacity": "Same original P2. Atomic one actual VM plus one unarmed child capacity slot. No SDK permit for the slot. Child attempts use their actual spec and same Native root, do not double-count slot capacity.",
+      "rows": "Four closed roles direct/workflow_vm/workflow_child_slot/workflow_child_attempt; complete 14 OLD+NEW cells guarded. parent_record_id and native_root_id are closed immutable relationships.",
+      "claim": "Same original queue scans for eligible capacity. A group child may use its reserved idle slot while unrelated queued attempts cannot consume that slot. One armed child per slot.",
+      "settlement": "Known child settles its actual row then restores idle capacity to same group. VM settles only while slot idle and no queued/unknown children; releases both VM and slot. SQL membership does not prove actual Worker or future-producer closure; fixed original TS SDK fate must independently AND.",
+      "legacy": "No silent installed floor rewrite. v3/schema1 floor is refused by v4/schema2 writer without changing old rows/receipts. Old binaries lack v3 full-cell guard and cannot write the new floor. Cold sessions reconcile only.",
+      "unknown": "Unknown child/VM or COMMIT/projection uncertainty keeps group capacity held. GC/timeout/close never refund.",
+      "roleReplay": "Same invocation/hash cannot replay direct or child P allocation as a VM group; existing role mismatch is a verified healthy pre-write conflict.",
+      "fixtureEvidence": "Finite-facts-only fixed binding mismatch seam tests all 14-cell guard relationships; actual COMMIT then controlled wrapper failure is not real OS fsync failure evidence."
+    },
+    "contextIdentity": "Canonical context and hash bind the exact original consumed Native root recordId as nativeRootId (null only without N ancestry), copied only through Native private context ancestry; identical data under different roots never aliases physical attempts.",
+    "processIntent": {
+      "receiptKind": "process_intent_v1",
+      "claim": "One immutable launch identity receipt in the same original P claim transaction; Native launch nonce sampled only for a new claim, binds original row, metadata, claim, generation and issuer epoch. Capacity-only slots never receive SDK intents.",
+      "read": "Same-session opaque original P permit for warm intent; execution key cold history metadata never returns a permit or remints eligibility. Full SQLite TEXT bytes and exact reconstructed receipt required.",
+      "writes": "Direct P claim 4 writes; workflow VM pair claim 6 writes; actual child claim 5 writes. All fit original MAX_WRITES=8 and roll back together.",
+      "legacy": "v4 and earlier floors refused without rewrite; no implicit migration.",
+      "boundary": "Identity is not OS containment, terminal proof, a retry, or permission to launch."
+    },
+    "readonlyLeaf": {
+      "abi": "original_main_physical_v2_nofork_leaf",
+      "portMethodCount": 19,
+      "producer": "same bounded-glob JS body in one fixed Node process; no inner Worker",
+      "launch": "original Ppermit owns fixed sandbox-exec spawn, unreaped child and every FD; actual kernel nofork plus private READY token and same Root immutable binding before one local GO",
+      "terminal": "actual owned waitpid and all original FD closure AND original SDK inventory; unknown never cleared; not generic process/domain authority",
+      "legacy": "v5/13-method Native ABI is history only, not leaf eligible. Uninstalled ordinary Worker ABI remains.",
+      "scope": "Darwin fixed readonly producer only; no Shell/Codex/plugin/fullfork/VFS/I0/Windows/product qualification",
+      "assets": "One build-bound bundled original JS module graph; compiled SHA256/size plus exact eleven builtin externals and fixed node:module banner; original Main executable and a closed sanitized environment. This is not VFS/old-writer isolation.",
+      "receipts": [
+        "process_binding_v1",
+        "process_fence_v1",
+        "process_closed_v1"
+      ],
+      "history": "Same Root receipt table; reconstruct complete canonical body with original intent/record/nonce/spec/claim/generation/issuer and binding/fence/closed relationships; full SQLite TEXT class and bytes. history_only never returns a permit or remints current eligibility.",
+      "failure": "Original P owns Native state before asset/pipe/spawn entry. Source retirement still permits exact owned negative cleanup. SDK function/raw/outcome/Error/undefined/own/symbol tails all AND actual waitpid and every FD close; any unknown remains held. A timeout only requests owned cancellation, never certifies closure.",
+      "guard": "Positive prepare/bind/GO use original current and final local; negative READY/cancel/closed use original private ownership/lifecycle. Same prepare/bind replay never resamples nonce or spawns another child."
+    }
+  },
+  "finish": "Negative settlement only: original same-session reservation with exact launch-consumed receipt and outbox1; active -> released/revision+1 plus immutable physical_finished receipt in same COMMIT, exact replay. TS fixed original Host/VM/SDK fate AND all descendant M/P required separately; Native membership alone never proves physical close.",
+  "poolBootstrap": {
+    "identityVersion": 1,
+    "cells": [
+      "singleton",
+      "identity_version",
+      "pool_id",
+      "owner_uid",
+      "directory_device",
+      "directory_inode",
+      "directory_mode",
+      "lock_device",
+      "lock_inode",
+      "lock_mode",
+      "database_device",
+      "database_inode",
+      "database_mode"
+    ],
+    "legacy": "Exact v6/v5 history only; no implicit identity anchor or positive migration",
+    "restore": "Read-only full typed schema, identity, immutable receipts, N/M/P and gang relations/counters. Original pool issuer epoch stays 1; old active/unknown holds and queued rows remain. New session has zero eligibility. Full namespace replacement/VFS isolation remains OPEN.",
+    "freshWrites": 5
+  }
+}
