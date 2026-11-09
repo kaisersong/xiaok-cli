@@ -21,9 +21,23 @@ class Child extends EventEmitter {
  kill(){if(this.exitCode!==null)return false;this.exitCode=0;this.connected=false;this.emit('exit',0,null);this.emit('close',0,null);return true;}
  send(value:unknown){f.frames.push(value);f.events.push('frame');const ready=()=>this.emit('message',{kind:'original_broker_ready_v1',port:4318,pid:this.pid});if(f.readyGate)f.readyGate=ready;else queueMicrotask(ready);return true;}
 }
+
+// This file models lifecycle/ABI with fake children and fully intercepted fetch.
+// Logical endpoint metadata never binds a user port or grants Native authority.
+// Real port selection remains exercised by the unmocked B4 runtime-owner tests.
+vi.mock('../../electron/desktop-service-discovery.js',async importOriginal=>{
+  const actual=await importOriginal<typeof import('../../electron/desktop-service-discovery.js')>();
+  return {...actual,async prepareDesktopServicePorts(file=actual.desktopServiceDiscoveryFile(),env:NodeJS.ProcessEnv=process.env){
+    const ports=actual.configuredDesktopServicePorts(env);
+    actual.writeDesktopServicePorts(file,ports);
+    return ports;
+  }};
+});
+
 let root:string,production:typeof import('../../electron/kswarm-service.js'),binding:typeof import('../../electron/broker-protected-service-binding.js');
 let service:ReturnType<typeof import('../../electron/kswarm-service.js')['createKSwarmService']>|undefined;
 beforeEach(async()=>{
+  for(const name of ['XIAOK_DESKTOP_PORT','INTENT_BROKER_PORT','KSWARM_PORT'])vi.stubEnv(name,undefined);
  vi.resetModules();root=mkdtempSync(join(tmpdir(),'original-broker-service-'));mkdirSync(join(root,'config'),{mode:0o700});vi.stubEnv('XIAOK_CONFIG_DIR',join(root,'config'));
  f.ksBound=false;f.ksClose=undefined;f.events=[];f.frames=[];f.services={};f.sources={};f.lease={};f.port=Object.freeze({});f.entered=false;f.closed=false;f.fail=undefined;f.readyGate=undefined;f.child=new Child();
  production=await import('../../electron/kswarm-service.js');binding=await import('../../electron/broker-protected-service-binding.js');

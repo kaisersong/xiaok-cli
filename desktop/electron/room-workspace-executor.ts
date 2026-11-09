@@ -1,3 +1,4 @@
+import {ROOM_HISTORY_PAGE_TOOL_NAME} from './room-history-page-tool.js';
 import { createRoomTurnCustody } from './original-room-turn-custody.js';
 import {
   createIntrinsicSet,
@@ -297,7 +298,7 @@ const discussionNames = new Set([
   'web_search',
   'web_fetch',
   'tool_search',
-  'get_room_messages_page',
+  ROOM_HISTORY_PAGE_TOOL_NAME,
 ]);
 const workspaceNames = new Set([
   ...discussionNames,

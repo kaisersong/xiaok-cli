@@ -1,4 +1,5 @@
 import { activeOwnerServicePorts } from './active-owner-service-ports.js';
+import {resolvePackagedBrokerRuntime,brokerRuntimeMatchesHealth,waitBrokerRuntimeReadsKnown} from './broker-node-runtime.js';
 import { configuredDesktopServicePorts, writeDesktopServicePorts, prepareDesktopServicePorts, desktopServiceDiscoveryFile, readDesktopServicePorts } from './desktop-service-discovery.js';
 import {hasOriginalProtectedBrokerService,createOriginalProtectedBrokerServiceChild,closeOriginalProtectedBrokerService,sealOriginalProtectedBrokerServiceStartup,assertOriginalProtectedBrokerServiceCurrent} from './broker-protected-service-binding.js';
 import {createOriginalBrokerServiceEnvironment} from './broker-protected-startup-data.js';
@@ -1121,6 +1122,12 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     if((!hasOriginalProtectedKSwarmService(service)&&!hasOriginalProtectedBrokerService(service))||!physicalCloseFinished||legacyCloseUnknown||metadataCleanupObligations.size||businessJoinUnknown.size||businessCalls.size)throw Error('KSWARM_ORIGINAL_SERVICE_PHYSICAL_UNCONFIRMED');
     const stocks=physicalCloseStocks.snapshot();for(let index=0;index<stocks.length;index++)stocks[index]!.assertPhysicalKnown();physicalJoinStock.assertPhysicalKnown();
   }
+  let brokerRuntimeReadEntered=false;
+  function resolveOrdinaryBrokerRuntime(env:NodeJS.ProcessEnv) {
+    if(hasOriginalProtectedBrokerService(service))throw Error('BROKER_ORIGINAL_CHILD_DELEGATION_DENIED');
+    brokerRuntimeReadEntered=true;
+    return resolvePackagedBrokerRuntime({isPackaged:Electron.app?.isPackaged===true,resourcesPath:process.resourcesPath??'',env})??{...resolveBackgroundNodeRuntime({env}),expected:undefined};
+  }
   const spawnProcess = options.spawnProcess ?? spawn;
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
   let activityOwner: ConversationActivityOwnerClient | undefined;
@@ -1285,9 +1292,15 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
   function invalidateActivitySourceControl(reason:Error):void{const previous=activitySourceControl;activitySourceControl=new AbortController();previous.abort(reason);}
 
-  async function brokerHealthCheck(): Promise<boolean> {
+  async function brokerHealthProbe(): Promise<{healthy:boolean;compatible:boolean}> {
     const result = await fetchHealthJsonFromUrls(BROKER_HEALTH_URLS);
-    return result.ok;
+    // Native Source children always retain their original Main executable.
+    if(!result.ok||hasOriginalProtectedBrokerService(service))return {healthy:result.ok,compatible:result.ok};
+    const runtime=resolveOrdinaryBrokerRuntime({});
+    return {healthy:true,compatible:!runtime.expected||brokerRuntimeMatchesHealth(result.body,{command:runtime.command,env:runtime.env,expected:runtime.expected})};
+  }
+  async function brokerHealthCheck(): Promise<boolean> {
+    return (await brokerHealthProbe()).compatible;
   }
 
   /**
@@ -1553,8 +1566,15 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     if (stopping || permanentlySealed) return false;
     if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
     // Check if broker is already running
-    const healthy = await brokerHealthCheck();
+    const probe = await brokerHealthProbe();
     if (stopping || permanentlySealed) return false;
+    if(hasOriginalProtectedBrokerService(service))throw Error('BROKER_ORIGINAL_BINDING_CHANGED');
+    const healthy=probe.healthy;
+    if(healthy&&!probe.compatible){
+      lastError='intent-broker runtime incompatible; existing listener preserved';
+      logKSwarmServiceLine('broker','lifecycle',lastError);
+      return false;
+    }
     if (healthy) {
       // A stale token can belong to an external installation. Authentication
       // failure is not permission to kill the listener or take over its data.
@@ -1608,7 +1628,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       desktopRoomToken,
       kswarmRoomToken,
     });
-    const nodeRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
+    const nodeRuntime = resolveOrdinaryBrokerRuntime(brokerEnv);
     console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
     logKSwarmServiceLine(
       'broker',
@@ -1617,6 +1637,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     );
     mkdirSync(brokerLaunch.cwd, { recursive: true });
     assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
+    if(stopping||permanentlySealed||hasOriginalProtectedBrokerService(service))throw Error('BROKER_ORIGINAL_BINDING_CHANGED');
     const spawnedBroker = spawnProcess(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
@@ -2477,15 +2498,16 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       mkdirSync(brokerLaunch.cwd, { recursive: true });
       const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
-      const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
+      const brokerRuntime = resolveOrdinaryBrokerRuntime(brokerEnv);
       const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken, ...projectScopeEnv } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
+      const brokerExpected={...expected(brokerLaunch.entryPath),...(brokerRuntime.expected?{'service.runtime.node':brokerRuntime.expected.node,'service.runtime.sqlite':brokerRuntime.expected.sqlite,'service.runtime.execPath':brokerRuntime.command,'service.runtime.executableSha256':brokerRuntime.expected.executableSha256}:{})};
       return { kswarm: { url: `http://127.0.0.1:${KSWARM_PORT}`, mutationToken: desktopMutationToken,
         brokerUrl: `http://127.0.0.1:${BROKER_PORT}`, roomToken: desktopRoomToken }, managedSources: [
         { name: 'broker' as const, executable: brokerRuntime.command, entryPath: brokerLaunch.entryPath, args: brokerLaunch.nodeArgs,
-          cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: expected(brokerLaunch.entryPath) },
+          cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: brokerExpected },
         { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, cwd: dirname(dirname(dirname(serverPath))),
           env: strings(ksEnv.env), healthUrl: `http://127.0.0.1:${KSWARM_PORT}/health`, expectedHealth: expected(serverPath) },
       ] };
@@ -2525,6 +2547,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       executionReadIncarnation=Object.freeze({}); running = false;
       healthFailureCount = 0;
       notifyListeners();
+      if(brokerRuntimeReadEntered){try{await closeSdk(waitBrokerRuntimeReadsKnown,undefined,[]);}catch(raw){legacyCloseUnknown=true;appendIntrinsic(errors,raw);}}
       const joins=await settleIntrinsicOperations(physicalCloseStocks.snapshot(),stock=>stock.waitPhysicalKnown());for(let index=0;index<joins.length;index++){const result=joins[index]!;if(result.status==='rejected'){legacyCloseUnknown=true;appendIntrinsic(errors,result.reason);}}
       physicalCloseFinished=true;
       if (errors.length) throw aggregateIntrinsicErrors(errors, 'kswarm_service_close_unconfirmed');
