@@ -238,6 +238,12 @@ jobs:
         if: runner.os == 'macOS'
         run: cd desktop && npm run test -- --run tests/main/activity-owner-attach-retry.test.ts
 
+      - name: Verify pinned ordinary Broker runtime
+        run: |
+          cd desktop
+          node scripts/prepare-broker-runtime.mjs --all
+          npm test -- --run tests/main/broker-node-runtime.test.ts tests/main/broker-runtime-owner.test.ts tests/main/broker-runtime-packaging.test.ts
+
       - name: Build renderer
         run: cd desktop && npm run build:renderer
 
@@ -260,7 +266,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.14.0'
+          node-version: '24.16.0'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -378,6 +384,10 @@ jobs:
         run: cd desktop && npm run build
         env:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
+
+      - name: Prepare pinned ordinary Broker runtime
+        working-directory: desktop
+        run: node scripts/prepare-broker-runtime.mjs
 
       - name: Package Windows Kimi smoke app
         shell: bash

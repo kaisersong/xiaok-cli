@@ -7,8 +7,11 @@ function job(id){
  let end=start+1;while(end<lines.length&&!/^  [a-zA-Z0-9_-]+:/.test(lines[end]))end++;
  return lines.slice(start,end).join('\n');
 }
-for(const id of ['cross-platform-tests','windows-kimi-packaged-smoke'])test(id+' uses the declared minimum Node rather than a drifting major alias',()=>{
- assert.match(job(id),/node-version: ['"]22\.14\.0['"]/);
+test('path tests keep the exact declared CLI minimum Node',()=>{
+ assert.match(job('cross-platform-tests'),/node-version: ['"]22\.14\.0['"]/);
+});
+test('packaging uses a fixed supported build toolchain without lowering the KSwarm floor',()=>{
+ assert.match(job('windows-kimi-packaged-smoke'),/node-version: ['"]24\.16\.0['"]/);
 });
 test('packaged smoke prepares the exact bundled CLI before its original build/package gates',()=>{
  const body=job('windows-kimi-packaged-smoke');

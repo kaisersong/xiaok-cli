@@ -1,0 +1,56 @@
+{
+  "originalTip": "b4e81b6e35c28cc1cc469fa73a422f6c15fd0dde",
+  "projectionCapable": false,
+  "qualified": false,
+  "currentPrivateGuardPreserved": true,
+  "files": [
+    {
+      "source": "desktop/electron/room-project-scope-guard.ts",
+      "originalSha256": "cd507aa914fff1abbb269ec51d7f4113f4e9e0631fa09ce4583d0668fc16aa14",
+      "archive": "recovery/b4-paused-proposals-20261109/desktop__electron__room-project-scope-guard.ts.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "desktop/tests/main/room-authorization-context-guard.test.ts",
+      "originalSha256": "65732d9585c7391afc87f4883338b6ebadf915b9d4ff6337f34599c05377e44e",
+      "archive": "recovery/b4-paused-proposals-20261109/desktop__tests__main__room-authorization-context-guard.test.ts.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "desktop/tests/main/room-authorization-context-reader.test.ts",
+      "originalSha256": "eb2f18fdb0e7b53032edb89ab47746079488583097364659564e670664ba9542",
+      "archive": "recovery/b4-paused-proposals-20261109/desktop__tests__main__room-authorization-context-reader.test.ts.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "desktop/tests/main/room-provider-replay.test.ts",
+      "originalSha256": "9b1292328fdc84e0865b6b1915773d95419830917917c194c66206c41867d167",
+      "archive": "recovery/b4-paused-proposals-20261109/desktop__tests__main__room-provider-replay.test.ts.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "scripts/evals/_desktop-runtime/provider-replay.mjs",
+      "originalSha256": "355892527ea8534c97d792ca05153586ad0386d74c0c738a8c981b469058780e",
+      "archive": "recovery/b4-paused-proposals-20261109/scripts__evals___desktop-runtime__provider-replay.mjs.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "scripts/evals/_desktop-runtime/provider-replay.test.mjs",
+      "originalSha256": "45733c91440886d7e45cf84483e99c8ca967475f64355b8a51c2f2c45fe7e3de",
+      "archive": "recovery/b4-paused-proposals-20261109/scripts__evals___desktop-runtime__provider-replay.test.mjs.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "scripts/evals/_desktop-runtime/restore-sqlite-fixture.mjs",
+      "originalSha256": "f045e0b554797388317c27bdab0cef3007525a4fe0a085401dfa496c70d56167",
+      "archive": "recovery/b4-paused-proposals-20261109/scripts__evals___desktop-runtime__restore-sqlite-fixture.mjs.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    },
+    {
+      "source": "scripts/evals/_desktop-runtime/restore-sqlite-fixture.test.mjs",
+      "originalSha256": "3a38a256b327d336afa1e0e407881ab19d043041e26b3691ddd1c5acda81a8a6",
+      "archive": "recovery/b4-paused-proposals-20261109/scripts__evals___desktop-runtime__restore-sqlite-fixture.test.mjs.txt",
+      "reason": "paused draft; JSON/caller callback does not replace current private Source, physical custody or default-deny guards"
+    }
+  ]
+}
