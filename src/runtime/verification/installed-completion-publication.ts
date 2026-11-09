@@ -14,6 +14,14 @@ export function createInstalledCompletionPublisher(raw:Pick<VerificationOwner,'o
  try{
   const publication=createPublicationClient({owner,requestSource,transport:client.publicationTransport});
   return Object.freeze({
+   // Preserve the installed route cut between observation and payload read.
+   async readCurrentPayload(signal?:AbortSignal){
+    current();if(owner.ownerKind!=='loop')throw Error('publication_client_owner');signal?.throwIfAborted();
+    const observed=await publication.observe(signal);current();signal?.throwIfAborted();
+    if(observed.currentVerification!=='valid'||observed.publication.status!=='committed'||!observed.publication.current)return Object.freeze({observation:observed,payload:null});
+    const payload=await publication.readPayload(observed,signal);current();
+    return Object.freeze({observation:observed,payload});
+   },
    async readArtifact(observation:Readonly<OwnerPublicationObservation>,selection:PublishedArtifactSelection,signal?:AbortSignal){current();const payload=await publication.readPayload(observation,signal);current();const artifact=readPublishedArtifact(payload,selection);signal?.throwIfAborted();current();return artifact;},
    async readPayload(observation:Readonly<OwnerPublicationObservation>,signal?:AbortSignal){current();const result=await publication.readPayload(observation,signal);current();return result;},
    async observe(signal?:AbortSignal){current();const result=await publication.observe(signal);current();return result;},
