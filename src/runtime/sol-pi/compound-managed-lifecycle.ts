@@ -84,7 +84,19 @@ export function createManagedCompoundLifecycle(input:BoundCompoundCoordinatorInp
  hasPendingEffects(ledger:import('./compound-operation.js').CompoundOperationLedger,lease?:SessionExecutionLease):boolean;
  captureBranches(lease:SessionExecutionLease):()=>void;
 }) {
- const scope=new AsyncLocalStorage<Invocation>(),states=new Map<string,State>();
+ const managedInvocationStorage=new AsyncLocalStorage<object>();
+ const managedInvocationRows=new WeakMap<object,Invocation>();
+ const scope={
+  getStore():Invocation|undefined{
+   const token=managedInvocationStorage.getStore();if(!token)return undefined;
+   const row=managedInvocationRows.get(token);if(!row)throw Error('compound_private_scope_unconfirmed');return row;
+  },
+  run<T>(row:Invocation,work:()=>T):T{
+   const token:object=Object.freeze(Object.create(null));managedInvocationRows.set(token,row);
+   return managedInvocationStorage.run(token,work);
+  }
+ };
+ const states=new Map<string,State>();
  const named=new Map<string,{record:DirectOperationRecord;installation:Installation}>();
  const {session,store,root,journal,owner,chain,treeRoot}=input,sessionIdentity=session.exportSnapshot().sessionId;
  function exactRow(row:DirectOperationRecord|undefined,state:State){

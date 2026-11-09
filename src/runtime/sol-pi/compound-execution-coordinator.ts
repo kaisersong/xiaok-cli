@@ -54,7 +54,18 @@ export function createCompoundExecutionCoordinator(options:{
  settlePublishedDelegations?(lease:SessionExecutionLease):Promise<void>; persistCurrentHistory?(lease:SessionExecutionLease):Promise<void>;getPermissionRevision():number;executionSignal?:AbortSignal;readonlyTools:readonly Tool[];fileTools:readonly Tool[];
 }):CompoundExecutionCoordinator{
  if(options.executionChain)assertSessionExecutionChainLeaf(options.executionChain,{authority:options.authority,sessionIdentity:options.sessionIdentity});
- const globalSupervision=new AsyncLocalStorage<{check(issued?:DirectOperationRecord|CompoundOperationRecord):void;issued?:DirectOperationRecord|CompoundOperationRecord}>();
+ const executionSupervisionStorage=new AsyncLocalStorage<object>();
+ const executionSupervisionRows=new WeakMap<object,{check(issued?:DirectOperationRecord|CompoundOperationRecord):void;issued?:DirectOperationRecord|CompoundOperationRecord}>();
+ const globalSupervision={
+  getStore():{check(issued?:DirectOperationRecord|CompoundOperationRecord):void;issued?:DirectOperationRecord|CompoundOperationRecord}|undefined{
+   const token=executionSupervisionStorage.getStore();if(!token)return undefined;
+   const row=executionSupervisionRows.get(token);if(!row)throw Error('compound_private_scope_unconfirmed');return row;
+  },
+  run<T>(row:{check(issued?:DirectOperationRecord|CompoundOperationRecord):void;issued?:DirectOperationRecord|CompoundOperationRecord},work:()=>T):T{
+   const token:object=Object.freeze(Object.create(null));executionSupervisionRows.set(token,row);
+   return executionSupervisionStorage.run(token,work);
+  }
+ };
  const noteCommittedRecord=(record:DirectOperationRecord|CompoundOperationRecord)=>{const active=globalSupervision.getStore();if(active)active.issued=structuredClone(record);};
  const assertExecutionCurrent=()=>{options.assertCurrent();const active=globalSupervision.getStore();active?.check(active.issued);};
  const lifetime=new AbortController(),closeReason=new DOMException('Compound owner disposed','AbortError');let disposed=false;let disposal:Promise<void>|undefined;

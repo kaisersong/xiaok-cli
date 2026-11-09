@@ -16,7 +16,19 @@ interface FinalPublication {
  readonly producer:Producer;
  readonly continuation:ReturnType<Queue['transfer']>;
 }
-const queues=new WeakMap<object,Queue>(),currentProducer=new AsyncLocalStorage<Producer>();
+const queues=new WeakMap<object,Queue>();
+const publicationProducerStorage=new AsyncLocalStorage<object>();
+const publicationProducerRows=new WeakMap<object,Producer>();
+const currentProducer={
+ getStore():Producer|undefined{
+  const token=publicationProducerStorage.getStore();if(!token)return undefined;
+  const row=publicationProducerRows.get(token);if(!row)throw Error('compound_private_scope_unconfirmed');return row;
+ },
+ run<T>(row:Producer,work:()=>T):T{
+  const token:object=Object.freeze(Object.create(null));publicationProducerRows.set(token,row);
+  return publicationProducerStorage.run(token,work);
+ }
+};
 const finalPublications=new WeakMap<object,FinalPublication>();
 type MetadataOrigin=Readonly<{session:AgentSessionState;nativeInvocationId:string}>;
 const activeProducers=new WeakMap<object,Set<Producer>>();
