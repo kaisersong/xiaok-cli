@@ -224,3 +224,11 @@ it.each(['text-only', 'done-only', 'empty'])('preserves existing selected incomp
   expect(await collect(model.stream(request()))).toEqual([{ type: 'text', delta: 'done' }, { type: 'done' }]);
   expect(calls).toEqual(['selected', 'current']);
 });
+
+it('real private finalization accounts usage through its physical source exactly once',async()=>{
+ const writes:Array<{inputTokens:number;outputTokens:number}>=[],input=request();
+ const adapter:ModelAdapter={getModelName:()=> 'test',async *stream(){yield {type:'usage',usage:{inputTokens:17,outputTokens:19}};yield* answer();}};
+ await finalize({adapter,apiMessages:input.messages,systemPrompt:input.systemPrompt,streamOptions:input.options,signal:input.options.signal,deadline:input.deadline,
+ sessionId:'s',turnId:'t',intentId:'i',stepId:'step',emitRuntimeEvent(){},onUsage:async chunk=>{writes.push(chunk.usage!);}});
+ expect(writes).toEqual([{inputTokens:17,outputTokens:19}]);
+});

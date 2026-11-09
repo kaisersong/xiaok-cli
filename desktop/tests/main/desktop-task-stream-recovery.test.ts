@@ -98,3 +98,52 @@ it('does not accept an empty or tool-emitting summary-only recovery', async () =
     } }, { summaryOnly: true }))).rejects.toThrow(/summary_recovery/);
   }
 });
+
+function usageDeferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
+it('persists every genuine usage chunk once before yielding it, including multiple chunks per invocation', async () => {
+  const writes: Array<[number, string]> = [];
+  const adapter = { async *stream() { yield {type:'usage',usage:{inputTokens:2,outputTokens:3}}; yield {type:'usage',usage:{inputTokens:5,outputTokens:7}}; yield {type:'text',delta:'done'}; yield {type:'done'}; } };
+  const out = await collect(request(adapter, { onUsage: async (chunk: any,id: string) => { writes.push([chunk.usage.inputTokens,id]); } }));
+  expect(writes).toEqual([[2,'first'],[5,'first']]);expect(out.filter(chunk=>chunk.type==='usage')).toHaveLength(2);
+});
+it.each(['usage','text','tool_use'] as const)('owns the original late %s read after outward cancellation and waits for durable usage', async type => {
+  const {createDesktopModelPhysicalScope,admitDesktopModelPhysicalRead,closeDesktopModelPhysicalScope}=await import('../../electron/desktop-task-stream.js');
+  const entered=usageDeferred(),release=usageDeferred(),sinkEntered=usageDeferred(),sinkRelease=usageDeferred();
+  const controller=new AbortController(),reason=Error('original cancellation'),scope=createDesktopModelPhysicalScope(),run=admitDesktopModelPhysicalRead(scope);
+  let writes=0,closed=false,calls=0;
+  const adapter={async *stream(){calls++;entered.resolve();await release.promise;yield type==='usage'?{type,usage:{inputTokens:17,outputTokens:19}}:type==='text'?{type,delta:'forbidden late text'}:{type,id:'late',name:'write',input:{}};}};
+  const observed=(async()=>{try{for await(const _chunk of streamDesktopTaskRecovery(request(adapter,{options:{signal:controller.signal},policy:{...policy,idleMs:10000},onUsage:async()=>{writes++;sinkEntered.resolve();await sinkRelease.promise;}}),run))throw Error('late visible chunk forbidden');}finally{run.finish();}})();
+  try{
+    await entered.promise;controller.abort(reason);await expect(observed).rejects.toBe(reason);
+    const closing=closeDesktopModelPhysicalScope(scope,reason);void closing.then(()=>{closed=true;},()=>{closed=true;});
+    release.resolve();
+    if(type==='usage'){await sinkEntered.promise;await new Promise<void>(resolve=>setImmediate(resolve));expect(closed).toBe(false);sinkRelease.resolve();}
+    await closing;expect(writes).toBe(type==='usage'?1:0);expect(calls).toBe(1);
+  }finally{release.resolve();sinkRelease.resolve();await Promise.allSettled([observed,closeDesktopModelPhysicalScope(scope,reason)]);}
+});
+it('never retries a physical usage sink failure named network timeout and retains its original error in drain', async()=>{
+  const {createDesktopModelPhysicalScope,admitDesktopModelPhysicalRead,closeDesktopModelPhysicalScope}=await import('../../electron/desktop-task-stream.js');
+  const scope=createDesktopModelPhysicalScope(),run=admitDesktopModelPhysicalRead(scope),failure=Error('network timeout while persisting original usage');let calls=0;
+  const adapter={async *stream(){calls++;yield {type:'usage',usage:{inputTokens:1,outputTokens:2}};yield {type:'text',delta:'done'};yield {type:'done'};}};
+  const observed=(async()=>{try{for await(const _chunk of streamDesktopTaskRecovery(request(adapter,{onUsage:()=>{throw failure;}}),run)){} }finally{run.finish();}})();
+  await expect(observed).rejects.toBe(failure);expect(calls).toBe(1);
+  await expect(closeDesktopModelPhysicalScope(scope)).rejects.toMatchObject({errors:[failure]});
+});
+it('retains the original invocation for late usage after an idle retry starts', async()=>{
+  const {createDesktopModelPhysicalScope,admitDesktopModelPhysicalRead,closeDesktopModelPhysicalScope}=await import('../../electron/desktop-task-stream.js');
+  const scope=createDesktopModelPhysicalScope(),run=admitDesktopModelPhysicalRead(scope),release=usageDeferred(),secondEntered=usageDeferred();
+  const invocations:string[]=[],writes:Array<[number,string]>=[];let calls=0;
+  const adapter={async *stream(){if(++calls===1){await release.promise;yield {type:'usage',usage:{inputTokens:1,outputTokens:2}};}else{secondEntered.resolve();yield {type:'usage',usage:{inputTokens:3,outputTokens:4}};yield {type:'done'};}}};
+  const observed=(async()=>{try{for await(const _chunk of streamDesktopTaskRecovery(request(adapter,{onInvocation:(id:string)=>invocations.push(id),onUsage:async(chunk:any,id:string)=>{writes.push([chunk.usage.inputTokens,id]);}}),run)){} }finally{run.finish();}})();
+  try{await secondEntered.promise;release.resolve();await observed;await closeDesktopModelPhysicalScope(scope);expect(invocations).toHaveLength(2);expect(invocations[0]).toBe('first');expect(invocations[1]).not.toBe('first');expect(writes).toContainEqual([1,invocations[0]]);expect(writes).toContainEqual([3,invocations[1]]);expect(writes).toHaveLength(2);}
+  finally{release.resolve();await Promise.allSettled([observed,closeDesktopModelPhysicalScope(scope)]);}
+});
+it('retains the original deferred sink failure after outward cancellation', async()=>{
+  const {createDesktopModelPhysicalScope,admitDesktopModelPhysicalRead,closeDesktopModelPhysicalScope}=await import('../../electron/desktop-task-stream.js');
+  const scope=createDesktopModelPhysicalScope(),run=admitDesktopModelPhysicalRead(scope),entered=usageDeferred(),release=usageDeferred(),sinkEntered=usageDeferred(),sinkRelease=usageDeferred();
+  const ctl=new AbortController(),reason=Error('cancel'),failure=Error('network timeout in late usage sink');let calls=0,sinkCalls=0;
+  const adapter={async *stream(){calls++;entered.resolve();await release.promise;yield {type:'usage',usage:{inputTokens:1,outputTokens:2}};}};
+  const observed=(async()=>{try{for await(const _chunk of streamDesktopTaskRecovery(request(adapter,{options:{signal:ctl.signal},onUsage:async()=>{sinkCalls++;sinkEntered.resolve();await sinkRelease.promise;throw failure;}}),run)){} }finally{run.finish();}})();
+  try{await entered.promise;ctl.abort(reason);await expect(observed).rejects.toBe(reason);release.resolve();await sinkEntered.promise;sinkRelease.resolve();const drainError=await closeDesktopModelPhysicalScope(scope,reason).catch(error=>error);expect(drainError).toBeInstanceOf(AggregateError);expect(drainError.errors.length).toBeGreaterThan(0);for(const error of drainError.errors)expect(error).toBe(failure);expect(calls).toBe(1);expect(sinkCalls).toBe(1);}
+  finally{release.resolve();sinkRelease.resolve();await Promise.allSettled([observed,closeDesktopModelPhysicalScope(scope,reason)]);}
+});
