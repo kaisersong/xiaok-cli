@@ -44,12 +44,13 @@ test('entered open without a returned handle keeps bare undefined and denies new
   assert.throws(()=>api.readPackageFile(path,128),/custody_unknown/);assert.equal(calls,1);
 });
 test('read first cause and bare-undefined close second cause remain ordered; no retry marks known',t=>{
-  const path=file(t),first=Error('original-read');const tail=Promise.resolve();Object.defineProperty(first,Symbol('sdk-tail'),{value:tail});let fd,closes=0;
-  const api=load({openSync(...a){fd=fs.openSync(...a);return fd;},readSync(){throw first;},closeSync(){closes++;throw undefined;}});
+  const path=file(t),first=Error('original-read');const tail=Promise.resolve();Object.defineProperty(first,Symbol('sdk-tail'),{value:tail});let fd,closes=0,reads=0;
+  const api=load({lstatSync:(p,o)=>changed(fs.lstatSync(p,o),{dev:0n}),openSync(...a){const actual=fs.openSync(...a);fd??=actual;return actual;},readSync(actual){assert.equal(actual,fd);reads++;throw first;},closeSync(actual){if(actual!==fd)return fs.closeSync(actual);closes++;throw undefined;}});
+  try{
   try{api.readPackageFile(path,128);assert.fail('must reject');}catch(raw){assert.equal(raw.cause,first);assert.equal(raw.errors[0],first);assert.equal(raw.errors[1],undefined);}
-  assert.equal(closes,1);assert.throws(()=>api.assertRuntimeFileReadsKnown(),/custody_unknown/);
+  assert.equal(reads,1);assert.equal(closes,1);assert.throws(()=>api.assertRuntimeFileReadsKnown(),/custody_unknown/);
   assert.throws(()=>api.readPackageFile(path,128),/custody_unknown/);assert.equal(closes,1);
-  fs.closeSync(fd); // This test owns the actual faulted FD; the module stays unknown.
+  }finally{if(fd!==undefined)fs.closeSync(fd);} // This fixture owns the faulted data FD; the module stays unknown.
 });
 test('a replaced/aliased path is rejected with real filesystem state',t=>{
   const path=file(t),alias=path+'-alias';fs.linkSync(path,alias);const api=load();assert.throws(()=>api.readPackageFile(path,128),/broker_runtime_alias/);api.assertRuntimeFileReadsKnown();
