@@ -190,6 +190,9 @@ jobs:
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
           tests/main/desktop-memory-store-close.test.ts
+          tests/main/context-continuity-projection.test.ts
+          tests/main/context-continuity-navigation.test.ts
+          tests/main/context-continuity-navigation-race.test.ts
           tests/main/context-continuity-profile.test.ts
           tests/main/context-continuity-profile-custody.test.ts
           tests/main/packaged-segmentation-smoke.test.ts
