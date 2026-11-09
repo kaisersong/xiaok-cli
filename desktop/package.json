@@ -32,6 +32,8 @@
     "@firecrawl/anydoc": "0.1.8",
     "@modelcontextprotocol/client": "2.3.0",
     "@modelcontextprotocol/ext-tasks": "0.2.2",
+    "@modelcontextprotocol/node": "2.1.1",
+    "@modelcontextprotocol/server": "2.3.0",
     "@napi-rs/keyring": "2.1.2",
     "@tanstack/react-query": "^5.100.10",
     "@yunzhijia/cli": "0.1.8",
