@@ -1,6 +1,6 @@
 import {createOriginalModelSdkAttemptTransport,finishOriginalModelSdkAttempt} from '../runtime/original-model-sdk-attempt.js';
 import type {Stream as OriginalOpenAiStream} from 'openai/core/streaming';
-import { createModelProviderError, getModelFailure, type ModelFailureProvider } from '../runtime/model-failure.js';
+import { associateModelFailure, createModelProviderError, getModelFailure, type ModelFailureProvider } from '../runtime/model-failure.js';
 import { isStrictKimiK3ProfileId } from '../providers/kimi-models.js';
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
@@ -21,6 +21,7 @@ import { createKimiTerminalBoundaryError, isKimiTerminalBoundaryError, getKimiTe
 import { createOpenAIStreamError } from '../runtime/openai-stream-error.js';
 import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
+import { CompactionResponseError } from '../runtime/compaction-response.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import {
@@ -1079,6 +1080,9 @@ export class OpenAIAdapter implements ModelAdapter {
       buffer: '',
     };
     let emittedDone = false;
+    let incompleteSummary = false;
+    let terminalDiagnostic: Error | undefined, terminalSummaryFailure: CompactionResponseError | undefined;
+    let threwTerminalSummary = false;
     let outputChars = 0;
     let streamTextChars = 0;
     let usageReceived = false;
@@ -1126,7 +1130,9 @@ export class OpenAIAdapter implements ModelAdapter {
           throwIfCallerAborted(options?.signal);
         }
 
-        if (attemptState && emittedDone) {
+        if ((attemptState || options?.requireCompleteResponse) && emittedDone) {
+          if (options?.requireCompleteResponse && chunk.choices.some(choice => choice.finish_reason != null
+            || Object.values(choice.delta ?? {}).some(value => value != null && value !== '' && !(Array.isArray(value) && value.length === 0)))) incompleteSummary = true;
           continue;
         }
 
@@ -1248,9 +1254,13 @@ export class OpenAIAdapter implements ModelAdapter {
         if (choice?.finish_reason) {
           const finish = String(choice.finish_reason);
           if (finish === 'content_filter' || diagnosticProvider === 'glm' && ['sensitive', 'network_error'].includes(finish)) {
-            throw createModelProviderError({ error: { code: finish === 'network_error' ? '1234' : diagnosticProvider === 'glm' ? '1301' : 'content_filter' } }, diagnosticProvider ?? 'other');
+            const failure = createModelProviderError({ error: { code: finish === 'network_error' ? '1234' : diagnosticProvider === 'glm' ? '1301' : 'content_filter' } }, diagnosticProvider ?? 'other');
+            if (!options?.requireCompleteResponse) throw failure;
+            terminalDiagnostic ??= failure;
+            emittedDone = true;
+            continue;
           }
-          if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
+          if (!options?.requireCompleteResponse && options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
             await streamIterator.return?.();
             throw new Error('memory_output_incomplete');
           }
@@ -1287,6 +1297,11 @@ export class OpenAIAdapter implements ModelAdapter {
             yield toolCall;
           }
 
+          if (options?.requireCompleteResponse) {
+            incompleteSummary = choice.finish_reason !== 'stop';
+            emittedDone = true;
+            continue;
+          }
           if (attemptState) {
             emittedDone = true;
             continue;
@@ -1307,6 +1322,22 @@ export class OpenAIAdapter implements ModelAdapter {
         }
       }
 
+      if (options?.requireCompleteResponse) {
+        if (terminalDiagnostic) {
+          terminalSummaryFailure = new CompactionResponseError('provider_incomplete', { cause: terminalDiagnostic });
+          const diagnostic = getModelFailure(terminalDiagnostic);
+          if (diagnostic) associateModelFailure(terminalSummaryFailure, diagnostic);
+          threwTerminalSummary = true;
+          throw terminalSummaryFailure;
+        }
+        if (!emittedDone || incompleteSummary) throw new CompactionResponseError('provider_incomplete');
+        if (!attemptState) {
+          if (!usageReceived) yield { type: 'usage', usage: estimateStreamUsage(messages, systemPrompt, outputChars) };
+          throwIfCallerAborted(options.signal);
+          yield { type: 'done' };
+        }
+        return;
+      }
       if (!emittedDone) {
         if (strictKimiK3) {
           if (toolBuffers.size === 0) {
@@ -1367,6 +1398,15 @@ export class OpenAIAdapter implements ModelAdapter {
           code: 'ERR_STREAM_PREMATURE_CLOSE',
         });
       }
+    } catch (error) {
+      if (terminalDiagnostic && !threwTerminalSummary) {
+        const failure = new CompactionResponseError('provider_incomplete', { cause:
+          new AggregateError([terminalDiagnostic, error], 'compaction_provider_and_late_failure', { cause: terminalDiagnostic }) });
+        const diagnostic = getModelFailure(terminalDiagnostic);
+        if (diagnostic) associateModelFailure(failure, diagnostic);
+        throw failure;
+      }
+      throw error;
     } finally {
       // finish_reason is a semantic boundary, not HTTP EOF. A suspended SDK
       // iterator retains the Response, request body and abort listener.

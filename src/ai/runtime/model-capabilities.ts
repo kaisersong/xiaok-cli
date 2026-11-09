@@ -34,6 +34,8 @@ export interface ModelInvocationOptions {
 }
 
 export interface StreamOptions extends ModelInvocationOptions {
+  /** Internal summary contract; not a provider body field or public setting. */
+  requireCompleteResponse?: boolean;
   maxOutputTokens?: number;
   reasoningMode?: 'disabled';
   signal?: AbortSignal;
