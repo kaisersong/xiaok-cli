@@ -1,0 +1,49 @@
+diff --git a/codex-rs/config/src/skills_config.rs b/codex-rs/config/src/skills_config.rs
+--- a/codex-rs/config/src/skills_config.rs
++++ b/codex-rs/config/src/skills_config.rs
+@@ -147,7 +147,7 @@
+     let skills: SkillsConfig = match skills_value.clone().try_into() {
+         Ok(skills) => skills,
+         Err(err) => {
+-            warn!("invalid skills config: {err}");
++            crate::config_diagnostic!(warn, "invalid skills config: {err}");
+             return true;
+         }
+     };
+@@ -172,7 +172,7 @@
+         let skills: SkillsConfig = match skills_value.clone().try_into() {
+             Ok(skills) => skills,
+             Err(err) => {
+-                warn!("invalid skills config: {err}");
++                crate::config_diagnostic!(warn, "invalid skills config: {err}");
+                 continue;
+             }
+         };
+@@ -202,18 +202,24 @@
+         (None, Some(name)) => {
+             let name = name.trim();
+             if name.is_empty() {
+-                warn!("ignoring empty skills.config name override");
++                crate::config_diagnostic!(warn, "ignoring empty skills.config name override");
+                 None
+             } else {
+                 Some(SkillConfigRuleSelector::Name(name.to_string()))
+             }
+         }
+         (Some(_), Some(_)) => {
+-            warn!("ignoring skills.config entry with both path and name selectors");
++            crate::config_diagnostic!(
++                warn,
++                "ignoring skills.config entry with both path and name selectors"
++            );
+             None
+         }
+         (None, None) => {
+-            warn!("ignoring skills.config entry without a path or name selector");
++            crate::config_diagnostic!(
++                warn,
++                "ignoring skills.config entry without a path or name selector"
++            );
+             None
+         }
+     }

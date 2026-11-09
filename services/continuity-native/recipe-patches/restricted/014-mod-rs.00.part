@@ -1,0 +1,11 @@
+diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
+--- a/codex-rs/core/src/tools/mod.rs
++++ b/codex-rs/core/src/tools/mod.rs
+@@ -73,6 +73,7 @@
+ }
+ 
+ pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return ToolMode::Direct; }
+     model_info.tool_mode.unwrap_or_else(|| {
+         if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+             ToolMode::CodeModeOnly

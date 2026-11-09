@@ -1,0 +1,13 @@
+diff --git a/codex-rs/app-server/src/models_refresh_worker.rs b/codex-rs/app-server/src/models_refresh_worker.rs
+--- a/codex-rs/app-server/src/models_refresh_worker.rs
++++ b/codex-rs/app-server/src/models_refresh_worker.rs
+@@ -39,6 +39,9 @@
+     let shutdown = CancellationToken::new();
+     let worker_shutdown = shutdown.clone();
+     let task = tokio::spawn(async move {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         loop {
+             if worker_shutdown.is_cancelled() {
+                 break;

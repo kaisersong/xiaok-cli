@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs b/codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs
+--- a/codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs
++++ b/codex-rs/app-server-transport/src/transport/remote_control/client_tracker.rs
+@@ -261,6 +261,8 @@
+                     let Some(queued_message) = queued_message else {
+                         break;
+                     };
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    if queued_message.private_auth.is_some() || matches!(&queued_message.message, crate::outgoing_message::OutgoingMessage::Response(r) if matches!(&*r.result, codex_app_server_protocol::ClientResponsePayload::XiaokAuthSnapshot(_))) { break; }
+                     let event = ServerEvent::ServerMessage {
+                         message: Box::new(queued_message.message),
+                     };

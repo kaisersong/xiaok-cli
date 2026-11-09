@@ -1,0 +1,473 @@
+diff --git a/codex-rs/app-server/src/xiaok_auth_owner.rs b/codex-rs/app-server/src/xiaok_auth_owner.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/xiaok_auth_owner.rs
+@@ -0,0 +1,468 @@
++//! Fixed-role auth authority. Only the original initialized stdio session binds.
++use crate::message_processor::ConnectionSessionState;
++use crate::outgoing_message::ConnectionId;
++use crate::transport::ConnectionOrigin;
++use codex_app_server_protocol::JSONRPCErrorError;
++use serde::Deserialize;
++use serde_json::Value;
++use std::sync::{Arc, OnceLock};
++
++pub(crate) fn error(message: &'static str) -> JSONRPCErrorError {
++    JSONRPCErrorError {
++        code: -32600,
++        message: message.into(),
++        data: None,
++    }
++}
++pub(crate) fn forbidden() -> JSONRPCErrorError {
++    error("xiaok_auth_owner_rpc_forbidden")
++}
++pub(crate) fn unavailable() -> JSONRPCErrorError {
++    error("xiaok_auth_unavailable")
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct SnapshotParams {
++    #[serde(default)]
++    pub(crate) refresh: bool,
++}
++impl SnapshotParams {
++    pub(crate) fn parse(value: Option<Value>) -> Result<Self, JSONRPCErrorError> {
++        let value = value.unwrap_or_else(|| serde_json::json!({}));
++        if !value.is_object() {
++            return Err(error("xiaok_auth_invalid_params"));
++        }
++        serde_json::from_value(value).map_err(|_| error("xiaok_auth_invalid_params"))
++    }
++}
++
++fn fields<'a>(
++    value: &'a Value,
++    allowed: &[&str],
++) -> Result<&'a serde_json::Map<String, Value>, JSONRPCErrorError> {
++    let object = value.as_object().ok_or_else(forbidden)?;
++    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
++        return Err(forbidden());
++    }
++    Ok(object)
++}
++fn optional_false(value: Option<&Value>) -> Result<(), JSONRPCErrorError> {
++    if value.is_some_and(|v| v != &Value::Bool(false)) {
++        return Err(forbidden());
++    }
++    Ok(())
++}
++
++/// Runs before public deserialization so malformed sibling credentials never
++/// reach a parser diagnostic. Typed requests pass this same fixed ceiling.
++pub(crate) fn validate_public_wire(
++    method: &str,
++    params: Option<&Value>,
++) -> Result<(), JSONRPCErrorError> {
++    let empty = serde_json::json!({});
++    let params = params.unwrap_or(&empty);
++    match method {
++        "initialize" => {
++            fields(params, &["clientInfo", "capabilities"])?;
++            let info = fields(&params["clientInfo"], &["name", "version", "title"])?;
++            for key in ["name", "version"] {
++                if !info
++                    .get(key)
++                    .and_then(Value::as_str)
++                    .is_some_and(|s| !s.is_empty() && s.len() <= 128)
++                {
++                    return Err(forbidden());
++                }
++            }
++            if let Some(title) = info.get("title") {
++                if !title.is_null() && !title.as_str().is_some_and(|s| s.len() <= 128) {
++                    return Err(forbidden());
++                }
++            }
++            if let Some(capabilities) = params.get("capabilities") {
++                if !capabilities.is_null() {
++                    let caps = fields(
++                        capabilities,
++                        &[
++                            "experimentalApi",
++                            "requestAttestation",
++                            "optOutNotificationMethods",
++                        ],
++                    )?;
++                    optional_false(caps.get("requestAttestation"))?;
++                    if caps
++                        .get("optOutNotificationMethods")
++                        .is_some_and(|v| !v.is_null() && !v.as_array().is_some_and(Vec::is_empty))
++                    {
++                        return Err(forbidden());
++                    }
++                    if caps.get("experimentalApi").is_some_and(|v| !v.is_boolean()) {
++                        return Err(forbidden());
++                    }
++                }
++            }
++        }
++        "account/read" => {
++            let p = fields(params, &["refreshToken"])?;
++            optional_false(p.get("refreshToken"))?;
++        }
++        "account/login/start" => match params["type"].as_str() {
++            Some("chatgpt") => {
++                let p = fields(
++                    params,
++                    &[
++                        "type",
++                        "codexStreamlinedLogin",
++                        "useHostedLoginSuccessPage",
++                        "appBrand",
++                    ],
++                )?;
++                optional_false(p.get("codexStreamlinedLogin"))?;
++                optional_false(p.get("useHostedLoginSuccessPage"))?;
++                if p.get("appBrand").is_some_and(|v| !v.is_null()) {
++                    return Err(forbidden());
++                }
++            }
++            Some("chatgptDeviceCode") => {
++                fields(params, &["type"])?;
++            }
++            _ => return Err(forbidden()),
++        },
++        "account/login/cancel" => {
++            fields(params, &["loginId"])?;
++            if !params["loginId"]
++                .as_str()
++                .is_some_and(|s| !s.is_empty() && s.len() <= 128)
++            {
++                return Err(forbidden());
++            }
++        }
++        "account/logout" => {
++            if !params.is_null() {
++                fields(params, &[])?;
++            }
++        }
++        _ => return Err(forbidden()),
++    }
++    Ok(())
++}
++
++pub(crate) struct AuthOwnerConnection {
++    original: OnceLock<(ConnectionId, Arc<ConnectionSessionState>)>,
++    incarnation: String,
++    physical: std::sync::Mutex<PhysicalState>,
++    pub(crate) closed: tokio_util::sync::CancellationToken,
++    pub(crate) export_closed: tokio_util::sync::CancellationToken,
++}
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum PhysicalPhase {
++    Unopened,
++    Open,
++    Closed,
++}
++struct PhysicalState {
++    phase: PhysicalPhase,
++    export_revoked: bool,
++}
++pub(crate) struct OwnerIoGuard<'a> {
++    state: std::sync::MutexGuard<'a, PhysicalState>,
++    owner: &'a AuthOwnerConnection,
++}
++impl OwnerIoGuard<'_> {
++    pub(crate) fn is_open(&self) -> bool {
++        self.state.phase == PhysicalPhase::Open
++    }
++    pub(crate) fn export_revoked(&self) -> bool {
++        self.state.export_revoked
++    }
++    pub(crate) fn close(&mut self) {
++        let was_open = self.is_open();
++        self.state.phase = PhysicalPhase::Closed;
++        self.state.export_revoked = true;
++        self.owner.export_closed.cancel();
++        self.owner.closed.cancel();
++        if was_open {
++            start_shutdown_watchdog();
++        }
++    }
++}
++fn start_shutdown_watchdog() {
++    static STARTED: std::sync::Once = std::sync::Once::new();
++    STARTED.call_once(|| {
++        std::thread::Builder::new()
++            .name("xiaok-auth-shutdown".into())
++            .spawn(|| {
++                std::thread::sleep(std::time::Duration::from_secs(45));
++                std::process::exit(1);
++            })
++            .unwrap_or_else(|_| std::process::exit(1));
++    });
++}
++impl AuthOwnerConnection {
++    pub(crate) fn new() -> Self {
++        Self {
++            original: OnceLock::new(),
++            incarnation: uuid::Uuid::new_v4().to_string(),
++            physical: std::sync::Mutex::new(PhysicalState {
++                phase: PhysicalPhase::Unopened,
++                export_revoked: false,
++            }),
++            closed: tokio_util::sync::CancellationToken::new(),
++            export_closed: tokio_util::sync::CancellationToken::new(),
++        }
++    }
++    pub(crate) fn io_guard(&self) -> OwnerIoGuard<'_> {
++        match self.physical.lock() {
++            Ok(state) => OwnerIoGuard { state, owner: self },
++            Err(poison) => {
++                let mut guard = OwnerIoGuard {
++                    state: poison.into_inner(),
++                    owner: self,
++                };
++                guard.close();
++                guard
++            }
++        }
++    }
++    #[cfg(unix)]
++    pub(crate) fn open_stdio(
++        &self,
++        _witness: &crate::xiaok_auth_stdio::VerifiedStdio,
++    ) -> std::io::Result<()> {
++        let mut guard = self.io_guard();
++        if guard.state.phase != PhysicalPhase::Unopened || guard.state.export_revoked {
++            return Err(std::io::Error::other("xiaok_auth_stdio_unavailable"));
++        }
++        guard.state.phase = PhysicalPhase::Open;
++        Ok(())
++    }
++    pub(crate) fn close_physical(&self) {
++        self.io_guard().close();
++    }
++    pub(crate) fn revoke_exports(&self) {
++        let mut guard = self.io_guard();
++        guard.state.export_revoked = true;
++        self.export_closed.cancel();
++    }
++    pub(crate) fn incarnation(&self) -> &str {
++        &self.incarnation
++    }
++    pub(crate) fn bind(
++        &self,
++        id: ConnectionId,
++        session: &Arc<ConnectionSessionState>,
++    ) -> Result<(), JSONRPCErrorError> {
++        if session.origin != ConnectionOrigin::Stdio
++            || !session.initialized()
++            || session.rpc_gate.is_closed()
++        {
++            return Err(forbidden());
++        }
++        if self.original.get().is_none() {
++            let _ = self.original.set((id, Arc::clone(session)));
++        }
++        self.check(id, session)
++    }
++    pub(crate) fn check(
++        &self,
++        id: ConnectionId,
++        session: &Arc<ConnectionSessionState>,
++    ) -> Result<(), JSONRPCErrorError> {
++        let Some((original_id, original_session)) = self.original.get() else {
++            return Err(forbidden());
++        };
++        if *original_id != id
++            || !Arc::ptr_eq(original_session, session)
++            || session.origin != ConnectionOrigin::Stdio
++            || !session.initialized()
++            || session.rpc_gate.is_closed()
++        {
++            return Err(forbidden());
++        }
++        Ok(())
++    }
++}
++
++// Fixed-role private auth implementation; public protocol method list stays unchanged.
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::message_processor::{ConnectionSessionState, InitializedConnectionSessionState};
++    use crate::outgoing_message::ConnectionId;
++    use crate::transport::ConnectionOrigin;
++    use serde_json::json;
++    use std::sync::Arc;
++
++    fn initialized(origin: ConnectionOrigin) -> Arc<ConnectionSessionState> {
++        let session = Arc::new(ConnectionSessionState::new(origin));
++        session
++            .initialize(InitializedConnectionSessionState {
++                experimental_api_enabled: false,
++                opted_out_notification_methods: Default::default(),
++                app_server_client_name: "auth-owner-unit-test".into(),
++                client_version: "1".into(),
++                request_attestation: false,
++                client_mcp_extensions: Default::default(),
++            })
++            .unwrap();
++        session
++    }
++    #[test]
++    fn xiaok_auth_owner_params_are_exact_and_non_secret() {
++        assert!(!SnapshotParams::parse(None).unwrap().refresh);
++        assert!(!SnapshotParams::parse(Some(json!({}))).unwrap().refresh);
++        assert!(
++            SnapshotParams::parse(Some(json!({"refresh":true})))
++                .unwrap()
++                .refresh
++        );
++        for value in [
++            json!(null),
++            json!([]),
++            json!({"refresh":null}),
++            json!({"refresh":"yes"}),
++            json!({"accessToken":"TOKEN_CANARY"}),
++            json!({"unknown":null}),
++        ] {
++            let error = SnapshotParams::parse(Some(value)).unwrap_err();
++            assert_eq!(error.message, "xiaok_auth_invalid_params");
++            assert!(!format!("{error:?}").contains("TOKEN_CANARY"));
++        }
++    }
++    #[test]
++    fn xiaok_auth_owner_raw_ceiling_denies_secret_siblings_before_decode() {
++        for (method, params) in [
++            ("thread/start", json!({})),
++            ("model/list", json!({})),
++            (
++                "account/login/start",
++                json!({"type":"apiKey","apiKey":"CANARY"}),
++            ),
++            (
++                "account/login/start",
++                json!({"type":"chatgptAuthTokens","accessToken":"CANARY"}),
++            ),
++            (
++                "account/login/start",
++                json!({"type":"chatgptDeviceCode","extra":null}),
++            ),
++            ("account/read", json!({"refreshToken":true})),
++            ("account/read", json!({"refreshToken":false,"unknown":null})),
++            ("getAuthStatus", json!({"includeToken":true})),
++        ] {
++            let e = validate_public_wire(method, Some(&params)).unwrap_err();
++            assert_eq!(e.message, "xiaok_auth_owner_rpc_forbidden");
++            assert!(!format!("{e:?}").contains("CANARY"));
++        }
++        for (method, params) in [
++            (
++                "initialize",
++                json!({"clientInfo":{"name":"test","version":"1"},"capabilities":{"experimentalApi":true}}),
++            ),
++            ("account/read", json!({"refreshToken":false})),
++            ("account/login/start", json!({"type":"chatgpt"})),
++            ("account/login/start", json!({"type":"chatgptDeviceCode"})),
++            ("account/login/cancel", json!({"loginId":"test-id"})),
++        ] {
++            validate_public_wire(method, Some(&params)).unwrap();
++        }
++        validate_public_wire("account/logout", None).unwrap();
++    }
++    #[test]
++    fn xiaok_auth_owner_original_typed_initialize_stays_usable() {
++        let request:codex_app_server_protocol::ClientRequest=serde_json::from_value(json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"test","version":"1"},"capabilities":{"experimentalApi":true}}})).unwrap();
++        crate::xiaok_main_bridge::validate_request(&request).unwrap();
++    }
++    #[tokio::test]
++    async fn xiaok_auth_owner_binds_original_session_and_never_rebinds() {
++        let owner = AuthOwnerConnection::new();
++        let id = ConnectionId(42);
++        let not_ready = Arc::new(ConnectionSessionState::new(ConnectionOrigin::Stdio));
++        assert!(owner.bind(id, &not_ready).is_err());
++        assert!(
++            owner
++                .bind(id, &initialized(ConnectionOrigin::InProcess))
++                .is_err()
++        );
++        let session = initialized(ConnectionOrigin::Stdio);
++        owner.bind(id, &session).unwrap();
++        owner.check(id, &session).unwrap();
++        assert!(owner.check(ConnectionId(43), &session).is_err());
++        let replacement = initialized(ConnectionOrigin::Stdio);
++        assert!(owner.check(id, &replacement).is_err());
++        assert!(owner.bind(id, &replacement).is_err());
++        session.rpc_gate.close().await;
++        assert!(owner.check(id, &session).is_err());
++        drop(session);
++        assert!(owner.bind(id, &replacement).is_err());
++    }
++}
++
++/// Only fixed local errors may cross the auth RPC boundary; original OAuth,
++/// storage and provider error text is never an error DTO credential channel.
++pub(crate) fn public_error(error: JSONRPCErrorError) -> JSONRPCErrorError {
++    match error.message.as_str() {
++        "xiaok_auth_owner_rpc_forbidden"
++        | "xiaok_auth_unavailable"
++        | "xiaok_auth_invalid_params"
++        | "xiaok_auth_request_id_rejected"
++        | "Not initialized"
++        | "Already initialized" => JSONRPCErrorError {
++            data: None,
++            ..error
++        },
++        _ => JSONRPCErrorError {
++            code: -32603,
++            message: "xiaok_auth_operation_failed".into(),
++            data: None,
++        },
++    }
++}
++
++#[cfg(test)]
++mod wire_tests {
++    use super::*;
++    use codex_app_server_protocol::{JSONRPCMessage, JSONRPCRequest};
++    use serde_json::json;
++    #[test]
++    fn xiaok_auth_owner_snapshot_uses_original_wire_presence() {
++        for (params, allowed) in [
++            (Some(json!({})), true),
++            (None, true),
++            (Some(json!(null)), false),
++            (Some(json!([])), false),
++            (Some(json!(true)), false),
++            (Some(json!(false)), false),
++            (Some(json!("")), false),
++        ] {
++            let mut value = json!({"id":1,"method":"xiaok/auth/snapshot"});
++            if let Some(params) = params {
++                value["params"] = params;
++            }
++            let JSONRPCMessage::Request(JSONRPCRequest { params, .. }) =
++                serde_json::from_value(value).unwrap()
++            else {
++                panic!("original request parser")
++            };
++            assert_eq!(SnapshotParams::parse(params).is_ok(), allowed);
++        }
++    }
++    #[test]
++    fn xiaok_auth_owner_public_errors_discard_original_message_and_data() {
++        let exposed = public_error(JSONRPCErrorError {
++            code: -32600,
++            message: "SYNTHETIC_PROVIDER_CANARY".into(),
++            data: Some(json!({"detail":"SYNTHETIC_TOKEN_CANARY"})),
++        });
++        assert_eq!(exposed.message, "xiaok_auth_operation_failed");
++        assert_eq!(exposed.data, None);
++        let fixed = public_error(JSONRPCErrorError {
++            code: -32600,
++            message: "xiaok_auth_unavailable".into(),
++            data: Some(json!("SYNTHETIC_TOKEN_CANARY")),
++        });
++        assert_eq!(fixed.message, "xiaok_auth_unavailable");
++        assert_eq!(fixed.data, None);
++    }
++}

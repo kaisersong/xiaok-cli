@@ -1,0 +1,34 @@
+diff --git a/codex-rs/config/src/lib.rs b/codex-rs/config/src/lib.rs
+--- a/codex-rs/config/src/lib.rs
++++ b/codex-rs/config/src/lib.rs
+@@ -48,6 +48,30 @@
+ mod tui_mouse_scroll;
+ mod tui_rendering;
+ pub mod types;
++
++/// Fixed binary role; never derived from a configuration value or environment flag.
++pub const XIAOK_AUTH_OWNER_ONLY: bool = cfg!(feature = "xiaok-auth-owner-only");
++
++/// Keep upstream diagnostics intact outside the private authentication owner.
++/// The private branch must not evaluate the original diagnostic arguments.
++#[macro_export]
++macro_rules! config_diagnostic {
++    ($level:ident, $($args:tt)*) => {{
++        if $crate::XIAOK_AUTH_OWNER_ONLY {
++            tracing::$level!("xiaok_auth_config_diagnostic");
++        } else {
++            tracing::$level!($($args)*);
++        }
++    }};
++}
++
++pub fn config_warning_message(message: String) -> String {
++    if XIAOK_AUTH_OWNER_ONLY {
++        "xiaok_auth_config_warning".to_owned()
++    } else {
++        message
++    }
++}
+ 
+ pub const CONFIG_TOML_FILE: &str = "config.toml";
+ 

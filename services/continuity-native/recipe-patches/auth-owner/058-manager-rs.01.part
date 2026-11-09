@@ -1,0 +1,464 @@
++                tracing::error!("Failed to refresh token: {}", err);
++            }
+             return Some(auth);
+         }
+         self.auth_cached()
+@@ -2407,6 +2731,23 @@
+     /// Refreshes auth, then captures credentials and their account-bound factory together.
+     /// The auth read lock prevents an identity change between the two snapshots.
+     pub async fn auth_with_http_client_factory(&self) -> Option<(CodexAuth, HttpClientFactory)> {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if let Some(vault) = &self.xiaok_vault {
++            self.auth().await?;
++            let cached = self.inner.read().ok()?;
++            let origin = cached.xiaok_origin.as_ref()?;
++            if cached
++                .auth
++                .as_ref()
++                .and_then(CodexAuth::get_current_auth_json)
++                .as_ref()
++                != origin.auth()
++            {
++                return None;
++            }
++            let _file = vault.lock_origin(origin).ok()?;
++            return Some((cached.auth.clone()?, self.http_client_factory()));
++        }
+         self.auth().await;
+         let cached = self.inner.read().ok()?;
+         Some((cached.auth.clone()?, self.http_client_factory()))
+@@ -2477,6 +2818,10 @@
+ 
+     /// Reloads auth from the active source. Returns whether the auth value changed.
+     pub async fn reload(&self) -> bool {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if self.xiaok_vault.is_some() {
++            return self.xiaok_reload_checked().await.unwrap_or(false);
++        }
+         tracing::info!("Reloading auth");
+         let new_auth = self.load_auth().await;
+         self.set_cached_auth(new_auth)
+@@ -2494,6 +2839,28 @@
+             }
+         };
+ 
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if self.xiaok_vault.is_some() {
++            let previous = self.auth_cached();
++            let loaded = self.xiaok_load_checked().await;
++            let Ok((auth, cap)) = loaded else {
++                return ReloadOutcome::Skipped;
++            };
++            if auth.as_ref().and_then(CodexAuth::get_account_id).as_deref()
++                != Some(expected_account_id)
++            {
++                return ReloadOutcome::Skipped;
++            }
++            let changed = !Self::auths_equal_for_refresh(previous.as_ref(), auth.as_ref());
++            if self.xiaok_commit_checked(auth, cap).is_err() {
++                return ReloadOutcome::Skipped;
++            }
++            return if changed {
++                ReloadOutcome::ReloadedChanged
++            } else {
++                ReloadOutcome::ReloadedNoChange
++            };
++        }
+         let new_auth = self.load_auth().await;
+         let new_account_id = new_auth.as_ref().and_then(CodexAuth::get_account_id);
+ 
+@@ -2583,7 +2950,11 @@
+             return match self.resolve_external_auth(external_auth.as_ref()).await {
+                 Ok(auth) => Some(auth),
+                 Err(err) => {
+-                    tracing::error!("Failed to resolve external auth: {err}");
++                    if crate::XIAOK_AUTH_OWNER_ONLY {
++                        tracing::warn!("External auth unavailable");
++                    } else {
++                        tracing::error!("Failed to resolve external auth: {err}");
++                    }
+                     match err {
+                         RefreshTokenError::Permanent(error) => {
+                             if let Some(auth) = cached_auth.as_ref() {
+@@ -2626,35 +2997,84 @@
+ 
+     fn set_cached_auth(&self, new_auth: Option<CodexAuth>) -> bool {
+         if let Ok(mut guard) = self.inner.write() {
+-            let previous = guard.auth.as_ref();
+-            let changed = !AuthManager::auths_equal(previous, new_auth.as_ref());
+-            let auth_changed_for_refresh =
+-                !Self::auths_equal_for_refresh(previous, new_auth.as_ref());
+-            let owner_changed =
+-                auth_changed_for_refresh && !same_owner(previous, new_auth.as_ref());
+-            if owner_changed {
+-                self.auth_route_config
+-                    .application_network_policy()
+-                    .invalidate();
+-            }
+-            if auth_changed_for_refresh {
+-                guard.permanent_refresh_failure = None;
+-            }
+-            tracing::info!("Reloaded auth, changed: {changed}");
+-            guard.auth = new_auth;
+-            if auth_changed_for_refresh {
+-                self.auth_change_state_tx.send_modify(|state| {
+-                    state.generation += 1;
+-                    if owner_changed {
+-                        state.owner_generation += 1;
+-                    }
+-                });
+-                self.auth_change_tx.send_modify(|revision| *revision += 1);
+-            }
+-            changed
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            let origin_changed = guard.xiaok_origin.take().is_some();
++            #[cfg(not(feature = "xiaok-auth-owner-only"))]
++            let origin_changed = false;
++            self.set_cached_auth_locked(&mut guard, new_auth, origin_changed)
+         } else {
+             false
+         }
++    }
++    fn set_cached_auth_locked(
++        &self,
++        guard: &mut CachedAuth,
++        new_auth: Option<CodexAuth>,
++        origin_changed: bool,
++    ) -> bool {
++        let next_pin = xiaok_committed_pin(new_auth.as_ref());
++        let pin_changed = guard.xiaok_export_pin != next_pin;
++        let had_uncommitted = guard.xiaok_uncommitted.load(Ordering::SeqCst);
++        let previous = guard.auth.as_ref();
++        let changed = !AuthManager::auths_equal(previous, new_auth.as_ref())
++            || pin_changed
++            || had_uncommitted
++            || origin_changed;
++        let auth_changed_for_refresh = !Self::auths_equal_for_refresh(previous, new_auth.as_ref())
++            || pin_changed
++            || had_uncommitted
++            || origin_changed;
++        let pin_owner_changed = pin_changed
++            && match (&guard.xiaok_export_pin, &next_pin) {
++                (Some(old), Some(next)) => old.owner != next.owner,
++                _ => true,
++            };
++        let owner_changed = auth_changed_for_refresh
++            && (pin_owner_changed
++                || (!same_owner(previous, new_auth.as_ref())
++                    && !(previous.is_none() && new_auth.is_none())));
++        if owner_changed {
++            self.auth_route_config
++                .application_network_policy()
++                .invalidate();
++        }
++        if auth_changed_for_refresh {
++            guard.permanent_refresh_failure = None;
++        }
++        let legacy_next = if auth_changed_for_refresh {
++            (*self.auth_change_tx.borrow()).checked_add(1)
++        } else {
++            None
++        };
++        if auth_changed_for_refresh {
++            let next_generation = guard.change_state.generation.checked_add(1);
++            let next_owner = if owner_changed {
++                guard.change_state.owner_generation.checked_add(1)
++            } else {
++                Some(guard.change_state.owner_generation)
++            };
++            match (next_generation, next_owner, legacy_next) {
++                (Some(generation), Some(owner_generation), Some(_)) => {
++                    guard.change_state = AuthChangeState {
++                        generation,
++                        owner_generation,
++                    }
++                }
++                _ => guard.xiaok_counter_exhausted = true,
++            }
++        }
++        tracing::info!("Reloaded auth, changed: {changed}");
++        guard.auth = new_auth;
++        guard.xiaok_export_pin = next_pin;
++        // Only this original setter can clear observed nested uncertainty;
++        // its new credential revision prevents an old snapshot reviving.
++        guard.xiaok_uncommitted.store(false, Ordering::SeqCst);
++        if auth_changed_for_refresh {
++            self.auth_change_state_tx.send_replace(guard.change_state);
++            self.auth_change_tx
++                .send_replace(legacy_next.unwrap_or(u64::MAX));
++        }
++        changed
+     }
+ 
+     pub async fn set_external_auth(
+@@ -2795,6 +3215,16 @@
+         auth_config: AuthConfig,
+         enable_codex_api_key_env: bool,
+     ) -> Result<Arc<Self>, AuthManagerInitializationError> {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            return Self::xiaok_checked_from_auth_config(auth_config)
++                .await
++                .map_err(|_| {
++                    AuthManagerInitializationError::from(RefreshTokenError::Transient(
++                        super::xiaok_vault::unavailable(),
++                    ))
++                });
++        }
+         let external_auth = WorkloadIdentityExternalAuth::from_process_config(&auth_config)?;
+         let mut manager = Self::new_from_auth_config(auth_config, enable_codex_api_key_env).await;
+         manager.workload_identity_selected = external_auth.is_some();
+@@ -2942,6 +3372,10 @@
+     /// callers immediately observe the unauthenticated state.
+     pub async fn logout(&self) -> std::io::Result<bool> {
+         self.ensure_logout_allowed()?;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if self.xiaok_vault.is_some() {
++            return self.xiaok_logout_checked(false).await;
++        }
+         let removed = logout_all_stores(
+             &self.codex_home,
+             self.auth_credentials_store_mode,
+@@ -2955,12 +3389,20 @@
+ 
+     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {
+         self.ensure_logout_allowed()?;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if self.xiaok_vault.is_some() {
++            return self.xiaok_logout_checked(true).await;
++        }
+         let auth_dot_json = self
+             .auth_cached()
+             .and_then(|auth| auth.get_current_auth_json());
+         if let Err(err) = revoke_auth_tokens(auth_dot_json.as_ref(), &self.auth_route_config).await
+         {
+-            tracing::warn!("failed to revoke auth tokens during logout: {err}");
++            if crate::XIAOK_AUTH_OWNER_ONLY {
++                tracing::warn!("Token revocation failed during logout");
++            } else {
++                tracing::warn!("failed to revoke auth tokens during logout: {err}");
++            }
+         }
+         let result = logout_all_stores(
+             &self.codex_home,
+@@ -3091,6 +3533,57 @@
+         auth: &ChatgptAuth,
+         refresh_token: String,
+     ) -> Result<(), RefreshTokenError> {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if let Some(vault) = &self.xiaok_vault {
++            let operation = vault.begin(super::xiaok_vault::Kind::Refresh)?;
++            let mut captured = operation.captured_auth()?;
++            let cached = auth
++                .state
++                .auth_dot_json
++                .lock()
++                .map_err(|_| super::xiaok_vault::unavailable())?
++                .clone();
++            if cached.as_ref() != Some(&captured) {
++                return Err(super::xiaok_vault::unavailable().into());
++            }
++            let request_token = captured
++                .tokens
++                .as_ref()
++                .ok_or_else(super::xiaok_vault::unavailable)?
++                .refresh_token
++                .clone();
++            operation.check()?;
++            let response = request_chatgpt_token_refresh(request_token, auth.client())
++                .await
++                .map_err(|error| match error {
++                    RefreshTokenError::Permanent(failed) => RefreshTokenError::Permanent(
++                        RefreshTokenFailedError::new(failed.reason, "xiaok_auth_unavailable"),
++                    ),
++                    RefreshTokenError::Transient(_) => {
++                        RefreshTokenError::Transient(super::xiaok_vault::unavailable())
++                    }
++                    RefreshTokenError::Policy(denied) => RefreshTokenError::Policy(denied),
++                })?;
++            operation.check()?;
++            let tokens = captured
++                .tokens
++                .as_mut()
++                .ok_or_else(super::xiaok_vault::unavailable)?;
++            if let Some(id) = response.id_token {
++                tokens.id_token =
++                    parse_chatgpt_jwt_claims(&id).map_err(|_| super::xiaok_vault::unavailable())?;
++            }
++            if let Some(access) = response.access_token {
++                tokens.access_token = access;
++            }
++            if let Some(refresh) = response.refresh_token {
++                tokens.refresh_token = refresh;
++            }
++            captured.last_refresh = Some(Utc::now());
++            operation.save(&captured)?;
++            self.xiaok_reload_checked().await?;
++            return Ok(());
++        }
+         let refresh_response = request_chatgpt_token_refresh(refresh_token, auth.client()).await?;
+ 
+         persist_tokens(
+@@ -3103,6 +3596,179 @@
+         self.reload().await;
+ 
+         Ok(())
++    }
++}
++
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub struct XiaokAuthSnapshotGuard<'a> {
++    _inner: std::sync::RwLockReadGuard<'a, CachedAuth>,
++    _vault: std::sync::MutexGuard<'a, super::xiaok_vault::State>,
++}
++
++#[cfg(feature = "xiaok-auth-owner-only")]
++impl AuthManager {
++    async fn xiaok_checked_from_auth_config(config: AuthConfig) -> std::io::Result<Arc<Self>> {
++        if config.auth_credentials_store_mode != AuthCredentialsStoreMode::File
++            || !config.is_login_method_allowed(ForcedLoginMethod::Chatgpt)
++        {
++            return Err(super::xiaok_vault::unavailable());
++        }
++        config
++            .validate()
++            .map_err(|_| super::xiaok_vault::unavailable())?;
++        let vault = super::xiaok_vault::lookup(&config.codex_home)?;
++        let mut manager = Self::from_loaded_auth_config(config, false, None);
++        manager.xiaok_vault = Some(vault);
++        manager.xiaok_reload_checked().await?;
++        Ok(Arc::new(manager))
++    }
++    async fn xiaok_load_checked(
++        &self,
++    ) -> std::io::Result<(Option<CodexAuth>, super::xiaok_vault::ReadCap)> {
++        let vault = self
++            .xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?;
++        let cap = vault.load_cap()?;
++        let Some(data) = cap.auth().cloned() else {
++            return Ok((None, cap));
++        };
++        let auth = CodexAuth::from_auth_dot_json(
++            &self.codex_home,
++            data,
++            AuthCredentialsStoreMode::File,
++            self.chatgpt_base_url.as_deref(),
++            self.keyring_backend_kind,
++            self.agent_identity_authapi_base_url.as_deref(),
++            &self.auth_route_config,
++        )
++        .await
++        .map_err(|_| {
++            vault.poison();
++            super::xiaok_vault::unavailable()
++        })?;
++        let forced = self
++            .forced_chatgpt_workspace_id
++            .read()
++            .map_err(|_| super::xiaok_vault::unavailable())?
++            .clone();
++        let allowed = self
++            .managed_auth_policy
++            .allowed_login_methods(self.forced_login_method, forced.as_deref());
++        let workspaces = self
++            .managed_auth_policy
++            .effective_chatgpt_workspaces(forced.as_deref());
++        validate_auth_restrictions(Some(&allowed), workspaces.as_deref(), &auth).map_err(|_| {
++            vault.poison();
++            super::xiaok_vault::unavailable()
++        })?;
++        Ok((Some(auth), cap))
++    }
++    fn xiaok_commit_checked(
++        &self,
++        auth: Option<CodexAuth>,
++        cap: super::xiaok_vault::ReadCap,
++    ) -> std::io::Result<bool> {
++        if auth
++            .as_ref()
++            .and_then(CodexAuth::get_current_auth_json)
++            .as_ref()
++            != cap.auth()
++        {
++            return Err(super::xiaok_vault::unavailable());
++        }
++        let vault = self
++            .xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?;
++        let mut inner = self
++            .inner
++            .write()
++            .map_err(|_| super::xiaok_vault::unavailable())?;
++        let (origin, file_guard) = vault.consume_cap(cap)?;
++        let origin_changed = !inner
++            .xiaok_origin
++            .as_ref()
++            .is_some_and(|old| old.same(&origin));
++        let changed = self.set_cached_auth_locked(&mut inner, auth, origin_changed);
++        inner.xiaok_origin = Some(origin);
++        drop(file_guard);
++        Ok(changed)
++    }
++    async fn xiaok_reload_checked(&self) -> std::io::Result<bool> {
++        let (auth, cap) = self.xiaok_load_checked().await?;
++        self.xiaok_commit_checked(auth, cap)
++    }
++    pub fn xiaok_begin_login(&self) -> std::io::Result<super::xiaok_vault::XiaokAuthOperation> {
++        self.xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?
++            .begin(super::xiaok_vault::Kind::Login)
++    }
++    pub fn xiaok_invalidate_auth_operations(&self) -> std::io::Result<()> {
++        self.xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?
++            .invalidate()
++    }
++    pub fn xiaok_lock_current_snapshot<'a>(
++        &'a self,
++        snapshot: &XiaokManagedAuthSnapshot,
++    ) -> std::io::Result<XiaokAuthSnapshotGuard<'a>> {
++        let inner = self
++            .inner
++            .read()
++            .map_err(|_| super::xiaok_vault::unavailable())?;
++        if !Arc::ptr_eq(&inner.xiaok_incarnation, &snapshot.incarnation)
++            || inner.change_state != snapshot.state
++            || self.xiaok_current_managed_tuple(&inner)?.pin() != snapshot.pin
++        {
++            return Err(xiaok_auth_unavailable());
++        }
++        let origin = inner
++            .xiaok_origin
++            .as_ref()
++            .ok_or_else(xiaok_auth_unavailable)?;
++        if !snapshot.origin.as_ref().is_some_and(|o| o.same(origin))
++            || inner
++                .auth
++                .as_ref()
++                .and_then(CodexAuth::get_current_auth_json)
++                .as_ref()
++                != origin.auth()
++        {
++            return Err(xiaok_auth_unavailable());
++        }
++        let vault = self
++            .xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?;
++        let file_guard = vault.lock_origin(origin)?;
++        Ok(XiaokAuthSnapshotGuard {
++            _inner: inner,
++            _vault: file_guard,
++        })
++    }
++    async fn xiaok_logout_checked(&self, revoke: bool) -> std::io::Result<bool> {
++        let vault = self
++            .xiaok_vault
++            .as_ref()
++            .ok_or_else(super::xiaok_vault::unavailable)?;
++        // This is synchronous, before the first network/queue await.

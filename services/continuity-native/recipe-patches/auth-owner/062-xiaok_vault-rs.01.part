@@ -1,0 +1,317 @@
++                vault: cap.vault,
++                stamp: cap.stamp,
++            },
++            state,
++        ))
++    }
++}
++fn bump_control(state: &mut State) -> io::Result<()> {
++    match state.stamp.control.checked_add(1) {
++        Some(v) => {
++            state.stamp.control = v;
++            Ok(())
++        }
++        None => {
++            state.poisoned = true;
++            Err(unavailable())
++        }
++    }
++}
++fn bump_revision(state: &mut State) -> io::Result<()> {
++    match state.stamp.revision.checked_add(1) {
++        Some(v) => {
++            state.stamp.revision = v;
++            Ok(())
++        }
++        None => {
++            state.poisoned = true;
++            Err(unavailable())
++        }
++    }
++}
++
++pub(super) struct ReadCap {
++    vault: Arc<Vault>,
++    stamp: Stamp,
++}
++impl ReadCap {
++    pub(super) fn auth(&self) -> Option<&AuthDotJson> {
++        self.stamp.version.auth()
++    }
++}
++#[derive(Clone)]
++pub(super) struct Origin {
++    vault: Arc<Vault>,
++    stamp: Stamp,
++}
++impl Origin {
++    pub(super) fn same(&self, other: &Self) -> bool {
++        Arc::ptr_eq(&self.vault, &other.vault) && self.stamp == other.stamp
++    }
++    pub(super) fn auth(&self) -> Option<&AuthDotJson> {
++        self.stamp.version.auth()
++    }
++}
++#[derive(Clone, Copy, PartialEq, Eq)]
++pub(super) enum Kind {
++    Login,
++    Refresh,
++    Delete,
++}
++struct Operation {
++    vault: Arc<Vault>,
++    kind: Kind,
++    stamp: Stamp,
++    nonce: String,
++    consumed: AtomicBool,
++    completion: Mutex<Option<Stamp>>,
++}
++/// Opaque original operation, never reconstructed from a loginId or JSON.
++#[derive(Clone)]
++pub struct XiaokAuthOperation {
++    inner: Arc<Operation>,
++}
++impl std::fmt::Debug for XiaokAuthOperation {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("XiaokAuthOperation([redacted])")
++    }
++}
++impl XiaokAuthOperation {
++    fn check_locked(&self, state: &mut State) -> io::Result<()> {
++        self.inner.vault.verify(state)?;
++        if self.inner.consumed.load(Ordering::SeqCst)
++            || state.stamp != self.inner.stamp
++            || (self.inner.kind == Kind::Login
++                && state.pending_login.as_deref() != Some(self.inner.nonce.as_str()))
++        {
++            return Err(stale());
++        }
++        Ok(())
++    }
++    pub fn completion_current(&self) -> bool {
++        let Ok(mut state) = self.inner.vault.io.lock() else {
++            return false;
++        };
++        if self.inner.vault.verify(&mut state).is_err()
++            || state.suspended
++            || state.pending_login.is_some()
++        {
++            return false;
++        }
++        self.inner.consumed.load(Ordering::SeqCst)
++            && self
++                .inner
++                .completion
++                .lock()
++                .is_ok_and(|saved| saved.as_ref() == Some(&state.stamp))
++    }
++    pub(crate) fn check(&self) -> io::Result<()> {
++        let mut state = self.inner.vault.io.lock().map_err(|_| unavailable())?;
++        self.check_locked(&mut state)
++    }
++    pub(crate) fn captured_auth(&self) -> io::Result<AuthDotJson> {
++        self.check()?;
++        self.inner.stamp.version.auth().cloned().ok_or_else(stale)
++    }
++    pub(crate) fn captured_optional_auth(&self) -> io::Result<Option<AuthDotJson>> {
++        self.check()?;
++        Ok(self.inner.stamp.version.auth().cloned())
++    }
++    pub(crate) fn check_root(&self, root: &Path) -> io::Result<()> {
++        if !Arc::ptr_eq(&lookup(root)?, &self.inner.vault) {
++            return Err(stale());
++        }
++        self.check()
++    }
++    /// Drop cleanup cancels only a still-unconsumed original attempt. Explicit
++    /// user cancellation may also suspend an already-written late completion.
++    pub fn cancel(&self, explicit: bool) {
++        let Ok(mut state) = self.inner.vault.io.lock() else {
++            return;
++        };
++        if state.stamp.control != self.inner.stamp.control || !state.ready || state.poisoned {
++            return;
++        }
++        let consumed = self.inner.consumed.load(Ordering::SeqCst);
++        if consumed && !explicit {
++            return;
++        }
++        if self.inner.kind != Kind::Login {
++            return;
++        }
++        if bump_control(&mut state).is_err() {
++            return;
++        }
++        state.pending_login = None;
++        state.suspended = consumed;
++    }
++    pub(crate) fn save(&self, auth: &AuthDotJson) -> io::Result<()> {
++        if !matches!(self.inner.kind, Kind::Login | Kind::Refresh) {
++            return Err(stale());
++        }
++        validate_auth(auth)?;
++        let encoded = serde_json::to_vec(auth).map_err(|_| unavailable())?;
++        if encoded.is_empty() || encoded.len() > LIMIT {
++            return Err(unavailable());
++        }
++        let vault = &self.inner.vault;
++        let mut state = vault.io.lock().map_err(|_| unavailable())?;
++        self.check_locked(&mut state)?;
++        let temp_name = format!(".xiaok-auth-{}.tmp", nonce());
++        let temp = at(
++            vault.root.as_raw_fd(),
++            &temp_name,
++            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
++        )
++        .map_err(|_| {
++            state.poisoned = true;
++            unavailable()
++        })?;
++        let initial = FileId::of(&temp.metadata().map_err(|_| {
++            state.poisoned = true;
++            unavailable()
++        })?);
++        let result = (|| {
++            regular(&temp.metadata().map_err(|_| unavailable())?, vault.uid)?;
++            temp.write_all_at(&encoded, 0).map_err(|_| unavailable())?;
++            temp.sync_all().map_err(|_| unavailable())?;
++            self.check_locked(&mut state)?;
++            if self.inner.consumed.swap(true, Ordering::SeqCst) {
++                return Err(stale());
++            }
++            let from = CString::new(temp_name.as_str()).map_err(|_| unavailable())?;
++            let to = CString::new(AUTH).map_err(|_| unavailable())?;
++            if unsafe {
++                libc::renameat(
++                    vault.root.as_raw_fd(),
++                    from.as_ptr(),
++                    vault.root.as_raw_fd(),
++                    to.as_ptr(),
++                )
++            } != 0
++            {
++                return Err(unavailable());
++            }
++            vault.root.sync_all().map_err(|_| unavailable())?;
++            let actual = vault.observe_auth()?;
++            let Version::Present {
++                id,
++                auth: observed,
++                digest,
++            } = &actual
++            else {
++                return Err(unavailable());
++            };
++            if observed != auth
++                || id.dev != initial.dev
++                || id.ino != initial.ino
++                || *digest != <[u8; 32]>::from(Sha256::digest(&encoded))
++            {
++                return Err(unavailable());
++            }
++            bump_revision(&mut state)?;
++            state.stamp.version = actual;
++            state.pending_login = None;
++            state.suspended = false;
++            vault.check_root_and_lock(&state)?;
++            *self.inner.completion.lock().map_err(|_| unavailable())? = Some(state.stamp.clone());
++            Ok(())
++        })();
++        if result.is_err() {
++            state.poisoned = true;
++            // Clean only the exact temp inode this operation created. Rename or
++            // an unknown replacement never causes deletion of another file.
++            if let Ok(named) = at(vault.root.as_raw_fd(), &temp_name, libc::O_RDONLY)
++                && let Ok(m) = named.metadata()
++                && m.dev() == initial.dev
++                && m.ino() == initial.ino
++            {
++                if let Ok(name) = CString::new(temp_name) {
++                    unsafe {
++                        libc::unlinkat(vault.root.as_raw_fd(), name.as_ptr(), 0);
++                    }
++                }
++            }
++        }
++        result.map_err(|_| unavailable())
++    }
++    pub(crate) fn delete(&self) -> io::Result<bool> {
++        if self.inner.kind != Kind::Delete {
++            return Err(stale());
++        }
++        let vault = &self.inner.vault;
++        let mut state = vault.io.lock().map_err(|_| unavailable())?;
++        self.check_locked(&mut state)?;
++        if self.inner.consumed.swap(true, Ordering::SeqCst) {
++            return Err(stale());
++        }
++        let present = matches!(state.stamp.version, Version::Present { .. });
++        let result = (|| {
++            if present {
++                let name = CString::new(AUTH).map_err(|_| unavailable())?;
++                if unsafe { libc::unlinkat(vault.root.as_raw_fd(), name.as_ptr(), 0) } != 0 {
++                    return Err(unavailable());
++                }
++                vault.root.sync_all().map_err(|_| unavailable())?;
++            }
++            if vault.observe_auth()? != Version::Absent {
++                return Err(unavailable());
++            }
++            bump_revision(&mut state)?;
++            state.stamp.version = Version::Absent;
++            state.suspended = false;
++            state.pending_login = None;
++            vault.check_root_and_lock(&state)?;
++            Ok(present)
++        })();
++        if result.is_err() {
++            state.poisoned = true;
++        }
++        result.map_err(|_| unavailable())
++    }
++}
++
++struct BoundStorage {
++    vault: Arc<Vault>,
++}
++impl std::fmt::Debug for BoundStorage {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("XiaokBoundFileStorage([redacted])")
++    }
++}
++impl AuthStorageBackend for BoundStorage {
++    fn load(&self) -> io::Result<Option<AuthDotJson>> {
++        Ok(self.vault.load_cap()?.auth().cloned())
++    }
++    fn save(&self, _: &AuthDotJson) -> io::Result<()> {
++        Err(stale())
++    }
++    fn delete(&self) -> io::Result<bool> {
++        Err(stale())
++    }
++}
++#[derive(Debug)]
++struct DeniedStorage;
++impl AuthStorageBackend for DeniedStorage {
++    fn load(&self) -> io::Result<Option<AuthDotJson>> {
++        Err(unavailable())
++    }
++    fn save(&self, _: &AuthDotJson) -> io::Result<()> {
++        Err(unavailable())
++    }
++    fn delete(&self) -> io::Result<bool> {
++        Err(unavailable())
++    }
++}
++pub(super) fn file_backend(
++    root: &Path,
++    mode: AuthCredentialsStoreMode,
++) -> Arc<dyn AuthStorageBackend> {
++    if mode != AuthCredentialsStoreMode::File {
++        return Arc::new(DeniedStorage);
++    }
++    match lookup(root) {
++        Ok(vault) => Arc::new(BoundStorage { vault }),
++        Err(_) => Arc::new(DeniedStorage),
++    }
++}

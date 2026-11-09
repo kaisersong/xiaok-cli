@@ -1,0 +1,171 @@
+diff --git a/codex-rs/app-server/src/xiaok_main_bridge.rs b/codex-rs/app-server/src/xiaok_main_bridge.rs
+--- a/codex-rs/app-server/src/xiaok_main_bridge.rs
++++ b/codex-rs/app-server/src/xiaok_main_bridge.rs
+@@ -1,31 +1,62 @@
+ //! Dedicated, build-time RPC ceiling. Server responses to original dynamic calls remain intact.
+ use codex_app_server_protocol::{ClientRequest, JSONRPCErrorError};
+ use serde_json::Value;
+-use std::sync::{OnceLock, atomic::{AtomicBool, Ordering}};
++use std::sync::{
++    OnceLock,
++    atomic::{AtomicBool, Ordering},
++};
+ static STARTED: AtomicBool = AtomicBool::new(false);
+ static THREAD: OnceLock<String> = OnceLock::new();
+-fn deny() -> JSONRPCErrorError { JSONRPCErrorError { code: -32600, message: "xiaok_main_bridge_rpc_forbidden".to_string(), data: None } }
++fn deny() -> JSONRPCErrorError {
++    JSONRPCErrorError {
++        code: -32600,
++        message: "xiaok_main_bridge_rpc_forbidden".to_string(),
++        data: None,
++    }
++}
+ fn fields(value: &Value, allowed: &[&str]) -> Result<(), JSONRPCErrorError> {
+     let object = value.as_object().ok_or_else(deny)?;
+-    if object.iter().any(|(key, value)| !value.is_null() && !allowed.contains(&key.as_str())) { return Err(deny()); }
++    if object
++        .iter()
++        .any(|(key, value)| !value.is_null() && !allowed.contains(&key.as_str()))
++    {
++        return Err(deny());
++    }
+     Ok(())
+ }
+ fn text_input(params: &Value) -> Result<(), JSONRPCErrorError> {
+-    let input = params.get("input").and_then(Value::as_array).ok_or_else(deny)?;
+-    if input.is_empty() || input.len() > 64 { return Err(deny()); }
++    let input = params
++        .get("input")
++        .and_then(Value::as_array)
++        .ok_or_else(deny)?;
++    if input.is_empty() || input.len() > 64 {
++        return Err(deny());
++    }
+     for item in input {
+         fields(item, &["type", "text", "text_elements"])?;
+-        if item["type"] != "text" || !item["text"].is_string() { return Err(deny()); }
+-        if item.get("text_elements").is_some_and(|value| !value.is_array() || !value.as_array().is_some_and(Vec::is_empty)) { return Err(deny()); }
++        if item["type"] != "text" || !item["text"].is_string() {
++            return Err(deny());
++        }
++        if item
++            .get("text_elements")
++            .is_some_and(|value| !value.is_array() || !value.as_array().is_some_and(Vec::is_empty))
++        {
++            return Err(deny());
++        }
+     }
+     Ok(())
+ }
+ pub(crate) fn bind_thread(id: String) -> Result<(), JSONRPCErrorError> {
+-    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { THREAD.set(id).map_err(|_| deny())?; }
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        THREAD.set(id).map_err(|_| deny())?;
++    }
+     Ok(())
+ }
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ pub(crate) fn validate_request(request: &ClientRequest) -> Result<(), JSONRPCErrorError> {
+-    if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return Ok(()); }
++    if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        return Ok(());
++    }
+     let wire = serde_json::to_value(request).map_err(|_| deny())?;
+     let method = wire["method"].as_str().ok_or_else(deny)?;
+     let params = &wire["params"];
+@@ -35,23 +66,49 @@
+             fields(&params["clientInfo"], &["name", "title", "version"])?;
+             if let Some(capabilities) = params.get("capabilities") {
+                 fields(capabilities, &["experimentalApi", "requestAttestation"])?;
+-                if capabilities.get("requestAttestation").is_some_and(|value| *value != Value::Bool(false)) { return Err(deny()); }
++                if capabilities
++                    .get("requestAttestation")
++                    .is_some_and(|value| *value != Value::Bool(false))
++                {
++                    return Err(deny());
++                }
+             }
+-        },
++        }
+         "account/read" => {
+             fields(params, &["refreshToken"])?;
+-            if params.get("refreshToken").is_some_and(|value| *value != Value::Bool(false)) { return Err(deny()); }
+-        },
+-        "model/list" => { fields(params, &["cursor", "limit", "includeHidden"])?; },
++            if params
++                .get("refreshToken")
++                .is_some_and(|value| *value != Value::Bool(false))
++            {
++                return Err(deny());
++            }
++        }
++        "model/list" => {
++            fields(params, &["cursor", "limit", "includeHidden"])?;
++        }
+         "thread/start" => {
+-            fields(params, &["model", "ephemeral", "environments", "dynamicTools"])?;
+-            if params["ephemeral"] != true || params["environments"] != serde_json::json!([]) { return Err(deny()); }
++            fields(
++                params,
++                &["model", "ephemeral", "environments", "dynamicTools"],
++            )?;
++            if params["ephemeral"] != true || params["environments"] != serde_json::json!([]) {
++                return Err(deny());
++            }
+             let tools = params["dynamicTools"].as_array().ok_or_else(deny)?;
+-            if tools.len() != 1 || tools[0]["type"] != "namespace" || tools[0]["name"] != "xiaok" { return Err(deny()); }
++            if tools.len() != 1 || tools[0]["type"] != "namespace" || tools[0]["name"] != "xiaok" {
++                return Err(deny());
++            }
+             let functions = tools[0]["tools"].as_array().ok_or_else(deny)?;
+-            if functions.len() != 1 || functions[0]["type"] != "function" || functions[0]["name"] != "invoke" { return Err(deny()); }
+-            if STARTED.swap(true, Ordering::SeqCst) { return Err(deny()); }
+-        },
++            if functions.len() != 1
++                || functions[0]["type"] != "function"
++                || functions[0]["name"] != "invoke"
++            {
++                return Err(deny());
++            }
++            if STARTED.swap(true, Ordering::SeqCst) {
++                return Err(deny());
++            }
++        }
+         "turn/start" | "turn/steer" | "turn/interrupt" => {
+             let allowed: &[&str] = match method {
+                 "turn/start" => &["threadId", "input", "clientUserMessageId"],
+@@ -59,10 +116,31 @@
+                 _ => &["threadId", "turnId"],
+             };
+             fields(params, allowed)?;
+-            if params["threadId"].as_str() != THREAD.get().map(String::as_str) || THREAD.get().is_none() { return Err(deny()); }
+-            if method != "turn/interrupt" { text_input(params)?; }
+-        },
++            if params["threadId"].as_str() != THREAD.get().map(String::as_str)
++                || THREAD.get().is_none()
++            {
++                return Err(deny());
++            }
++            if method != "turn/interrupt" {
++                text_input(params)?;
++            }
++        }
+         _ => return Err(deny()),
+     }
+     Ok(())
+ }
++
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub(crate) fn validate_request(request: &ClientRequest) -> Result<(), JSONRPCErrorError> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    {
++        let wire =
++            serde_json::to_value(request).map_err(|_| crate::xiaok_auth_owner::forbidden())?;
++        return crate::xiaok_auth_owner::validate_public_wire(
++            wire["method"]
++                .as_str()
++                .ok_or_else(crate::xiaok_auth_owner::forbidden)?,
++            wire.get("params"),
++        );
++    }
++}

@@ -1,0 +1,547 @@
+diff --git a/codex-rs/login/src/auth/xiaok_vault.rs b/codex-rs/login/src/auth/xiaok_vault.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/login/src/auth/xiaok_vault.rs
+@@ -0,0 +1,859 @@
++//! Fixed AuthOwner storage. No path-based credential backend or caller supplied
++//! verification participates in this module. The registry deliberately owns
++//! every acquired lock, including failed initialization, until process exit.
++use super::storage::{AuthDotJson, AuthStorageBackend};
++use codex_config::types::AuthCredentialsStoreMode;
++use codex_protocol::auth::AuthMode;
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use std::collections::HashMap;
++use std::ffi::{CStr, CString};
++use std::fs::{File, Metadata, OpenOptions};
++use std::io;
++use std::os::fd::{AsRawFd, FromRawFd, RawFd};
++use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
++use std::path::{Path, PathBuf};
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
++
++const LOCK: &str = ".xiaok-auth-vault-v1.lock";
++const AUTH: &str = "auth.json";
++const LIMIT: usize = 1024 * 1024;
++static REGISTRY: OnceLock<Mutex<HashMap<(u64, u64), Arc<Vault>>>> = OnceLock::new();
++
++pub(crate) fn unavailable() -> io::Error {
++    io::Error::new(
++        io::ErrorKind::PermissionDenied,
++        "xiaok_auth_vault_unavailable",
++    )
++}
++fn stale() -> io::Error {
++    io::Error::new(io::ErrorKind::PermissionDenied, "xiaok_auth_unavailable")
++}
++fn nonce() -> String {
++    rand::random::<[u8; 32]>()
++        .iter()
++        .map(|b| format!("{b:02x}"))
++        .collect()
++}
++fn registry() -> &'static Mutex<HashMap<(u64, u64), Arc<Vault>>> {
++    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
++}
++
++#[derive(Clone, PartialEq, Eq)]
++struct FileId {
++    dev: u64,
++    ino: u64,
++    uid: u32,
++    mode: u32,
++    links: u64,
++    size: u64,
++    modified: (i64, i64),
++    changed: (i64, i64),
++}
++impl FileId {
++    fn of(m: &Metadata) -> Self {
++        Self {
++            dev: m.dev(),
++            ino: m.ino(),
++            uid: m.uid(),
++            mode: m.mode(),
++            links: m.nlink(),
++            size: m.len(),
++            modified: (m.mtime(), m.mtime_nsec()),
++            changed: (m.ctime(), m.ctime_nsec()),
++        }
++    }
++}
++#[derive(Clone, PartialEq)]
++enum Version {
++    Absent,
++    Present {
++        id: FileId,
++        digest: [u8; 32],
++        auth: AuthDotJson,
++    },
++}
++impl Version {
++    fn auth(&self) -> Option<&AuthDotJson> {
++        match self {
++            Self::Absent => None,
++            Self::Present { auth, .. } => Some(auth),
++        }
++    }
++}
++#[derive(Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++struct Birth {
++    magic: String,
++    schema: u32,
++    incarnation: String,
++    dev: u64,
++    ino: u64,
++    uid: u32,
++}
++#[derive(Clone, PartialEq)]
++struct Stamp {
++    control: u64,
++    revision: u64,
++    version: Version,
++}
++
++// One mutex contains IO AND control. There is no second state lock and no
++// state->IO ordering. No operation under it calls a manager or awaits network.
++pub(super) struct State {
++    ready: bool,
++    poisoned: bool,
++    suspended: bool,
++    birth: Vec<u8>,
++    lock_id: Option<FileId>,
++    stamp: Stamp,
++    pending_login: Option<String>,
++}
++pub(super) struct Vault {
++    root: File,
++    lock: File,
++    path: PathBuf,
++    identity: (u64, u64),
++    uid: u32,
++    io: Mutex<State>,
++}
++
++fn regular(m: &Metadata, uid: u32) -> io::Result<()> {
++    if !m.is_file() || m.uid() != uid || m.mode() & 0o7777 != 0o600 || m.nlink() != 1 {
++        return Err(unavailable());
++    }
++    Ok(())
++}
++fn directory(m: &Metadata, uid: u32) -> io::Result<()> {
++    if !m.is_dir() || m.uid() != uid || m.mode() & 0o7777 != 0o700 {
++        return Err(unavailable());
++    }
++    Ok(())
++}
++fn at(fd: RawFd, name: &str, flags: i32) -> io::Result<File> {
++    let name = CString::new(name).map_err(|_| unavailable())?;
++    // SAFETY: fd is an owned live directory, name has a terminal NUL; returned
++    // descriptor is uniquely converted to File. O_NOFOLLOW is unconditional.
++    // A replaced FIFO must reach the metadata/type checks without waiting for
++    // a peer while the Vault mutex is held. Regular files ignore O_NONBLOCK.
++    let result = unsafe {
++        libc::openat(
++            fd,
++            name.as_ptr(),
++            flags | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
++            0o600,
++        )
++    };
++    if result < 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(unsafe { File::from_raw_fd(result) })
++}
++fn bytes(file: &File, max: usize, uid: u32) -> io::Result<(FileId, Vec<u8>)> {
++    let before = file.metadata().map_err(|_| unavailable())?;
++    regular(&before, uid)?;
++    if before.len() == 0 || before.len() > max as u64 {
++        return Err(unavailable());
++    }
++    let id = FileId::of(&before);
++    let mut value = vec![0; before.len() as usize];
++    file.read_exact_at(&mut value, 0)
++        .map_err(|_| unavailable())?;
++    if FileId::of(&file.metadata().map_err(|_| unavailable())?) != id {
++        return Err(unavailable());
++    }
++    Ok((id, value))
++}
++fn names(file: &File) -> io::Result<Vec<String>> {
++    // fdopendir owns only this duplicate; the original root fd is retained.
++    let duplicate = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) };
++    if duplicate < 0 {
++        return Err(unavailable());
++    }
++    let stream = unsafe { libc::fdopendir(duplicate) };
++    if stream.is_null() {
++        unsafe { libc::close(duplicate) };
++        return Err(unavailable());
++    }
++    unsafe {
++        libc::rewinddir(stream);
++    }
++    let result = (|| {
++        let mut result = Vec::new();
++        loop {
++            // Reset errno so an IO error cannot be confused with EOF.
++            unsafe {
++                *libc::__error() = 0;
++            }
++            let entry = unsafe { libc::readdir(stream) };
++            if entry.is_null() {
++                if unsafe { *libc::__error() } != 0 {
++                    return Err(unavailable());
++                }
++                break;
++            }
++            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }
++                .to_str()
++                .map_err(|_| unavailable())?;
++            if name != "." && name != ".." {
++                result.push(name.to_owned());
++            }
++            if result.len() > 32 {
++                return Err(unavailable());
++            }
++        }
++        Ok(result)
++    })();
++    let closed = unsafe { libc::closedir(stream) };
++    if closed != 0 {
++        return Err(unavailable());
++    }
++    result
++}
++fn fresh(root: &File, uid: u32, has_lock: bool) -> io::Result<()> {
++    for name in names(root)? {
++        match name.as_str() {
++            LOCK if has_lock => {}
++            "config.toml" => {
++                let f = at(root.as_raw_fd(), &name, libc::O_RDONLY).map_err(|_| unavailable())?;
++                let m = f.metadata().map_err(|_| unavailable())?;
++                regular(&m, uid)?;
++                if m.len() > LIMIT as u64 {
++                    return Err(unavailable());
++                }
++            }
++            "workspace" => {
++                let f = at(root.as_raw_fd(), &name, libc::O_RDONLY | libc::O_DIRECTORY)
++                    .map_err(|_| unavailable())?;
++                directory(&f.metadata().map_err(|_| unavailable())?, uid)?;
++                if !names(&f)?.is_empty() {
++                    return Err(unavailable());
++                }
++            }
++            _ => return Err(unavailable()),
++        }
++    }
++    Ok(())
++}
++fn validate_auth(auth: &AuthDotJson) -> io::Result<()> {
++    if auth.auth_mode != Some(AuthMode::Chatgpt)
++        || auth.openai_api_key.is_some()
++        || auth.agent_identity.is_some()
++        || auth.personal_access_token.is_some()
++        || auth.bedrock_api_key.is_some()
++        || auth.bedrock_access_keys.is_some()
++        || auth.last_refresh.is_none()
++    {
++        return Err(unavailable());
++    }
++    let t = auth.tokens.as_ref().ok_or_else(unavailable)?;
++    let bounded = |s: &str, max: usize| !s.trim().is_empty() && s.len() <= max && !s.contains('\0');
++    let account = t.account_id.as_deref().ok_or_else(unavailable)?;
++    let user = t
++        .id_token
++        .chatgpt_user_id
++        .as_deref()
++        .ok_or_else(unavailable)?;
++    if !bounded(&t.access_token, 65536)
++        || !bounded(&t.refresh_token, 65536)
++        || !bounded(account, 256)
++        || !bounded(user, 256)
++        || t.id_token.chatgpt_account_id.as_deref() != Some(account)
++    {
++        return Err(unavailable());
++    }
++    Ok(())
++}
++
++/// The only cross-crate birth entry performs the real OS claim itself. It
++/// accepts no existing handle/provider/verified fact and has no release API.
++pub fn initialize_xiaok_auth_vault(root: &Path) -> io::Result<()> {
++    if !root.is_absolute()
++        || std::fs::symlink_metadata(root)
++            .map_err(|_| unavailable())?
++            .file_type()
++            .is_symlink()
++    {
++        return Err(unavailable());
++    }
++    let path = root.canonicalize().map_err(|_| unavailable())?;
++    if path.file_name().is_some_and(|v| v == ".codex") {
++        return Err(unavailable());
++    }
++    let dir = OpenOptions::new()
++        .read(true)
++        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
++        .open(&path)
++        .map_err(|_| unavailable())?;
++    let uid = unsafe { libc::geteuid() };
++    let metadata = dir.metadata().map_err(|_| unavailable())?;
++    directory(&metadata, uid)?;
++    let identity = (metadata.dev(), metadata.ino());
++    let mut registry = registry().lock().map_err(|_| unavailable())?;
++    if registry.contains_key(&identity) {
++        return Err(unavailable());
++    }
++    let (lock, created) = match at(dir.as_raw_fd(), LOCK, libc::O_RDWR) {
++        Ok(f) => (f, false),
++        Err(e) if e.kind() == io::ErrorKind::NotFound => {
++            fresh(&dir, uid, false)?;
++            (
++                at(
++                    dir.as_raw_fd(),
++                    LOCK,
++                    libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
++                )
++                .map_err(|_| unavailable())?,
++                true,
++            )
++        }
++        Err(_) => return Err(unavailable()),
++    };
++    regular(&lock.metadata().map_err(|_| unavailable())?, uid)?;
++    lock.try_lock().map_err(|_| unavailable())?;
++    // Nothing fallible may precede strong retention after try_lock succeeds.
++    let vault = Arc::new(Vault {
++        root: dir,
++        lock,
++        path,
++        identity,
++        uid,
++        io: Mutex::new(State {
++            ready: false,
++            poisoned: false,
++            suspended: false,
++            birth: Vec::new(),
++            lock_id: None,
++            stamp: Stamp {
++                control: 1,
++                revision: 1,
++                version: Version::Absent,
++            },
++            pending_login: None,
++        }),
++    });
++    registry.insert(identity, Arc::clone(&vault));
++    drop(registry);
++    let mut state = vault.io.lock().map_err(|_| unavailable())?;
++    if created {
++        fresh(&vault.root, uid, true)?;
++        let birth = Birth {
++            magic: "xiaok-auth-vault".into(),
++            schema: 1,
++            incarnation: nonce(),
++            dev: identity.0,
++            ino: identity.1,
++            uid,
++        };
++        let encoded = serde_json::to_vec(&birth).map_err(|_| unavailable())?;
++        vault
++            .lock
++            .write_all_at(&encoded, 0)
++            .map_err(|_| unavailable())?;
++        vault.lock.sync_all().map_err(|_| unavailable())?;
++        vault.root.sync_all().map_err(|_| unavailable())?;
++    }
++    let (lock_id, encoded) = bytes(&vault.lock, 4096, uid)?;
++    let birth: Birth = serde_json::from_slice(&encoded).map_err(|_| unavailable())?;
++    if birth.magic != "xiaok-auth-vault"
++        || birth.schema != 1
++        || birth.dev != identity.0
++        || birth.ino != identity.1
++        || birth.uid != uid
++        || birth.incarnation.len() != 64
++        || !birth.incarnation.bytes().all(|b| b.is_ascii_hexdigit())
++    {
++        return Err(unavailable());
++    }
++    state.birth = encoded;
++    state.lock_id = Some(lock_id);
++    vault.check_root_and_lock(&state)?;
++    let version = vault.observe_auth()?;
++    state.stamp.version = version;
++    state.ready = true;
++    Ok(())
++}
++
++pub(super) fn lookup(root: &Path) -> io::Result<Arc<Vault>> {
++    let metadata = std::fs::symlink_metadata(root).map_err(|_| unavailable())?;
++    if metadata.file_type().is_symlink() {
++        return Err(unavailable());
++    }
++    let registry = registry().lock().map_err(|_| unavailable())?;
++    let vault = registry
++        .get(&(metadata.dev(), metadata.ino()))
++        .ok_or_else(unavailable)?;
++    if root.canonicalize().map_err(|_| unavailable())? != vault.path {
++        return Err(unavailable());
++    }
++    Ok(Arc::clone(vault))
++}
++
++impl Vault {
++    fn check_root_and_lock(&self, state: &State) -> io::Result<()> {
++        let root = self.root.metadata().map_err(|_| unavailable())?;
++        directory(&root, self.uid)?;
++        let named = std::fs::symlink_metadata(&self.path).map_err(|_| unavailable())?;
++        directory(&named, self.uid)?;
++        if (root.dev(), root.ino()) != self.identity
++            || (named.dev(), named.ino()) != self.identity
++            || self.path.canonicalize().map_err(|_| unavailable())? != self.path
++        {
++            return Err(unavailable());
++        }
++        let (id, encoded) = bytes(&self.lock, 4096, self.uid)?;
++        let named = at(self.root.as_raw_fd(), LOCK, libc::O_RDONLY).map_err(|_| unavailable())?;
++        let (named_id, named_bytes) = bytes(&named, 4096, self.uid)?;
++        if state.lock_id.as_ref() != Some(&id)
++            || id != named_id
++            || encoded != state.birth
++            || named_bytes != encoded
++        {
++            return Err(unavailable());
++        }
++        Ok(())
++    }
++    fn observe_auth(&self) -> io::Result<Version> {
++        let file = match at(self.root.as_raw_fd(), AUTH, libc::O_RDONLY) {
++            Ok(f) => f,
++            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Version::Absent),
++            Err(_) => return Err(unavailable()),
++        };
++        let (id, encoded) = bytes(&file, LIMIT, self.uid)?;
++        let auth: AuthDotJson = serde_json::from_slice(&encoded).map_err(|_| unavailable())?;
++        validate_auth(&auth)?;
++        let named = at(self.root.as_raw_fd(), AUTH, libc::O_RDONLY).map_err(|_| unavailable())?;
++        let (other_id, other_bytes) = bytes(&named, LIMIT, self.uid)?;
++        if other_id != id || other_bytes != encoded {
++            return Err(unavailable());
++        }
++        Ok(Version::Present {
++            id,
++            digest: Sha256::digest(&encoded).into(),
++            auth,
++        })
++    }
++    fn verify(&self, state: &mut State) -> io::Result<()> {
++        if !state.ready || state.poisoned {
++            return Err(unavailable());
++        }
++        if self.check_root_and_lock(state).is_err() {
++            state.poisoned = true;
++            return Err(unavailable());
++        }
++        // External mutation is never adopted.
++        match self.observe_auth() {
++            Ok(version) if version == state.stamp.version => Ok(()),
++            _ => {
++                state.poisoned = true;
++                Err(unavailable())
++            }
++        }
++    }
++    pub(super) fn load_cap(self: &Arc<Self>) -> io::Result<ReadCap> {
++        let mut state = self.io.lock().map_err(|_| unavailable())?;
++        self.verify(&mut state)?;
++        if state.suspended || state.pending_login.is_some() {
++            return Err(stale());
++        }
++        Ok(ReadCap {
++            vault: Arc::clone(self),
++            stamp: state.stamp.clone(),
++        })
++    }
++    pub(super) fn begin(self: &Arc<Self>, kind: Kind) -> io::Result<XiaokAuthOperation> {
++        let mut state = self.io.lock().map_err(|_| unavailable())?;
++        self.verify(&mut state)?;
++        if kind == Kind::Refresh && (state.suspended || state.pending_login.is_some()) {
++            return Err(stale());
++        }
++        if matches!(kind, Kind::Login | Kind::Delete) {
++            bump_control(&mut state)?;
++            state.pending_login = None;
++            state.suspended = false;
++        }
++        let nonce = nonce();
++        if kind == Kind::Login {
++            state.pending_login = Some(nonce.clone());
++        }
++        Ok(XiaokAuthOperation {
++            inner: Arc::new(Operation {
++                vault: Arc::clone(self),
++                kind,
++                stamp: state.stamp.clone(),
++                nonce,
++                consumed: AtomicBool::new(false),
++                completion: Mutex::new(None),
++            }),
++        })
++    }
++    pub(super) fn invalidate(&self) -> io::Result<()> {
++        let mut state = self.io.lock().map_err(|_| unavailable())?;
++        if !state.ready || state.poisoned {
++            return Err(unavailable());
++        }
++        bump_control(&mut state)?;
++        state.pending_login = None;
++        state.suspended = true;
++        Ok(())
++    }
++    pub(super) fn lock_origin<'a>(&'a self, origin: &Origin) -> io::Result<MutexGuard<'a, State>> {
++        let mut state = self.io.lock().map_err(|_| unavailable())?;
++        self.verify(&mut state)?;
++        if !std::ptr::eq(self, origin.vault.as_ref())
++            || state.suspended
++            || state.pending_login.is_some()
++            || state.stamp != origin.stamp
++        {
++            return Err(stale());
++        }
++        Ok(state)
++    }
++    pub(super) fn origin_control_current(&self, origin: &Origin) -> bool {
++        self.io.lock().is_ok_and(|state| {
++            state.ready
++                && !state.poisoned
++                && !state.suspended
++                && state.pending_login.is_none()
++                && state.stamp == origin.stamp
++                && std::ptr::eq(self, origin.vault.as_ref())
++        })
++    }
++    pub(super) fn poison(&self) {
++        if let Ok(mut state) = self.io.lock() {
++            state.poisoned = true;
++        }
++    }
++    pub(super) fn consume_cap<'a>(
++        &'a self,
++        cap: ReadCap,
++    ) -> io::Result<(Origin, MutexGuard<'a, State>)> {
++        let mut state = self.io.lock().map_err(|_| unavailable())?;
++        self.verify(&mut state)?;
++        if !std::ptr::eq(self, cap.vault.as_ref())
++            || state.suspended
++            || state.pending_login.is_some()
++            || state.stamp != cap.stamp
++        {
++            return Err(stale());
++        }
++        Ok((
++            Origin {

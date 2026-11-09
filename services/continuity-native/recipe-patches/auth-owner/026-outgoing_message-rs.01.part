@@ -1,0 +1,92 @@
++    pub(super) fn revoked(&self) -> &tokio_util::sync::CancellationToken {
++        &self.owner.export_closed
++    }
++    pub(super) fn cancelled(&self) -> &tokio_util::sync::CancellationToken {
++        &self.context.cancellation
++    }
++    pub(super) fn step(
++        &mut self,
++        io: &crate::xiaok_auth_stdio::VerifiedStdio,
++    ) -> crate::xiaok_auth_stdio::WriteStep {
++        use crate::xiaok_auth_stdio::WriteStep;
++        // On failure this returns no live guard; no owner -> Vault acquisition.
++        let qualification = self
++            .manager
++            .xiaok_lock_current_snapshot(&self.snapshot)
++            .ok();
++        let mut physical = self.owner.io_guard();
++        if !physical.is_open() {
++            return WriteStep::Closed;
++        }
++        let current = qualification.is_some()
++            && !physical.export_revoked()
++            && self
++                .owner
++                .check(self.request_id.connection_id, &self.session)
++                .is_ok()
++            && self.context.request_id == self.request_id
++            && self.context.xiaok_method == "xiaok/auth/snapshot"
++            && !self.context.cancellation.is_cancelled();
++        if !current {
++            if self.offset == 0 && physical.export_revoked() {
++                return WriteStep::Drop;
++            }
++            // Nonzero unfinished prefix wins over the duplicate error contract.
++            physical.close();
++            return WriteStep::Closed;
++        }
++        if self.frame.is_none() {
++            let response = codex_app_server_protocol::XiaokAuthSnapshotResponse {
++                access_token: self.snapshot.access_token().to_owned(),
++                account_id: self.snapshot.account_id().to_owned(),
++                user_id: self.snapshot.user_id().to_owned(),
++                plan: self.snapshot.plan().map(str::to_owned),
++                credential_generation: self.snapshot.credential_generation().to_string(),
++                owner_generation: self.snapshot.owner_generation().to_string(),
++                owner_incarnation: self.owner.incarnation().to_owned(),
++            };
++            let message = OutgoingMessage::Response(OutgoingResponse {
++                id: self.request_id.request_id.clone(),
++                result: Box::new(ClientResponsePayload::XiaokAuthSnapshot(response)),
++            });
++            let Ok(mut frame) = serde_json::to_vec(&message) else {
++                physical.close();
++                return WriteStep::Closed;
++            };
++            if frame.len() >= 1024 * 1024 {
++                physical.close();
++                return WriteStep::Closed;
++            }
++            frame.push(b'\n');
++            self.frame = Some(frame);
++        }
++        let frame = self.frame.as_ref().expect("original fixed frame");
++        match io.write_stdout(&frame[self.offset..], &physical) {
++            Ok(0) => {
++                physical.close();
++                WriteStep::Closed
++            }
++            Ok(count) => {
++                self.offset += count;
++                if self.offset == frame.len() {
++                    WriteStep::Complete
++                } else {
++                    WriteStep::Progress
++                }
++            }
++            Err(error)
++                if matches!(
++                    error.kind(),
++                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
++                ) =>
++            {
++                WriteStep::Wait
++            }
++            Err(_) => {
++                physical.close();
++                WriteStep::Closed
++            }
++        }
++        // qualification and physical are dropped before any await/readiness.
++    }
++}

@@ -1,0 +1,358 @@
+  "bitflags 2.13.1",
+  "codex-code-mode",
+@@ -4801,7 +4801,7 @@
+ 
+ [[package]]
+ name = "codex-tui"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -4927,7 +4927,7 @@
+ 
+ [[package]]
+ name = "codex-uds"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "async-io",
+  "libc",
+@@ -4941,7 +4941,7 @@
+ 
+ [[package]]
+ name = "codex-user-verification"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "core-foundation 0.10.1",
+@@ -4961,7 +4961,7 @@
+ 
+ [[package]]
+ name = "codex-utils-absolute-path"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "dirs",
+  "dunce",
+@@ -4975,14 +4975,14 @@
+ 
+ [[package]]
+ name = "codex-utils-approval-presets"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-audio"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-protocol",
+@@ -4996,7 +4996,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cache"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "lru",
+  "sha1 0.10.6",
+@@ -5005,7 +5005,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cargo-bin"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_cmd",
+  "runfiles",
+@@ -5014,7 +5014,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cli"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "clap",
+  "codex-protocol",
+@@ -5026,15 +5026,15 @@
+ 
+ [[package]]
+ name = "codex-utils-elapsed"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-utils-fuzzy-match"
+-version = "0.0.0"
++version = "0.162.1"
+ 
+ [[package]]
+ name = "codex-utils-git-discovery"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-git-utils",
+  "codex-utils-absolute-path",
+@@ -5047,7 +5047,7 @@
+ 
+ [[package]]
+ name = "codex-utils-home-dir"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dirs",
+@@ -5057,7 +5057,7 @@
+ 
+ [[package]]
+ name = "codex-utils-image"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-cache",
+@@ -5071,7 +5071,7 @@
+ 
+ [[package]]
+ name = "codex-utils-json-to-toml"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "serde_json",
+@@ -5080,7 +5080,7 @@
+ 
+ [[package]]
+ name = "codex-utils-oss"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-core",
+  "codex-lmstudio",
+@@ -5090,7 +5090,7 @@
+ 
+ [[package]]
+ name = "codex-utils-output-truncation"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -5100,7 +5100,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dunce",
+@@ -5111,7 +5111,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path-uri"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-absolute-path",
+@@ -5127,7 +5127,7 @@
+ 
+ [[package]]
+ name = "codex-utils-plugins"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-exec-server",
+  "codex-exec-server-protocol",
+@@ -5141,7 +5141,7 @@
+ 
+ [[package]]
+ name = "codex-utils-process"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "tokio",
+@@ -5149,7 +5149,7 @@
+ 
+ [[package]]
+ name = "codex-utils-pty"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-utils-cargo-bin",
+@@ -5168,7 +5168,7 @@
+ 
+ [[package]]
+ name = "codex-utils-readiness"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "assert_matches",
+  "thiserror 2.0.18",
+@@ -5178,7 +5178,7 @@
+ 
+ [[package]]
+ name = "codex-utils-redacted-string"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "schemars 0.8.22",
+  "serde",
+@@ -5186,14 +5186,14 @@
+ 
+ [[package]]
+ name = "codex-utils-rustls-provider"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "rustls",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-sandbox-summary"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-absolute-path",
+@@ -5203,7 +5203,7 @@
+ 
+ [[package]]
+ name = "codex-utils-sleep-inhibitor"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "core-foundation 0.9.4",
+  "libc",
+@@ -5213,14 +5213,14 @@
+ 
+ [[package]]
+ name = "codex-utils-stream-parser"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-string"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "regex-lite",
+@@ -5230,14 +5230,14 @@
+ 
+ [[package]]
+ name = "codex-utils-template"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-v8-poc"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "pretty_assertions",
+  "v8",
+@@ -5245,7 +5245,7 @@
+ 
+ [[package]]
+ name = "codex-voice-host"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-install-context",
+@@ -5272,7 +5272,7 @@
+ 
+ [[package]]
+ name = "codex-web-search-extension"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-api",
+  "codex-core",
+@@ -5294,7 +5294,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-auth"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5313,7 +5313,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-client"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-http-client",
+  "codex-utils-rustls-provider",
+@@ -5329,7 +5329,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5359,7 +5359,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-service"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-cloud-config",
+@@ -5376,14 +5376,14 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-test-support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "dirs",
+ ]
+ 
+ [[package]]
+ name = "codex-workload-identity"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "codex-http-client",
+  "pretty_assertions",
+@@ -5398,7 +5398,7 @@
+ 
+ [[package]]
+ name = "codex-worktree"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "codex-git-utils",
+@@ -5639,7 +5639,7 @@
+ 
+ [[package]]
+ name = "core_test_support"
+-version = "0.0.0"
++version = "0.162.1"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",

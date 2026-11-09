@@ -1,0 +1,97 @@
+diff --git a/codex-rs/config/src/loader/macos.rs b/codex-rs/config/src/loader/macos.rs
+--- a/codex-rs/config/src/loader/macos.rs
++++ b/codex-rs/config/src/loader/macos.rs
+@@ -73,9 +73,9 @@
+         Ok(result) => result,
+         Err(join_err) => {
+             if join_err.is_cancelled() {
+-                tracing::error!("Managed config load task was cancelled");
++                crate::config_diagnostic!(error, "Managed config load task was cancelled");
+             } else {
+-                tracing::error!("Managed config load task failed: {join_err}");
++                crate::config_diagnostic!(error, "Managed config load task failed: {join_err}");
+             }
+             Err(io::Error::other("Failed to load managed config"))
+         }
+@@ -116,9 +116,12 @@
+         })),
+         Err(join_err) => {
+             if join_err.is_cancelled() {
+-                tracing::error!("Managed requirements load task was cancelled");
++                crate::config_diagnostic!(error, "Managed requirements load task was cancelled");
+             } else {
+-                tracing::error!("Managed requirements load task failed: {join_err}");
++                crate::config_diagnostic!(
++                    error,
++                    "Managed requirements load task failed: {join_err}"
++                );
+             }
+             Err(io::Error::other("Failed to load managed requirements"))
+         }
+@@ -184,14 +187,16 @@
+     // CopyAppValue also searches user-writable domains. Only forced values may
+     // supply administrator configuration or override lower requirements layers.
+     if !is_forced() {
+-        tracing::debug!(
++        crate::config_diagnostic!(
++            debug,
+             "No forced managed preference for {MANAGED_PREFERENCES_APPLICATION_ID} key {key_name}"
+         );
+         return Ok(None);
+     }
+ 
+     let Some(value) = copy_value() else {
+-        tracing::debug!(
++        crate::config_diagnostic!(
++            debug,
+             "Managed preferences for {MANAGED_PREFERENCES_APPLICATION_ID} key {key_name} not found"
+         );
+         return Ok(None);
+@@ -200,7 +205,8 @@
+     // Reject a user-default fallback if the preference stopped being forced
+     // during the read. These separate calls do not form an atomic snapshot.
+     if !is_forced() {
+-        tracing::debug!(
++        crate::config_diagnostic!(
++            debug,
+             "Managed preference {MANAGED_PREFERENCES_APPLICATION_ID}:{key_name} is no longer forced after reading"
+         );
+         return Ok(None);
+@@ -226,7 +232,7 @@
+     let source_name =
+         format!("{MANAGED_PREFERENCES_APPLICATION_ID}:{MANAGED_PREFERENCES_CONFIG_KEY}");
+     let parsed = toml::from_str::<TomlValue>(&raw_toml).map_err(|err| {
+-        tracing::error!("Failed to parse managed config TOML: {err}");
++        crate::config_diagnostic!(error, "Failed to parse managed config TOML: {err}");
+         if strict_config {
+             let config_error = config_error_from_toml_for_source(
+                 ConfigDiagnosticSource::DisplayName(&source_name),
+@@ -252,7 +258,10 @@
+             raw_toml,
+         }),
+         other => {
+-            tracing::error!("Managed config TOML must have a table at the root, found {other:?}",);
++            crate::config_diagnostic!(
++                error,
++                "Managed config TOML must have a table at the root, found {other:?}",
++            );
+             Err(io::Error::new(
+                 io::ErrorKind::InvalidData,
+                 "managed config root must be a table",
+@@ -293,11 +302,14 @@
+ 
+ fn decode_managed_preferences_base64(encoded: &str) -> io::Result<String> {
+     String::from_utf8(BASE64_STANDARD.decode(encoded.as_bytes()).map_err(|err| {
+-        tracing::error!("Failed to decode managed value as base64: {err}",);
++        crate::config_diagnostic!(error, "Failed to decode managed value as base64: {err}",);
+         io::Error::new(io::ErrorKind::InvalidData, err)
+     })?)
+     .map_err(|err| {
+-        tracing::error!("Managed value base64 contents were not valid UTF-8: {err}",);
++        crate::config_diagnostic!(
++            error,
++            "Managed value base64 contents were not valid UTF-8: {err}",
++        );
+         io::Error::new(io::ErrorKind::InvalidData, err)
+     })
+ }

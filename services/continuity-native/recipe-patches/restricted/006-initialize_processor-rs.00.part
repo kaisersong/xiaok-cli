@@ -1,0 +1,14 @@
+diff --git a/codex-rs/app-server/src/request_processors/initialize_processor.rs b/codex-rs/app-server/src/request_processors/initialize_processor.rs
+--- a/codex-rs/app-server/src/request_processors/initialize_processor.rs
++++ b/codex-rs/app-server/src/request_processors/initialize_processor.rs
+@@ -209,7 +209,9 @@
+             }
+         }
+ 
+-        let user_agent = get_codex_user_agent();
++        let user_agent = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            format!("{}; {}", get_codex_user_agent(), codex_extension_api::XIAOK_RESTRICTION_VERSION)
++        } else { get_codex_user_agent() };
+         let response = InitializeResponse {
+             user_agent,
+             codex_home,

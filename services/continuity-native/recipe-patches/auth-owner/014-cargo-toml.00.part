@@ -1,0 +1,19 @@
+diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
+--- a/codex-rs/app-server/Cargo.toml
++++ b/codex-rs/app-server/Cargo.toml
+@@ -25,6 +25,7 @@
+ workspace = true
+ 
+ [features]
++xiaok-auth-owner-only = ["xiaok-main-bridge-only", "codex-extension-api/xiaok-auth-owner-only", "codex-app-server-protocol/xiaok-auth-owner-only", "codex-login/xiaok-auth-owner-only", "codex-app-server-transport/xiaok-auth-owner-only"]
+ xiaok-main-bridge-only = ["codex-core/xiaok-main-bridge-only", "codex-extension-api/xiaok-main-bridge-only"]
+ 
+ [dependencies]
+@@ -127,6 +128,7 @@
+ tikv-jemallocator = { workspace = true }
+ 
+ [target.'cfg(unix)'.dependencies]
++signal-hook = { workspace = true }
+ libc = { workspace = true }
+ 
+ [target.'cfg(windows)'.dependencies]

@@ -1,0 +1,36 @@
+diff --git a/codex-rs/app-server/src/main.rs b/codex-rs/app-server/src/main.rs
+--- a/codex-rs/app-server/src/main.rs
++++ b/codex-rs/app-server/src/main.rs
+@@ -80,8 +80,14 @@
+     if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
+         let mut args = std::env::args_os();
+         let argv0 = args.next().unwrap_or_default();
+-        let name = std::path::Path::new(&argv0).file_name().and_then(|name| name.to_str());
+-        let allowed_name = if cfg!(windows) { "codex-app-server.exe" } else { "codex-app-server" };
++        let name = std::path::Path::new(&argv0)
++            .file_name()
++            .and_then(|name| name.to_str());
++        let allowed_name = if cfg!(windows) {
++            "codex-app-server.exe"
++        } else {
++            "codex-app-server"
++        };
+         let remaining: Vec<_> = args.collect();
+         if name != Some(allowed_name)
+             || !(remaining.is_empty() || remaining == [std::ffi::OsString::from("--strict-config")])
+@@ -89,6 +95,15 @@
+             anyhow::bail!("xiaok_native_entrypoint_forbidden");
+         }
+     }
++    let result = main_inner();
++    if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++        result.map_err(|_| anyhow::anyhow!("xiaok_auth_unavailable"))
++    } else {
++        result
++    }
++}
++
++fn main_inner() -> anyhow::Result<()> {
+     let remote_control_disabled = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
+         true
+     } else {

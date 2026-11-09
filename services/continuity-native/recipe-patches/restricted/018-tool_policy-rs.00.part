@@ -1,0 +1,15 @@
+diff --git a/codex-rs/ext/extension-api/src/tool_policy.rs b/codex-rs/ext/extension-api/src/tool_policy.rs
+--- a/codex-rs/ext/extension-api/src/tool_policy.rs
++++ b/codex-rs/ext/extension-api/src/tool_policy.rs
+@@ -33,6 +33,11 @@
+ 
+ impl ToolPolicy {
+     pub fn allows(&self, tool: &ToolName) -> bool {
++        if crate::XIAOK_MAIN_BRIDGE_ONLY
++            && !(tool.namespace.as_deref() == Some("xiaok") && tool.name == "invoke")
++        {
++            return false;
++        }
+         self.allowed_tools.as_ref().is_none_or(|tools| {
+             tools.iter().any(|allowed| {
+                 allowed.name == tool.name

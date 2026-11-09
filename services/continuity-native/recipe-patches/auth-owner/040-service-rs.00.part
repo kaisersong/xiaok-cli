@@ -1,0 +1,96 @@
+diff --git a/codex-rs/cloud-config/src/service.rs b/codex-rs/cloud-config/src/service.rs
+--- a/codex-rs/cloud-config/src/service.rs
++++ b/codex-rs/cloud-config/src/service.rs
+@@ -45,6 +45,24 @@
+     "Please log out and sign in again."
+ );
+ 
++// Error values can carry remote bodies or parsed configuration fragments.
++// The fixed AuthOwner role never formats them into diagnostics or public errors.
++fn diagnostic(error: &impl std::fmt::Display) -> String {
++    if codex_login::XIAOK_AUTH_OWNER_ONLY {
++        "xiaok_auth_unavailable".to_owned()
++    } else {
++        error.to_string()
++    }
++}
++
++fn public_error(error: CloudConfigBundleLoadError) -> CloudConfigBundleLoadError {
++    if codex_login::XIAOK_AUTH_OWNER_ONLY {
++        CloudConfigBundleLoadError::new(error.code(), error.status_code(), "xiaok_auth_unavailable")
++    } else {
++        error
++    }
++}
++
+ fn auth_identity(auth: &CodexAuth) -> (Option<String>, Option<String>) {
+     (auth.get_chatgpt_user_id(), auth.get_account_id())
+ }
+@@ -170,7 +188,7 @@
+             Ok(result) => result,
+             Err(err) => {
+                 emit_load_metric("startup", "error", /*bundle*/ None);
+-                return Err(err);
++                return Err(public_error(err));
+             }
+         };
+ 
+@@ -233,7 +251,7 @@
+                 if let Err(err) = validate_bundle(&signed_payload.bundle, &self.codex_home) {
+                     tracing::warn!(
+                         path = %self.cache.path().display(),
+-                        error = %err,
++                        error = %diagnostic(&err),
+                         "Ignoring invalid cached cloud config bundle"
+                     );
+                     self.cache
+@@ -368,7 +386,7 @@
+                 Err(err) => Err(err),
+             };
+             if let Err(err) = result {
+-                tracing::warn!(error = %err, "Failed to write cloud config bundle cache");
++                tracing::warn!(error = %diagnostic(&err), "Failed to write cloud config bundle cache");
+             }
+         }
+ 
+@@ -453,7 +471,7 @@
+                 }
+                 Err(RefreshTokenError::Permanent(failed)) => {
+                     tracing::warn!(
+-                        error = %failed,
++                        error = %diagnostic(&failed),
+                         "Failed to recover from unauthorized cloud config bundle request"
+                     );
+                     emit_fetch_final_metric(
+@@ -473,7 +491,7 @@
+                 Err(RefreshTokenError::Transient(recovery_err)) => {
+                     if attempt < CLOUD_CONFIG_BUNDLE_MAX_ATTEMPTS {
+                         tracing::warn!(
+-                            error = %recovery_err,
++                            error = %diagnostic(&recovery_err),
+                             attempt,
+                             max_attempts = CLOUD_CONFIG_BUNDLE_MAX_ATTEMPTS,
+                             "Failed to recover from unauthorized cloud config bundle request; retrying"
+@@ -486,7 +504,7 @@
+         }
+ 
+         tracing::warn!(
+-            error = %message,
++            error = %diagnostic(&message),
+             "Cloud config bundle request was unauthorized and no auth recovery is available"
+         );
+         emit_fetch_final_metric(
+@@ -556,11 +574,11 @@
+             Err(err) => {
+                 tracing::error!(
+                     path = %self.cache.path().display(),
+-                    error = %err,
++                    error = %diagnostic(&err),
+                     "Failed to refresh cloud config bundle cache from remote"
+                 );
+                 emit_load_metric("refresh", "error", /*bundle*/ None);
+-                self.publish_refresh_result(Err(err)).await;
++                self.publish_refresh_result(Err(public_error(err))).await;
+             }
+         }
+         true

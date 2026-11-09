@@ -1,0 +1,29 @@
+{
+  "originalSHA256": "e17e0bcfb9ee1b577ef1d20813ce2d1f62b26469a968593e9fb9cab372dbd257",
+  "keys": [
+    "schemaVersion",
+    "upstreamCommit",
+    "baselineSamplingPatchSHA256",
+    "additionalPatchApplication",
+    "cargoFeature",
+    "previousQualification",
+    "scope",
+    "additionalPatchSHA256",
+    "source",
+    "sourceRoot",
+    "reproductionRoot",
+    "exactPatchCheckAndApplyMatched",
+    "syntheticFileVaultTestsPassed",
+    "physicalManagedOAuthQualified",
+    "privateVaultAndLifetimeLockQualified",
+    "workerCredentialLeaseAndFinalStdinQualified",
+    "fullHarnessQualified",
+    "wholeGoalConsensus",
+    "officialRecipeEndToEndQualified",
+    "finalStdoutCredentialGateQualified",
+    "implementationReview",
+    "officialRecipe",
+    "knownOpenFinalStdoutRed",
+    "designReview"
+  ]
+}

@@ -1,0 +1,45 @@
+diff --git a/codex-rs/cloud-config/src/validation.rs b/codex-rs/cloud-config/src/validation.rs
+--- a/codex-rs/cloud-config/src/validation.rs
++++ b/codex-rs/cloud-config/src/validation.rs
+@@ -5,6 +5,14 @@
+ use codex_config::CloudConfigBundleLoadErrorCode;
+ use codex_config::compose_requirements;
+ use codex_config::config_toml::validate_model_providers;
++
++fn invalid_bundle_message(error: impl std::fmt::Display) -> String {
++    if codex_login::XIAOK_AUTH_OWNER_ONLY {
++        "xiaok_auth_unavailable".to_owned()
++    } else {
++        format!("invalid cloud config bundle: {error}")
++    }
++}
+ 
+ pub(crate) fn validate_bundle(
+     bundle: &CloudConfigBundle,
+@@ -15,7 +23,7 @@
+             CloudConfigBundleLoadError::new(
+                 CloudConfigBundleLoadErrorCode::InvalidBundle,
+                 /*status_code*/ None,
+-                format!("invalid cloud config bundle: {err}"),
++                invalid_bundle_message(err),
+             )
+         })?;
+     let CloudConfigBundleLayers {
+@@ -27,7 +35,7 @@
+         CloudConfigBundleLoadError::new(
+             CloudConfigBundleLoadErrorCode::InvalidBundle,
+             /*status_code*/ None,
+-            format!("invalid cloud config bundle: {err}"),
++            invalid_bundle_message(err),
+         )
+     })?;
+     if let Some(providers) = requirements.and_then(|requirements| requirements.model_providers) {
+@@ -35,7 +43,7 @@
+             CloudConfigBundleLoadError::new(
+                 CloudConfigBundleLoadErrorCode::InvalidBundle,
+                 /*status_code*/ None,
+-                format!("invalid cloud config bundle: {err}"),
++                invalid_bundle_message(err),
+             )
+         })?;
+     }

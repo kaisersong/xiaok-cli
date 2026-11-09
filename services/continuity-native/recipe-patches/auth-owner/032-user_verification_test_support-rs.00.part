@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server/src/user_verification_test_support.rs b/codex-rs/app-server/src/user_verification_test_support.rs
+--- a/codex-rs/app-server/src/user_verification_test_support.rs
++++ b/codex-rs/app-server/src/user_verification_test_support.rs
+@@ -154,6 +154,8 @@
+             AnalyticsEventsClient::disabled(),
+         ));
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_auth_connection: Arc::new(crate::xiaok_auth_owner::AuthOwnerConnection::new()),
+             outgoing: Arc::clone(&outgoing),
+             analytics_events_client: AnalyticsEventsClient::disabled(),
+             arg0_paths: Arg0DispatchPaths::default(),

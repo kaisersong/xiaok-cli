@@ -1,0 +1,20 @@
+diff --git a/codex-rs/login/src/auth/change_state_tests.rs b/codex-rs/login/src/auth/change_state_tests.rs
+--- a/codex-rs/login/src/auth/change_state_tests.rs
++++ b/codex-rs/login/src/auth/change_state_tests.rs
+@@ -70,6 +70,16 @@
+     let initial = chatgpt_auth("user-a", "workspace-a", "token-1");
+     let manager =
+         AuthManager::from_auth_for_testing_with_home(initial.clone(), home.path().to_path_buf());
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    let manager = {
++        // This is the original in-memory change-state primitive. It never
++        // obtains a File CacheOrigin or final sender qualification; real File
++        // logout/restart is exercised separately through checked factories.
++        let mut manager = manager;
++        Arc::get_mut(&mut manager).unwrap().auth_credentials_store_mode =
++            AuthCredentialsStoreMode::Ephemeral;
++        manager
++    };
+     let mut changes = manager.auth_change_state_receiver();
+ 
+     manager.logout().await.unwrap();

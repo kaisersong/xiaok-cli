@@ -1,0 +1,74 @@
+diff --git a/codex-rs/core/src/config/mod.rs b/codex-rs/core/src/config/mod.rs
+--- a/codex-rs/core/src/config/mod.rs
++++ b/codex-rs/core/src/config/mod.rs
+@@ -2126,7 +2126,7 @@
+ 
+     let merged_toml = config_layer_stack.effective_config();
+     let cfg = deserialize_config_toml_with_base(merged_toml, codex_home).map_err(|e| {
+-        tracing::error!("Failed to deserialize overridden config: {e}");
++        codex_config::config_diagnostic!(error, "Failed to deserialize overridden config: {e}");
+         e
+     })?;
+ 
+@@ -2275,15 +2275,15 @@
+ {
+     if let Err(err) = constrained_value.set(configured_value) {
+         let fallback_value = constrained_value.get().clone();
+-        tracing::warn!(
++        codex_config::config_diagnostic!(warn,
+             error = %err,
+             ?fallback_value,
+             requirement_source = ?constrained_value.source,
+             "configured value is disallowed by requirements; falling back to required value for {field_name}"
+         );
+-        let message = format!(
++        let message = codex_config::config_warning_message(format!(
+             "Configured value for `{field_name}` is disallowed by requirements; falling back to required value {fallback_value:?}. Details: {err}"
+-        );
++        ));
+         startup_warnings.push(message);
+ 
+         constrained_value.set(fallback_value).map_err(|fallback_err| {
+@@ -3457,13 +3457,13 @@
+ 
+             match cwd {
+                 None => {
+-                    tracing::info!("cwd not set, using current dir");
++                    codex_config::config_diagnostic!(info, "cwd not set, using current dir");
+                     env::current_dir()?
+                 }
+                 Some(p) if p.is_absolute() => p,
+                 Some(p) => {
+                     // Resolve relative path against the current working directory.
+-                    tracing::info!("cwd is relative, resolving against current dir");
++                    codex_config::config_diagnostic!(info, "cwd is relative, resolving against current dir");
+                     let mut current = env::current_dir()?;
+                     current.push(p);
+                     current
+@@ -3719,7 +3719,7 @@
+             // with carveouts or writes that are not expressible as
+             // workspace-write roots.
+             if let Err(err) = permission_profile.to_legacy_sandbox_policy(resolved_cwd.as_path()) {
+-                tracing::warn!(
++                codex_config::config_diagnostic!(warn,
+                     error = %err,
+                     "derived permission profile cannot be represented as a legacy sandbox policy; falling back to read-only"
+                 );
+@@ -3764,7 +3764,7 @@
+         if !approval_policy_was_explicit
+             && let Err(err) = constrained_approval_policy.can_set(&approval_policy)
+         {
+-            tracing::warn!(
++            codex_config::config_diagnostic!(warn,
+                 error = %err,
+                 "default approval policy is disallowed by requirements; falling back to required default"
+             );
+@@ -3778,7 +3778,7 @@
+         if !approvals_reviewer_was_explicit
+             && let Err(err) = constrained_approvals_reviewer.can_set(&approvals_reviewer)
+         {
+-            tracing::warn!(
++            codex_config::config_diagnostic!(warn,
+                 error = %err,
+                 "default approvals reviewer is disallowed by requirements; falling back to required default"
+             );

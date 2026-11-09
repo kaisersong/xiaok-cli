@@ -1,0 +1,71 @@
+diff --git a/codex-rs/core/src/config/requirements.rs b/codex-rs/core/src/config/requirements.rs
+--- a/codex-rs/core/src/config/requirements.rs
++++ b/codex-rs/core/src/config/requirements.rs
+@@ -63,10 +63,10 @@
+                 .any(|name| name.eq_ignore_ascii_case(RESIDENCY_HEADER_NAME));
+ 
+             if has_residency_header {
+-                let warning = format!(
++                let warning = codex_config::config_warning_message(format!(
+                     "Ignoring `{RESIDENCY_HEADER_NAME}` in `model_providers.{provider_name}` because managed residency is required."
+-                );
+-                tracing::warn!(provider = provider_name, "{warning}");
++                ));
++                codex_config::config_diagnostic!(warn, provider = provider_name, "{warning}");
+                 startup_warnings.push(warning);
+             }
+         }
+@@ -88,14 +88,15 @@
+         .as_ref()
+         .is_some_and(|configured| configured != value)
+     {
+-        tracing::warn!(
++        codex_config::config_diagnostic!(
++            warn,
+             ?source,
+             ?value,
+             "configured value is overridden by an exact requirement for {field_name}"
+         );
+-        startup_warnings.push(format!(
++        startup_warnings.push(codex_config::config_warning_message(format!(
+             "Configured value for `{field_name}` is overridden by the required value {value:?} from {source}."
+-        ));
++        )));
+     }
+     *configured_value = Some(value.clone());
+ }
+@@ -147,14 +148,15 @@
+         return;
+     }
+ 
+-    tracing::warn!(
++    codex_config::config_diagnostic!(
++        warn,
+         ?source,
+         ?value,
+         "`CODEX_SQLITE_HOME` is overridden by an exact requirement for sqlite_home"
+     );
+-    startup_warnings.push(format!(
++    startup_warnings.push(codex_config::config_warning_message(format!(
+         "Environment value for `$CODEX_SQLITE_HOME` is overridden by the required `sqlite_home` value {value:?} from {source}."
+-    ));
++    )));
+ }
+ 
+ /// Emits one source-aware warning when a structured requirement replaces one
+@@ -168,11 +170,12 @@
+     if !conflict {
+         return;
+     }
+-    tracing::warn!(
++    codex_config::config_diagnostic!(
++        warn,
+         ?source,
+         "configured values are overridden by requirements for {field_name}"
+     );
+-    startup_warnings.push(format!(
++    startup_warnings.push(codex_config::config_warning_message(format!(
+         "Configured values under `{field_name}` are overridden by requirements from {source}."
+-    ));
++    )));
+ }

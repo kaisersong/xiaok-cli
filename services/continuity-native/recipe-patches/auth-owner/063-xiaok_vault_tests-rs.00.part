@@ -1,0 +1,516 @@
+diff --git a/codex-rs/login/src/auth/xiaok_vault_tests.rs b/codex-rs/login/src/auth/xiaok_vault_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/login/src/auth/xiaok_vault_tests.rs
+@@ -0,0 +1,511 @@
++//! Real claim/checked manager/original persistence entry tests. No fake Vault,
++//! ReadCap, CacheOrigin, or replacement storage provider is constructed here.
++use super::*;
++use base64::Engine;
++use std::os::unix::fs::PermissionsExt;
++use tokio::time::{sleep, timeout};
++use wiremock::matchers::{method, path};
++use wiremock::{Mock, MockServer, ResponseTemplate};
++
++fn config(root: &Path) -> AuthConfig {
++    AuthConfig {
++        codex_home: root.into(),
++        auth_credentials_store_mode: AuthCredentialsStoreMode::File,
++        keyring_backend_kind: AuthKeyringBackendKind::Direct,
++        forced_login_method: None,
++        chatgpt_base_url: None,
++        forced_chatgpt_workspace_id: None,
++        managed_auth_policy: Default::default(),
++        auth_route_config: crate::test_support::transport_default_auth_route_config(),
++    }
++}
++fn token(label: &str, expired: bool) -> String {
++    let claims = serde_json::json!({"exp":if expired {1} else {4102444800_i64},
++        "https://api.openai.com/auth":{"chatgpt_account_id":format!("account-{label}"),"chatgpt_user_id":format!("user-{label}"),"chatgpt_plan_type":"plus"}});
++    format!(
++        "e30.{}.SYNTHETIC_SIGNATURE",
++        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string())
++    )
++}
++async fn persist(
++    root: &Path,
++    operation: crate::XiaokAuthOperation,
++    label: &str,
++    expired: bool,
++) -> std::io::Result<()> {
++    crate::server::persist_tokens_async(
++        root,
++        None,
++        token(label, false),
++        token(label, expired),
++        format!("SYNTHETIC_REFRESH_{label}"),
++        AuthCredentialsStoreMode::File,
++        AuthKeyringBackendKind::Direct,
++        Some(operation),
++    )
++    .await
++}
++async fn fixture(expired: bool) -> (tempfile::TempDir, Arc<AuthManager>) {
++    let root = tempfile::tempdir().unwrap();
++    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
++    super::super::xiaok_vault::initialize_xiaok_auth_vault(root.path()).unwrap();
++    let manager = AuthManager::shared_from_auth_config(config(root.path()), false)
++        .await
++        .unwrap();
++    persist(
++        root.path(),
++        manager.xiaok_begin_login().unwrap(),
++        "a",
++        expired,
++    )
++    .await
++    .unwrap();
++    manager.xiaok_reload_checked().await.unwrap();
++    (root, manager)
++}
++struct RefreshEndpoint(Option<std::ffi::OsString>);
++impl RefreshEndpoint {
++    fn set(server: &MockServer) -> Self {
++        let previous = std::env::var_os(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR);
++        // All tests changing this process environment are serial(auth_env).
++        unsafe {
++            std::env::set_var(
++                REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
++                format!("{}/oauth/token", server.uri()),
++            );
++        }
++        Self(previous)
++    }
++}
++impl Drop for RefreshEndpoint {
++    fn drop(&mut self) {
++        unsafe {
++            match &self.0 {
++                Some(value) => std::env::set_var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR, value),
++                None => std::env::remove_var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR),
++            }
++        }
++    }
++}
++async fn refresh_entered(server: &MockServer) {
++    timeout(Duration::from_secs(2), async {
++        loop {
++            if !server.received_requests().await.unwrap().is_empty() {
++                break;
++            }
++            sleep(Duration::from_millis(5)).await;
++        }
++    })
++    .await
++    .unwrap();
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_refresh_redaction_preserves_original_permanent_failure_classification() {
++    let server = MockServer::start().await;
++    let _env = RefreshEndpoint::set(&server);
++    Mock::given(method("POST")).and(path("/oauth/token"))
++        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({"error":{"code":"refresh_token_expired","message":"SYNTHETIC_PROVIDER_ERROR_CANARY"}})))
++        .expect(1).mount(&server).await;
++    let (_root, manager) = fixture(false).await;
++    let error = manager.refresh_token_from_authority().await.unwrap_err();
++    assert_eq!(
++        error.failed_reason(),
++        Some(RefreshTokenFailedReason::Expired)
++    );
++    assert!(!error.to_string().contains("CANARY"));
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_auth_never_returns_captured_bearer_after_file_poison_during_refresh() {
++    let server = MockServer::start().await;
++    let _env = RefreshEndpoint::set(&server);
++    Mock::given(method("POST"))
++        .and(path("/oauth/token"))
++        .respond_with(
++            ResponseTemplate::new(200)
++                .set_delay(Duration::from_millis(200))
++                .set_body_json(serde_json::json!({"access_token":"SYNTHETIC_LATE_REFRESH"})),
++        )
++        .expect(1)
++        .mount(&server)
++        .await;
++    let (root, manager) = fixture(true).await;
++    let captured = Arc::clone(&manager);
++    let request = tokio::spawn(async move { captured.auth().await });
++    refresh_entered(&server).await;
++    std::fs::write(root.path().join("auth.json"), "SYNTHETIC_BAD_JSON_CANARY").unwrap();
++    assert!(
++        timeout(Duration::from_secs(2), request)
++            .await
++            .unwrap()
++            .unwrap()
++            .is_none(),
++        "failed original refresh must not return the captured pre-await bearer"
++    );
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_auth_never_returns_captured_bearer_after_control_invalidation_during_refresh()
++{
++    let server = MockServer::start().await;
++    let _env = RefreshEndpoint::set(&server);
++    Mock::given(method("POST"))
++        .and(path("/oauth/token"))
++        .respond_with(
++            ResponseTemplate::new(200)
++                .set_delay(Duration::from_millis(200))
++                .set_body_json(serde_json::json!({"access_token":"SYNTHETIC_LATE_REFRESH"})),
++        )
++        .expect(1)
++        .mount(&server)
++        .await;
++    let (_root, manager) = fixture(true).await;
++    let captured = Arc::clone(&manager);
++    let request = tokio::spawn(async move { captured.auth().await });
++    refresh_entered(&server).await;
++    manager.xiaok_invalidate_auth_operations().unwrap();
++    assert!(
++        timeout(Duration::from_secs(2), request)
++            .await
++            .unwrap()
++            .unwrap()
++            .is_none()
++    );
++}
++
++#[tokio::test]
++async fn xiaok_vault_http_factory_sibling_cannot_read_retained_cache_after_invalidation() {
++    let (_root, manager) = fixture(false).await;
++    manager.xiaok_invalidate_auth_operations().unwrap();
++    assert!(manager.auth_cached().is_none());
++    assert!(
++        manager.auth_with_http_client_factory().await.is_none(),
++        "raw inner cache is an historical fact, not current bearer authority"
++    );
++}
++
++#[tokio::test]
++async fn xiaok_vault_original_checked_commit_rejects_a_cap_captured_before_new_login() {
++    let (root, manager) = fixture(false).await;
++    let original = manager.xiaok_managed_auth_snapshot().unwrap();
++    let (auth, cap) = manager.xiaok_load_checked().await.unwrap();
++    persist(
++        root.path(),
++        manager.xiaok_begin_login().unwrap(),
++        "b",
++        false,
++    )
++    .await
++    .unwrap();
++    assert!(manager.xiaok_commit_checked(auth, cap).is_err());
++    assert!(manager.xiaok_lock_current_snapshot(&original).is_err());
++    manager.xiaok_reload_checked().await.unwrap();
++    let current = manager.xiaok_managed_auth_snapshot().unwrap();
++    assert_eq!(current.account_id(), "account-b");
++    assert!(manager.xiaok_lock_current_snapshot(&current).is_ok());
++}
++
++#[tokio::test]
++async fn xiaok_vault_two_real_checked_managers_cannot_exchange_snapshot_incarnations() {
++    let (root, bootstrap) = fixture(false).await;
++    let effective = AuthManager::shared_from_auth_config(config(root.path()), false)
++        .await
++        .unwrap();
++    let bootstrap_snapshot = bootstrap.xiaok_managed_auth_snapshot().unwrap();
++    assert!(
++        effective
++            .xiaok_lock_current_snapshot(&bootstrap_snapshot)
++            .is_err()
++    );
++    assert!(
++        effective
++            .xiaok_lock_current_snapshot(&effective.xiaok_managed_auth_snapshot().unwrap())
++            .is_ok()
++    );
++}
++
++#[tokio::test]
++async fn xiaok_vault_old_refresh_and_delete_operations_cannot_modify_new_login() {
++    let (root, manager) = fixture(false).await;
++    let vault = manager.xiaok_vault.as_ref().unwrap();
++    let refresh = vault
++        .begin(super::super::xiaok_vault::Kind::Refresh)
++        .unwrap();
++    let old_data = refresh.captured_auth().unwrap();
++    let delete = vault
++        .begin(super::super::xiaok_vault::Kind::Delete)
++        .unwrap();
++    persist(
++        root.path(),
++        manager.xiaok_begin_login().unwrap(),
++        "b",
++        false,
++    )
++    .await
++    .unwrap();
++    let committed = std::fs::read(root.path().join("auth.json")).unwrap();
++    assert!(refresh.save(&old_data).is_err());
++    assert!(delete.delete().is_err());
++    assert_eq!(
++        std::fs::read(root.path().join("auth.json")).unwrap(),
++        committed
++    );
++    manager.xiaok_reload_checked().await.unwrap();
++    assert_eq!(
++        manager.xiaok_managed_auth_snapshot().unwrap().account_id(),
++        "account-b"
++    );
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_real_held_refresh_http_cannot_overwrite_new_original_login() {
++    let server = MockServer::start().await;
++    let _env = RefreshEndpoint::set(&server);
++    Mock::given(method("POST"))
++        .and(path("/oauth/token"))
++        .respond_with(
++            ResponseTemplate::new(200)
++                .set_delay(Duration::from_millis(200))
++                .set_body_json(serde_json::json!({"access_token":"SYNTHETIC_LATE_A"})),
++        )
++        .expect(1)
++        .mount(&server)
++        .await;
++    let (root, manager) = fixture(false).await;
++    let captured = Arc::clone(&manager);
++    let request = tokio::spawn(async move { captured.refresh_token_from_authority().await });
++    refresh_entered(&server).await;
++    persist(
++        root.path(),
++        manager.xiaok_begin_login().unwrap(),
++        "b",
++        false,
++    )
++    .await
++    .unwrap();
++    let committed = std::fs::read(root.path().join("auth.json")).unwrap();
++    assert!(
++        timeout(Duration::from_secs(2), request)
++            .await
++            .unwrap()
++            .unwrap()
++            .is_err()
++    );
++    assert_eq!(
++        std::fs::read(root.path().join("auth.json")).unwrap(),
++        committed
++    );
++    manager.xiaok_reload_checked().await.unwrap();
++    assert_eq!(
++        manager.xiaok_managed_auth_snapshot().unwrap().account_id(),
++        "account-b"
++    );
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_http_factory_await_cannot_recover_a_suspended_bearer() {
++    let server = MockServer::start().await;
++    let _env = RefreshEndpoint::set(&server);
++    Mock::given(method("POST"))
++        .and(path("/oauth/token"))
++        .respond_with(
++            ResponseTemplate::new(200)
++                .set_delay(Duration::from_millis(200))
++                .set_body_json(serde_json::json!({"access_token":"SYNTHETIC_LATE_A"})),
++        )
++        .expect(1)
++        .mount(&server)
++        .await;
++    let (_root, manager) = fixture(true).await;
++    let captured = Arc::clone(&manager);
++    let request = tokio::spawn(async move { captured.auth_with_http_client_factory().await });
++    refresh_entered(&server).await;
++    manager.xiaok_invalidate_auth_operations().unwrap();
++    assert!(
++        timeout(Duration::from_secs(2), request)
++            .await
++            .unwrap()
++            .unwrap()
++            .is_none()
++    );
++}
++
++#[tokio::test]
++async fn xiaok_vault_joint_guard_holds_the_real_writer_until_original_output_boundary() {
++    let (_root, manager) = fixture(false).await;
++    let vault = manager.xiaok_vault.as_ref().unwrap();
++    let refresh = vault
++        .begin(super::super::xiaok_vault::Kind::Refresh)
++        .unwrap();
++    let mut captured = refresh.captured_auth().unwrap();
++    captured.last_refresh = Some(Utc::now());
++    let snapshot = manager.xiaok_managed_auth_snapshot().unwrap();
++    let guard = manager.xiaok_lock_current_snapshot(&snapshot).unwrap();
++    let (entered, started) = std::sync::mpsc::channel();
++    let (done, completed) = std::sync::mpsc::channel();
++    let writer = std::thread::spawn(move || {
++        entered.send(()).unwrap();
++        done.send(refresh.save(&captured)).unwrap();
++    });
++    started.recv_timeout(Duration::from_secs(1)).unwrap();
++    assert!(
++        matches!(
++            completed.recv_timeout(Duration::from_millis(30)),
++            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
++        ),
++        "the original file writer must wait while the same guard used by permit.send is live"
++    );
++    drop(guard);
++    completed
++        .recv_timeout(Duration::from_secs(1))
++        .unwrap()
++        .unwrap();
++    writer.join().unwrap();
++    assert!(manager.xiaok_lock_current_snapshot(&snapshot).is_err());
++    manager.xiaok_reload_checked().await.unwrap();
++    assert!(
++        manager
++            .xiaok_lock_current_snapshot(&manager.xiaok_managed_auth_snapshot().unwrap())
++            .is_ok()
++    );
++}
++
++#[tokio::test]
++#[serial(auth_env)]
++async fn xiaok_vault_real_held_revoke_http_cannot_delete_new_original_login() {
++    let server = MockServer::start().await;
++    // The original revoke endpoint derives from this exact loopback override.
++    let _env = RefreshEndpoint::set(&server);
++    assert!(std::env::var_os(REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR).is_none());
++    Mock::given(method("POST"))
++        .and(path("/oauth/revoke"))
++        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(200)))
++        .expect(1)
++        .mount(&server)
++        .await;
++    let (root, manager) = fixture(false).await;
++    let captured = Arc::clone(&manager);
++    let request = tokio::spawn(async move { captured.logout_with_revoke().await });
++    refresh_entered(&server).await;
++    persist(
++        root.path(),
++        manager.xiaok_begin_login().unwrap(),
++        "b",
++        false,
++    )
++    .await
++    .unwrap();
++    let committed = std::fs::read(root.path().join("auth.json")).unwrap();
++    assert!(
++        timeout(Duration::from_secs(2), request)
++            .await
++            .unwrap()
++            .unwrap()
++            .is_err()
++    );
++    assert_eq!(
++        std::fs::read(root.path().join("auth.json")).unwrap(),
++        committed
++    );
++    manager.xiaok_reload_checked().await.unwrap();
++    assert_eq!(
++        manager.xiaok_managed_auth_snapshot().unwrap().account_id(),
++        "account-b"
++    );
++}
++
++fn assert_real_os_lock_retained(root: &Path) {
++    let mut child = std::process::Command::new("/usr/bin/python3")
++        .args(["-c", "import fcntl,sys\nf=open(sys.argv[1],'r+b')\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(0)\nsys.exit(7)"])
++        .arg(root.join(".xiaok-auth-vault-v1.lock"))
++        .spawn().unwrap();
++    let pid = child.id();
++    println!("owned OS lock probe PID {pid}");
++    assert!(
++        child.wait().unwrap().success(),
++        "another process must observe the real OS lock, not just the registry"
++    );
++    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
++    assert_eq!(
++        std::io::Error::last_os_error().raw_os_error(),
++        Some(libc::ESRCH)
++    );
++    println!("owned OS lock probe PID {pid} reaped");
++}
++
++#[test]
++fn xiaok_vault_failed_birth_parse_retains_actual_os_lock_until_process_exit() {
++    use std::io::Write;
++    use std::os::unix::fs::OpenOptionsExt;
++    let root = tempfile::tempdir().unwrap();
++    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
++    let mut birth = std::fs::OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o600)
++        .open(root.path().join(".xiaok-auth-vault-v1.lock"))
++        .unwrap();
++    birth.write_all(b"SYNTHETIC_BAD_BIRTH_JSON_CANARY").unwrap();
++    drop(birth);
++    assert!(super::super::xiaok_vault::initialize_xiaok_auth_vault(root.path()).is_err());
++    assert_real_os_lock_retained(root.path());
++    assert!(super::super::xiaok_vault::initialize_xiaok_auth_vault(root.path()).is_err());
++}
++
++#[tokio::test]
++async fn xiaok_vault_checked_constructor_policy_failure_does_not_release_actual_claim() {
++    let root = tempfile::tempdir().unwrap();
++    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
++    super::super::xiaok_vault::initialize_xiaok_auth_vault(root.path()).unwrap();
++    let mut denied = config(root.path());
++    denied.forced_login_method = Some(ForcedLoginMethod::Api);
++    assert!(
++        AuthManager::shared_from_auth_config(denied, false)
++            .await
++            .is_err()
++    );
++    assert_real_os_lock_retained(root.path());
++}
++
++#[test]
++fn xiaok_vault_queued_original_spawn_blocking_save_cannot_recreate_auth_after_cancel() {
++    let runtime = tokio::runtime::Builder::new_current_thread()
++        .enable_all()
++        .max_blocking_threads(1)
++        .build()
++        .unwrap();
++    runtime.block_on(async {
++        let (root, manager) = fixture(false).await;
++        let operation = manager.xiaok_begin_login().unwrap();
++        let (release, held) = std::sync::mpsc::channel();
++        let (started, entered) = std::sync::mpsc::channel();
++        let occupying = tokio::task::spawn_blocking(move || {
++            started.send(()).unwrap();
++            held.recv_timeout(Duration::from_secs(3)).unwrap();
++        });
++        entered.recv_timeout(Duration::from_secs(1)).unwrap();
++        let save = persist(root.path(), operation.clone(), "b", false);
++        tokio::pin!(save);
++        assert!(timeout(Duration::from_millis(20), &mut save).await.is_err());
++        operation.cancel(true);
++        release.send(()).unwrap();
++        occupying.await.unwrap();
++        assert!(
++            timeout(Duration::from_secs(1), save)
++                .await
++                .unwrap()
++                .is_err()
++        );
++        manager.xiaok_reload_checked().await.unwrap();
++        assert_eq!(
++            manager.xiaok_managed_auth_snapshot().unwrap().account_id(),
++            "account-a"
++        );
++    });
++}
