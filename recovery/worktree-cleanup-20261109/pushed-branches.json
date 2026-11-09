@@ -49,7 +49,7 @@
   },
   {
     "branch": "integration/final-reviewed-head-20261109",
-    "sha": "66883f92148dc85fa21b8223fe5e9fa9746c272d",
+    "sha": "c552a7ab2a30b67bcb14a9826c959bb74ccf3310",
     "merged": false,
     "remote_tip": false,
     "local_only_count": 177,
@@ -81,7 +81,7 @@
   },
   {
     "branch": "integration/pi74-net-20261109",
-    "sha": "22e9512b5d260736b5f6f6f3601d6a7f82cabd05",
+    "sha": "1659ea9aff8ce8592fe3061df5ce5262afada5ce",
     "merged": false,
     "remote_tip": false,
     "local_only_count": 169,
@@ -97,7 +97,7 @@
   },
   {
     "branch": "integration/primary-capture-a992-20261109",
-    "sha": "ec3a360e6f0047b35e38b83396ed67ce9455c51e",
+    "sha": "f3f2ebd9ac585a4066a5abc39039d806fbd56f8a",
     "merged": false,
     "remote_tip": false,
     "local_only_count": 86,

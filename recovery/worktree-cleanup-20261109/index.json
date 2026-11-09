@@ -238,5 +238,17 @@
     "sourceEntries": 0,
     "indexEntries": 0,
     "excludedEntries": 383
+  },
+  {
+    "repo": "xiaok-cli",
+    "snapshotId": "xiaok-release-1.6.3-20261109__observation-async-context-integration--submission-delta",
+    "baseline": "3ab82784eebc4c6b5c60970f95603ce68a1db93f",
+    "head": "3ab82784eebc4c6b5c60970f95603ce68a1db93f",
+    "file": "xiaok-release-1.6.3-20261109__observation-async-context-integration--submission-delta.tar.gz",
+    "sha256": "9efc0ec7888cbff8da6f794aad8bd6ec0b9a275bbfbaefa6bee26e9735db1a16",
+    "bytes": 70921,
+    "sourceEntries": 4,
+    "indexEntries": 0,
+    "excludedEntries": 0
   }
 ]
