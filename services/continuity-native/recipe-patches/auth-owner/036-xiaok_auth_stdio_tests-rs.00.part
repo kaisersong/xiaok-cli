@@ -1,0 +1,136 @@
+diff --git a/codex-rs/app-server/src/xiaok_auth_stdio_tests.rs b/codex-rs/app-server/src/xiaok_auth_stdio_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/xiaok_auth_stdio_tests.rs
+@@ -0,0 +1,131 @@
++use super::*;
++use codex_app_server_protocol::{ClientResponsePayload, RequestId, XiaokAuthSnapshotResponse};
++use codex_app_server_transport::{OutgoingResponse, PrivateAuthPayload};
++
++#[test]
++fn fake_any_is_rejected_at_the_real_final_writer() {
++    let mut queued = QueuedOutgoingMessage::new(OutgoingMessage::Error(
++        crate::outgoing_message::OutgoingError {
++            id: RequestId::Integer(1),
++            error: crate::xiaok_auth_owner::unavailable(),
++        },
++    ));
++    queued.private_auth = Some(PrivateAuthPayload::new(Box::new(
++        "not an original delivery",
++    )));
++    assert!(prepare_message(queued).is_err());
++}
++
++#[test]
++fn ordinary_snapshot_dto_is_rejected_at_the_real_final_writer() {
++    let queued = QueuedOutgoingMessage::new(OutgoingMessage::Response(OutgoingResponse {
++        id: RequestId::Integer(1),
++        result: Box::new(ClientResponsePayload::XiaokAuthSnapshot(
++            XiaokAuthSnapshotResponse {
++                access_token: "SYNTHETIC_FAKE_DTO".into(),
++                account_id: "a".into(),
++                user_id: "u".into(),
++                plan: None,
++                credential_generation: "1".into(),
++                owner_generation: "1".into(),
++                owner_incarnation: "fake".into(),
++            },
++        )),
++    }));
++    assert!(prepare_message(queued).is_err());
++}
++
++#[test]
++fn regular_file_cannot_grant_nonblocking_stdio_authority() {
++    use std::os::fd::AsRawFd;
++    let file = tempfile::tempfile().unwrap();
++    assert!(validate_fd(file.as_raw_fd()).is_err());
++}
++
++fn actual_pipe() -> (std::os::fd::OwnedFd, std::os::fd::OwnedFd) {
++    use std::os::fd::FromRawFd;
++    let mut fds = [-1; 2];
++    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
++    unsafe {
++        (
++            std::os::fd::OwnedFd::from_raw_fd(fds[0]),
++            std::os::fd::OwnedFd::from_raw_fd(fds[1]),
++        )
++    }
++}
++
++#[test]
++fn actual_nonblocking_read_zero_closes_the_same_owner_before_any_next_write() {
++    let (input, input_writer) = actual_pipe();
++    let (output_reader, output) = actual_pipe();
++    validate_fd(input.as_raw_fd()).unwrap();
++    validate_fd(output.as_raw_fd()).unwrap();
++    let io = VerifiedStdio {
++        input: input.as_raw_fd(),
++        output: output.as_raw_fd(),
++    };
++    let owner = AuthOwnerConnection::new();
++    owner.open_stdio(&io).unwrap();
++    drop(input_writer);
++    assert_eq!(io.read_stdin(&mut [0u8; 8], &owner).unwrap(), 0);
++    assert!(owner.closed.is_cancelled());
++    let mut offset = 0;
++    assert!(matches!(
++        public_step(&io, &owner, b"must-not-write\n", &mut offset),
++        WriteStep::Closed
++    ));
++    assert_eq!(offset, 0);
++    validate_fd(output_reader.as_raw_fd()).unwrap();
++    let mut bytes = [0u8; 32];
++    assert_eq!(
++        unsafe {
++            libc::read(
++                output_reader.as_raw_fd(),
++                bytes.as_mut_ptr().cast(),
++                bytes.len(),
++            )
++        },
++        -1
++    );
++    assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
++}
++
++#[test]
++fn unbound_owner_never_writes_but_actual_open_revoked_owner_can_write_the_fixed_public_error() {
++    let (input, _input_writer) = actual_pipe();
++    let (output_reader, output) = actual_pipe();
++    validate_fd(input.as_raw_fd()).unwrap();
++    validate_fd(output.as_raw_fd()).unwrap();
++    let io = VerifiedStdio {
++        input: input.as_raw_fd(),
++        output: output.as_raw_fd(),
++    };
++    let owner = AuthOwnerConnection::new();
++    let mut offset = 0;
++    assert!(matches!(
++        public_step(&io, &owner, b"blocked", &mut offset),
++        WriteStep::Closed
++    ));
++    owner.open_stdio(&io).unwrap();
++    owner.revoke_exports();
++    let frame = b"{\"error\":\"xiaok_auth_request_id_rejected\"}\n";
++    assert!(matches!(
++        public_step(&io, &owner, frame, &mut offset),
++        WriteStep::Complete
++    ));
++    assert!(!owner.closed.is_cancelled());
++    let mut read = vec![0u8; frame.len()];
++    assert_eq!(
++        unsafe {
++            libc::read(
++                output_reader.as_raw_fd(),
++                read.as_mut_ptr().cast(),
++                read.len(),
++            )
++        },
++        frame.len() as isize
++    );
++    assert_eq!(read, frame);
++    owner.close_physical();
++    assert!(owner.open_stdio(&io).is_err());
++}

@@ -1,0 +1,13 @@
+diff --git a/codex-rs/core/src/config/permissions.rs b/codex-rs/core/src/config/permissions.rs
+--- a/codex-rs/core/src/config/permissions.rs
++++ b/codex-rs/core/src/config/permissions.rs
+@@ -858,7 +858,8 @@
+ }
+ 
+ fn push_warning(startup_warnings: &mut Vec<String>, message: String) {
+-    tracing::warn!("{message}");
++    let message = codex_config::config_warning_message(message);
++    codex_config::config_diagnostic!(warn, "{message}");
+     startup_warnings.push(message);
+ }
+ 

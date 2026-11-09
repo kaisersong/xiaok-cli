@@ -1,0 +1,24 @@
+diff --git a/codex-rs/app-server/src/skills_watcher.rs b/codex-rs/app-server/src/skills_watcher.rs
+--- a/codex-rs/app-server/src/skills_watcher.rs
++++ b/codex-rs/app-server/src/skills_watcher.rs
+@@ -40,11 +40,15 @@
+         codex_home: &AbsolutePathBuf,
+         outgoing: Arc<OutgoingMessageSender>,
+     ) -> Arc<Self> {
+-        let file_watcher = match FileWatcher::new() {
+-            Ok(file_watcher) => Arc::new(file_watcher),
+-            Err(err) => {
+-                warn!("failed to initialize skills file watcher: {err}");
+-                Arc::new(FileWatcher::noop())
++        let file_watcher = if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            Arc::new(FileWatcher::noop())
++        } else {
++            match FileWatcher::new() {
++                Ok(file_watcher) => Arc::new(file_watcher),
++                Err(err) => {
++                    warn!("failed to initialize skills file watcher: {err}");
++                    Arc::new(FileWatcher::noop())
++                }
+             }
+         };
+         let (subscriber, rx) = file_watcher.add_subscriber();

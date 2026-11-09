@@ -1,0 +1,34 @@
+diff --git a/codex-rs/core/src/session/mod.rs b/codex-rs/core/src/session/mod.rs
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -4236,13 +4236,15 @@
+             developer_sections
+                 .push(DeveloperInstructions::new(developer_instructions).render_fragment());
+         }
+-        let loaded_plugins = self
+-            .services
+-            .plugins_manager
+-            .plugins_for_config(&turn_context.config.plugins_config_input())
+-            .await
+-            .without_plugins(&turn_context.disabled_plugin_ids);
+-        let recommended_plugin_candidates = if turn_context
++        let loaded_plugins = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            codex_core_plugins::PluginLoadOutcome::default()
++        } else {
++            self.services.plugins_manager
++                .plugins_for_config(&turn_context.config.plugins_config_input())
++                .await
++                .without_plugins(&turn_context.disabled_plugin_ids)
++        };
++        let recommended_plugin_candidates = if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && turn_context
+             .config
+             .features
+             .plugin_recommendations_enabled()
+@@ -5138,6 +5140,7 @@
+     environment: Option<&TurnEnvironment>,
+     disabled_plugin_ids: &[String],
+ ) -> HooksConfig {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return HooksConfig::default(); }
+     let (hook_shell_program, hook_shell_argv) = environment
+         .and_then(|environment| environment.shell.as_ref())
+         .map(|shell| {

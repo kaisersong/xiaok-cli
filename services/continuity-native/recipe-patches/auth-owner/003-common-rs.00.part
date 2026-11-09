@@ -1,0 +1,21 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -337,6 +337,8 @@
+         pub enum ClientResponsePayload {
+             $( $variant($response), )*
+             InterruptConversation(v1::InterruptConversationResponse),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            XiaokAuthSnapshot(crate::XiaokAuthSnapshotResponse),
+         }
+ 
+         impl ClientResponsePayload {
+@@ -351,6 +353,8 @@
+                         }
+                     )*
+                     Self::InterruptConversation(_) => None,
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    Self::XiaokAuthSnapshot(_) => None,
+                 }
+             }
+ 

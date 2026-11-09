@@ -1,0 +1,11 @@
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -937,6 +937,7 @@
+         outbound_initialized: Option<&AtomicBool>,
+         request_context: RequestContext,
+     ) -> Result<(), JSONRPCErrorError> {
++        crate::xiaok_main_bridge::validate_request(&codex_request)?;
+         let connection_id = connection_request_id.connection_id;
+         if let ClientRequest::Initialize { request_id, params } = codex_request {
+             let connection_initialized = self

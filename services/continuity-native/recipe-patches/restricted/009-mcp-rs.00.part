@@ -1,0 +1,38 @@
+diff --git a/codex-rs/core/src/mcp.rs b/codex-rs/core/src/mcp.rs
+--- a/codex-rs/core/src/mcp.rs
++++ b/codex-rs/core/src/mcp.rs
+@@ -193,6 +193,7 @@
+         context: McpServerContributionContext<'_, Config>,
+         disabled_plugin_ids: &[String],
+     ) -> SelectedPluginSnapshot {
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return SelectedPluginSnapshot::default(); }
+         let roots = context
+             .ready_selected_capability_roots()
+             .unwrap_or_default();
+@@ -233,6 +234,18 @@
+         disabled_plugin_ids: &[String],
+     ) -> McpRuntimeProjection {
+         let config = context.config();
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            // Pure data conversion only; never visit a plugin/contributor before this return.
++            let mut empty = config.to_mcp_config_with_loaded_plugins(&codex_core_plugins::PluginLoadOutcome::default(), []);
++            empty.mcp_server_catalog = Default::default();
++            empty.connector_snapshot = Default::default();
++            empty.apps_enabled = false;
++            empty.skill_mcp_dependency_install_enabled = false;
++            empty.server_permission_profiles.clear();
++            empty.environment_cwds.clear();
++            empty.environment_use_mxc.clear();
++            return McpRuntimeProjection { config: empty, plugins_available: false, selected_plugins: Default::default() };
++        }
+         let mut selected_plugin_connector_sources = Vec::new();
+         let mut selected_plugin_registrations = Vec::new();
+         let mut selected_plugins = Vec::new();
+@@ -450,6 +463,7 @@
+ 
+     /// Returns config- and plugin-backed servers without runtime contributions.
+     pub async fn configured_servers(&self, config: &Config) -> HashMap<String, McpServerConfig> {
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return HashMap::new(); }
+         let mcp_config = config.to_mcp_config(self.plugins_manager.as_ref()).await;
+         configured_mcp_servers(&mcp_config)
+     }

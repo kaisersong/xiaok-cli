@@ -1,0 +1,27 @@
+diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
+--- a/codex-rs/app-server/src/extensions.rs
++++ b/codex-rs/app-server/src/extensions.rs
+@@ -431,6 +431,7 @@
+             connection_id,
+             message,
+             write_complete_tx: _,
++            ..
+         } = envelope
+         else {
+             panic!("expected connection-targeted warning notification");
+@@ -490,6 +491,7 @@
+             connection_id,
+             message,
+             write_complete_tx: _,
++            ..
+         } = envelope
+         else {
+             panic!("expected connection-targeted warning notification");
+@@ -550,6 +552,7 @@
+             connection_id,
+             message,
+             write_complete_tx: _,
++            ..
+         } = envelope
+         else {
+             panic!("expected connection-targeted warning notification");

@@ -1,0 +1,87 @@
+diff --git a/codex-rs/login/src/device_code_auth.rs b/codex-rs/login/src/device_code_auth.rs
+--- a/codex-rs/login/src/device_code_auth.rs
++++ b/codex-rs/login/src/device_code_auth.rs
+@@ -103,6 +103,7 @@
+     device_auth_id: &str,
+     user_code: &str,
+     interval: u64,
++    #[cfg(feature = "xiaok-auth-owner-only")] operation: Option<&crate::XiaokAuthOperation>,
+ ) -> std::io::Result<CodeSuccessResp> {
+     let url = format!("{auth_base_url}/deviceauth/token");
+     let max_wait = Duration::from_secs(15 * 60);
+@@ -114,6 +115,10 @@
+             user_code: user_code.to_string(),
+         })
+         .map_err(std::io::Error::other)?;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        operation
++            .ok_or_else(crate::auth::xiaok_vault::unavailable)?
++            .check()?;
+         let resp = client
+             .post(&url)
+             .header("Content-Type", "application/json")
+@@ -122,6 +127,10 @@
+             .await
+             .map_err(std::io::Error::other)?;
+ 
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        operation
++            .ok_or_else(crate::auth::xiaok_vault::unavailable)?
++            .check()?;
+         let status = resp.status();
+ 
+         if status.is_success() {
+@@ -163,6 +172,8 @@
+ }
+ 
+ pub async fn request_device_code(opts: &ServerOptions) -> std::io::Result<DeviceCode> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    opts.xiaok_check_operation()?;
+     let base_url = opts.issuer.trim_end_matches('/');
+     let api_base_url = format!("{base_url}/api/accounts");
+     let client = create_raw_auth_client(
+@@ -170,6 +181,8 @@
+         &opts.auth_route_config,
+     )?;
+     let uc = request_user_code(&client, &api_base_url, &opts.client_id).await?;
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    opts.xiaok_check_operation()?;
+ 
+     Ok(DeviceCode {
+         verification_url: format!("{base_url}/codex/device"),
+@@ -196,6 +209,8 @@
+         &device_code.device_auth_id,
+         &device_code.user_code,
+         device_code.interval,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        opts.xiaok_operation.as_ref(),
+     )
+     .await?;
+ 
+@@ -205,6 +220,8 @@
+     };
+     let redirect_uri = format!("{base_url}/deviceauth/callback");
+ 
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    opts.xiaok_check_operation()?;
+     let (tokens, _) = crate::server::exchange_code_for_tokens(
+         base_url,
+         &opts.client_id,
+@@ -216,6 +233,8 @@
+     .await
+     .map_err(|err| std::io::Error::other(format!("device code exchange failed: {err}")))?;
+ 
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    opts.xiaok_check_operation()?;
+     if let Err(message) = crate::server::ensure_workspace_allowed(
+         opts.forced_chatgpt_workspace_id.as_deref(),
+         &tokens.id_token,
+@@ -231,6 +250,8 @@
+         tokens.refresh_token,
+         opts.cli_auth_credentials_store_mode,
+         opts.auth_keyring_backend_kind,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        opts.xiaok_operation.clone(),
+     )
+     .await
+ }

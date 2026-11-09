@@ -1,0 +1,366 @@
+diff --git a/codex-rs/app-server/src/request_processors/account_processor.rs b/codex-rs/app-server/src/request_processors/account_processor.rs
+--- a/codex-rs/app-server/src/request_processors/account_processor.rs
++++ b/codex-rs/app-server/src/request_processors/account_processor.rs
+@@ -42,10 +42,14 @@
+     Browser {
+         shutdown_handle: ShutdownHandle,
+         login_id: Uuid,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        operation: Option<codex_login::XiaokAuthOperation>,
+     },
+     DeviceCode {
+         cancel: CancellationToken,
+         login_id: Uuid,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        operation: Option<codex_login::XiaokAuthOperation>,
+     },
+ }
+ 
+@@ -58,7 +62,19 @@
+         }
+     }
+ 
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    fn operation(&self) -> Option<&codex_login::XiaokAuthOperation> {
++        match self {
++            Self::Browser { operation, .. } | Self::DeviceCode { operation, .. } => {
++                operation.as_ref()
++            }
++        }
++    }
+     fn cancel(&self) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if let Some(op) = self.operation() {
++            op.cancel(false);
++        }
+         match self {
+             ActiveLogin::Browser {
+                 shutdown_handle, ..
+@@ -224,6 +240,15 @@
+     }
+ 
+     pub(crate) async fn cancel_active_login(&self) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            let _ = self.auth_manager.xiaok_invalidate_auth_operations();
++            let mut guard = self.active_login.lock().await;
++            if let Some(active) = guard.take() {
++                drop(active);
++            }
++            return;
++        }
+         self.cancel_gateway_login();
+         self.enterprise_login.cancel(/*login_id*/ None).await;
+         let mut guard = self.active_login.lock().await;
+@@ -256,7 +281,11 @@
+         {
+             Ok(config) => config,
+             Err(err) => {
+-                tracing::warn!("failed to reload config, using startup config: {err}");
++                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                    tracing::warn!("Auth config reload failed");
++                } else {
++                    tracing::warn!("failed to reload config, using startup config: {err}");
++                }
+                 self.config.as_ref().clone()
+             }
+         }
+@@ -267,6 +296,9 @@
+         thread_manager: &Arc<ThreadManager>,
+         auth: Option<CodexAuth>,
+     ) {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         thread_manager
+             .plugins_manager()
+             .clear_recommended_plugins_cache();
+@@ -317,6 +349,9 @@
+         thread_manager: Arc<ThreadManager>,
+         config_manager: ConfigManager,
+     ) {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         tokio::spawn(async move {
+             thread_manager.plugins_manager().clear_cache();
+             thread_manager.skills_service().clear_cache();
+@@ -628,6 +663,14 @@
+                 .map_err(|err| internal_error(format!("invalid Codex open app URL: {err}")))?;
+         }
+ 
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            opts.xiaok_operation = Some(
++                self.auth_manager
++                    .xiaok_begin_login()
++                    .map_err(|_| internal_error("xiaok_auth_unavailable"))?,
++            );
++        }
+         Ok(opts)
+     }
+ 
+@@ -660,8 +703,23 @@
+         let opts = self
+             .login_chatgpt_common(codex_streamlined_login, login_success_page)
+             .await?;
+-        let server = run_login_server(opts)
+-            .map_err(|err| internal_error(format!("failed to start login server: {err}")))?;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        let operation = opts.xiaok_operation.clone();
++        let server = match run_login_server(opts) {
++            Ok(server) => server,
++            Err(err) => {
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                {
++                    if let Some(op) = &operation {
++                        op.cancel(true);
++                    }
++                    self.auth_manager.reload().await;
++                }
++                return Err(internal_error(format!(
++                    "failed to start login server: {err}"
++                )));
++            }
++        };
+         let login_id = Uuid::new_v4();
+         let shutdown_handle = server.cancel_handle();
+ 
+@@ -674,6 +732,8 @@
+             *guard = Some(ActiveLogin::Browser {
+                 shutdown_handle: shutdown_handle.clone(),
+                 login_id,
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                operation: operation.clone(),
+             });
+         }
+ 
+@@ -703,6 +763,13 @@
+                 }
+             };
+ 
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            let (success, error_msg) =
++                if success && !operation.as_ref().is_some_and(|op| op.completion_current()) {
++                    (false, Some("xiaok_auth_unavailable".to_owned()))
++                } else {
++                    (success, error_msg)
++                };
+             processor
+                 .send_chatgpt_login_completion_notifications(AccountLoginCompletedNotification {
+                     login_id: Some(login_id.to_string()),
+@@ -717,6 +784,9 @@
+             if guard.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
+                 *guard = None;
+             }
++            drop(guard);
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            processor.auth_manager.reload().await;
+         };
+         tokio::spawn(AuthStorageOriginator::current().scope(task));
+ 
+@@ -740,9 +810,21 @@
+                 LoginSuccessPage::default(),
+             )
+             .await?;
+-        let device_code = request_device_code(&opts)
+-            .await
+-            .map_err(Self::login_chatgpt_device_code_start_error)?;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        let operation = opts.xiaok_operation.clone();
++        let device_code = match request_device_code(&opts).await {
++            Ok(code) => code,
++            Err(err) => {
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                {
++                    if let Some(op) = &operation {
++                        op.cancel(true);
++                    }
++                    self.auth_manager.reload().await;
++                }
++                return Err(Self::login_chatgpt_device_code_start_error(err));
++            }
++        };
+         let login_id = Uuid::new_v4();
+         let cancel = CancellationToken::new();
+ 
+@@ -754,6 +836,8 @@
+             *guard = Some(ActiveLogin::DeviceCode {
+                 cancel: cancel.clone(),
+                 login_id,
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                operation: operation.clone(),
+             });
+         }
+ 
+@@ -775,6 +859,13 @@
+                 }
+             };
+ 
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            let (success, error_msg) =
++                if success && !operation.as_ref().is_some_and(|op| op.completion_current()) {
++                    (false, Some("xiaok_auth_unavailable".to_owned()))
++                } else {
++                    (success, error_msg)
++                };
+             processor
+                 .send_chatgpt_login_completion_notifications(AccountLoginCompletedNotification {
+                     login_id: Some(login_id.to_string()),
+@@ -788,6 +879,9 @@
+             if guard.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
+                 *guard = None;
+             }
++            drop(guard);
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            processor.auth_manager.reload().await;
+         };
+         tokio::spawn(AuthStorageOriginator::current().scope(task));
+ 
+@@ -804,9 +898,16 @@
+     ) -> std::result::Result<(), CancelLoginError> {
+         let mut guard = self.active_login.lock().await;
+         if guard.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            if let Some(op) = guard.as_ref().and_then(ActiveLogin::operation) {
++                op.cancel(true);
++            }
+             if let Some(active) = guard.take() {
+                 drop(active);
+             }
++            drop(guard);
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            self.auth_manager.reload().await;
+             Ok(())
+         } else {
+             Err(CancelLoginError::NotFound)
+@@ -908,7 +1009,9 @@
+     }
+ 
+     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
+-        self.thread_manager.invalidate_mcp_runtimes().await;
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            self.thread_manager.invalidate_mcp_runtimes().await;
++        }
+         self.send_account_login_notifications(AccountLoginCompletedNotification {
+             login_id: login_id.map(|id| id.to_string()),
+             success: true,
+@@ -970,7 +1073,9 @@
+             self.auth_manager.reload().await;
+             let auth_changes = self.auth_manager.auth_change_state_receiver();
+             let owner_generation = auth_changes.borrow().owner_generation;
+-            self.thread_manager.invalidate_mcp_runtimes().await;
++            if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                self.thread_manager.invalidate_mcp_runtimes().await;
++            }
+             self.config_manager.replace_cloud_config_bundle_loader(
+                 self.auth_manager.clone(),
+                 self.config.chatgpt_base_url.clone(),
+@@ -988,6 +1093,23 @@
+     }
+ 
+     async fn logout_common(&self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            let mode = self
++                .auth_manager
++                .auth_cached()
++                .as_ref()
++                .map(|auth| auth_mode_to_api(auth.api_auth_mode()));
++            self.auth_manager
++                .xiaok_invalidate_auth_operations()
++                .map_err(|_| internal_error("xiaok_auth_unavailable"))?;
++            self.cancel_active_login().await;
++            self.auth_manager
++                .logout_with_revoke()
++                .await
++                .map_err(|_| internal_error("xiaok_auth_unavailable"))?;
++            return Ok(mode);
++        }
+         if self.auth_manager.is_workload_identity_selected() {
+             return Err(self.configured_auth_owned_by_host_error());
+         }
+@@ -1049,7 +1171,9 @@
+             }
+         }
+         drop(enterprise_guard);
+-        self.thread_manager.invalidate_mcp_runtimes().await;
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            self.thread_manager.invalidate_mcp_runtimes().await;
++        }
+ 
+         self.config_manager.clear_cloud_config_bundle_loader();
+ 
+@@ -1105,7 +1229,11 @@
+         if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
+             let failed_reason = err.failed_reason();
+             if failed_reason.is_none() {
+-                tracing::warn!("failed to refresh token while getting account: {err}");
++                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                    tracing::warn!("Account token refresh failed");
++                } else {
++                    tracing::warn!("failed to refresh token while getting account: {err}");
++                }
+                 return RefreshTokenRequestOutcome::FailedTransiently;
+             }
+             return RefreshTokenRequestOutcome::FailedPermanently;
+@@ -1145,31 +1273,36 @@
+                     let permanent_refresh_failure =
+                         self.auth_manager.refresh_failure_for_auth(&auth).is_some();
+                     let auth_mode = auth_mode_to_api(auth.api_auth_mode());
+-                    let (reported_auth_method, token_opt) =
+-                        if self.auth_manager.is_workload_identity_selected()
+-                            || matches!(
+-                                auth,
+-                                CodexAuth::Headers(_)
+-                                    | CodexAuth::AgentIdentity(_)
+-                                    | CodexAuth::PersonalAccessToken(_)
+-                            )
+-                            || include_token && permanent_refresh_failure
+-                        {
+-                            // Host-owned and metadata-bearing credentials are never exported.
+-                            (Some(auth_mode), None)
+-                        } else {
+-                            match auth.get_token() {
+-                                Ok(token) if !token.is_empty() => {
+-                                    let tok = if include_token { Some(token) } else { None };
+-                                    (Some(auth_mode), tok)
++                    let (reported_auth_method, token_opt) = if self
++                        .auth_manager
++                        .is_workload_identity_selected()
++                        || matches!(
++                            auth,
++                            CodexAuth::Headers(_)
++                                | CodexAuth::AgentIdentity(_)
++                                | CodexAuth::PersonalAccessToken(_)
++                        )
++                        || include_token && permanent_refresh_failure
++                    {
++                        // Host-owned and metadata-bearing credentials are never exported.
++                        (Some(auth_mode), None)
++                    } else {
++                        match auth.get_token() {
++                            Ok(token) if !token.is_empty() => {
++                                let tok = if include_token { Some(token) } else { None };
++                                (Some(auth_mode), tok)
++                            }
++                            Ok(_) => (None, None),
++                            Err(err) => {
++                                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                                    tracing::warn!("Account auth unavailable");
++                                } else {
++                                    tracing::warn!("failed to get token for auth status: {err}");
+                                 }
+-                                Ok(_) => (None, None),
+-                                Err(err) => {
+-                                    tracing::warn!("failed to get token for auth status: {err}");
+-                                    (None, None)
+-                                }
++                                (None, None)
+                             }
+-                        };
++                        }
++                    };
+                     GetAuthStatusResponse {
+                         auth_method: reported_auth_method,
+                         auth_token: token_opt,

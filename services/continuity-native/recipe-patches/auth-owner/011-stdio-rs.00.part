@@ -1,0 +1,32 @@
+diff --git a/codex-rs/app-server-transport/src/transport/stdio.rs b/codex-rs/app-server-transport/src/transport/stdio.rs
+--- a/codex-rs/app-server-transport/src/transport/stdio.rs
++++ b/codex-rs/app-server-transport/src/transport/stdio.rs
+@@ -30,6 +30,8 @@
+     initialize_client_name_tx: oneshot::Sender<String>,
+     install_shutdown_signal_handler: bool,
+ ) -> IoResult<JoinHandle<()>> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    return Err(std::io::Error::other("xiaok_auth_stdio_entry_forbidden"));
+     let shutdown_signal = CancellationToken::new();
+     #[cfg(unix)]
+     if install_shutdown_signal_handler {
+@@ -135,6 +137,10 @@
+ 
+     let write_messages = async move {
+         while let Some(queued_message) = writer_rx.recv().await {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            if queued_message.private_auth.is_some() {
++                break;
++            }
+             let Some(mut json) = serialize_outgoing_message(queued_message.message) else {
+                 continue;
+             };
+@@ -181,7 +187,7 @@
+     });
+ }
+ 
+-fn stdio_initialize_client_name(line: &str) -> Option<String> {
++pub fn stdio_initialize_client_name(line: &str) -> Option<String> {
+     let message = serde_json::from_str::<JSONRPCMessage>(line).ok()?;
+     let JSONRPCMessage::Request(JSONRPCRequest { method, params, .. }) = message else {
+         return None;

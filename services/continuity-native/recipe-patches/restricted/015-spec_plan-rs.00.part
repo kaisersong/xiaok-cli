@@ -1,0 +1,11 @@
+diff --git a/codex-rs/core/src/tools/spec_plan.rs b/codex-rs/core/src/tools/spec_plan.rs
+--- a/codex-rs/core/src/tools/spec_plan.rs
++++ b/codex-rs/core/src/tools/spec_plan.rs
+@@ -706,6 +706,7 @@
+ }
+ 
+ pub(crate) fn tool_suggest_enabled(turn_context: &TurnContext) -> bool {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { return false; }
+     let features = turn_context.config.features.get();
+     features.enabled(Feature::ToolSuggest)
+         && features.enabled(Feature::Apps)

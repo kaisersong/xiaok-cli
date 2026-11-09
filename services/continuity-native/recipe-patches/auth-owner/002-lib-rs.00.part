@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server-protocol/src/lib.rs b/codex-rs/app-server-protocol/src/lib.rs
+--- a/codex-rs/app-server-protocol/src/lib.rs
++++ b/codex-rs/app-server-protocol/src/lib.rs
+@@ -1,3 +1,8 @@
++#[cfg(feature = "xiaok-auth-owner-only")]
++mod xiaok_auth_snapshot;
++#[cfg(feature = "xiaok-auth-owner-only")]
++#[doc(hidden)]
++pub use xiaok_auth_snapshot::XiaokAuthSnapshotResponse;
+ mod experimental_api;
+ #[cfg(test)]
+ mod export;

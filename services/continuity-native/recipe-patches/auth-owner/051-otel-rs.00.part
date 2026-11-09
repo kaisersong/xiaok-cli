@@ -1,0 +1,15 @@
+diff --git a/codex-rs/core/src/config/otel.rs b/codex-rs/core/src/config/otel.rs
+--- a/codex-rs/core/src/config/otel.rs
++++ b/codex-rs/core/src/config/otel.rs
+@@ -114,7 +114,9 @@
+     err: impl Display,
+     startup_warnings: &mut Vec<String>,
+ ) {
+-    let message = format!("Ignoring invalid `{config_key}` config: {err}");
+-    tracing::warn!("{message}");
++    let message = codex_config::config_warning_message(format!(
++        "Ignoring invalid `{config_key}` config: {err}"
++    ));
++    codex_config::config_diagnostic!(warn, "{message}");
+     startup_warnings.push(message);
+ }

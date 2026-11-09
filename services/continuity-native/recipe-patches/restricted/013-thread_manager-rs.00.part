@@ -1,0 +1,37 @@
+diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
+--- a/codex-rs/core/src/thread_manager.rs
++++ b/codex-rs/core/src/thread_manager.rs
+@@ -2116,7 +2116,23 @@
+             mut reserved_thread_id,
+             disabled_plugin_ids,
+         } = options;
+-        let inherited_environments = captured_environments.or(inherited_environments);
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && !matches!(&initial_history, InitialHistory::New) {
++            return Err(CodexErr::InvalidRequest("xiaok_main_bridge_new_thread_required".to_string()));
++        }
++        let inherited_environments = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { None } else { captured_environments.or(inherited_environments) };
++        let inherited_instructions = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { None } else { inherited_instructions };
++        let client_mcp_extensions = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Default::default() } else { client_mcp_extensions };
++        let turn_extension_init = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Default::default() } else { turn_extension_init };
++        let environment_requests = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Some(Vec::new()) } else { environment_requests };
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            thread_extension_init = Default::default();
++            thread_extension_init.insert(codex_extension_api::SessionIsolation::Isolated);
++            thread_extension_init.insert(codex_extension_api::ToolPolicy {
++                allowed_tools: Some(vec![codex_extension_api::ToolName::namespaced("xiaok", "invoke")]),
++                expose_additional_permissions: false,
++                ..Default::default()
++            });
++        }
+         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
+         // Older callers and saved reviewers identify isolation through their source.
+         // New internal callers supply an explicit runtime policy before startup.
+@@ -2330,7 +2346,7 @@
+             skills_service: Arc::clone(&self.skills_service),
+             plugins_manager: Arc::clone(&self.plugins_manager),
+             mcp_manager,
+-            code_mode_session_provider: Arc::clone(&self.code_mode_session_provider),
++            code_mode_session_provider: if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY { Arc::new(DisabledCodeModeSessionProvider) } else { Arc::clone(&self.code_mode_session_provider) },
+             extensions,
+             conversation_history: initial_history,
+             disabled_plugin_ids,

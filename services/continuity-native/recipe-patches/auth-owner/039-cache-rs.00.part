@@ -1,0 +1,19 @@
+diff --git a/codex-rs/cloud-config/src/cache.rs b/codex-rs/cloud-config/src/cache.rs
+--- a/codex-rs/cloud-config/src/cache.rs
++++ b/codex-rs/cloud-config/src/cache.rs
+@@ -121,6 +121,15 @@
+                 | CacheLoadStatus::CacheParseFailed(_)
+                 | CacheLoadStatus::CacheSignatureInvalid
+         );
++
++        if codex_login::XIAOK_AUTH_OWNER_ONLY {
++            if warn {
++                tracing::warn!("Cloud config bundle cache unavailable");
++            } else {
++                tracing::info!("Cloud config bundle cache skipped");
++            }
++            return;
++        }
+ 
+         if warn {
+             tracing::warn!(path = %self.path.display(), "{status}");

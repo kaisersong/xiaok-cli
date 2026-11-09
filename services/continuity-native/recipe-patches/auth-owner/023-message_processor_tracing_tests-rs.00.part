@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server/src/message_processor_tracing_tests.rs b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+--- a/codex-rs/app-server/src/message_processor_tracing_tests.rs
++++ b/codex-rs/app-server/src/message_processor_tracing_tests.rs
+@@ -261,6 +261,8 @@
+         analytics_events_client.clone(),
+     ));
+     let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        xiaok_auth_connection: Arc::new(crate::xiaok_auth_owner::AuthOwnerConnection::new()),
+         outgoing,
+         analytics_events_client,
+         arg0_paths: Arg0DispatchPaths::default(),

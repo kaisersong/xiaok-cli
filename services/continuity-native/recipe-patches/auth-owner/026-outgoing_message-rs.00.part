@@ -1,0 +1,472 @@
+diff --git a/codex-rs/app-server/src/outgoing_message.rs b/codex-rs/app-server/src/outgoing_message.rs
+--- a/codex-rs/app-server/src/outgoing_message.rs
++++ b/codex-rs/app-server/src/outgoing_message.rs
+@@ -64,6 +64,10 @@
+ #[derive(Clone)]
+ pub(crate) struct RequestContext {
+     request_id: ConnectionRequestId,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    xiaok_method: String,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    xiaok_identity: Arc<()>,
+     pub(crate) cancellation: tokio_util::sync::CancellationToken,
+     cancellation_scope: RequestCancellationScope,
+     span: Span,
+@@ -78,6 +82,11 @@
+ }
+ 
+ impl RequestContext {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) fn request_id(&self) -> &ConnectionRequestId {
++        &self.request_id
++    }
++
+     pub(crate) fn new(
+         request_id: ConnectionRequestId,
+         method: &str,
+@@ -86,6 +95,10 @@
+     ) -> Self {
+         Self {
+             request_id,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_method: method.to_owned(),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_identity: Arc::new(()),
+             cancellation: tokio_util::sync::CancellationToken::new(),
+             cancellation_scope: match method {
+                 "userVerification/status"
+@@ -119,10 +132,32 @@
+         connection_id: ConnectionId,
+         message: OutgoingMessage,
+         write_complete_tx: Option<oneshot::Sender<()>>,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        private_auth: Option<codex_app_server_transport::PrivateAuthPayload>,
+     },
+     Broadcast {
+         message: OutgoingMessage,
+     },
++}
++
++// The original context map and auth-only lifetime replay reservations share
++// one original Mutex/guard. No seen-ID eviction or connection reincarnation.
++#[derive(Default)]
++struct RequestContexts {
++    active: HashMap<ConnectionRequestId, RequestContext>,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    seen: HashSet<ConnectionRequestId>,
++}
++impl std::ops::Deref for RequestContexts {
++    type Target = HashMap<ConnectionRequestId, RequestContext>;
++    fn deref(&self) -> &Self::Target {
++        &self.active
++    }
++}
++impl std::ops::DerefMut for RequestContexts {
++    fn deref_mut(&mut self) -> &mut Self::Target {
++        &mut self.active
++    }
+ }
+ 
+ /// Sends messages to the client and manages request callbacks.
+@@ -135,7 +170,7 @@
+     /// Incoming requests that are still waiting on a final response or error.
+     /// We keep them here because this is where responses, errors, and
+     /// disconnect cleanup all get handled.
+-    request_contexts: Mutex<HashMap<ConnectionRequestId, RequestContext>>,
++    request_contexts: Mutex<RequestContexts>,
+     analytics_events_client: AnalyticsEventsClient,
+ }
+ 
+@@ -248,7 +283,7 @@
+             next_server_request_id: AtomicI64::new(0),
+             sender,
+             request_id_to_callback: Mutex::new(HashMap::new()),
+-            request_contexts: Mutex::new(HashMap::new()),
++            request_contexts: Mutex::new(RequestContexts::default()),
+             analytics_events_client,
+         }
+     }
+@@ -261,6 +296,136 @@
+         {
+             warn!("replaced unresolved request context");
+         }
++    }
++
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) async fn try_register_xiaok_request_context(&self, context: RequestContext) -> bool {
++        let mut contexts = self.request_contexts.lock().await;
++        let id = &context.request_id;
++        let bounded = match &id.request_id {
++            RequestId::Integer(_) => true,
++            RequestId::String(value) => !value.is_empty() && value.len() <= 128,
++        };
++        if !bounded
++            || contexts.seen.len() >= 65_536
++            || contexts.seen.contains(id)
++            || contexts.active.contains_key(id)
++        {
++            return false;
++        }
++        contexts.seen.insert(id.clone());
++        contexts.active.insert(id.clone(), context);
++        true
++    }
++
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) async fn send_xiaok_duplicate_error(&self, request_id: ConnectionRequestId) {
++        // The original request keeps its context. The caller already closed its
++        // original gate; this fixed reply never consumes another request.
++        let ConnectionRequestId {
++            request_id,
++            connection_id,
++        } = request_id;
++        // The id echo stays verbatim while the fixed error frame fits the
++        // bounded output budget checked at the final writer. A string ID whose
++        // echo would push the fixed frame past that budget is answered under
++        // the empty id instead: the fixed error must still be written and the
++        // connection stay alive until real EOF, not close early on an
++        // oversized frame.
++        let request_id = match request_id {
++            original @ RequestId::String(_) => {
++                let probe = OutgoingMessage::Error(OutgoingError {
++                    id: original.clone(),
++                    error: crate::xiaok_auth_owner::error("xiaok_auth_request_id_rejected"),
++                });
++                if serde_json::to_string(&probe).map_or(true, |frame| {
++                    frame.len() >= crate::xiaok_auth_stdio::MAX_FRAME
++                }) {
++                    RequestId::String(String::new())
++                } else {
++                    original
++                }
++            }
++            bounded => bounded,
++        };
++        let request_id = ConnectionRequestId {
++            request_id,
++            connection_id,
++        };
++        self.send_error_inner(
++            None,
++            request_id,
++            crate::xiaok_auth_owner::error("xiaok_auth_request_id_rejected"),
++        )
++        .await;
++    }
++
++    /// A fact at original outbound enqueue, not a promise about final stdout.
++    /// Only an original AuthManager snapshot can reach this producer.
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) async fn send_xiaok_auth_snapshot_checked(
++        &self,
++        request_id: ConnectionRequestId,
++        expected_context: &RequestContext,
++        snapshot: codex_login::auth::XiaokManagedAuthSnapshot,
++        manager: &Arc<codex_login::AuthManager>,
++        owner: &Arc<crate::xiaok_auth_owner::AuthOwnerConnection>,
++        session: &Arc<crate::message_processor::ConnectionSessionState>,
++    ) {
++        let permit = self.sender.reserve().await;
++        let context = self.take_request_context(&request_id).await;
++        let Ok(permit) = permit else {
++            return;
++        };
++        let current = context.as_ref().is_some_and(|context| {
++            context.request_id == request_id
++                && expected_context.request_id == request_id
++                && context.xiaok_method == "xiaok/auth/snapshot"
++                && expected_context.xiaok_method == "xiaok/auth/snapshot"
++                && Arc::ptr_eq(&context.xiaok_identity, &expected_context.xiaok_identity)
++                && !context.cancellation.is_cancelled()
++                && owner.check(request_id.connection_id, session).is_ok()
++        });
++        // Both original locks remain held through the actual permit.send below.
++        let qualification = if current {
++            manager.xiaok_lock_current_snapshot(&snapshot).ok()
++        } else {
++            None
++        };
++        let current = qualification.is_some()
++            && owner.check(request_id.connection_id, session).is_ok()
++            && context
++                .as_ref()
++                .is_some_and(|c| !c.cancellation.is_cancelled());
++        let private_auth = if current {
++            Some(codex_app_server_transport::PrivateAuthPayload::new(
++                Box::new(AuthSnapshotDelivery {
++                    snapshot,
++                    manager: Arc::clone(manager),
++                    owner: Arc::clone(owner),
++                    session: Arc::clone(session),
++                    context: context.expect("checked original context"),
++                    request_id: request_id.clone(),
++                    frame: None,
++                    offset: 0,
++                }),
++            ))
++        } else {
++            None
++        };
++        // Public placeholder never contains credentials and is never serialized
++        // by the role writer when carrying the private original delivery.
++        let message = OutgoingMessage::Error(OutgoingError {
++            id: request_id.request_id,
++            error: crate::xiaok_auth_owner::unavailable(),
++        });
++        permit.send(OutgoingEnvelope::ToConnection {
++            connection_id: request_id.connection_id,
++            message,
++            private_auth,
++            write_complete_tx: None,
++        });
++        drop(qualification);
+     }
+ 
+     pub(crate) async fn cancel_user_verification_request(&self, request_id: &ConnectionRequestId) {
+@@ -417,6 +582,8 @@
+                         .send(OutgoingEnvelope::ToConnection {
+                             connection_id: *connection_id,
+                             message: outgoing_message.clone(),
++                            #[cfg(feature = "xiaok-auth-owner-only")]
++                            private_auth: None,
+                             write_complete_tx: None,
+                         })
+                         .await
+@@ -455,6 +622,8 @@
+                 .send(OutgoingEnvelope::ToConnection {
+                     connection_id,
+                     message: OutgoingMessage::Request(request),
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    private_auth: None,
+                     write_complete_tx: None,
+                 })
+                 .await
+@@ -478,8 +647,14 @@
+                 if entry.verification_owner.is_none()
+                     && let Ok(response) = entry.request.response_from_result(result.clone())
+                 {
+-                    tracing::info!("<- response: {response:?}");
+-                    if !matches!(response, ServerResponse::PermissionsRequestApproval { .. }) {
++                    let secret_auth = codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY
++                        && matches!(&response, ServerResponse::ChatgptAuthTokensRefresh { .. });
++                    if !secret_auth {
++                        tracing::info!("<- response: {response:?}");
++                    }
++                    if !secret_auth
++                        && !matches!(response, ServerResponse::PermissionsRequestApproval { .. })
++                    {
+                         self.analytics_events_client
+                             .track_server_response(completed_at_ms, response);
+                     }
+@@ -667,6 +842,12 @@
+         response: ClientResponsePayload,
+         check: impl FnOnce() -> std::result::Result<(), JSONRPCErrorError>,
+     ) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if matches!(&response, ClientResponsePayload::XiaokAuthSnapshot(_)) {
++            self.send_error(request_id, crate::xiaok_auth_owner::unavailable())
++                .await;
++            return;
++        }
+         // Remain cancellable while waiting to deliver a proof, including after native work ends.
+         let permit = self.sender.reserve().await;
+         let _context = self.take_request_context(&request_id).await;
+@@ -693,6 +874,8 @@
+         permit.send(OutgoingEnvelope::ToConnection {
+             connection_id: request_id.connection_id,
+             message,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         });
+     }
+@@ -703,24 +886,32 @@
+         response: ClientResponsePayload,
+         thread_originator: Option<String>,
+     ) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        if matches!(&response, ClientResponsePayload::XiaokAuthSnapshot(_)) {
++            self.send_error(request_id, crate::xiaok_auth_owner::unavailable())
++                .await;
++            return;
++        }
+         let connection_id = request_id.connection_id;
+         let request_id_for_analytics = request_id.request_id.clone();
+-        match thread_originator {
+-            Some(thread_originator) => {
+-                self.analytics_events_client
+-                    .track_response_with_thread_originator(
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            match thread_originator {
++                Some(thread_originator) => {
++                    self.analytics_events_client
++                        .track_response_with_thread_originator(
++                            connection_id.0,
++                            request_id_for_analytics,
++                            &response,
++                            thread_originator,
++                        );
++                }
++                None => {
++                    self.analytics_events_client.track_response(
+                         connection_id.0,
+                         request_id_for_analytics,
+                         &response,
+-                        thread_originator,
+                     );
+-            }
+-            None => {
+-                self.analytics_events_client.track_response(
+-                    connection_id.0,
+-                    request_id_for_analytics,
+-                    &response,
+-                );
++                }
+             }
+         }
+         let response = Box::new(response);
+@@ -763,10 +954,12 @@
+         connection_ids: &[ConnectionId],
+         notification: ServerNotification,
+     ) {
+-        tracing::trace!(
+-            targeted_connections = connection_ids.len(),
+-            "app-server event: {notification}"
+-        );
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::trace!(
++                targeted_connections = connection_ids.len(),
++                "app-server event: {notification}"
++            );
++        }
+         let outgoing_message = timestamped_server_notification(notification);
+         if connection_ids.is_empty() {
+             if let Err(err) = self
+@@ -776,7 +969,11 @@
+                 })
+                 .await
+             {
+-                warn!("failed to send server notification to client: {err:?}");
++                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                    warn!("auth-owner notification delivery failed");
++                } else {
++                    warn!("failed to send server notification to client: {err:?}");
++                }
+             }
+             return;
+         }
+@@ -786,11 +983,17 @@
+                 .send(OutgoingEnvelope::ToConnection {
+                     connection_id: *connection_id,
+                     message: outgoing_message.clone(),
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    private_auth: None,
+                     write_complete_tx: None,
+                 })
+                 .await
+             {
+-                warn!("failed to send server notification to client: {err:?}");
++                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                    warn!("auth-owner notification delivery failed");
++                } else {
++                    warn!("failed to send server notification to client: {err:?}");
++                }
+             }
+         }
+     }
+@@ -800,7 +1003,9 @@
+         connection_id: ConnectionId,
+         notification: ServerNotification,
+     ) -> bool {
+-        tracing::trace!("app-server event: {notification}");
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::trace!("app-server event: {notification}");
++        }
+         let outgoing_message = timestamped_server_notification(notification);
+         let (write_complete_tx, write_complete_rx) = oneshot::channel();
+         if let Err(err) = self
+@@ -808,11 +1013,17 @@
+             .send(OutgoingEnvelope::ToConnection {
+                 connection_id,
+                 message: outgoing_message,
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                private_auth: None,
+                 write_complete_tx: Some(write_complete_tx),
+             })
+             .await
+         {
+-            warn!("failed to send server notification to client: {err:?}");
++            if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                warn!("auth-owner notification delivery failed");
++            } else {
++                warn!("failed to send server notification to client: {err:?}");
++            }
+         }
+         write_complete_rx.await.is_ok()
+     }
+@@ -849,6 +1060,8 @@
+         request_id: ConnectionRequestId,
+         error: JSONRPCErrorError,
+     ) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        let error = crate::xiaok_auth_owner::public_error(error);
+         let outgoing_message = OutgoingMessage::Error(OutgoingError {
+             id: request_id.request_id,
+             error,
+@@ -872,6 +1085,8 @@
+         let send_fut = self.sender.send(OutgoingEnvelope::ToConnection {
+             connection_id,
+             message,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         });
+         let send_result = if let Some(request_context) = request_context {
+@@ -881,7 +1096,11 @@
+         };
+ 
+         if let Err(err) = send_result {
+-            warn!("failed to send {message_kind} to client: {err:?}");
++            if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++                warn!("auth-owner outbound delivery failed");
++            } else {
++                warn!("failed to send {message_kind} to client: {err:?}");
++            }
+         }
+     }
+ }
+@@ -1409,6 +1628,7 @@
+             connection_id,
+             message,
+             write_complete_tx,
++            ..
+         } = envelope
+         else {
+             panic!("expected targeted server notification envelope");
+@@ -1627,3 +1847,118 @@
+         );
+     }
+ }
++
++#[cfg(all(test, feature = "xiaok-auth-owner-only"))]
++#[path = "xiaok_auth_outgoing_tests.rs"]
++mod xiaok_auth_outgoing_tests;
++
++// Only this original narrow sender can construct this one-shot delivery.
++// Fields are private to outgoing_message; Any is a transport, never authority.
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub(super) struct AuthSnapshotDelivery {
++    snapshot: codex_login::auth::XiaokManagedAuthSnapshot,
++    manager: Arc<codex_login::AuthManager>,
++    owner: Arc<crate::xiaok_auth_owner::AuthOwnerConnection>,
++    session: Arc<crate::message_processor::ConnectionSessionState>,
++    context: RequestContext,
++    request_id: ConnectionRequestId,
++    frame: Option<Vec<u8>>,
++    offset: usize,
++}
++#[cfg(all(feature = "xiaok-auth-owner-only", unix))]
++impl AuthSnapshotDelivery {
++    pub(super) fn closed(&self) -> &tokio_util::sync::CancellationToken {
++        &self.owner.closed
++    }
