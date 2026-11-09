@@ -32,6 +32,8 @@ describe('desktop memory store close (#150)', () => {
     expect((warm as unknown as Internals).db.open).toBe(false);
   });
 
+  // Windows: 20 real runs took 3698–4429ms; two fresh store constructions dominated.
+  // Keep every close/retirement assertion and grant only this case more runner time.
   it('closeDesktopMemoryStore resolves only after the retired store has landed its pending write and closed memory.db', async () => {
     const rootA = join(base, 'a');
     const rootB = join(base, 'b');
@@ -56,5 +58,5 @@ describe('desktop memory store close (#150)', () => {
     await closing;
     expect(firstDb.open).toBe(false);
     expect((getDesktopMemoryStore(rootB) as unknown as Internals).db.open).toBe(false);
-  });
+  }, process.platform === 'win32' ? 10_000 : undefined);
 });
