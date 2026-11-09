@@ -1,3 +1,4 @@
+import {createAssistantRuntimeCollector} from './assistant-runtime-collector.js';
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
 import {AssistantMorningNotificationLedger,createAssistantMorningDelivery} from './assistant-morning-delivery.js';
@@ -1516,12 +1517,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
-    collect: async input => {
-      if(input.kind==='morning')await assistantInbox!.service.ensureToday('scheduler');
-      const snapshot = await assistantSnapshotReader.collect(input);
-      if (input.kind === 'evening') return snapshot;
-      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
-    },
+    collect:createAssistantRuntimeCollector({inbox:inboxOwner.service,snapshotReader:assistantSnapshotReader,calendarSource:assistantCalendarSource,contextReader:assistantContextReader,threadMetaStore}),
   });
   const assistantAwareRunner = createLoopExecutionAdapter({
     genericRunner: loopRuntime.runner,

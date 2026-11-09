@@ -25,6 +25,7 @@ export interface AssistantLoopExecutorDependencies {
     kind: 'evening' | 'morning';
     profile: AssistantLoopProfile;
     now: number;
+    signal?: AbortSignal;
   }): unknown | Promise<unknown>;
   complete(input: {
     kind: 'evening' | 'morning';
@@ -81,7 +82,7 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
         // Protected output retains the original fixed publication body. External
         // derived context is ordinary-only until that protocol binds it itself.
         const session=!input.publicationProducer?dependencies.derived?.beginCapture({kind:input.kind,profile,now:input.now}):undefined;
-        const collected = await dependencies.collect({ kind: input.kind, profile, now: input.now });
+        const collected = await dependencies.collect({ kind: input.kind, profile, now: input.now,...(input.signal?{signal:input.signal}:{}) });
         const capture:AssistantDerivedCapture|undefined=session?await session.finish(collected):undefined;
         const internal=input.publicationProducer&&dependencies.derived?prepareAssistantProtectedInternalContext(collected,dependencies.derived.visibility):undefined;
         const assertCurrent=()=>{if(internal&&!internal.isCurrent())throw Error('assistant_derived_stale');if(capture){assertOrdinaryLoopOwner('loop_run',input.runId);if(!capture.isCurrent())throw Error('assistant_derived_stale');}};
