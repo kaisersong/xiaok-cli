@@ -30,13 +30,41 @@ function assertDirectories(directory) {
   }
 }
 function sameFile(a, b) { return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs; }
+// Keep pathname evidence independent of the descriptor used to read bytes.
+// Node 22 on Windows can report path dev=0 while fstat has the real volume ID.
+function withReadHandle(file, read) {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let value, primary, failed = false;
+  try { value = read(fd); } catch (error) { failed = true; primary = error; }
+  try { fs.closeSync(fd); } catch (secondary) {
+    const error = new AggregateError(failed ? [primary, secondary] : [secondary],
+      'artifact export package: read handle close unconfirmed', {cause: failed ? primary : secondary});
+    // Preserve the original raw errors and uncertain descriptor; never retry an
+    // ambiguous close or report the capture as successfully completed.
+    Object.defineProperty(error, 'fileDescriptor', {value: fd});
+    throw error;
+  }
+  if (failed) throw primary;
+  return value;
+}
+function pathIdentity(file, max) {
+  const before = fs.lstatSync(file, {bigint: true});
+  requireValue(before.isFile() && !before.isSymbolicLink() && before.size <= BigInt(max), 'invalid regular file');
+  if (process.platform !== 'win32' || before.dev !== 0n) return before;
+  return withReadHandle(file, fd => {
+    const probe = fs.fstatSync(fd, {bigint: true});
+    const after = fs.lstatSync(file, {bigint: true});
+    requireValue(after.isFile() && !after.isSymbolicLink() && sameFile(before, after)
+      && probe.isFile() && probe.dev !== 0n
+      && sameFile({...before, dev: probe.dev}, probe), 'file changed while probing identity');
+    return probe;
+  });
+}
 function capture(file, max) {
   assertDirectories(path.dirname(file));
-  const before = fs.lstatSync(file, { bigint: true });
-  requireValue(before.isFile() && !before.isSymbolicLink() && before.size <= BigInt(max), 'invalid regular file');
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-  try {
-    requireValue(sameFile(before, fs.fstatSync(fd, { bigint: true })), 'file changed while opening');
+  const before = pathIdentity(file, max);
+  return withReadHandle(file, fd => {
+    requireValue(sameFile(before, fs.fstatSync(fd, {bigint: true})), 'file changed while opening');
     const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
     while (offset < bytes.length) {
@@ -44,9 +72,9 @@ function capture(file, max) {
       requireValue(count > 0, 'file shortened'); offset += count;
     }
     requireValue(fs.readSync(fd, Buffer.alloc(1), 0, 1, offset) === 0, 'file grew');
-    requireValue(sameFile(before, fs.fstatSync(fd, { bigint: true })) && sameFile(before, fs.lstatSync(file, { bigint: true })), 'file changed while reading');
+    requireValue(sameFile(before, fs.fstatSync(fd, {bigint: true})) && sameFile(before, pathIdentity(file, max)), 'file changed while reading');
     return bytes;
-  } finally { fs.closeSync(fd); }
+  });
 }
 function manifestSchema(bytes, target) {
   const m = JSON.parse(bytes.toString('utf8'));
