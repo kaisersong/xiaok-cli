@@ -122,8 +122,12 @@ test('merged manifest preserves native source lifecycle and all original helper 
   assert.equal(manifest.scripts.postinstall, 'node scripts/prepare-cli-native.mjs');
   assert.equal(manifest.scripts.prepack, 'node scripts/pack-cli.mjs --prepack-check');
   assert.equal(manifest.scripts['pack:cli'], 'node scripts/pack-cli.mjs');
-  for (const name of ['build', 'build:rollback']) assert(manifest.scripts[name].endsWith(' && node scripts/verification/copy-windows-absence.mjs cli'), name);
-  assert(manifest.scripts['build:release'].endsWith(' && node scripts/verification/copy-windows-absence.mjs cli --require-all'));
+  const ledger = ' && node scripts/verification/build-root-ledger-source.mjs';
+  for (const name of ['build', 'build:rollback', 'build:release']) {
+    const absence = ' && node scripts/verification/copy-windows-absence.mjs cli' + (name === 'build:release' ? ' --require-all' : '');
+    assert(manifest.scripts[name].includes(absence + ledger), name + ': ordered original absence and RootLedger helper gates');
+    assert(manifest.scripts[name].endsWith(ledger), name + ': RootLedger final gate');
+  }
   for (const name of ['scripts/prepare-cli-pty.mjs', 'scripts/prepare-cli-native.mjs']) assert(manifest.files.includes(name), name);
   assert.equal(manifest.devDependencies['adm-zip'], '0.5.17');
   assert.equal(manifest.devDependencies.tar, '7.5.22');
