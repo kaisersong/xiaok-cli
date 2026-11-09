@@ -1,0 +1,11 @@
+{
+  "commit": "94a28974889386f9d6e33f5bcc75ae9cdc29fa11",
+  "tree": "871291012b5deb1d632f19501e9b33c728cdd407",
+  "branch": "refs/heads/checkpoint/unfinished-handoff-20261011",
+  "localIndexUnchanged": true,
+  "localHEADUnchanged": true,
+  "localMERGE_HEADUnchanged": true,
+  "selectedPathCount": 5562,
+  "excludedGeneratedUntrackedCount": 2949,
+  "initialMergeCheckpoint": "75df8e31f52cb87e1f07e30ad0fdc8e503bed926"
+}

@@ -1,0 +1,38 @@
+{
+  "commit": "b80729b99a469241a56fb5992f05ccdfe5aa2f9f",
+  "branch": "refs/heads/checkpoint/xiaok-unfinished-handoff-20261011",
+  "includedPaths": [
+    "xiaok-cli/design/2026-10-10-unfinished-development-live-handoff.md",
+    "xiaok-cli/quality/lessons-ledger.md",
+    "xiaok-cli/analysis/2026-10-11-connectors4-ipc-closure.md",
+    "xiaok-cli/analysis/2026-10-11-knowledge10-ipc-closure.md",
+    "xiaok-cli/analysis/2026-10-11-meeting-recorder-window6-ipc-closure.md",
+    "xiaok-cli/analysis/2026-10-11-model-provider-systemone-ipc10-closure.md",
+    "xiaok-cli/analysis/2026-10-11-principles3-ipc-closure.md",
+    "xiaok-cli/analysis/2026-10-11-scheduled-timed-action17-ipc-closure.md",
+    "xiaok-cli/design/2026-10-10-desktop-small-config-ipc4-contract.md",
+    "xiaok-cli/design/2026-10-10-multi-agent-thread-binding-ownership-r1.md",
+    "xiaok-cli/design/2026-10-11-connectors4-typed-ipc-design.md",
+    "xiaok-cli/design/2026-10-11-cross-machine-checkpoint.md",
+    "xiaok-cli/design/2026-10-11-desktop-diagnostics3-ipc-contract-design.md",
+    "xiaok-cli/design/2026-10-11-knowledge10-typed-ipc-design.md",
+    "xiaok-cli/design/2026-10-11-meeting-recorder-window6-typed-ipc-design.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-ancestor-physical-cleanup-diagnostic-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-ancestor-publication-barrier-implementation-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-goal-handoff-native-sql-fault-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-protected-init-missing-env-fixture-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-registered-recipe-test-account-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-root-model-physical-owner-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-root-physical-owner-diagnostic-r1.md",
+    "xiaok-cli/design/2026-10-11-multi-agent-service-native-sql-fault-r1.md",
+    "xiaok-cli/design/2026-10-11-plugin-catalog-readonly-ipc3.md",
+    "xiaok-cli/design/2026-10-11-principles3-typed-ipc-design.md",
+    "xiaok-cli/design/2026-10-11-scheduled-timed-action17-typed-ipc-design.md"
+  ],
+  "foreignDraftsExcluded": [
+    "xiaok-cli/design/2026-10-11-cli-copyable-code-blocks.md",
+    "xiaok-cli/design/2026-10-11-cli-interactive-prompt-spacing.md"
+  ],
+  "localIndexUnchanged": true,
+  "localHEADUnchanged": true
+}

@@ -1,3 +1,4 @@
+import {getCredentialStore,setCredentialStore} from '../utils/system-credentials.js';
 import {defaultKimDecisionRuntime} from '../ai/kim/runtime.js';
 import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
 import type { Command } from 'commander';
@@ -124,6 +125,11 @@ export function registerConfigCommands(program: Command): void {
   const config = program.command('config').description('管理 xiaok 工作台配置');
 
   const configSet = config.command('set').description('设置配置项');
+  configSet.command('credential-store <mode>').description('凭证存储：file（默认）或 keychain')
+    .action((mode:string)=>{
+      if(mode!=='file'&&mode!=='keychain')throw Error('凭证存储只支持 file 或 keychain');
+      setCredentialStore(mode);console.log(`凭证存储：${mode==='file'?'文件（默认）':'系统钥匙串'}`);
+    });
 
   configSet
     .command('model <value>')
@@ -375,6 +381,7 @@ export function registerConfigCommands(program: Command): void {
     .command('get <key>')
     .description('获取配置项（如 model）')
     .action(async (key: string) => {
+      if(key==='credential-store'){console.log(getCredentialStore());return;}
       const cfg = await loadConfig();
       if (key === 'model') {
         const m = cfg.models[cfg.defaultModelId];
