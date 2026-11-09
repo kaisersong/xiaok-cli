@@ -52,6 +52,7 @@ export type { DesktopGoalNativeMutationProjection } from '../shared/host-observa
 import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
 import type { ConversationActivity, WorkWatch, ConversationWorkView, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
+import type { TaskHistoryRead } from '../shared/task-history.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -104,6 +105,16 @@ export type {
 };
 
 export const PRELOAD_API_KEYS = [
+  'getAuthOwnerStatus',
+  'startAuthOwnerLogin',
+  'cancelAuthOwnerLogin',
+  'logoutAuthOwner',
+  'getContextMcpStatus',
+  'setContextMcpEnabled',
+  'resetContextMcpPort',
+  'issueContextMcpConfig',
+  'listExternalContextReaders',
+  'revokeExternalContextReader',
   'getModelConfig',
   'saveModelConfig',
   'updateModelRuntimeOptions',
@@ -135,6 +146,27 @@ export const PRELOAD_API_KEYS = [
   'observeRoomConversion',
   'createTask',
   'createTaskWithFiles',
+  'inspectContextConversations',
+  'getContextGrant',
+  'importLegacyThreadMetadata',
+  'getLegacyThreadMetadata',
+  'previewLegacyContext',
+  'claimLegacyContext',
+  'listCliArchives',
+  'previewCliArchive',
+  'claimCliArchive',
+  'createContextConversation',
+  'getContextConversation',
+  'listContextConversations',
+  'updateContextConversation',
+  'createContextReference',
+  'resolveContextReference',
+  'enqueueConversationInput','listConversationInputs','cancelConversationInput','onConversationInputsChanged',
+  'searchContextHistory',
+  'getHistorySearchConsent',
+  'setHistorySearchConsent',
+  'attachContextReference',
+  'revokeContextGrant',
   'subscribeTask',
   'getConversationActivities',
   'getConversationActivityUnread',
@@ -195,6 +227,7 @@ export const PRELOAD_API_KEYS = [
   'cancelTask',
   'getActiveTask',
   'recoverTask',
+  'readTaskHistory',
   'openArtifact',
   'openFileInSystemApp',
   'readFileContent',
@@ -489,6 +522,7 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // `desktop:subscribeTask` to register the subscription on main side; we still
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
+  'onConversationInputsChanged',
   'subscribeConversationActivityOverview',
   'subscribeConversationActivities',
   'subscribeTask',
@@ -543,6 +577,8 @@ export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
 // name. Tests cross-check this against the live preload implementation and the
 // main-process handler registry to catch drift.
 export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
+  ...CONTINUITY_CHANNELS,
+  enqueueConversationInput:'desktop:inputs:enqueue',listConversationInputs:'desktop:inputs:list',cancelConversationInput:'desktop:inputs:cancel',
   getConversationActivities: 'desktop:activity:list',
   getConversationActivityUnread: 'desktop:activity:unread',
   markConversationActivitiesRead: 'desktop:activity:read',
@@ -627,6 +663,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   cancelTask: 'desktop:cancelTask',
   getActiveTask: 'desktop:getActiveTask',
   recoverTask: 'desktop:recoverTask',
+  readTaskHistory: 'desktop:readTaskHistory',
   openArtifact: 'desktop:openArtifact',
   openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
@@ -922,7 +959,7 @@ export const KNOWN_UNROUTED_HANDLERS: readonly string[] = [
 
 export type DesktopModelProviderView = ModelProviderDTO.ModelProviderView;
 
-export type DesktopModelEntryView = ModelProviderDTO.ModelEntryView;
+export type DesktopModelEntryView = ModelProviderDTO.ModelEntryView & { unavailableReason?: 'native_execution_gate_unavailable' };
 
 export type DesktopProviderProfileView = ModelProviderDTO.ModelProviderProfileView;
 
@@ -1281,6 +1318,8 @@ export type ProjectTeamOperationView = ProjectTeamOperationDto;
 export type CreateKSwarmProjectSemanticInput = KSwarmProjectCreateDto;
 export type KSwarmAgentSemanticInput = KSwarmAgentCreateDto;
 
+export type DesktopGoalControlReceipt = import('../shared/goal-control.js').GoalControlReceipt;
+
 export interface DesktopGoalProjection {
   currentCompletion?: GoalCompletionObservation;
   state: GoalState;
@@ -1308,7 +1347,7 @@ export interface DesktopGoalChangedEvent {
   goal: DesktopGoalProjection;
 }
 
-export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
+export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, ContinuityDesktopApi {
   dsh: import('../../src/shared/dsh-desktop.js').DshDesktopApi;
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -1358,11 +1397,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   continueGoalNativeMutation(input: { threadId: string } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   cancelGoalNativeMutation(input: { threadId: string }): Promise<DesktopGoalNativeMutationProjection>;
   createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
-  pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
+  pauseGoal(threadId: string): Promise<DesktopGoalControlReceipt>;
   resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   recoverGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
   continueGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
-  cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
+  cancelGoal(threadId: string): Promise<DesktopGoalControlReceipt>;
   replaceGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
@@ -1382,11 +1421,12 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   cancelMcpWork(watchId: string): Promise<{ requested: true }>;
   updateWorkReporting(input: { watchId: string; preference: ReportingPreference; expectedPolicyRevision: number }): Promise<WorkWatch>;
   stopWorkWatch(input: { watchId: string; expectedPolicyRevision: number }): Promise<WorkWatch>;
-  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void, sinceIndex?: number): () => void;
+  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent, source?: TaskEventCoordinate) => void, sinceIndex?: number): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }>;
+  readTaskHistory(taskId: string): Promise<TaskHistoryRead>;
   openArtifact(artifactId: string): Promise<void>;
   openFileInSystemApp(filePath: string): Promise<OpenFileResult>;
   readFileContent(filePath: string): Promise<ReadFileResult>;
@@ -1795,6 +1835,40 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     observeRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:observe',input) as ReturnType<DesktopApi['observeRoomConversion']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
+    enqueueConversationInput:input=>ipcRenderer.invoke('desktop:inputs:enqueue',input) as ReturnType<DesktopApi['enqueueConversationInput']>,
+    listConversationInputs:input=>ipcRenderer.invoke('desktop:inputs:list',input) as ReturnType<DesktopApi['listConversationInputs']>,
+    cancelConversationInput:input=>ipcRenderer.invoke('desktop:inputs:cancel',input) as ReturnType<DesktopApi['cancelConversationInput']>,
+    onConversationInputsChanged(handler){const listener=(_event:unknown,payload:unknown)=>{const value=payload as {conversationId?:unknown};if(typeof value?.conversationId==='string')handler({conversationId:value.conversationId});};ipcRenderer.on('desktop:inputs:changed',listener);return ()=>ipcRenderer.off('desktop:inputs:changed',listener);},
+    getAuthOwnerStatus: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.getAuthOwnerStatus) as ReturnType<DesktopApi['getAuthOwnerStatus']>,
+    startAuthOwnerLogin: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.startAuthOwnerLogin) as ReturnType<DesktopApi['startAuthOwnerLogin']>,
+    cancelAuthOwnerLogin: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.cancelAuthOwnerLogin) as ReturnType<DesktopApi['cancelAuthOwnerLogin']>,
+    logoutAuthOwner: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.logoutAuthOwner) as ReturnType<DesktopApi['logoutAuthOwner']>,
+    getContextMcpStatus: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextMcpStatus) as ReturnType<DesktopApi['getContextMcpStatus']>,
+    setContextMcpEnabled: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.setContextMcpEnabled,input) as ReturnType<DesktopApi['setContextMcpEnabled']>,
+    resetContextMcpPort: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.resetContextMcpPort) as ReturnType<DesktopApi['resetContextMcpPort']>,
+    issueContextMcpConfig: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.issueContextMcpConfig,input) as ReturnType<DesktopApi['issueContextMcpConfig']>,
+    listExternalContextReaders: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.listExternalContextReaders) as ReturnType<DesktopApi['listExternalContextReaders']>,
+    revokeExternalContextReader: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.revokeExternalContextReader,input) as ReturnType<DesktopApi['revokeExternalContextReader']>,
+    inspectContextConversations: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.inspectContextConversations, input) as ReturnType<DesktopApi['inspectContextConversations']>,
+    getContextGrant: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextGrant, input) as ReturnType<DesktopApi['getContextGrant']>,
+    importLegacyThreadMetadata: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.importLegacyThreadMetadata, input) as ReturnType<DesktopApi['importLegacyThreadMetadata']>,
+    getLegacyThreadMetadata: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getLegacyThreadMetadata, input) as ReturnType<DesktopApi['getLegacyThreadMetadata']>,
+    previewLegacyContext: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.previewLegacyContext, input) as ReturnType<DesktopApi['previewLegacyContext']>,
+    claimLegacyContext: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.claimLegacyContext, input) as ReturnType<DesktopApi['claimLegacyContext']>,
+    listCliArchives: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.listCliArchives,input) as ReturnType<DesktopApi['listCliArchives']>,
+    previewCliArchive: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.previewCliArchive,input) as ReturnType<DesktopApi['previewCliArchive']>,
+    claimCliArchive: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.claimCliArchive,input) as ReturnType<DesktopApi['claimCliArchive']>,
+    createContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.createContextConversation, input) as ReturnType<DesktopApi['createContextConversation']>,
+    getContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextConversation, input) as ReturnType<DesktopApi['getContextConversation']>,
+    listContextConversations: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.listContextConversations, input) as ReturnType<DesktopApi['listContextConversations']>,
+    updateContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.updateContextConversation, input) as ReturnType<DesktopApi['updateContextConversation']>,
+    createContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.createContextReference, input) as ReturnType<DesktopApi['createContextReference']>,
+    resolveContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.resolveContextReference, input) as ReturnType<DesktopApi['resolveContextReference']>,
+    searchContextHistory: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.searchContextHistory,input) as ReturnType<DesktopApi['searchContextHistory']>,
+    getHistorySearchConsent: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getHistorySearchConsent,input) as ReturnType<DesktopApi['getHistorySearchConsent']>,
+    setHistorySearchConsent: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.setHistorySearchConsent,input) as ReturnType<DesktopApi['setHistorySearchConsent']>,
+    attachContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.attachContextReference, input) as ReturnType<DesktopApi['attachContextReference']>,
+    revokeContextGrant: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.revokeContextGrant, input) as ReturnType<DesktopApi['revokeContextGrant']>,
     getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
     getGoalNativeMutation: (threadId) => ipcRenderer.invoke('desktop:goal:getNativeMutation', { threadId }) as ReturnType<DesktopApi['getGoalNativeMutation']>,
     recoverGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:recoverNativeMutation', input) as ReturnType<DesktopApi['recoverGoalNativeMutation']>,
@@ -1850,7 +1924,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       const subscriptionId = `task-${Date.now()}-${Math.random()}`;
       const channel = `desktop:taskEvent:${taskId}`;
       const listener = (_event: unknown, payload: unknown) => {
-        handler(payload as DesktopTaskEvent);
+        const record = payload as { taskId?: unknown; eventIndex?: unknown; sourceDataEpoch?: unknown; event?: DesktopTaskEvent };
+        if (record && typeof record === 'object' && 'event' in record) {
+          if (record.taskId !== taskId || !Number.isSafeInteger(record.eventIndex) || (record.eventIndex as number) < 0 || typeof record.sourceDataEpoch !== 'string' || !record.event?.type) return;
+          handler(record.event, { taskId, eventIndex: record.eventIndex as number, sourceDataEpoch: record.sourceDataEpoch });
+        } else handler(payload as DesktopTaskEvent);
       };
       ipcRenderer.on(channel, listener);
       const registration = ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex, subscriptionId } : { taskId, subscriptionId }).catch(() => undefined);
@@ -1863,6 +1941,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     cancelTask: (taskId) => ipcRenderer.invoke('desktop:cancelTask', { taskId }) as Promise<void>,
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt }) as ReturnType<DesktopApi['recoverTask']>,
+    readTaskHistory: taskId => ipcRenderer.invoke('desktop:readTaskHistory', { taskId }) as ReturnType<DesktopApi['readTaskHistory']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<OpenFileResult>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<ReadFileResult>,
@@ -2342,3 +2421,4 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
 }
 
 export type { IpcRenderer };
+import { CONTINUITY_CHANNELS, type TaskEventCoordinate, type ContinuityDesktopApi } from '../shared/context-continuity-types.js';
