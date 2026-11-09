@@ -1,3 +1,5 @@
+import { ASSISTANT_SOURCE_IDS, type AssistantSourceCoverage } from '../shared/assistant-coverage-contract.js';
+import type { AssistantSourceRead, AssistantSourceReceipt } from './assistant-source-ports.js';
 import type { AssistantLoopProfile } from './assistant-loop-executor.js';
 import {
   buildBoundedAssistantSnapshot,
@@ -81,11 +83,11 @@ export interface AssistantKnowledgeSourceMetadata {
 }
 
 export interface AssistantDesktopSnapshotPorts {
-  listTaskSnapshots(query: AssistantSnapshotQuery): readonly AssistantTaskSnapshotMetadata[] | Promise<readonly AssistantTaskSnapshotMetadata[]>;
-  listKSwarmProjects(query: AssistantSnapshotQuery): readonly AssistantKSwarmProjectMetadata[] | Promise<readonly AssistantKSwarmProjectMetadata[]>;
-  listTimedActions(query: AssistantSnapshotQuery): readonly AssistantTimedActionMetadata[] | Promise<readonly AssistantTimedActionMetadata[]>;
-  listMeetingMetadata(query: AssistantSnapshotQuery): readonly AssistantMeetingMetadata[] | Promise<readonly AssistantMeetingMetadata[]>;
-  listKnowledgeSourceMetadata(query: AssistantSnapshotQuery): readonly AssistantKnowledgeSourceMetadata[] | Promise<readonly AssistantKnowledgeSourceMetadata[]>;
+  listTaskSnapshots(query: AssistantSnapshotQuery): AssistantSourceRead<AssistantTaskSnapshotMetadata> | Promise<AssistantSourceRead<AssistantTaskSnapshotMetadata>>;
+  listKSwarmProjects(query: AssistantSnapshotQuery): AssistantSourceRead<AssistantKSwarmProjectMetadata> | Promise<AssistantSourceRead<AssistantKSwarmProjectMetadata>>;
+  listTimedActions(query: AssistantSnapshotQuery): AssistantSourceRead<AssistantTimedActionMetadata> | Promise<AssistantSourceRead<AssistantTimedActionMetadata>>;
+  listMeetingMetadata(query: AssistantSnapshotQuery): AssistantSourceRead<AssistantMeetingMetadata> | Promise<AssistantSourceRead<AssistantMeetingMetadata>>;
+  listKnowledgeSourceMetadata(query: AssistantSnapshotQuery): AssistantSourceRead<AssistantKnowledgeSourceMetadata> | Promise<AssistantSourceRead<AssistantKnowledgeSourceMetadata>>;
 }
 
 export interface AssistantDesktopSnapshot extends Omit<BoundedAssistantSnapshot, 'dropped'> {
@@ -93,6 +95,7 @@ export interface AssistantDesktopSnapshot extends Omit<BoundedAssistantSnapshot,
     disabledScope: number;
     sourceErrors: number;
   };
+  coverage: AssistantSourceCoverage[];
   sourceErrors: Array<{
     source: AssistantDesktopSnapshotSource;
     message: string;
@@ -104,6 +107,7 @@ export interface AssistantDesktopSnapshotReader {
     kind: 'evening' | 'morning';
     profile: AssistantLoopProfile;
     now: number;
+    window?:{from:number;to:number};
   }): Promise<AssistantDesktopSnapshot>;
 }
 
@@ -113,16 +117,26 @@ export function createAssistantDesktopSnapshotReader(
 ): AssistantDesktopSnapshotReader {
   return {
     async collect(input) {
-      const window = resolveAssistantSnapshotWindow(input);
+      const window = input.window??resolveAssistantSnapshotWindow(input);
+      if(!Number.isSafeInteger(window.from)||!Number.isSafeInteger(window.to)||window.from<0||window.to<window.from||window.to>input.now||window.to-window.from>31*86400000)throw Error('assistant_snapshot_window');
       const enabledScopes = new Set<AssistantActivityScope>(input.profile.dataScopes);
       const query = { from: window.from, to: window.to };
       const records: AssistantActivityRecord[] = [];
       const sourceErrors: AssistantDesktopSnapshot['sourceErrors'] = [];
       let disabledScope = 0;
+      const emittedBySource = new Map<AssistantSourceCoverage, Set<string>>();
+      const coverage: AssistantSourceCoverage[] = ASSISTANT_SOURCE_IDS.map(sourceId => ({
+        sourceId, status: 'disabled', requestedWindow: {...query}, recordCount: 0, includedCount: 0,
+        checkedAt: input.now, freshUntil: input.now + 30 * 60_000,
+      }));
+      const read = <T>(source: AssistantDesktopSnapshotSource, load: () => AssistantSourceRead<T> | Promise<AssistantSourceRead<T>>,
+        errors: AssistantDesktopSnapshot['sourceErrors'], append: (items: readonly T[]) => void) =>
+        readSource(source, load, errors, append, coverage.find(row => row.sourceId === source)!, records, emittedBySource);
+
 
       const sources: Array<Promise<void>> = [];
       if (hasAnyScope(enabledScopes, ['threads', 'tasks', 'artifacts'])) {
-        sources.push(readSource('task_snapshots', () => ports.listTaskSnapshots(query), sourceErrors, snapshots => {
+        sources.push(read('task_snapshots', () => ports.listTaskSnapshots(query), sourceErrors, snapshots => {
           for (const snapshot of snapshots) {
             if (enabledScopes.has('tasks')) {
               records.push(activity({
@@ -173,7 +187,7 @@ export function createAssistantDesktopSnapshotReader(
         }));
       }
       if (enabledScopes.has('projects')) {
-        sources.push(readSource('kswarm_projects', () => ports.listKSwarmProjects(query), sourceErrors, projects => {
+        sources.push(read('kswarm_projects', () => ports.listKSwarmProjects(query), sourceErrors, projects => {
           for (const project of projects) {
             records.push(activity({
               id: project.id,
@@ -188,7 +202,7 @@ export function createAssistantDesktopSnapshotReader(
         }));
       }
       if (enabledScopes.has('automations')) {
-        sources.push(readSource('timed_actions', () => ports.listTimedActions(query), sourceErrors, actions => {
+        sources.push(read('timed_actions', () => ports.listTimedActions(query), sourceErrors, actions => {
           for (const action of actions) {
             const updatedAt = isInsideWindow(action.dueAt, window) ? action.dueAt! : action.updatedAt;
             records.push(activity({
@@ -204,7 +218,7 @@ export function createAssistantDesktopSnapshotReader(
         }));
       }
       if (enabledScopes.has('meetings')) {
-        sources.push(readSource('meeting_metadata', () => ports.listMeetingMetadata(query), sourceErrors, meetings => {
+        sources.push(read('meeting_metadata', () => ports.listMeetingMetadata(query), sourceErrors, meetings => {
           for (const meeting of meetings) {
             records.push(activity({
               id: meeting.id,
@@ -219,7 +233,7 @@ export function createAssistantDesktopSnapshotReader(
         }));
       }
       if (enabledScopes.has('artifacts')) {
-        sources.push(readSource('knowledge_source_metadata', () => ports.listKnowledgeSourceMetadata(query), sourceErrors, sources => {
+        sources.push(read('knowledge_source_metadata', () => ports.listKnowledgeSourceMetadata(query), sourceErrors, sources => {
           for (const source of sources) {
             records.push(activity({
               id: `knowledge-source:${source.id}`,
@@ -242,7 +256,7 @@ export function createAssistantDesktopSnapshotReader(
         records,
         limits: options.limits,
       });
-      return enforceFinalByteLimit({
+      const result = enforceFinalByteLimit({
         ...bounded,
         dropped: {
           ...bounded.dropped,
@@ -250,7 +264,21 @@ export function createAssistantDesktopSnapshotReader(
           sourceErrors: sourceErrors.length,
         },
         sourceErrors,
-      }, options.limits?.maxSerializedBytes);
+      } as AssistantDesktopSnapshot, options.limits?.maxSerializedBytes ?? 256 * 1024);
+      // Compare by stable scope/reference identity after *all* bounding, including
+      // the existing source error envelope. Counts are facts, never LLM output.
+      for (const row of coverage) {
+        const expected = emittedBySource.get(row);
+        if (!expected) continue;
+        row.includedCount = result.items.filter(item => expected.has(activityIdentity(item))).length;
+        if (row.includedCount < expected.size && row.status === 'checked') {
+          row.status = 'partial'; row.errorCode = 'snapshot_bounded';
+        }
+      }
+      // Owner metadata is deliberately outside the bounded LLM payload. Persist
+      // explicitly before analysis; never let JSON serialization erase coverage.
+      Object.defineProperty(result, 'coverage', {value: coverage, enumerable: false});
+      return result;
     },
   };
 }
@@ -272,19 +300,37 @@ export function resolveAssistantSnapshotWindow(input: {
   };
 }
 
+function activityIdentity(item: AssistantActivityRecord): string {
+  return JSON.stringify([item.scope, item.reference.kind, item.reference.id]);
+}
 async function readSource<T>(
   source: AssistantDesktopSnapshotSource,
-  load: () => readonly T[] | Promise<readonly T[]>,
+  load: () => AssistantSourceRead<T> | Promise<AssistantSourceRead<T>>,
   errors: AssistantDesktopSnapshot['sourceErrors'],
   append: (items: readonly T[]) => void,
+  coverage: AssistantSourceCoverage,
+  records: AssistantActivityRecord[],
+  emitted: Map<AssistantSourceCoverage, Set<string>>,
 ): Promise<void> {
   try {
-    append(await load());
+    const value = await load();
+    const receipt = Array.isArray(value) ? undefined : value as AssistantSourceReceipt<T>;
+    const items = receipt ? receipt.items : value as readonly T[];
+    if (!Array.isArray(items) || receipt && (!['available','unavailable'].includes(receipt.availability) || !['complete','partial','unknown'].includes(receipt.completeness))) throw Error('assistant_source_receipt_invalid');
+    if (receipt?.availability === 'unavailable') {
+      coverage.status = 'unavailable'; coverage.errorCode = 'source_unavailable'; return;
+    }
+    coverage.recordCount = items.length;
+    coverage.status = !receipt || receipt.completeness === 'unknown' ? 'not_checked'
+      : receipt.completeness === 'complete' ? 'checked' : 'partial';
+    if (coverage.status === 'not_checked') coverage.errorCode = 'completeness_unknown';
+    if (coverage.status === 'partial') coverage.errorCode = 'source_incomplete';
+    const start = records.length;
+    append(items);
+    emitted.set(coverage, new Set(records.slice(start).map(activityIdentity)));
   } catch (error) {
-    errors.push({
-      source,
-      message: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
-    });
+    coverage.status = 'unavailable'; coverage.errorCode = 'source_unavailable';
+    errors.push({source, message: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500)});
   }
 }
 

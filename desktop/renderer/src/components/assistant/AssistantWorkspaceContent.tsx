@@ -1,3 +1,4 @@
+import {AssistantProductPanel} from './AssistantProductPanel';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarDays, ChevronRight, CircleDot, Clock3, Mail, MessagesSquare, Newspaper, RefreshCw, Settings2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -85,6 +86,7 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
         </div>}
         {suggestions.length > 0 && <ul className="mt-4 divide-y divide-[var(--c-border-subtle)]">{suggestions.map(suggestion => <li key={suggestion.id} className="flex items-start justify-between gap-3 py-3"><div className="min-w-0"><p className="text-sm font-medium text-[var(--c-text-primary)]">{suggestion.title}</p><p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)]">{suggestion.summary}</p></div><button type="button" aria-label={labels.prepareSuggestion(suggestion.title)} className={subtleButton} onClick={() => onPrepareSuggestion?.(`请帮助我推进以下事项，先核对当前事实，再明确下一步和交付：\n${suggestion.title}\n${suggestion.summary}`)}>{labels.prepare}<ArrowRight size={13}/></button></li>)}</ul>}
         {pendingCount > 0 && <button type="button" className={subtleButton} onClick={() => void openDetails()}>{t.assistant.pendingCandidates(pendingCount)}<ChevronRight size={13}/></button>}
+        <AssistantProductPanel data={data}/>
         {sourceOpen && <div className={`mt-4 p-4 ${surface}`}><AppConnectorsSettings /></div>}
 
         <section className="mt-9" aria-labelledby="assistant-watches-title">

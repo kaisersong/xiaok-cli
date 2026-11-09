@@ -1,3 +1,4 @@
+import {ASSISTANT_ACTION_OVERVIEW_SCHEMA,type AssistantActionOverviewDto} from '../../../shared/assistant-ipc-contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ASSISTANT_OVERVIEW_SCHEMA, type AssistantOverviewDto } from '../../../shared/assistant-ipc-contract';
 import { SCHEDULED_TASK_SCHEMA, type ScheduledTaskDto } from '../../../shared/scheduled-timed-action-ipc-contract';
@@ -5,11 +6,12 @@ import { AUTOMATION_RUN_HISTORY_SCHEMA, type AutomationRunHistoryDto } from '../
 import { AUTOMATION_OVERVIEW_SCHEMA, type AutomationOverviewDto } from '../../../shared/automation-config-ipc-contract';
 import { getDesktopApi } from '../shared/desktop';
 
-type Source = 'assistant' | 'schedules' | 'history' | 'automation';
+type Source = 'product' | 'assistant' | 'schedules' | 'history' | 'automation';
 interface Owner { active: boolean; busy: boolean; queued: boolean; revision: number }
 
 /** Page read owner only. Scheduling and execution stay in Main. */
 export function useAssistantWorkspace() {
+  const [product,setProduct]=useState<AssistantActionOverviewDto|null>(null);
   const [overview, setOverview] = useState<AssistantOverviewDto | null>(null);
   const [schedules, setSchedules] = useState<ScheduledTaskDto[] | null>(null);
   const [history, setHistory] = useState<AutomationRunHistoryDto[] | null>(null);
@@ -41,6 +43,7 @@ export function useAssistantWorkspace() {
       }
     }
     void Promise.allSettled([
+      read('product',async()=>ASSISTANT_ACTION_OVERVIEW_SCHEMA.parse(await desktop!.getAssistantActionOverview()),setProduct),
       read('assistant', async () => ASSISTANT_OVERVIEW_SCHEMA.parse(await desktop!.getAssistantOverview()), setOverview),
       read('schedules', async () => SCHEDULED_TASK_SCHEMA.array().parse(await desktop!.getScheduledTasks()), setSchedules),
       read('history', async () => AUTOMATION_RUN_HISTORY_SCHEMA.array().parse(await desktop!.getAutomationRunHistory()), setHistory),
@@ -79,5 +82,5 @@ export function useAssistantWorkspace() {
       }
     }
   }, [refresh]);
-  return { overview, schedules, history, automation, errors, reading, refresh, mutate, mutationBusy, operationUnknown };
+  return { product, overview, schedules, history, automation, errors, reading, refresh, mutate, mutationBusy, operationUnknown };
 }
