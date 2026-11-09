@@ -4,7 +4,7 @@ import { inspectModuleEdges } from './resolution-graph.mjs';
 const DARWIN_ARM64_EDGE_SPECIFICATIONS = Object.freeze([
   Object.freeze({
     importerRelativePath: 'dist/ai/memory/segment.js',
-    astLocation: '191:13',
+    astLocation: '192:13',
     pattern: "require(join(dirname(require.resolve('nodejieba')), 'build', 'Release', 'nodejieba.node'))",
     targets: Object.freeze(['../../../node_modules/nodejieba/build/Release/nodejieba.node']),
   }),

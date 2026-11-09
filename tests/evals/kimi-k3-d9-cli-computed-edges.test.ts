@@ -34,7 +34,7 @@ describe('Kimi K3 D9 CLI computed loader edges', () => {
 
     expect(allowlist).toHaveLength(7);
     expect(allowlist).toContainEqual(expect.objectContaining({
-      astLocation: '191:13',
+      astLocation: '192:13',
       pattern: "require(join(dirname(require.resolve('nodejieba')), 'build', 'Release', 'nodejieba.node'))",
       targets: ['../../../node_modules/nodejieba/build/Release/nodejieba.node'],
     }));
