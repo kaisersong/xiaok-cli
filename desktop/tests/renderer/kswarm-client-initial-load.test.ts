@@ -8,10 +8,12 @@ import { useKSwarmClient } from '../../renderer/src/hooks/useKSwarmClient';
 
 describe('useKSwarmClient initial load', () => {
   let kswarmProxyGetMock: ReturnType<typeof vi.fn>;
+  let runtimeHandler: ((payload: unknown) => void) | null;
   let connectionHandler: ((payload: { status: string }) => void) | null;
 
   beforeEach(() => {
     connectionHandler = null;
+    runtimeHandler = null;
     kswarmProxyGetMock = vi.fn(async (path: string) => {
       if (path === '/projects') {
         return { projects: [{ id: 'proj-live', name: 'Live project', status: 'active' }] };
@@ -39,6 +41,7 @@ describe('useKSwarmClient initial load', () => {
           connectionHandler = null;
         };
       }),
+      onKSwarmStatus: vi.fn(handler => { runtimeHandler = handler; return () => { runtimeHandler = null; }; }),
       onKSwarmWsEvent: vi.fn().mockReturnValue(() => {}),
     };
   });
@@ -192,6 +195,32 @@ describe('useKSwarmClient initial load', () => {
       expect(api.kswarmStreamSubscribe).toHaveBeenCalledTimes(1);
       expect(result.current.projects[0].id).toBe('proj-live');
     } finally { bridge.dispose(); }
+  });
+
+  it('reloads the project snapshot when runtime becomes ready after all startup retries expired', async () => {
+    vi.useFakeTimers();let ready=false;
+    kswarmProxyGetMock.mockImplementation(async path => path==='/projects' ? (ready?{projects:[{id:'late-project',name:'Late project'}]}:null) : null);
+    const {result,unmount}=renderHook(()=>useKSwarmClient());
+    await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});
+    expect(result.current.projectsLoaded).toBe(false);ready=true;
+    const status={running:true,port:4400,pid:12,restartCount:0,lastError:null};
+    await act(async()=>{runtimeHandler?.(status);await vi.advanceTimersByTimeAsync(0);});
+    expect(result.current.projects.map(project=>project.id)).toEqual(['late-project']);
+    expect(result.current.projectsLoaded).toBe(true);
+    const count=kswarmProxyGetMock.mock.calls.length;
+    await act(async()=>{runtimeHandler?.(status);await vi.advanceTimersByTimeAsync(0);});
+    expect(kswarmProxyGetMock.mock.calls.length).toBe(count);
+    unmount();expect(runtimeHandler).toBeNull();
+  });
+  it('does not let a held pre-ready snapshot overwrite the runtime-ready snapshot',async()=>{
+    const held:Array<(value:unknown)=>void>=[];let ready=false;
+    kswarmProxyGetMock.mockImplementation(async path=>path==='/projects'?(ready?{projects:[{id:'ready-project',name:'Ready'}]}:new Promise(resolve=>held.push(resolve))):null);
+    const {result}=renderHook(()=>useKSwarmClient());
+    await act(async()=>{await Promise.resolve();});ready=true;
+    await act(async()=>{runtimeHandler?.({running:true,port:4400,pid:12,restartCount:0,lastError:null});await Promise.resolve();});
+    await waitFor(()=>expect(result.current.projects[0]?.id).toBe('ready-project'));
+    await act(async()=>{for(const resolve of held)resolve({projects:[{id:'stale-project',name:'Stale'}]});});
+    expect(result.current.projects[0]?.id).toBe('ready-project');
   });
 
 });
