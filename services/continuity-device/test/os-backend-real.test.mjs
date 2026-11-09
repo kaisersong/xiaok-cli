@@ -1,0 +1,10 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{fork}from'node:child_process';import{fileURLToPath}from'node:url';import{randomBytes}from'node:crypto';import{mkdtempSync,writeFileSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
+test('real OS credentials persist across separate processes and lost items never auto-reinitialize',{skip:!(['darwin','win32'].includes(process.platform)),timeout:45000},async()=>{
+ const evidence=mkdtempSync(join(tmpdir(),'xiaok-os-keychain-test-')),accountId=randomBytes(32).toString('hex'),pids=[],worker=fork(fileURLToPath(new URL('./helpers/os-worker.mjs',import.meta.url)),[],{execArgv:[],detached:true,stdio:['ignore','ignore','ignore','ipc']});pids.push(worker.pid);let result,timedOut=false;
+ const save=()=>writeFileSync(join(evidence,'owned-processes.json'),JSON.stringify({accountId,pids,kind:'synthetic test credential only',platform:process.platform,arch:process.arch},null,2));save();
+ try{
+  const done=new Promise((resolve,reject)=>{worker.on('message',message=>{if(message.type==='pid'){pids.push(message.pid);save();}else result=message;});worker.once('error',reject);worker.once('exit',code=>resolve(code));});
+  const timer=setTimeout(()=>{timedOut=true;try{process.kill(-worker.pid,'SIGKILL');}catch{}},30000);worker.send({mode:'driver',accountId});let code;try{code=await done;}finally{clearTimeout(timer);}assert.equal(timedOut,false);assert.equal(code,0);assert.deepEqual(result,{ok:true,freshMissing:true,restartRead:true,updatedRestartRead:true,missingNotRecreated:true,deletedOwn:true});
+  const remaining=[];for(const pid of pids){try{process.kill(pid,0);remaining.push(pid);}catch(error){if(error.code!=='ESRCH')throw error;}}assert.deepEqual(remaining,[]);writeFileSync(join(evidence,'result.json'),JSON.stringify({ok:true,ownedPids:pids,remaining,deletedOwnCredential:true},null,2));console.info('OS_KEYCHAIN_EVIDENCE='+evidence);console.info('owned OS test PIDs reaped',pids);
+ }finally{if(worker.exitCode===null&&worker.signalCode===null){try{process.kill(-worker.pid,'SIGKILL');}catch{}}}
+});

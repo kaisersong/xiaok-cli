@@ -1,0 +1,28 @@
+[Unit]
+Description=xiaok Continuity Sync Coordinator
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=xiaok-continuity
+Group=xiaok-continuity
+WorkingDirectory=/opt/xiaok-continuity
+ExecStart=/usr/local/bin/node /opt/xiaok-continuity/src/server.mjs --config /etc/xiaok-continuity/server.json
+Environment=NODE_ENV=production
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/xiaok-continuity/state /var/lib/xiaok-continuity-witness /var/lib/xiaok-continuity/.xiaok-context-sync-provisioning-v1
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

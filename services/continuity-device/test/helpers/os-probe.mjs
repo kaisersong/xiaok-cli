@@ -1,0 +1,11 @@
+// Synthetic, recorded test namespaces only. Never enumerate credential accounts.
+import{createRequire}from'node:module';import{randomBytes}from'node:crypto';import{mkdtempSync,writeFileSync,readdirSync,readFileSync}from'node:fs';import{join}from'node:path';import{tmpdir}from'node:os';
+const require=createRequire(import.meta.url),target=process.platform==='darwin'?`darwin-${process.arch}`:'win32-x64-msvc',{Entry}=require(`@napi-rs/keyring-${target}`),accountId=randomBytes(32).toString('hex'),path=mkdtempSync(join(tmpdir(),'xiaok-os-keychain-test-')),secret=randomBytes(64),report={pid:process.pid,accountId,kind:'synthetic test credential only'};
+writeFileSync(join(path,'owned-processes.json'),JSON.stringify({accountId,pids:[process.pid],kind:report.kind}),{mode:0o600});
+const entry=new Entry('xiaok.continuity.device.v1',accountId);let attempted=false;
+try{if(entry.getSecret()!==null)throw new Error('unexpected_existing');attempted=true;const result=entry.setSecret(secret);report.setterType=typeof result;report.setterNull=result===null;const read=entry.getSecret();report.readLength=read?.length??null;if(read)read.fill(0);}
+catch(error){report.errorCode=String(error.code??'unknown');report.numericStatus=String(error.message).match(/-\d{2,}/g)??[];}
+finally{secret.fill(0);if(attempted){try{entry.deleteCredential();report.deletedOwn=entry.getSecret()===null;}catch{report.deletedOwn=false;}}}
+report.priorCleanup=[];
+for(const name of readdirSync(tmpdir()).filter(name=>name.startsWith('xiaok-os-keychain-test-'))){try{const owned=JSON.parse(readFileSync(join(tmpdir(),name,'owned-processes.json'),'utf8'));if(owned.kind!=='synthetic test credential only'||!/^[a-f0-9]{64}$/.test(owned.accountId)||owned.pids.some(pid=>{if(pid===process.pid)return false;try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}))continue;const old=new Entry('xiaok.continuity.device.v1',owned.accountId);const had=old.getSecret();const present=had!==null;if(had)had.fill(0);if(present)old.deleteCredential();report.priorCleanup.push({directory:name,pids:owned.pids,remaining:[],absent:old.getSecret()===null});}catch{report.priorCleanup.push({directory:name,error:'cleanup_unavailable'});}}
+writeFileSync(join(path,'probe-result.json'),JSON.stringify(report,null,2),{mode:0o600});console.info(JSON.stringify({evidence:path,...report}));
