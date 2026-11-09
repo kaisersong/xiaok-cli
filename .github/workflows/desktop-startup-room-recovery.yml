@@ -1,64 +1,9 @@
 name: Desktop startup and room recovery
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/**'
-      - 'src/runtime/task-host/**'
-      - 'tests/runtime/task-host/**'
-      - 'tests/native/accepted-root-candidate-identity.test.mjs'
-      - 'tests/native/protected-core-model-sdk.test.mjs'
-      - 'tests/native/root-nmp-ledger*.test.mjs'
-      - 'src/runtime/verification/**'
-      - 'tests/native/root-nmp-custody*.test.mjs'
-      - 'tests/native/fixtures/root-nmp-custody*'
-      - 'tests/native/helpers/root-nmp-custody-fixture.mjs'
-      - 'tests/native/root-ledger-source-artifact.test.mjs'
-      - 'tests/native/root-ledger-source-desktop.test.mjs'
-      - 'scripts/verification/build-root-ledger-source.mjs'
-      - 'src/runtime/verification/original-root-ledger-source-loader.ts'
-      - 'tests/runtime/verification/original-root-ledger-source-loader.test.ts'
-      - 'tests/native/fixtures/root-nmp-ledger-*'
-      - 'tests/native/helpers/root-nmp-ledger-fixture.mjs'
-      - 'tests/native/helpers/application-policy-observer.m'
-      - 'tests/native/helpers/protected-nmp-sql-assets.mjs'
-      - 'tests/native/helpers/electron-executable.mjs'
-      - 'tests/native/fixtures/protected-nmp-sql-fragment.cjs'
-      - 'tests/native/helpers/main-protected-sqlite-fixture.mjs'
-      - 'src/runtime/verification/original-main-native-loader.ts'
-      - 'src/runtime/verification/original-root-nmp-ledger.ts'
-      - 'tests/native/fixtures/protected-core-model-sdk.cjs'
-      - 'tests/native/fixtures/protected-core-model-sdk-entry.ts'
-      - 'tests/native/fixtures/accepted-root-candidate-identity.cjs'
-      - 'tests/native/fixtures/accepted-root-binding-entry.ts'
-      - 'tests/native/helpers/accepted-root-candidate-observation.*'
-      - 'native/main-installation/**'
-      - 'scripts/build-main-installation-artifacts.mjs'
-      - 'tests/native/main-installation-*.test.mjs'
-      - 'tests/native/main-root-enrollment-*.test.mjs'
-      - 'tests/native/fixtures/main-enrollment-*'
-      - 'src/runtime/verification/main-root-enrollment-codec.ts'
-      - 'src/runtime/verification/main-root-activation-claim.ts'
-      - 'tests/native/fixtures/main-installation-*'
-      - 'tests/native/helpers/main-installed-fixture.mjs'
-      - 'native/root-resource-authority/**'
-      - 'native/protected-sqlite-facade/**'
-      - 'native/kswarm-authority-source/**'
-      - 'native/broker-authority-source/**'
-      - 'native/sidecar-source-runtime/**'
-      - 'tests/native/sqlite-api-unavailable.test.mjs'
-      - 'tests/native/fixtures/sqlite-api-unavailable-*'
-      - 'tests/native/broker-*.test.mjs'
-      - 'tests/native/kswarm-*.test.mjs'
-      - 'tests/native/main-service-component-boundary.test.mjs'
-      - 'tests/native/fixtures/broker-*'
-      - 'tests/native/fixtures/kswarm-*'
-      - 'tests/native/helpers/broker-*'
-      - 'tests/native/helpers/kswarm-*'
-      - '.github/actions/node-headers/**'
-      - 'package*.json'
-      - '.github/workflows/desktop-startup-room-recovery.yml'
   pull_request:
     paths:
       - 'desktop/**'
@@ -116,10 +61,28 @@ on:
       - '.github/actions/node-headers/**'
       - 'package*.json'
       - '.github/workflows/desktop-startup-room-recovery.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   recovery:

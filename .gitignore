@@ -104,3 +104,7 @@ docs/skill-observability-design.md
 
 # Generated fixed Broker Native and portable runtime resources.
 native/broker-authority-source/build/
+
+# CI shard evidence (uploaded per run, never committed)
+/ci-shard-reports/
+/ci-shard-downloads/

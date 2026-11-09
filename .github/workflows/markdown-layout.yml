@@ -1,15 +1,8 @@
 name: Markdown layout
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/ui/markdown*.ts'
-      - 'src/ui/highlight.ts'
-      - 'src/ui/text-metrics.ts'
-      - 'tests/ui/markdown*.test.ts'
-      - 'tests/ui/text-metrics.test.ts'
-      - 'tests/e2e/markdown-code-indent.py'
-      - '.github/workflows/markdown-layout.yml'
   pull_request:
     paths:
       - 'src/ui/markdown*.ts'
@@ -19,9 +12,21 @@ on:
       - 'tests/ui/text-metrics.test.ts'
       - 'tests/e2e/markdown-code-indent.py'
       - '.github/workflows/markdown-layout.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - 'tests/support/tty.ts'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   markdown:
     strategy:

@@ -17,6 +17,10 @@ permissions:
 env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -39,7 +43,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -272,7 +278,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -295,10 +303,6 @@ jobs:
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
 
       - name: Verify native SQLite binding loads
-        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
-        # node-gyp source build when it does not see gypfile:false. Either path is
-        # acceptable, but a binding that cannot be loaded must fail here rather
-        # than inside the packaged app.
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"

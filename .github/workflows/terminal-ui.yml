@@ -1,56 +1,8 @@
 name: Terminal UI
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/ui/**'
-      - 'src/build-info.ts'
-      - 'src/build-metadata.ts'
-      - 'src/utils/version-info.ts'
-      - 'src/commands/version.ts'
-      - 'src/commands/chat-statusline.ts'
-      - 'src/commands/registry.ts'
-      - 'src/main.ts'
-      - 'scripts/set-build-info.mjs'
-      - 'tests/commands/version.test.ts'
-      - 'tests/e2e/version-statusline.py'
-      - 'tests/package/build-info.test.mjs'
-      - 'package.json'
-      - 'src/commands/chat.ts'
-      - 'src/commands/chat-permission-mode.ts'
-      - 'tests/commands/chat-permission-mode.test.ts'
-      - 'tests/e2e/mode-persistence.py'
-      - 'src/ai/memory/layered-store.ts'
-      - 'src/ai/memory/segment.ts'
-      - 'tests/ai/memory/segment-*.test.ts'
-      - 'src/commands/yzj.ts'
-      - 'src/utils/pid-lock.ts'
-      - 'tests/commands/yzj-serve-shutdown.test.ts'
-      - 'tests/support/yzj-serve-child-preload.ts'
-      - 'src/utils/logger.ts'
-      - 'src/ai/tools/ask-user*.ts'
-      - 'tests/ui/**'
-      - 'src/runtime/conversation-activity/**'
-      - 'tests/runtime/conversation-activity/**'
-      - 'tests/support/activity-owner-teardown.ts'
-      - 'tests/commands/chat-interactive-runtime.test.ts'
-      - 'src/runtime/verification/**'
-      - 'tests/runtime/verification/known-directory-writer-root.test.ts'
-      - 'tests/ai/memory/background-diagnostics.test.ts'
-      - 'tests/utils/logger.test.ts'
-      - 'tests/ai/tools/ask-user*.test.ts'
-      - 'tests/e2e/inline-image*'
-      - 'tests/e2e/askuser-short-menu.py'
-      - 'tests/e2e/question-transcript-spacing.py'
-      - 'tests/e2e/thinking-draft-handoff.py'
-      - 'tests/e2e/footer-return.py'
-      - 'tests/e2e/ghostty-vt-footer.mjs'
-      - 'tests/e2e/welcome-frame-width.py'
-      - 'tests/support/ghostty-vt*'
-      - 'tests/e2e/terminal-cursor-tty.mjs'
-      - 'tests/e2e/memory-background-footer.py'
-      - 'tests/e2e/mode-selector.py'
-      - '.github/workflows/terminal-ui.yml'
   pull_request:
     paths:
       - 'src/ui/**'
@@ -101,9 +53,22 @@ on:
       - 'tests/e2e/memory-background-footer.py'
       - 'tests/e2e/mode-selector.py'
       - '.github/workflows/terminal-ui.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - 'tests/support/tty.ts'
+      - 'tests/support/owned-chat-fixture.ts'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   terminal:
     strategy:
@@ -111,6 +76,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
         node: ['22.14.0', '24']
+        shard: [1, 2, 3]
+        # Windows cases are ~8-10s each. Linux/macOS restore the full single
+        # case set: extra preparation and shared-runner queue outweighed sharding.
+        exclude:
+          - os: ubuntu-latest
+            shard: 2
+          - os: ubuntu-latest
+            shard: 3
+          - os: macos-15
+            shard: 2
+          - os: macos-15
+            shard: 3
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -142,13 +119,18 @@ jobs:
         run: |
           node -e "const j=require('nodejieba');j.load();const o=j.cut('南京市长江大桥').join(' ');console.log(o);if(o!=='南京市 长江大桥'){console.error('nodejieba cut mismatch='+o);process.exit(1)}"
       - run: npm run build:release
+        if: matrix.shard == 1
       - run: npm run test:sandbox:build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - run: node --test tests/package/build-info.test.mjs
-      - name: Test image layout, questions and actual chat entry
+        if: matrix.shard == 1
+      - name: Test image layout and questions (original 25 plus fixture contracts)
+        if: matrix.shard == 1
         run: >
           npm run test:sandbox:run --
+          .test-dist/tests/ui/tty-harness.test.js
+          .test-dist/tests/ui/owned-chat-fixture.test.js
           .test-dist/tests/ui/input-keyboard-protocol.test.js
           .test-dist/tests/ui/input.test.js
           .test-dist/tests/ui/mode-selector.test.js
@@ -191,20 +173,37 @@ jobs:
           .test-dist/tests/ui/transcript-buffer.test.js
           .test-dist/tests/ai/tools/ask-user-question.test.js
           .test-dist/tests/ai/tools/ask-user.test.js
-          .test-dist/tests/commands/chat-interactive-runtime.test.js
           .test-dist/tests/runtime/verification/known-directory-writer-root.test.js
+      - name: Collect complete interactive case inventory (including natural skips)
+        run: >-
+          node .github/scripts/ci-plan.mjs collect vitest.sandbox.config.mjs
+          .test-dist/tests/commands/chat-interactive-runtime.test.js
+          ci-shard-reports/terminal ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} ${{ matrix.os == 'windows-2022' && 3 || 1 }}
+      - name: Run original interactive cases on this shard
+        run: node .github/scripts/ci-plan.mjs run ci-shard-reports/terminal
+      - name: Require actual interactive case coverage
+        if: always()
+        run: node .github/scripts/ci-plan.mjs audit ci-shard-reports/terminal
+      - name: Preserve interactive shard identities and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-cases-${{ matrix.os }}-${{ matrix.node }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: ci-shard-reports/terminal/
+          if-no-files-found: error
       - uses: actions/setup-python@v5
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         with:
           python-version: '3.13'
       - name: Install tmux for isolated real TTY tests
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Test welcome cells in isolated real PTYs
         if: runner.os == 'Linux'
         run: python3 tests/e2e/welcome-frame-width.py
       - name: Check retained image cells and short-menu interaction in real TTYs
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         run: |
           python tests/e2e/inline-image-scrollback.py
           python tests/e2e/askuser-short-menu.py
@@ -218,7 +217,7 @@ jobs:
           python tests/e2e/mode-selector.py
           python tests/e2e/mode-persistence.py
       - name: Retain synthetic Thinking draft failure evidence
-        if: failure() && runner.os == 'Linux'
+        if: failure() && runner.os == 'Linux' && matrix.shard == 1
         uses: actions/upload-artifact@v4
         with:
           name: thinking-draft-failure-${{ matrix.node }}
@@ -232,3 +231,29 @@ jobs:
             /tmp/xiaok-question-spacing-*/
             /tmp/xiaok-version-statusline-*/
           retention-days: 7
+
+  interactive-coverage:
+    needs: terminal
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: terminal-cases-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-shard-downloads
+      - name: Require all original OS/Node case sets and successful jobs
+        env:
+          RESULT: ${{ needs.terminal.result }}
+        run: >-
+          node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
+          ${{ github.sha }}
+          ubuntu-latest-node-22.14.0:1,ubuntu-latest-node-24:1,windows-2022-node-22.14.0:3,windows-2022-node-24:3,macos-15-node-22.14.0:1,macos-15-node-24:1 3
+      - name: Preserve original blocking suite status
+        shell: bash
+        env:
+          RESULT: ${{ needs.terminal.result }}
+        run: test "$RESULT" = success
