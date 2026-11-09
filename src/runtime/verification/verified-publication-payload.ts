@@ -54,7 +54,7 @@ export function createVerifiedPublicationPayloads(input:{
    ownDataObjectFreeze(current);
   }
  }
- function parseApplicationPayload(payload:Buffer):ApplicationPayloadBody{
+ function parsePublicationApplicationBody(payload:Buffer):ApplicationPayloadBody{
   const body=ownDataJSONParse(ownDataBufferPrototypeToString(payload,'utf8'));
   freezeParsedPublicationData(body);
   return body as ApplicationPayloadBody;
@@ -67,9 +67,9 @@ export function createVerifiedPublicationPayloads(input:{
   for(const item of applications){const key=ownerKey(item.owner),prior=checked.get(key);if(prior!==undefined){if(prior!==item.expected)throw Error('publication_application_changed');continue;}checked.set(key,item.expected);const current=application(item.owner);if(item.expected!==json(current))throw Error('publication_application_changed');if(current?.binding.kind==='loop')assertLoopApplicationArtifacts(item.owner,current.binding,owner,body.evaluations);if(current?.binding.kind==='intent'){assertIntentApplicationArtifacts(item.owner,current.binding,owner,body.evaluations);assertIntentParentPublication({database:db,owner:item.owner,binding:current.binding,payloadOwner:owner,sections:body.evaluations,inspectOwner,getCurrentDependencies,assertPublicationTuplesCurrent});}}
   return applications.filter((item,index)=>applications.findIndex(other=>ownerKey(other.owner)===ownerKey(item.owner))===index);
  }
- function assertApplicationPayload(payload:Buffer,owner:VerificationOwner){return assertApplicationBody(JSON.parse(payload.toString('utf8')),owner);}
+ function assertApplicationPayload(payload:Buffer,owner:VerificationOwner){return assertApplicationBody(parsePublicationApplicationBody(payload),owner);}
  function parentVector(owner:VerificationOwner){const active=application(owner);return active?.binding.kind==='intent'?intentParentPublicationVector(db,owner,active.binding):'[]';}
- function readRow(id:string,owner:VerificationOwner){if(typeof id!=='string'||id.length>160)throw Error('publication_payload');const r=db.prepare('SELECT * FROM verified_publication_payloads WHERE payload_id=?').get(id) as Row|undefined;if(!r)throw Error('publication_payload');if(r.owner_key!==ownerKey(owner))throw Error('publication_owner');if(hash(r.payload)!==r.payload_hash)throw Error('publication_payload_corrupt');if(r.dependencies_json!==json(dependencies(owner)))throw Error('publication_dependency');const parsedApplicationBody=parseApplicationPayload(r.payload),applications=assertApplicationBody(parsedApplicationBody,owner);return {...r,applications,parsedApplicationBody};}
+ function readRow(id:string,owner:VerificationOwner){if(typeof id!=='string'||id.length>160)throw Error('publication_payload');const r=db.prepare('SELECT * FROM verified_publication_payloads WHERE payload_id=?').get(id) as Row|undefined;if(!r)throw Error('publication_payload');if(r.owner_key!==ownerKey(owner))throw Error('publication_owner');if(hash(r.payload)!==r.payload_hash)throw Error('publication_payload_corrupt');if(r.dependencies_json!==json(dependencies(owner)))throw Error('publication_dependency');const parsedApplicationBody=parsePublicationApplicationBody(r.payload),applications=assertApplicationBody(parsedApplicationBody,owner);return {...r,applications,parsedApplicationBody};}
  type Evidence=ReturnType<typeof exportEvidence>;
  const tokens=new WeakMap<object,{body:Buffer;bundleHash:string}>();
  function trust(){if(!proofAuthority)throw Error('publication_retention_authority');return proofAuthority;}
@@ -105,7 +105,7 @@ export function createVerifiedPublicationPayloads(input:{
  function retainedEvidence(dep:VerificationDependency):Evidence{
   trust();const row=db.prepare('SELECT * FROM verified_evaluation_retentions WHERE attempt_id=?').get(dep.activeAttemptId) as any;let body:Buffer|undefined;
   if(row){if(hash(row.bundle)!==row.bundle_hash)throw Error('publication_retention_bundle');body=Buffer.from(row.bundle);}
-  else {for(const payload of relatedPayloads([dep.activeAttemptId])){if(hash(payload.payload)!==payload.payload_hash)throw Error('publication_payload_corrupt');const parsed=JSON.parse(payload.payload.toString());if(!Buffer.from(json(parsed)).equals(payload.payload)||!Array.isArray(parsed.evaluations))throw Error('publication_payload_corrupt');for(const section of parsed.evaluations){if(section?.binding?.attemptId!==dep.activeAttemptId)continue;const candidate=Buffer.from(json({version:1,definitionHash:section.definitionHash,binding:section.binding,evaluation:section.evaluation,artifacts:section.artifacts}));if(body&&!body.equals(candidate))throw Error('publication_retention_ambiguous');body=candidate;}}}
+  else {for(const payload of relatedPayloads([dep.activeAttemptId])){if(hash(payload.payload)!==payload.payload_hash)throw Error('publication_payload_corrupt');const parsed=parsePublicationApplicationBody(payload.payload);if(!Buffer.from(json(parsed)).equals(payload.payload)||!Array.isArray(parsed.evaluations))throw Error('publication_payload_corrupt');for(const section of parsed.evaluations){if(section?.binding?.attemptId!==dep.activeAttemptId)continue;const candidate=Buffer.from(json({version:1,definitionHash:section.definitionHash,binding:section.binding,evaluation:section.evaluation,artifacts:section.artifacts}));if(body&&!body.equals(candidate))throw Error('publication_retention_ambiguous');body=candidate;}}}
   if(!body)throw Error('publication_retention_missing');const evidence=decode(body),proof=evidenceProof(evidence,hash(body));if(!proof||evidence.binding.attemptId!==dep.activeAttemptId||row&&row.owner_key!==proof.attempt.owner_key)throw Error('publication_retention_proof');return evidence;
  }
  function stage(raw:{owner:VerificationOwner;evaluations:readonly RecipeEvaluation[]},retained=false){
