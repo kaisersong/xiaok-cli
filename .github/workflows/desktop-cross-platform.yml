@@ -250,6 +250,8 @@ jobs:
           node scripts/prepare-broker-runtime.mjs --all
           npm test -- --run tests/main/broker-node-runtime.test.ts tests/main/broker-runtime-owner.test.ts tests/main/broker-runtime-packaging.test.ts
 
+      - uses: ./.github/actions/room-activity
+
       - name: Build renderer
         run: cd desktop && npm run build:renderer
 
