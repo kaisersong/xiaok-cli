@@ -82,6 +82,12 @@ export const GOAL_SOURCE_SCHEMA = Object.freeze([
   },
   {
     "type": "index",
+    "name": "sqlite_autoindex_goal_task_read_sources_1",
+    "tbl_name": "goal_task_read_sources",
+    "sql": null
+  },
+  {
+    "type": "index",
     "name": "sqlite_autoindex_goal_thread_context_tasks_1",
     "tbl_name": "goal_thread_context_tasks",
     "sql": null
@@ -112,8 +118,20 @@ export const GOAL_SOURCE_SCHEMA = Object.freeze([
   },
   {
     "type": "index",
+    "name": "sqlite_autoindex_goal_turn_read_sources_1",
+    "tbl_name": "goal_turn_read_sources",
+    "sql": null
+  },
+  {
+    "type": "index",
     "name": "sqlite_autoindex_goal_turns_1",
     "tbl_name": "goal_turns",
+    "sql": null
+  },
+  {
+    "type": "index",
+    "name": "sqlite_autoindex_goal_user_input_sources_1",
+    "tbl_name": "goal_user_input_sources",
     "sql": null
   },
   {
@@ -154,6 +172,12 @@ export const GOAL_SOURCE_SCHEMA = Object.freeze([
   },
   {
     "type": "table",
+    "name": "goal_task_read_sources",
+    "tbl_name": "goal_task_read_sources",
+    "sql": "CREATE TABLE goal_task_read_sources ( task_id text primary key, source_epoch text not null, scope_hash text not null, policy_version integer not null )"
+  },
+  {
+    "type": "table",
     "name": "goal_thread_context_tasks",
     "tbl_name": "goal_thread_context_tasks",
     "sql": "CREATE TABLE goal_thread_context_tasks ( context_id text primary key, goal_id text not null, thread_id text not null, task_id text not null unique, ordinal integer not null, recorded_at integer not null )"
@@ -166,9 +190,21 @@ export const GOAL_SOURCE_SCHEMA = Object.freeze([
   },
   {
     "type": "table",
+    "name": "goal_turn_read_sources",
+    "tbl_name": "goal_turn_read_sources",
+    "sql": "CREATE TABLE goal_turn_read_sources ( goal_id text not null, epoch integer not null, turn_id text not null, task_id text not null, source_epoch text not null, snapshot_hash text not null, policy_version integer not null, primary key(goal_id, epoch, turn_id) )"
+  },
+  {
+    "type": "table",
     "name": "goal_turns",
     "tbl_name": "goal_turns",
     "sql": "CREATE TABLE goal_turns ( goal_id text not null, epoch integer not null, turn_id text not null, turn_json text not null, recorded_at integer not null, primary key(goal_id, epoch, turn_id) )"
+  },
+  {
+    "type": "table",
+    "name": "goal_user_input_sources",
+    "tbl_name": "goal_user_input_sources",
+    "sql": "CREATE TABLE goal_user_input_sources ( goal_id text not null, epoch integer not null, content_hash text not null, policy_version integer not null, primary key(goal_id, epoch) )"
   },
   {
     "type": "table",
