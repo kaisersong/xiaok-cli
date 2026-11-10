@@ -38,6 +38,13 @@ function shortPath(path:string):string{return path.length<=160?path:`${path.slic
 function registryFull(path:string,size:bigint):never{fail(`identity: registry is full; limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${size} bytes. Registry: ${path}. 先备份，再用编辑器打开该文件删除不再使用的项目条目。`);}
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function decimal(value:unknown):value is string{return typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value)&&value.length<=20&&BigInt(value)<=U64;}
+/**
+ * Registry directories this process has already made durable for one exact registry file.
+ * Keyed by root; the value binds registry path, file identity (dev/ino/size/mtime) and content hash.
+ * Set only after a successful directory barrier; any change, write or error drops it.
+ */
+const durableRegistryTrees=new Map<string,string>();
+function registryDurabilityKey(path:string):string{const stat=lstatSync(path,{bigint:true});return JSON.stringify([path,String(stat.dev),String(stat.ino),String(stat.size),String(stat.mtimeNs),createHash('sha256').update(readFileSync(path)).digest('hex')]);}
 function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=readOwnAtomicErrorCode(error);if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
 function shape(value:unknown,keys:string[]):asserts value is Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==keys.sort().join(','))fail('schema');}
 function directory(path:string):Readonly<ProfileSourceDirectory>{
@@ -153,7 +160,12 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
   sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row,undefined,true);}catch(error){if(typeof readOwnAtomicErrorCode(error)==='string')return true;throw error;}});
   // Unchanged observations preserve bytes and generation after the stale sweep.
-  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
+  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){
+   // Unchanged bytes this process already made durable need no second directory barrier.
+   const durable=registryDurabilityKey(loc.path);
+   if(durableRegistryTrees.get(loc.root)!==durable){durableRegistryTrees.delete(loc.root);syncOrdinaryRegistryTree(loc.root);durableRegistryTrees.set(loc.root,durable);}
+   loc.assertCurrent();return;}
+  durableRegistryTrees.delete(loc.root);
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
   const existingSources=sources;
   sources=[...sources.filter(row=>row!==prior),merged];
@@ -172,5 +184,7 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();
- }finally{loc.assertCurrent();release();}
+  // Remember only the bytes this call wrote and synced; a concurrent replacement is not ours to vouch for.
+  const written=registryDurabilityKey(loc.path);if(written.endsWith(JSON.stringify(createHash('sha256').update(bytes).digest('hex'))+']'))durableRegistryTrees.set(loc.root,written);
+ }catch(error){durableRegistryTrees.delete(loc.root);throw error;}finally{loc.assertCurrent();release();}
 }
