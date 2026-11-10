@@ -30,16 +30,34 @@ jobs:
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
-      - name: Install the locked Electron runtime
+      - name: Diagnose Electron install on matrix Node (non-fatal)
+        working-directory: desktop
+        shell: bash
+        continue-on-error: true
+        run: |
+          node -v
+          node node_modules/electron/install.js; echo "install.js exit=$?"
+          ls -la node_modules/electron/ || true
+          ls node_modules/electron/dist 2>/dev/null | head -20 || echo "no dist dir"
+      - name: Switch to Node 22.14.0 for the Electron binary install
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Install the locked Electron runtime (Node 22, binary is Node-independent)
         working-directory: desktop
         shell: bash
         run: |
-          for i in 1 2 3; do
-            node node_modules/electron/install.js && test -f node_modules/electron/path.txt && break
-            echo "electron install attempt $i did not produce path.txt; retrying"; rm -rf node_modules/electron/dist; sleep 5
-          done
+          node -v
+          test -f node_modules/electron/path.txt || { rm -rf node_modules/electron/dist; node node_modules/electron/install.js; }
           test -f node_modules/electron/path.txt
           echo "electron path: $(cat node_modules/electron/path.txt)"
+      - name: Switch back to matrix Node for compile and tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Confirm matrix Node
+        shell: bash
+        run: node -v
       - name: Compile the real main graph
         working-directory: desktop
         shell: bash
