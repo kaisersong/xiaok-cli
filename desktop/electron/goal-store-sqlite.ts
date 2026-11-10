@@ -1,3 +1,8 @@
+import {effectSnapshotHash,digest} from './context-continuity/store.js';
+import {InProcessTaskRuntimeHost,getTaskPreparedSourceReceipt,readOriginalTaskCommittedContinuitySnapshot} from '../../src/runtime/task-host/task-runtime-host.js';
+import type {FileTaskSnapshotStore} from '../../src/runtime/task-host/snapshot-store.js';
+import type {MaterialRegistry} from '../../src/runtime/task-host/material-registry.js';
+import type {TaskSnapshot} from '../../src/runtime/task-host/types.js';
 import {createKnownDirectoryWriterFence} from '../../src/runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinarySQLiteWriter } from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import { captureGoalCommitForStore } from '../../src/runtime/goal/completion-projection.js';
@@ -44,6 +49,7 @@ export interface GoalContextTask {
 const knownSqliteGoalWriters=new WeakMap<object,{fence?:ReturnType<typeof createKnownDirectoryWriterFence>}>();
 export class SqliteGoalStore implements GoalStore {
   private readonly db: DatabaseSync;
+  #continuityOwner?:InProcessTaskRuntimeHost;#continuityStore?:FileTaskSnapshotStore;
 
   constructor(dbPath: string) {
     assertOrdinarySourceWriterRoute();
@@ -70,11 +76,65 @@ export class SqliteGoalStore implements GoalStore {
     this.db.close();
   }
 
+  bindContinuitySource(host:InProcessTaskRuntimeHost,store:FileTaskSnapshotStore,materials:MaterialRegistry):void{
+    if(this.#continuityOwner)throw Error('goal_source_already_bound');InProcessTaskRuntimeHost.prototype.assertInputOwnerDependencies.call(host,store,materials);this.#continuityOwner=host;this.#continuityStore=store;
+  }
+  /** Missing pointer is distinct from a damaged or missing pointed-to Goal. */
+  readDisclosureDocument(sessionId: string): GoalDocument | null {
+    const pointer = this.db.prepare('select current_goal_id from goal_sessions where session_id = ?').get(sessionId) as GoalPointerRow | undefined;
+    if (!pointer) return null;
+    const document = this.loadGoalById(pointer.current_goal_id);
+    if (!document || document.state.sessionId !== sessionId || document.state.goalId !== pointer.current_goal_id) throw new Error('goal_content_unavailable');
+    return document;
+  }
+
+  hasUserInputSource(state: GoalState): boolean {
+    const row = this.db.prepare('select content_hash, policy_version from goal_user_input_sources where goal_id=? and epoch=?').get(state.goalId, state.epoch);
+    return row?.policy_version === 1 && row.content_hash === goalUserInputHash(state);
+  }
+
+  readTaskSource(taskId: string): { sourceEpoch: string; scopeHash: string } | null {
+    const row = this.db.prepare('select source_epoch,scope_hash,policy_version from goal_task_read_sources where task_id=?').get(taskId);
+    return row?.policy_version === 1 ? { sourceEpoch: String(row.source_epoch), scopeHash: String(row.scope_hash) } : null;
+  }
+
+  recordTurnSource(taskId: string, snapshot: TaskSnapshot): void {
+    if(!this.#continuityOwner)throw Error('goal_content_unavailable');const actual=readOriginalTaskCommittedContinuitySnapshot(this.#continuityOwner,this.#continuityStore,taskId);if(!actual||effectSnapshotHash(actual)!==effectSnapshotHash(snapshot))throw Error('goal_content_unavailable');
+    const binding = this.getTaskBinding(taskId), source = this.readTaskSource(taskId), scope = snapshot.executionScope;
+    if (!binding || !source || snapshot.taskId !== taskId || source.sourceEpoch !== snapshot.sessionId
+      || snapshot.context?.threadId !== binding.threadId || scope?.kind !== 'goal_turn'
+      || scope.goalId !== binding.goalId || scope.epoch !== binding.epoch || scope.goalTurnId !== binding.goalTurnId
+      || scope.threadId !== binding.threadId || scope.origin !== binding.origin || source.scopeHash !== goalBindingHash(binding)
+      || !['completed', 'failed', 'cancelled'].includes(snapshot.status)) throw new Error('goal_content_unavailable');
+    const hash = effectSnapshotHash(snapshot), previous = this.readTurnSource(binding.goalId, binding.epoch, binding.goalTurnId);
+    if (previous && (previous.taskId !== taskId || previous.sourceEpoch !== snapshot.sessionId || previous.snapshotHash !== hash)) throw new Error('goal_content_unavailable');
+    this.db.prepare('insert or ignore into goal_turn_read_sources values(?,?,?,?,?,?,1)').run(binding.goalId, binding.epoch, binding.goalTurnId, taskId, snapshot.sessionId, hash);
+  }
+
+  readTurnSource(goalId: string, epoch: number, turnId: string): { taskId: string; sourceEpoch: string; snapshotHash: string } | null {
+    const row = this.db.prepare('select task_id,source_epoch,snapshot_hash,policy_version from goal_turn_read_sources where goal_id=? and epoch=? and turn_id=?').get(goalId, epoch, turnId);
+    return row?.policy_version === 1 ? { taskId: String(row.task_id), sourceEpoch: String(row.source_epoch), snapshotHash: String(row.snapshot_hash) } : null;
+  }
+
   async load(sessionId: string): Promise<GoalDocument | null> {
     const pointer = this.db.prepare(
       'select current_goal_id from goal_sessions where session_id = ?',
     ).get(sessionId) as GoalPointerRow | undefined;
     return pointer ? this.loadGoalById(pointer.current_goal_id) : null;
+  }
+
+  loadGoalStateByThread(sessionId: string): GoalState | null {
+    const row = this.db.prepare(`
+      select p.current_goal_id, g.session_id as goal_session_id, g.state_json, g.revision, g.epoch
+      from goal_sessions p left join goals g on g.goal_id = p.current_goal_id
+      where p.session_id = ?
+    `).get(sessionId) as {current_goal_id:string;goal_session_id:string|null;state_json:string|null;revision:number|null;epoch:number|null}|undefined;
+    if (!row) return null;
+    if (row.state_json === null || row.goal_session_id !== sessionId) throw Error('goal_current_state_unavailable');
+    const state = parseGoalState(row.state_json);
+    if (state.goalId !== row.current_goal_id || state.sessionId !== sessionId || state.revision !== row.revision || state.epoch !== row.epoch)
+      throw Error('goal_current_state_identity');
+    return state;
   }
 
   loadGoalById(goalId: string): GoalDocument | null {
@@ -229,6 +289,10 @@ export class SqliteGoalStore implements GoalStore {
         }
       }
 
+      if(this.#continuityOwner&&input.events.some(event=>event.actor==='user'&&['created','replaced'].includes(event.type)&&event.goalId===input.next.goalId&&event.revision===input.next.revision)){
+        const contentHash=goalUserInputHash(input.next),previous=this.db.prepare('select content_hash,policy_version from goal_user_input_sources where goal_id=? and epoch=?').get(input.next.goalId,input.next.epoch);
+        if(previous&&(previous.content_hash!==contentHash||previous.policy_version!==1))throw Error('goal_content_unavailable');this.db.prepare('insert or ignore into goal_user_input_sources values(?,?,?,1)').run(input.next.goalId,input.next.epoch,contentHash);
+      }
       const insertEvent = this.db.prepare(`
         insert into goal_events(event_id, session_id, goal_id, revision, event_json, recorded_at)
         values (?, ?, ?, ?, ?, ?)
@@ -298,6 +362,12 @@ export class SqliteGoalStore implements GoalStore {
         randomUUID(), record.goalId, record.epoch, record.goalTurnId, record.threadId,
         record.taskId, record.origin, record.ordinal, record.attachedAt,
       );
+      if(this.#continuityOwner){
+        const receipt=InProcessTaskRuntimeHost.prototype.getPreparedSourceReceipt.call(this.#continuityOwner,record.taskId);if(!receipt)throw Error('goal_content_unavailable');
+        const prepared=getTaskPreparedSourceReceipt(receipt),scope=prepared.executionScope;
+        if(prepared.taskId!==record.taskId||prepared.threadId!==record.threadId||scope?.kind!=='goal_turn'||scope.goalId!==record.goalId||scope.epoch!==record.epoch||scope.goalTurnId!==record.goalTurnId||scope.origin!==record.origin)throw Error('goal_content_unavailable');
+        this.db.prepare('insert into goal_task_read_sources values(?,?,?,1)').run(record.taskId,prepared.sessionId,goalBindingHash(record));
+      }
       return record;
     });
   }
@@ -424,6 +494,19 @@ export class SqliteGoalStore implements GoalStore {
 
   private applySchema(): void {
     this.db.exec(`
+      create table if not exists goal_user_input_sources (
+        goal_id text not null, epoch integer not null, content_hash text not null, policy_version integer not null,
+        primary key(goal_id, epoch)
+      );
+      create table if not exists goal_task_read_sources (
+        task_id text primary key, source_epoch text not null, scope_hash text not null, policy_version integer not null
+      );
+      create table if not exists goal_turn_read_sources (
+        goal_id text not null, epoch integer not null, turn_id text not null, task_id text not null,
+        source_epoch text not null, snapshot_hash text not null, policy_version integer not null,
+        primary key(goal_id, epoch, turn_id)
+      );
+
       create table if not exists goal_sessions (
         session_id text primary key,
         current_goal_id text not null,
@@ -529,4 +612,12 @@ function parseGoalState(raw: string): GoalState {
 
 function stale(expected: number | null, actual: number | null): Error {
   return new Error(`stale goal revision: expected ${expected}, found ${actual}`);
+}
+
+export function goalUserInputHash(state: GoalState): string {
+  return digest([1, state.sessionId, state.goalId, state.epoch, state.objective, state.completionCriterion ?? null, state.expectedEvidenceKinds]);
+}
+
+export function goalBindingHash(binding: Omit<GoalTaskBinding, 'ordinal' | 'attachedAt'>): string {
+  return digest([1, binding.taskId, binding.goalId, binding.epoch, binding.goalTurnId, binding.threadId, binding.origin]);
 }

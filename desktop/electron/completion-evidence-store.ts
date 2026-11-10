@@ -1,4 +1,6 @@
-import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
+import {assistantDerivedHash} from './assistant-derived-data.js';
+import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
+import {retainOriginalLoopDatabaseFailure,rollbackOriginalLoopDatabase,openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { validateCompletionEvidence } from '../../src/runtime/guards/completion-evidence.js';
@@ -65,12 +67,21 @@ export class CompletionEvidenceValidationError extends Error {
 }
 
 export class CompletionEvidenceStore {
+  private assistantDerivedVisibility?:AssistantDerivedVisibility;
+  bindAssistantDerivedVisibility(value:AssistantDerivedVisibility){if(this.assistantDerivedVisibility&&this.assistantDerivedVisibility!==value)throw Error('assistant_derived_owner_conflict');this.assistantDerivedVisibility=value;}
+  private assistantEvidenceVisible(kind:string,id:string){try{if(this.assistantDerivedVisibility)return this.assistantDerivedVisibility.isEvidenceVisible({ownerKind:kind,ownerId:id});if(kind!=='loop_run')return true;const table=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='assistant_derived_run_markers'").get();return !table||!this.db.prepare('SELECT 1 FROM assistant_derived_run_markers WHERE run_id=?').get(id);}catch{return false;}}
+  captureAssistantMemoryEvidenceFacts(runId:string,ids:readonly string[]){
+   const read=()=>{if(!ids.length||ids.length>100||new Set(ids).size!==ids.length)return undefined;const all=this.db.prepare("SELECT * FROM completion_evidence WHERE owner_kind='loop_run' AND owner_id=? AND orphaned_at IS NULL ORDER BY id LIMIT 101").all(runId);if(all.length>100)return undefined;const selected=all.filter(row=>ids.includes(String(row.id)));if(selected.length!==ids.length)return undefined;
+    const record=this.db.prepare("SELECT * FROM completion_records WHERE owner_kind='loop_run' AND owner_id=? AND status='completed' AND ok=1 ORDER BY created_at DESC,id DESC LIMIT 1").get(runId);if(!record)return undefined;const committed=JSON.parse(String(record.evidence_ids_json)) as unknown;if(!Array.isArray(committed)||ids.some(id=>!committed.includes(id)))return undefined;return {selected,record};};
+   const facts=read();if(!facts)return undefined;const revision=assistantDerivedHash(facts);return {revision,isCurrent:()=>{try{const value=read();return !!value&&assistantDerivedHash(value)===revision;}catch{return false;}}};
+  }
+
   private readonly connection:LoopDatabaseLease;
   private get db():DatabaseSync{return this.connection.database;}
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try{this.applySchema();this.connection.recordComponent('completion');}catch(error){this.connection.close();throw error;}
+    try{this.applySchema();this.connection.recordComponent('completion');}catch(error){try{this.connection.close();}catch{/* Owner-held cleanup must not replace the construction error. */}throw error;}
   }
 
   close(): void {
@@ -83,7 +94,7 @@ export class CompletionEvidenceStore {
     const expectedKindsJson = JSON.stringify(input.expectedKinds);
     const metadataJson = JSON.stringify(input.metadata ?? {});
 
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_expectations (
         id, schema_version, owner_kind, owner_id, expected_kinds_json, source, confidence,
         metadata_json, created_at, updated_at
@@ -97,7 +108,7 @@ export class CompletionEvidenceStore {
         confidence = excluded.confidence,
         metadata_json = excluded.metadata_json,
         updated_at = excluded.updated_at
-    `).run({
+    `, {
       id,
       ownerKind: input.ownerKind,
       ownerId: input.ownerId,
@@ -121,7 +132,7 @@ export class CompletionEvidenceStore {
     const id = input.id ?? randomUUID();
     const metadataJson = JSON.stringify(input.metadata ?? {});
 
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_evidence (
         id, schema_version, owner_kind, owner_id, kind, summary, uri, metadata_json,
         created_at, orphaned_at
@@ -129,7 +140,7 @@ export class CompletionEvidenceStore {
         @id, 1, @ownerKind, @ownerId, @kind, @summary, @uri, @metadataJson,
         @createdAt, null
       )
-    `).run({
+    `, {
       id,
       ownerKind: input.ownerKind,
       ownerId: input.ownerId,
@@ -156,6 +167,7 @@ export class CompletionEvidenceStore {
   }
 
   listEvidenceForOwner(ownerKind: CompletionOwnerKind, ownerId: string): StoredCompletionEvidenceRecord[] {
+    if(!this.assistantEvidenceVisible(ownerKind,ownerId))return [];
     const rows = typedRows<CompletionEvidenceRow>(this.db.prepare(`
       select * from completion_evidence
       where owner_kind = ? and owner_id = ? and orphaned_at is null
@@ -184,15 +196,15 @@ export class CompletionEvidenceStore {
       select * from completion_records${where}
       order by created_at asc, id asc
     `).all(...params));
-    return rows.map(row => this.completionRecordRowToRecord(row));
+    return rows.filter(row=>this.assistantEvidenceVisible(row.owner_kind,row.owner_id)).map(row => this.completionRecordRowToRecord(row));
   }
 
   markEvidenceOrphaned(evidenceId: string, now: number): boolean {
-    const result = this.db.prepare(`
+    const result = this.connection.runWrite(`
       update completion_evidence
       set orphaned_at = ?
       where id = ?
-    `).run(now, evidenceId);
+    `, now, evidenceId);
     return result.changes === 1;
   }
 
@@ -232,7 +244,7 @@ export class CompletionEvidenceStore {
   }
 
   private insertCompletionRecord(record: CompletionValidationRecord): CompletionValidationRecord {
-    this.db.prepare(`
+    this.connection.runWrite(`
       insert into completion_records (
         id, owner_kind, owner_id, status, ok, failure_kind, message,
         expectation_id, evidence_ids_json, created_at
@@ -240,7 +252,7 @@ export class CompletionEvidenceStore {
         @id, @ownerKind, @ownerId, @status, @ok, @failureKind, @message,
         @expectationId, @evidenceIdsJson, @createdAt
       )
-    `).run({
+    `, {
       id: record.id,
       ownerKind: record.ownerKind,
       ownerId: record.ownerId,
@@ -264,7 +276,7 @@ export class CompletionEvidenceStore {
   }
 
   private applySchema(): void {
-    this.db.exec(`
+    this.connection.execWrite(`
       create table if not exists completion_expectations (
         id text primary key,
         schema_version integer not null,
@@ -317,14 +329,16 @@ export class CompletionEvidenceStore {
   }
 
   private transaction<T>(fn: () => T): T {
-    this.db.exec('begin immediate');
+    const rollbackDatabase = this.db;
+    this.connection.execWrite('begin immediate');
     try {
       const result = fn();
-      this.db.exec('commit');
+      this.connection.execWrite('commit');
       return result;
     } catch (error) {
+      retainOriginalLoopDatabaseFailure(this.connection,rollbackDatabase,error);
       try {
-        if(this.db.isTransaction)this.db.exec('rollback');
+        rollbackOriginalLoopDatabase(this.connection,rollbackDatabase);
       } catch { /* ignore rollback errors */ }
       throw error;
     }

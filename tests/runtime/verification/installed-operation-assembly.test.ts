@@ -16,6 +16,21 @@ const os=vi.hoisted(()=>({lifetime:undefined as any,engine:undefined as any,qual
 vi.mock('../../../src/runtime/verification/installed-controller-lifetime.js',()=>({createInstalledControllerLifetime:()=>os.lifetime,assertInstalledControllerLifetime(value:unknown){if(value!==os.lifetime)throw Error('fixture lifetime identity');os.lifetime.assertCurrent();}}));
 vi.mock('../../../src/runtime/verification/installed-identity.js',async original=>({...await original<any>(),assertRootProtectedFile(){},assertInstalledControllerIdentity(){}}));
 vi.mock('../../../src/runtime/verification/migration-markers.js',async original=>({...await original<any>(),assertServiceProtectedMarkerPath(){}}));
+// The installed controller now constructs this journal eagerly. Keep its real
+// implementation and authorization function; only its fixed OS location joins
+// the same private lifetime/database already used by the original fixture.
+vi.mock('../../../src/runtime/verification/installed-migration-publisher.js',async original=>{
+ const actual=await original<typeof import('../../../src/runtime/verification/installed-migration-publisher.js')>();
+ const {createMigrationMarkerJournal}=await import('../../../src/runtime/verification/migration-marker-journal.js');
+ return {...actual,createInstalledMigrationMarkerPublisher(input:Parameters<typeof actual.createInstalledMigrationMarkerPublisher>[0]){
+  const lifetime=os.lifetime;
+  const assertCurrent=()=>{if(!lifetime||input.database!==lifetime.database)throw Error('fixture_migration_journal_identity');lifetime.assertCurrent();};
+  assertCurrent();
+  // Actual composition.close -> family.close -> closeMainRootFamily retains the
+  // original journal SDK custody before the installed lifetime closes its DB.
+  return createMigrationMarkerJournal({root:join(lifetime.base,'migrations'),database:input.database,authorityId:lifetime.manifest.authorityId,assertCurrent,assertAuthorized:input.assertAuthorized});
+ }};
+});
 vi.mock('../../../src/runtime/verification/root-broker-client.js',()=>({createInstalledRootBrokerClient:()=>os.broker,assertInstalledRootBrokerClient(value:unknown){if(value!==os.broker)throw Error('fixture broker identity');}}));
 vi.mock('../../../src/runtime/verification/installed-engine.js',()=>({initializeInstalledMacEngine:async()=>os.engine,assertInstalledMacEngineHandle(value:unknown){if(value!==os.engine)throw Error('fixture engine identity');},assertInstalledEngineDatabase(value:unknown,db:unknown){if(value!==os.engine||db!==os.lifetime.database)throw Error('fixture engine database');}}));
 vi.mock('../../../src/runtime/verification/installed-engine-qualification.js',()=>({createInstalledEngineQualification:()=>os.qualification,assertInstalledEngineQualification(value:unknown,engine:unknown){if(value!==os.qualification||engine!==os.engine)throw Error('fixture qualification');},assertInstalledEngineQualificationIdentity(value:unknown,engine:unknown,db:unknown){if(value!==os.qualification||engine!==os.engine||db!==os.lifetime.database)throw Error('fixture qualification identity');}}));

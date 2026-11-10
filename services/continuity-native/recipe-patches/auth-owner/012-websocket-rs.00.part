@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server-transport/src/transport/websocket.rs b/codex-rs/app-server-transport/src/transport/websocket.rs
+--- a/codex-rs/app-server-transport/src/transport/websocket.rs
++++ b/codex-rs/app-server-transport/src/transport/websocket.rs
+@@ -314,6 +314,8 @@
+                 let Some(queued_message) = queued_message else {
+                     break;
+                 };
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                if queued_message.private_auth.is_some() { break; }
+                 let Some(json) = serialize_outgoing_message(queued_message.message) else {
+                     continue;
+                 };

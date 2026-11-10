@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "sourceSha256": "d251c866c811195e586f4f58c77f1aaf35dd23a7d9920bdde90959fecdbd0011",
+  "journal": {
+    "revision": 1,
+    "jobs": [
+      {
+        "id": "p",
+        "projectId": "p",
+        "projectName": "Project",
+        "goal": "g",
+        "requirements": "",
+        "planningGuidance": "",
+        "poAgent": "po",
+        "members": [
+          "w"
+        ],
+        "startPolicy": "plan_only",
+        "ownerBinding": {
+          "protocol": "ordinary_initial_plan_v1",
+          "projectId": "p",
+          "profileId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "workspaceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "canonicalCreateOperationId": "main-create-pre-reader",
+          "canonicalCreateDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "enqueueKey": "initial-plan:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "planGeneration": 1
+        },
+        "schemaVersion": 2,
+        "enqueueKey": "initial-plan:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "payloadHash": "7730bfcdaaf1f705340a0c13f91d43c0e157cd7a315ede4c0376d1e08c4a337c",
+        "planRunId": "3e487759-c681-4ef4-b55f-26298dbdd52d",
+        "status": "pending",
+        "attempts": 0,
+        "maxAttempts": 3,
+        "nextAttemptAt": 1,
+        "createdAt": 1,
+        "updatedAt": 1
+      }
+    ]
+  },
+  "input": {
+    "projectId": "p",
+    "projectName": "Project",
+    "goal": "g",
+    "requirements": "",
+    "planningGuidance": "",
+    "poAgent": "po",
+    "members": [
+      "w"
+    ],
+    "startPolicy": "plan_only",
+    "ownerBinding": {
+      "protocol": "ordinary_initial_plan_v1",
+      "projectId": "p",
+      "profileId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "workspaceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "canonicalCreateOperationId": "main-create-pre-reader",
+      "canonicalCreateDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "enqueueKey": "initial-plan:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "planGeneration": 1
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "previousQualification": {
+    "scope": "historical 51-file File Vault/config slice only",
+    "record": "native-auth-stdout-patch-reproduction-v1/previous-auth-owner.json",
+    "consensus": "native-auth-vault-implementation-main-review-v2/consensus.json",
+    "officialRecipe": {
+      "verification": "native-auth-official-recipe-vault-current-v3-verification.json",
+      "artifact": "native-auth-official-recipe-vault-current-v3-artifact.json",
+      "binarySHA256": "d657d1df21d6b8b74c727f63154366a086ef0c7fc4e97f8dd4f5831911d38ec1",
+      "nativeTests": {
+        "pass": 52,
+        "fail": 0,
+        "skip": 0
+      },
+      "scope": "exact 51-file File Vault candidate only; no final stdout/profile/worker/Harness qualification"
+    }
+  },
+  "sourceRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "reproductionRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/stdout-v5c-patch-baseline-mncoceln/codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+  "exactPatchCheckAndApplyMatched": true,
+  "finalStdoutCredentialGateQualified": true,
+  "implementationReview": {
+    "status": "CONSENSUS APPROVE (Codex/Kimi/Zcode independently, tests not run by reviewers)",
+    "scope": "original-native-auth-final-stdout-implementation-v4",
+    "sha256": "842e85e01466c78a8dd6e9d29330abc9061da5afb5c0531c03167a69ccfe9e1c",
+    "consensus": "native-auth-final-stdout-implementation-review-v4/consensus.json",
+    "qualification": "84-file freeze: final stdout + v5 ingress fix + bounded oversize-id echo + per-line raw frame budget; not real-user OAuth/worker stdin lease/full Harness/whole v10",
+    "priorBlockedScopesRetained": [
+      "original-native-auth-final-stdout-implementation-v1",
+      "original-native-auth-final-stdout-implementation-v2",
+      "original-native-auth-final-stdout-implementation-v3"
+    ]
+  },
+  "officialRecipe": {
+    "status": "passed end-to-end on this exact source/tests/patch",
+    "buildRoot": "/Users/kk/projects/.worktrees/continuity-native-auth-20261018-tnli8jdh/xiaok-auth-owner-build-mFBVFF",
+    "recipeSHA256": "0c82a7666562ccaed1187f929090234f0ff1ead7822e4e1cd2831589d7ef88aa",
+    "verification": "native-auth-official-recipe-stdout-v5-v6-process.json",
+    "artifact": "xiaok-auth-owner-build-mFBVFF/artifact.json",
+    "binarySHA256": "5319f2e03161415f75a88ccf251fc43fbc9a86c62481e2f8430f6b831cd54c6c",
+    "testsSHA256": "68db274d1d2af63d87a492ba505ec3d1e5b34a891d617eaf3cfd595f28d7f4e9",
+    "nativeTests": {
+      "pass": 61,
+      "fail": 0,
+      "skip": 0
+    },
+    "scope": "final stdout candidate AuthOwner slice only; no real-user OAuth/main-worker stdin/full-Harness/whole-v10 qualification"
+  },
+  "knownOpenFinalStdoutRed": {
+    "records": [
+      "native-auth-stdout-physical-pipe-red-v1.log",
+      "native-auth-stdout-ingress-overload-red-v1/stdout.log",
+      "native-auth-stdout-ingress-unit-red-v1/xiaok_auth_ingress.log"
+    ],
+    "status": "all recorded REDs closed by the consensus candidate (7/7 stdout + 54/54 serial + units + official recipe 61/61); retained as history, do not re-run as new RED"
+  },
+  "designReview": {
+    "base": {
+      "scope": "original-native-auth-final-stdout-design-v4",
+      "sha256": "6b01ca6bef81db4102cc0f03b90876407048c28c90f9dc97abcdca9b4ff4d07a",
+      "status": "Kimi and Zcode independently APPROVE design-to-tests-to-production only",
+      "evidence": "native-auth-final-stdout-design-main-review-v4/"
+    },
+    "ingressIncrement": {
+      "scope": "original-native-auth-final-stdout-design-v5",
+      "sha256": "1bc930438008eb2e4f808d983f400dcdcab007fce15c27f637783ff60edab79e",
+      "status": "Codex/Kimi/Zcode independently APPROVE design-to-RED-to-production only; production change now included in this patch",
+      "evidence": "native-auth-final-stdout-design-main-review-v5/"
+    },
+    "priorBlockedImplementation": {
+      "scope": "original-native-auth-final-stdout-implementation-v1",
+      "sha256": "5c52e8aa013a0046f7c199765f27a945c3b041b4146500605cfb59158e4671ea",
+      "verdict": "BLOCK (Codex P1 lower ingress Full(Request) overload bypass; Kimi reason independently overruled by all three seats)",
+      "evidence": "native-auth-final-stdout-implementation-review-v1/",
+      "thirdBlockedCandidate": {
+        "scope": "original-native-auth-final-stdout-implementation-v3",
+        "sha256": "253290a0db5c5de7caa71682babc0b606846afa335eef55eed5d8d193acb9e15",
+        "verdict": "Codex BLOCK (pre-split cumulative buffer budget; fixed by this candidate); Kimi APPROVE; Zcode APPROVE; not consensus, tickets retained",
+        "evidence": "native-auth-final-stdout-implementation-review-v3/"
+      }
+    },
+    "generatedAt": "2026-10-19T06:45:20.690044+00:00",
+    "rawReaderPerLineBudgetIncrement": {
+      "origin": "implementation review v3 Codex BLOCK finding (P2): the raw reader checked buffered.len() > MAX_FRAME before splitting lines, so two individually legal lines whose newline arrived in a later read chunk were misjudged as one over-long line and physically closed, violating the preserved fixed-error/alive-until-EOF contract and making the outcome depend on read chunking",
+      "change": "the budget is now checked per completed line (a genuinely over-1MiB line still closes physically) and only on the incomplete tail since the last newline after draining complete lines, matching the approved <=1MiB original buffer semantics; adjacent complete lines never sum into the budget",
+      "status": "presented to implementation review v4 for independent admission; not pre-approved by any design ticket"
+    }
+  }
+}

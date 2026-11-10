@@ -1,0 +1,59 @@
+import nodeTest from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {fork} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import {coordinatorFixture} from '../../continuity-sync/test/helpers/coordinator-fixture.mjs';import {sign,hash} from '../../continuity-sync/src/crypto.mjs';
+import {DatabaseSync} from 'node:sqlite';
+import {claimDeviceNamespace,assertDeviceNamespace} from '../src/device-lock.mjs';
+const test=(name,fn)=>nodeTest(name,{skip:process.platform==='win32',timeout:15000},fn);
+function setup(t){const f=coordinatorFixture(t),root=path.dirname(f.opts.stateDir),options={identity:f.identity,deviceId:'device-a',testRegistryDir:path.join(root,'device-registry')};return {f,root,options};}
+async function peer(t,options){const child=fork(fileURLToPath(new URL('./helpers/device-lock-worker.mjs',import.meta.url)),[],{execArgv:[],stdio:['ignore','ignore','ignore','ipc']});console.info('DEVICE_LOCK_CHILD_OWNED',child.pid);const messages=[],waiters=[];const exited=new Promise(resolve=>child.once('exit',resolve));child.on('message',row=>{messages.push(row);for(const wake of waiters.splice(0))wake();});const wait=async type=>{const end=Date.now()+5000;while(!messages.some(row=>Array.isArray(type)?type.includes(row.type):row.type===type)){if(Date.now()>end)throw new Error('owned child message timeout');await new Promise(resolve=>{const timer=setTimeout(resolve,20);waiters.push(()=>{clearTimeout(timer);resolve();});});}return messages.find(row=>Array.isArray(type)?type.includes(row.type):row.type===type);};t.after(async()=>{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await exited;}try{process.kill(child.pid,0);assert.fail('owned child remains live');}catch(error){assert.equal(error.code,'ESRCH');console.info('DEVICE_LOCK_CHILD_REAPED',child.pid);}});child.send({type:'open',options});return {child,exited,wait,result:await wait('open'),close:async()=>{child.send({type:'close'});await wait('closed');await exited;}};}
+test('actual independent processes cannot obtain a second owner by changing coordinator or body context',async t=>{
+ const {f,options}=setup(t),a=await peer(t,options);assert.equal(a.result.ok,true);const identity=structuredClone(f.identity);identity.coordinatorId='replacement-coordinator';identity.certificate.body.coordinatorId=identity.coordinatorId;identity.certificate.signature=sign(['xiaok/context-sync/coordinator-certificate/v1',identity.certificate.body],f.root.privateKey);const b=await peer(t,{...options,identity});assert.equal(b.result.ok,false);await b.exited;const c=await peer(t,{...options,deviceId:'independent-device'});assert.equal(c.result.ok,true);await c.close();await a.close();console.info('DEVICE_LOCK_OWNED_PIDS',JSON.stringify([a.child.pid,b.child.pid,c.child.pid]));
+});
+test('close invalidates late ACK but retains the real namespace until the original operation settles',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);let release;const gate=new Promise(resolve=>release=resolve),work=owner.run(()=>gate),check=assert.rejects(work,/device_owner_unavailable/);let closed=false;owner.close();const closing=owner.drainClosed().then(()=>closed=true);assert.equal(closed,false);const b=await peer(t,options);assert.equal(b.result.ok,false);await b.exited;release('late result must not escape');await check;await closing;const c=await peer(t,options);assert.equal(c.result.ok,true);await c.close();console.info('DEVICE_LOCK_OWNED_PIDS',JSON.stringify([b.child.pid,c.child.pid]));
+});
+test('SIGKILL of only the owned holder releases the OS lock without deleting the persistent lock file',async t=>{
+ const {options}=setup(t),a=await peer(t,options);assert.equal(a.result.ok,true);const files=fs.readdirSync(options.testRegistryDir);a.child.kill('SIGKILL');await a.exited;const b=await peer(t,options);assert.equal(b.result.ok,true);assert.deepEqual(fs.readdirSync(options.testRegistryDir),files);await b.close();console.info('DEVICE_LOCK_OWNED_PIDS',JSON.stringify([a.child.pid,b.child.pid]));
+});
+test('production identities cannot redirect the fixed registry and invalid roots create no paths',t=>{
+ const {f,root,options}=setup(t),identity=structuredClone(f.identity);identity.certificate.body.deploymentMode='self-hosted';identity.certificate.signature=sign(['xiaok/context-sync/coordinator-certificate/v1',identity.certificate.body],f.root.privateKey);assert.throws(()=>claimDeviceNamespace({...options,identity}),/device_owner_unavailable/);assert.equal(fs.existsSync(options.testRegistryDir),false);const invalid=structuredClone(f.identity);invalid.coordinatorId='unsigned';assert.throws(()=>claimDeviceNamespace({...options,identity:invalid}));assert.equal(fs.existsSync(options.testRegistryDir),false);const target=path.join(root,'real-registry');fs.mkdirSync(target,{mode:0o700});fs.symlinkSync(target,options.testRegistryDir);assert.throws(()=>claimDeviceNamespace(options));assert.deepEqual(fs.readdirSync(target),[]);
+});
+test('operation failures and replaced lock paths deny later work without granting a guard kind',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);assert.notEqual(owner.kind,'os-protected');assert.throws(()=>assertDeviceNamespace(owner),/device_owner_unavailable/);assert.doesNotThrow(()=>assertDeviceNamespace(owner,{testOnly:true}));assert.throws(()=>assertDeviceNamespace({kind:owner.kind},{testOnly:true}),/device_owner_unavailable/);await assert.rejects(owner.run(()=>{throw new Error('PRIVATE_CANARY');}),error=>error.message==='device_owner_unavailable');await assert.rejects(owner.run(()=> 'must not execute'),/device_owner_unavailable/);owner.close();await owner.drainClosed();const next=claimDeviceNamespace(options),key=hash(['xiaok/context-sync/device-owner/v1',options.identity.rootKeyId,options.identity.syncGroupId,options.deviceId]),lock=path.join(options.testRegistryDir,key+'.sqlite');fs.renameSync(lock,lock+'.old');fs.writeFileSync(lock,'',{mode:0o600});await assert.rejects(next.run(()=> 'must not execute'),/device_owner_unavailable/);next.close();await next.drainClosed();
+});
+test('the original private lease brand checks exact deployment mode and full device/coordinator binding',async t=>{
+ const {f,options}=setup(t),owner=claimDeviceNamespace(options);t.after(async()=>{owner.close();await owner.drainClosed();});
+ assert.doesNotThrow(()=>assertDeviceNamespace(owner,{testOnly:true,exactMode:'test',identityHash:hash(f.identity),deviceId:options.deviceId}));
+ for(const extra of [{exactMode:'self-hosted'},{identityHash:'0'.repeat(64)},{deviceId:'another'}])assert.throws(()=>assertDeviceNamespace(owner,{testOnly:true,...extra}),/device_owner_unavailable/);
+});
+
+test('synchronous close reentry cannot release ownership before its original returned promise exits',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);let release;const gate=new Promise(resolve=>release=resolve);const work=owner.run(()=>{owner.close();return gate;}),denied=assert.rejects(work,/device_owner_unavailable/);const b=await peer(t,options);assert.equal(b.result.ok,false);await b.exited;release('late');await denied;await owner.drainClosed();const c=claimDeviceNamespace(options);c.close();await c.drainClosed();
+});
+test('the actual SQLite transaction must remain active even when the connection can still query',async t=>{
+ const {options}=setup(t),exec=DatabaseSync.prototype.exec;let actual;DatabaseSync.prototype.exec=function(sql){const result=exec.call(this,sql);if(sql.includes('BEGIN EXCLUSIVE'))actual=this;return result;};let owner;try{owner=claimDeviceNamespace(options);}finally{DatabaseSync.prototype.exec=exec;}assert.equal(actual.isTransaction,true);actual.exec('ROLLBACK');assert.equal(actual.prepare('SELECT 1 AS ok').get().ok,1);assert.equal(actual.isTransaction,false);await assert.rejects(owner.run(()=> 'must not run'),/device_owner_unavailable/);owner.close();await owner.drainClosed();
+});
+test('losing the fixed registry never recreates it and a failed identity check remains poisoned',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options),moved=options.testRegistryDir+'.moved';fs.renameSync(options.testRegistryDir,moved);await assert.rejects(owner.run(()=> 'must not run'),/device_owner_unavailable/);assert.equal(fs.existsSync(options.testRegistryDir),false);fs.renameSync(moved,options.testRegistryDir);await assert.rejects(owner.run(()=> 'must remain poisoned'),/device_owner_unavailable/);owner.close();await owner.drainClosed();
+});
+
+test('reentrant drain is rejected rather than waiting on its own operation',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);await assert.rejects(owner.run(async()=>{owner.close();await owner.drainClosed();}),/device_owner_unavailable/);await owner.drainClosed();const next=claimDeviceNamespace(options);next.close();await next.drainClosed();
+});
+test('an outer timeout does not end the original operation or release its namespace',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);let release;const gate=new Promise(resolve=>release=resolve),work=owner.run(()=>gate),denied=assert.rejects(work,/device_owner_unavailable/);let timer;await Promise.race([work,new Promise(resolve=>{timer=setTimeout(resolve,10);})]);clearTimeout(timer);owner.close();const other=await peer(t,options);assert.equal(other.result.ok,false);await other.exited;release('late after timeout');await denied;await owner.drainClosed();
+});
+
+for(const proxy of [false,true])test(`uncertain ${proxy?'proxy':'thenable'} work retains the lease until the actual process exits`,async t=>{
+ const {options}=setup(t),a=await peer(t,options);assert.equal(a.result.ok,true);a.child.send({type:'uncertain',proxy});assert.equal((await a.wait('uncertain')).denied,true);const b=await peer(t,options);assert.equal(b.result.ok,false);await b.exited;a.child.kill('SIGKILL');await a.exited;const c=await peer(t,options);assert.equal(c.result.ok,true);await c.close();console.info('DEVICE_LOCK_OWNED_PIDS',JSON.stringify([a.child.pid,b.child.pid,c.child.pid]));
+});
+
+for(const variant of ['subclass','hidden-proxy'])test(`untrusted ${variant} cannot release a namespace while its original operation remains uncertain`,async t=>{
+ const {options}=setup(t),a=await peer(t,options);assert.equal(a.result.ok,true);a.child.send({type:'uncertain',variant});await a.wait(['uncertain','released']);const b=await peer(t,options);assert.equal(b.result.ok,false);await b.exited;a.child.kill('SIGKILL');await a.exited;const c=await peer(t,options);assert.equal(c.result.ok,true);await c.close();console.info('DEVICE_LOCK_OWNED_PIDS',JSON.stringify([a.child.pid,b.child.pid,c.child.pid]));
+});
+test('the exact exported namespace check poisons a signed lease after its real path identity fails',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options),moved=options.testRegistryDir+'.moved';try{fs.renameSync(options.testRegistryDir,moved);assert.throws(()=>assertDeviceNamespace(owner,{testOnly:true}),/device_owner_unavailable/);fs.renameSync(moved,options.testRegistryDir);assert.throws(()=>assertDeviceNamespace(owner,{testOnly:true}),/device_owner_unavailable/);}finally{owner.close();await owner.drainClosed();}
+});
+
+test('a supported original native promise returns its actual result only after that operation exits',async t=>{
+ const {options}=setup(t),owner=claimDeviceNamespace(options);let release;const raw=new Promise(resolve=>release=resolve),work=owner.run(()=>raw),other=await peer(t,options);assert.equal(other.result.ok,false);await other.exited;release({committed:true,sequence:1});assert.deepEqual(await work,{committed:true,sequence:1});assertDeviceNamespace(owner,{testOnly:true});owner.close();await owner.drainClosed();const next=await peer(t,options);assert.equal(next.result.ok,true);await next.close();
+});

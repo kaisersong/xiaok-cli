@@ -1,3 +1,4 @@
+import { getModelFailure, formatModelFailure, formatModelRecoveryExhaustion } from './model-failure.js';
 import { isAbortError } from './abort-utils.js';
 import { MODEL_TEXT_REPETITION_CODE } from './model-text-repetition.js';
 import { isKimiReasoningAdmissionError, KIMI_REASONING_ADMISSION_CODE } from './kimi-reasoning-admission.js';
@@ -13,6 +14,8 @@ export interface RuntimeErrorShape {
     | 'kimi_k3_durable_resume_unsupported';
   message: string;
   retryable: boolean;
+  /** Sub-type kept after normalization so consumers can tell repetition apart from other model failures. */
+  detail?: 'model_text_repetition';
 }
 
 export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
@@ -38,19 +41,21 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   if (isKimiReasoningAdmissionError(error)) {
     return { code: 'model_failed', message: KIMI_REASONING_ADMISSION_CODE, retryable: false };
   }
+  const modelFailure = getModelFailure(error);
+  if (errorCode === 'MODEL_RECOVERY_EXHAUSTED') return { code: 'model_failed', message: formatModelRecoveryExhaustion(modelFailure), retryable: false };
+  if (modelFailure && errorCode !== 'OPENAI_PROVIDER_STREAM_ERROR' && errorCode !== MODEL_TEXT_REPETITION_CODE) {
+    return { code: 'model_failed', message: formatModelFailure(modelFailure) + (!modelFailure.retryable ? '；已停止自动重试。' : ''), retryable: modelFailure.retryable };
+  }
   const providerDiagnostic = getKimiProviderRequestDiagnostic(error);
   if (providerDiagnostic) {
     return { code: 'model_failed', message: formatKimiProviderRequestError(providerDiagnostic), retryable: providerDiagnostic.retryable };
   }
   const transportCode = typeof errorCode === 'string' ? errorCode : '';
   if (transportCode === MODEL_TEXT_REPETITION_CODE || message === MODEL_TEXT_REPETITION_CODE) {
-    return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false };
+    return { code: 'model_failed', message: MODEL_TEXT_REPETITION_CODE, retryable: false, detail: 'model_text_repetition' };
   }
   const streamFailure = getOpenAIStreamFailure(error);
   if (streamFailure) return { code: 'model_failed', ...streamFailure };
-  if (transportCode === 'MODEL_RECOVERY_EXHAUSTED') {
-    return { code: 'model_failed', message, retryable: false };
-  }
   if (
     /ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)
     || /502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(message)

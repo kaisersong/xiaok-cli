@@ -10,6 +10,8 @@ const native = vi.hoisted(() => ({
 }));
 vi.mock('electron', () => ({
   app: { getPath: () => native.appPath },
+  BrowserWindow: undefined,
+  webContents: undefined,
   clipboard: { read: native.clipboardRead, readBuffer: native.clipboardReadBuffer },
   dialog: { showSaveDialog: native.showSaveDialog }, shell: {},
 }));
@@ -37,7 +39,7 @@ describe('actual file-selection IPC registry round two', () => {
     native.clipboardRead.mockReset().mockReturnValue('');
     native.clipboardReadBuffer.mockReset().mockReturnValue(Buffer.alloc(0));
     native.showSaveDialog.mockReset().mockResolvedValue({ canceled: false, filePath: join(root, 'chosen.txt') });
-    await registerDesktopIpc(registrar, window as never, { getDataRoot: () => join(root, 'data') } as never);
+    await registerDesktopIpc(registrar, window as never, { getDataRoot: () => join(root, 'data'), getProjectPlanningTriggerOwner: () => undefined } as never);
   }, 60000);
   afterEach(async () => {
     vi.unstubAllEnvs();

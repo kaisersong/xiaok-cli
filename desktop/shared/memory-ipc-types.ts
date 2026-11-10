@@ -10,6 +10,6 @@ export interface MemoryLayerIpcMeta {
 }
 export interface MemoryLayerIpcEntry { id: string; content: string; tags?: string[]; createdAt?: string; meta?: MemoryLayerIpcMeta }
 export interface EmbeddingModelIpcEntry {
-  id: string; name: string; dims: number; size: string; languages: string; downloaded: boolean; active: boolean;
+  id: string; name: string; dims: number; size: string; languages: string; downloaded: boolean; filesPresent?:boolean; active: boolean;
   manualHint: { urls: Array<{ file: string; url: string }>; targetDir: string };
 }

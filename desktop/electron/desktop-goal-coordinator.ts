@@ -1,3 +1,5 @@
+import {ASSISTANT_GOAL_CONSENT_SCHEMA,type AssistantNoGoalGuard,type AssistantGoalConsentQuote} from '../shared/assistant-launch-contract.js';
+interface AssistantGoalConsentRecord{quote:AssistantGoalConsentQuote;stateJson:string;admission:()=>void;instruction?:string;requestDigest?:string;consumed:boolean;}
 import { createInstalledGoalApplicationClient } from '../../src/runtime/verification/installed-goal-application.js';
 import { FileGoalNativeJournal, isGoalNativeJournalId, goalNativeStateHash, type GoalNativeMutation } from '../../src/runtime/goal/native-mutation-journal.js';
 import { createGoalNativeMutationWorkflow } from '../../src/runtime/goal/native-mutation-workflow.js';
@@ -22,7 +24,7 @@ import type {
 } from '../../src/runtime/goal/types.js';
 import type { GoalToolHost } from '../../src/ai/tools/goal.js';
 import type { ToolExecutionContext } from '../../src/types.js';
-import type { TaskIdentityReservation, PersistedTaskEvent } from '../../src/runtime/task-host/task-runtime-host.js';
+import type { TaskIdentityReservation, PersistedTaskEvent, NativePersistedTaskEventReceipt, TaskSourceShutdownDrainedReceipt } from '../../src/runtime/task-host/task-runtime-host.js';
 import type { HostDeliveryRecoveryReceipt } from '../../src/runtime/task-host/delivery-types.js';
 import type {
   GoalTurnExecutionScope,
@@ -80,9 +82,20 @@ export interface DesktopGoalCoordinatorOptions {
   prepareThread?(threadId: string): Promise<void>;
   /** Fixed main-only service closure; ownerId/source strings never authorize recovery. */
   authorizeRecoveredDelivery?(input: HostDeliveryRecoveryReceipt): void;
+  /** Actual Main population verifier; no renderer flag or serialized receipt. */
+  assertNativePersistedEvent?(input:PersistedTaskEvent,receipt:NativePersistedTaskEventReceipt):void;
+  assertTaskSourceShutdownDrainedReceipt?(receipt:TaskSourceShutdownDrainedReceipt):void;
+  captureGoalRead?(threadId:string,value:DesktopGoalProjection|null):void;
+  assertGoalReadCurrent?(threadId:string,value:DesktopGoalProjection|null,receiverTaskId?:string):void;
+  assertPreparedTaskCurrent?(value:PreparedGoalTask):void;
+  preparePublicTask?(input:TaskCreateInput,publicInput:{prompt:string;includeUser:boolean}):Promise<{taskId:string;understanding?:TaskUnderstanding}>;
 }
 
 export class DesktopGoalCoordinator {
+ private readonly goalPointerGenerations=new Map<string,number>();
+ private readonly assistantNoGoalGuards=new Map<string,{token:AssistantNoGoalGuard;admission:()=>void}>();
+ private readonly assistantConsents=new Map<string,AssistantGoalConsentRecord>();
+  private readonly projectionOrigins = new WeakMap<object,{threadId:string;bytes:string}>();
   private readonly now: () => number;
   private readonly service: GoalService;
   private readonly activation = new Map<string, { goalId: string; armed: boolean; permissionRevision: number | undefined }>();
@@ -97,6 +110,8 @@ export class DesktopGoalCoordinator {
   private publicationEpoch = 0;
   private readonly nativeGenerations = new Map<string, number>();
   private closed = false;
+  private nativeTailUnconfirmed = false;
+  private nativeTailSealed=false;
   private operations = 0;
   private readonly drainWaiters = new Set<() => void>();
 
@@ -123,8 +138,22 @@ export class DesktopGoalCoordinator {
     });
   }
 
+  /** Observe original admitted operations without extending a caller deadline. */
+  whenShutdownDrained():Promise<boolean> {
+    if(this.nativeTailUnconfirmed)return Promise.resolve(false);
+    if(this.isShutdownDrained())return Promise.resolve(true);
+    return new Promise(resolve=>{
+      const check=()=>{
+        if(this.nativeTailUnconfirmed || this.isShutdownDrained()){
+          this.drainWaiters.delete(check);resolve(!this.nativeTailUnconfirmed);
+        }
+      };
+      this.drainWaiters.add(check);check();
+    });
+  }
+
   private isShutdownDrained(): boolean {
-    return this.closed && this.operations === 0 && this.threadChains.size === 0 && this.publicationThreads.size === 0;
+    return this.closed && !this.nativeTailUnconfirmed && this.operations === 0 && this.threadChains.size === 0 && this.publicationThreads.size === 0;
   }
 
   private notifyDrain(): void { for (const waiter of this.drainWaiters) waiter(); }
@@ -151,6 +180,7 @@ export class DesktopGoalCoordinator {
       let document = await this.service.load(threadId);
       if (!document) {
         this.activation.delete(threadId);
+        this.options.captureGoalRead?.(threadId,null);
         return null;
       }
       const captured = JSON.stringify(document.state);
@@ -159,13 +189,35 @@ export class DesktopGoalCoordinator {
       if (!latest) return null;
       if (JSON.stringify(latest.state) !== captured) currentCompletion = unobservedGoalCompletion(latest.state);
       document = latest;
-      return {
+      const value:DesktopGoalProjection={
         currentCompletion,
         state: document.state,
         activation: this.isArmed(threadId, document.state.goalId) ? 'armed' : 'disarmed',
         ...this.waitingProjection(threadId, document.state),
       };
+      this.captureProjection(threadId,value);return value;
       });
+  }
+
+  /** Actual coordinator origin plus current SQL/activation facts, never DTO presence. */
+  assertLiveProjection(threadId:string,value:DesktopGoalProjection):void {
+    const origin=this.projectionOrigins.get(value),state=this.options.store.readDisclosureDocument(threadId)?.state;
+    if(!origin||origin.threadId!==threadId||origin.bytes!==JSON.stringify(value)||!state
+      ||JSON.stringify(value.state)!==JSON.stringify(state)
+      ||value.activation!==(this.isArmed(threadId,state.goalId)?'armed':'disarmed')
+      ||value.waitingReason!==this.waitingProjection(threadId,state).waitingReason)throw Error('goal_content_unavailable');
+  }
+  assertPreparedCurrent(value:PreparedGoalTask):void {
+    const pending=this.pendingByThread.get(value.threadId),state=this.options.store.readDisclosureDocument(value.threadId)?.state;
+    if(!pending||!state||this.now()>=pending.expiresAt||JSON.stringify(value)!==JSON.stringify(stripTimeout(pending))
+      ||state.goalId!==pending.goalRef.goalId||state.revision!==pending.goalRef.revision||state.epoch!==pending.executionScope.epoch
+      ||state.status!=='active'||!this.isArmed(value.threadId,state.goalId)||this.userQueuePending.has(value.threadId)||this.runningByThread.has(value.threadId))throw Error('goal_content_unavailable');
+    this.assertExecutionAdmission(value.threadId,pending.permissionRevision);
+    const checked:unknown=this.options.assertPreparedTaskCurrent?.(value);
+    if(checked!==undefined){if(checked instanceof Promise)void checked.catch(()=>{});throw Error('goal_content_unavailable');}
+  }
+  private captureProjection(threadId:string,value:DesktopGoalProjection):void {
+    this.projectionOrigins.set(value,{threadId,bytes:JSON.stringify(value)});this.options.captureGoalRead?.(threadId,value);
   }
 
   async createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<{
@@ -176,17 +228,22 @@ export class DesktopGoalCoordinator {
       input = structuredClone(input);
       if (input.verificationDefinition !== undefined) return this.beginNativeMutation('create', input);
       if (readInstalledCurrentProfile().kind !== 'ordinary') throw Error('goal_verification_definition_required');
+      // Negative-only fence: a queued creation invalidates earlier absence quotes
+      // before its original admission await; it grants no Goal or task permission.
+      this.invalidateGoalPointer(input.threadId);
       const attachmentSource: GoalAttachmentSource = { kind: 'request', requestId: parseGoalRequestId(input.requestId) ?? null };
       const permissionRevision = this.captureExecutionRevision();
       return this.withThread(input.threadId, async () => {
         await this.assertThreadAdmission(input.threadId, permissionRevision);
         this.assertExecutionAdmission(input.threadId, permissionRevision);
+        this.invalidateGoalPointer(input.threadId);
         const state = await this.service.create(this.context(input.threadId, 'user', null), input);
         this.assertExecutionAdmission(input.threadId, permissionRevision);
         this.activation.set(input.threadId, { goalId: state.goalId, armed: true, permissionRevision });
         const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', permissionRevision, attachmentSource, state.objective);
         this.assertExecutionAdmission(input.threadId, permissionRevision);
         const goal = { state, activation: 'armed' as const };
+        this.captureProjection(input.threadId,goal);
         this.options.publishGoalChanged?.({ threadId: input.threadId, goal });
         return { goal, preparedTask };
       });
@@ -273,6 +330,7 @@ export class DesktopGoalCoordinator {
     admission();
     return this.withThread(threadId, async () => {
       admission();
+      this.invalidateGoalPointer(threadId);
       const state = await prepared.commit();
       admission();
       this.activation.set(threadId, { goalId: state.goalId, armed: true, permissionRevision: permission });
@@ -323,7 +381,7 @@ export class DesktopGoalCoordinator {
         } else {
           admission();
           const projection = await this.service.prepareNativeMutationCommit(this.context(input.threadId, 'user', row.kind === 'replace' ? row.previous!.revision : null), row.id, undefined, admission);
-          await this.withThread(input.threadId, async () => { admission(); await projection.commit(); });
+          await this.withThread(input.threadId, async () => { admission(); this.invalidateGoalPointer(input.threadId); await projection.commit(); });
         }
       }
       const latest = this.latestNative(input.threadId)!;
@@ -472,6 +530,7 @@ export class DesktopGoalCoordinator {
         }
         const document = await this.requireDocument(input.threadId);
         this.assertExecutionAdmission(input.threadId, permissionRevision);
+        this.invalidateGoalPointer(input.threadId);
         const state = await this.service.replace(
           this.context(input.threadId, 'user', document.state.revision),
           input,
@@ -502,8 +561,98 @@ export class DesktopGoalCoordinator {
     });
   }
 
-  async admitUserTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-    return this.withOperation(async () => {
+  private invalidateGoalPointer(threadId:string):void {
+    const next=(this.goalPointerGenerations.get(threadId)??0)+1;
+    if(!Number.isSafeInteger(next))throw Error('goal_pointer_generation_exhausted');
+    this.goalPointerGenerations.set(threadId,next);
+  }
+  async prepareAssistantNoGoalGuard(input:{threadId:string;requestSource:'user'|'agent'|'scheduler'}):Promise<AssistantNoGoalGuard> {
+    if(input?.requestSource!=='user')throw Error('goal_assistant_user_only');
+    const threadId=input.threadId;
+    return this.withOperation(()=>this.withThread(threadId,async()=>{
+      const permission=this.captureExecutionRevision();
+      await this.assertThreadAdmission(threadId,permission);
+      const admission=this.nativeAdmission(threadId,permission,this.nativeGenerations.get(threadId)??0,this.publicationEpoch);
+      const pointerGeneration=this.goalPointerGenerations.get(threadId)??0;
+      if(this.options.store.loadGoalStateByThread(threadId))throw Error('goal_consent_required');
+      admission();this.assertNoNativePending(threadId);
+      for(const [id,row]of this.assistantNoGoalGuards)if(row.token.validUntil<=this.now())this.assistantNoGoalGuards.delete(id);
+      const token={guardId:randomUUID(),threadId,validUntil:this.now()+600_000};
+      this.assistantNoGoalGuards.set(token.guardId,{token,admission:()=>{admission();if((this.goalPointerGenerations.get(threadId)??0)!==pointerGeneration||this.options.store.loadGoalStateByThread(threadId)!==null)throw Error('goal_consent_stale');}});return {...token};
+    }));
+  }
+  assertAssistantNoGoalGuard(token:AssistantNoGoalGuard):void {
+    const row=this.assistantNoGoalGuards.get(token.guardId);
+    if(!row||canonicalVerificationJson(row.token)!==canonicalVerificationJson(token)||row.token.validUntil<=this.now())throw Error('goal_consent_stale');
+    row.admission();this.assertNoNativePending(row.token.threadId);
+  }
+  async prepareAssistantGoalConsent(input: {threadId:string; requestSource:'user'|'agent'|'scheduler'}): Promise<AssistantGoalConsentQuote> {
+    if (input?.requestSource !== 'user') throw Error('goal_assistant_user_only');
+    const threadId = input.threadId;
+    return this.withOperation(() => this.withThread(threadId, async () => {
+      const permission = this.captureExecutionRevision();
+      await this.assertThreadAdmission(threadId, permission);
+      const state=this.options.store.loadGoalStateByThread(threadId);
+      if(!state)throw Error('goal_consent_stale');
+      const document={state};
+      this.assertAssistantGoalReady(threadId, document.state);
+      const admission = this.nativeAdmission(threadId, permission, this.nativeGenerations.get(threadId) ?? 0, this.publicationEpoch);
+      admission();
+      for (const [id, record] of this.assistantConsents) if (record.quote.validUntil <= this.now()) this.assistantConsents.delete(id);
+      const candidate={consentId:randomUUID(),threadId,state:structuredClone(document.state),validUntil:this.now()+600_000};
+      const checked=ASSISTANT_GOAL_CONSENT_SCHEMA.safeParse(candidate);
+      if(!checked.success)throw Error('goal_consent_quote_unsupported');
+      const quote=checked.data;
+      this.assistantConsents.set(quote.consentId, {quote,stateJson:canonicalVerificationJson(document.state),admission,consumed:false});
+      return structuredClone(quote);
+    }));
+  }
+  async confirmAssistantGoalConsent(input: {consentId:string;checked:boolean;requestDigest:string;instruction:string;requestSource:'user'|'agent'|'scheduler'}): Promise<void> {
+    if (input?.requestSource !== 'user' || input.checked !== true) throw Error('goal_assistant_explicit_consent_required');
+    if (!/^[a-f0-9]{64}$/.test(input.requestDigest) || typeof input.instruction !== 'string' || !input.instruction.trim() || input.instruction.length > 4000) throw Error('goal_assistant_consent_input');
+    const captured = {...input}, record = this.assistantConsents.get(input.consentId);
+    if (!record) throw Error('goal_consent_stale');
+    await this.withOperation(() => this.withThread(record.quote.threadId, async () => {
+      await this.assertThreadAdmission(record.quote.threadId, this.captureExecutionRevision());
+      this.assertAssistantConsent(record);
+      if (record.requestDigest && (record.requestDigest !== captured.requestDigest || record.instruction !== captured.instruction)) throw Error('goal_consent_conflict');
+      record.requestDigest=captured.requestDigest; record.instruction=captured.instruction;
+    }));
+  }
+  assertAssistantGoalConsentQuote(quote:AssistantGoalConsentQuote,allowConsumed=false):void {
+    const record=this.assistantConsents.get(quote.consentId);
+    if (!record || canonicalVerificationJson(record.quote)!==canonicalVerificationJson(quote)) throw Error('goal_consent_stale');
+    if (allowConsumed && record.consumed) {
+      record.admission();const actual=this.options.store.loadGoalStateByThread(record.quote.threadId);
+      if(!actual || canonicalVerificationJson(actual)!==record.stateJson || !this.isArmed(record.quote.threadId,actual.goalId))throw Error('goal_consent_stale');
+    } else this.assertAssistantConsent(record);
+  }
+  private assertAssistantGoalReady(threadId:string,state:GoalState):void {
+    this.assertNoNativePending(threadId);
+    if (state.status !== 'active' || !this.isArmed(threadId,state.goalId) || state.pendingCompletionIntentId) throw Error('goal_requires_new_thread');
+    if (this.pendingByThread.has(threadId) || this.runningByThread.has(threadId) || this.contextRunningByThread.has(threadId) || this.userQueuePending.has(threadId)) throw Error('existing_thread_busy');
+    if (this.options.multiAgent && this.options.multiAgent.goalReadiness(threadId) !== 'ready') throw Error('existing_thread_busy');
+    const limits=state.budgetLimits;
+    if (state.turnsUsed >= limits.turnLimit || (limits.tokenLimit !== undefined && state.tokensUsed >= limits.tokenLimit)
+      || (limits.activeWallClockLimitMs !== undefined && state.activeWallClockMs >= limits.activeWallClockLimitMs)) throw Error('goal_budget_exhausted');
+  }
+  private assertAssistantConsent(record:AssistantGoalConsentRecord):void {
+    record.admission();
+    if (record.consumed || record.quote.validUntil <= this.now()) throw Error('goal_consent_stale');
+    // Synchronous reread: no await between this check, journal guard, consume and start.
+    // Resolve the real current thread pointer, including sibling store writers.
+    const actual=this.options.store.loadGoalStateByThread(record.quote.threadId);
+    if (!actual || canonicalVerificationJson(actual) !== record.stateJson) throw Error('goal_consent_stale');
+    this.assertAssistantGoalReady(record.quote.threadId,actual);
+  }
+  consumeAssistantGoalConsent(quote:AssistantGoalConsentQuote,scope:GoalTurnExecutionScope):void{
+   const row=this.assistantConsents.get(quote.consentId);if(!row||row.consumed||canonicalVerificationJson(row.quote)!==canonicalVerificationJson(quote)||row.quote.validUntil<=this.now()||!row.requestDigest||scope.goalId!==row.quote.state.goalId||scope.epoch!==row.quote.state.epoch||scope.threadId!==row.quote.threadId)throw Error('goal_consent_stale');
+   row.admission();const actual=this.options.store.loadGoalStateByThread(row.quote.threadId);if(!actual||actual.goalId!==scope.goalId||actual.epoch!==scope.epoch||!this.isArmed(row.quote.threadId,actual.goalId))throw Error('goal_consent_stale');
+   row.consumed=true;row.stateJson=canonicalVerificationJson(actual);
+  }
+
+  async admitUserTask(input: TaskCreateInput, assistantGuard?:()=>void): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+    return this.withOperation(async () => {assistantGuard?.();
       const threadId = input.context?.threadId;
       if (!threadId) return this.prepareBindStart(input);
       this.assertNoNativePending(threadId);
@@ -514,9 +663,9 @@ export class DesktopGoalCoordinator {
       const admission = this.nativeAdmission(threadId, permissionRevision, this.nativeGenerations.get(threadId) ?? 0, this.publicationEpoch);
       return this.withThread(threadId, async () => {
         await this.assertThreadAdmission(threadId, permissionRevision);
-        this.assertExecutionAdmission(threadId, permissionRevision);
+        this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
         const document = await this.service.load(threadId);
-        this.assertExecutionAdmission(threadId, permissionRevision);
+        this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
         this.assertNoNativePending(threadId);
         if (!document || !this.isArmed(threadId, document.state.goalId) || document.state.status !== 'active') {
           if (!document) this.activation.delete(threadId);
@@ -526,7 +675,7 @@ export class DesktopGoalCoordinator {
               ...input,
               context: this.mainOwnedContext(threadId),
             });
-            const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+            const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId,()=>{admission();assistantGuard?.();});
             if (compensation) await compensation;
             this.options.store.recordContextTask({
               goalId: document.state.goalId,
@@ -537,9 +686,9 @@ export class DesktopGoalCoordinator {
             this.contextRunningByThread.set(threadId, prepared.taskId);
             this.contextTaskThread.set(prepared.taskId, threadId);
             try {
-              this.assertExecutionAdmission(threadId, permissionRevision);
+              this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
               await this.options.taskHost.startTask(prepared.taskId);
-              this.assertExecutionAdmission(threadId, permissionRevision);
+              this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
             } catch (error) {
               this.contextRunningByThread.delete(threadId);
               this.contextTaskThread.delete(prepared.taskId);
@@ -547,12 +696,12 @@ export class DesktopGoalCoordinator {
             }
             return prepared;
           }
-          return this.prepareBindStart(input, permissionRevision);
+          return this.prepareBindStart(input,permissionRevision,undefined,()=>{admission();assistantGuard?.();});
         }
         if (!observed) throw Error('goal_application_observation_required');
-        await observed();
+        await observed();assistantGuard?.();
         await this.cancelPending(threadId, 'superseded_by_user');
-        this.assertExecutionAdmission(threadId, permissionRevision);
+        this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
         const runningTaskId = this.runningByThread.get(threadId);
         if (runningTaskId) {
           const binding = this.options.store.getTaskBinding(runningTaskId);
@@ -568,15 +717,15 @@ export class DesktopGoalCoordinator {
           context: this.mainOwnedContext(threadId),
           executionScope: scope,
         });
-        const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+        const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId,()=>{admission();assistantGuard?.();});
         if (compensation) await compensation;
         this.options.store.bindTask({ ...scopeToBinding(scope, prepared.taskId), attachedAt: this.now() });
         admission();
         this.runningByThread.set(threadId, prepared.taskId);
         this.userQueuePending.delete(threadId);
-        this.assertExecutionAdmission(threadId, permissionRevision);
+        this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
         await this.options.taskHost.startTask(prepared.taskId);
-        this.assertExecutionAdmission(threadId, permissionRevision);
+        this.assertExecutionAdmission(threadId, permissionRevision);assistantGuard?.();
         return prepared;
       });
       });
@@ -630,6 +779,7 @@ export class DesktopGoalCoordinator {
 
   createGoalToolHost(taskId: string): GoalToolHost {
     return {
+      assertReadCurrent:value=>{const binding=this.requireTaskBinding(taskId);this.options.assertGoalReadCurrent?.(binding.threadId,value as DesktopGoalProjection|null,taskId);},
       getGoal: async () => {
         const binding = this.requireTaskBinding(taskId);
         return this.getGoal(binding.threadId);
@@ -662,10 +812,68 @@ export class DesktopGoalCoordinator {
       return this.createGoalToolHost(context.taskId);
     };
     return {
+      assertReadCurrent:(value,context)=>forContext(context).assertReadCurrent?.(value,context),
       getGoal: context => forContext(context).getGoal(context),
       requestComplete: (summary, context) => forContext(context).requestComplete(summary, context),
       requestBlocked: (claim, context) => forContext(context).requestBlocked(claim, context),
     };
+  }
+
+  sealNativePersistedTail(receipt:TaskSourceShutdownDrainedReceipt):void {
+    if(!this.options.assertTaskSourceShutdownDrainedReceipt)throw Error('task_source_shutdown_receipt_invalid');
+    this.options.assertTaskSourceShutdownDrainedReceipt(receipt);
+    if(!this.isShutdownDrained())throw Error('goal_shutdown_not_drained');
+    this.nativeTailSealed=true;
+  }
+
+  /** Registered original Host consumer only. Closing admission never grants a
+   * new Goal decision, continuation, evaluator or publication from this tail. */
+  async handleNativePersistedTaskEvent(input:PersistedTaskEvent,receipt:NativePersistedTaskEventReceipt):Promise<void> {
+    const verify=()=>{
+      if(!this.options.assertNativePersistedEvent)throw Error('task_persisted_event_unverified');
+      this.options.assertNativePersistedEvent(input,receipt);
+    };
+    verify();
+    if(this.nativeTailSealed)throw Error('goal_native_tail_sealed');
+    if(!this.closed){
+      try{await this.handlePersistedTaskEvent(input);}
+      catch(error){if(!this.closed || !(error instanceof Error) || error.message!=='goal_coordinator_closed')throw error;}
+      if(!this.closed)return;
+    }
+    verify();
+    if(input.event.type!=='task_terminal')return;
+    const terminalEvent=input.event;
+    this.operations++;
+    try{
+      const binding=this.options.store.getTaskBinding(input.taskId);
+      if(!binding)return;
+      const previous=this.threadChains.get(binding.threadId) ?? Promise.resolve();
+      const tail=previous.catch(()=>undefined).then(async()=>{
+        verify();
+        const scope=input.snapshot.executionScope;
+        if(scope?.kind!=='goal_turn' || input.snapshot.taskId!==input.taskId || input.snapshot.status!==terminalEvent.status
+          || scope.threadId!==binding.threadId || scope.goalId!==binding.goalId || scope.epoch!==binding.epoch
+          || scope.goalTurnId!==binding.goalTurnId || scope.origin!==binding.origin)throw Error('goal_native_tail_scope_mismatch');
+        const document=await this.requireDocument(binding.threadId);verify();
+        if(document.state.goalId!==binding.goalId || document.state.epoch!==binding.epoch)throw Error('goal_native_tail_generation_unconfirmed');
+        // Task metadata retains unknown usage. The current Goal ledger cannot
+        // represent unknown cost, so preserve every dependent writer and pin.
+        const usage=input.snapshot.usage;
+        if(!usage?.known)throw Error('goal_native_tail_usage_unconfirmed');
+        if(document.turns.some(turn=>turn.turnId===binding.goalTurnId))return;
+        if(document.state.status!=='active')throw Error('goal_native_tail_state_unconfirmed');
+        await this.service.settleTurn(this.context(binding.threadId,'runtime',document.state.revision),{
+          turnId:binding.goalTurnId,tokensUsed:usage.inputTokens+usage.outputTokens,
+          activeWallClockMs:Math.max(0,input.snapshot.updatedAt-input.snapshot.createdAt),
+          evidence:[],terminalDecision:{kind:'paused',reason:'app_shutdown'},
+        });
+        if(this.runningByThread.get(binding.threadId)===input.taskId)this.runningByThread.delete(binding.threadId);
+        this.pendingBlocked.delete(input.taskId);this.activation.delete(binding.threadId);
+      });
+      this.threadChains.set(binding.threadId,tail);
+      try{await tail;}finally{if(this.threadChains.get(binding.threadId)===tail)this.threadChains.delete(binding.threadId);}
+    }catch(error){this.nativeTailUnconfirmed=true;throw error;}
+    finally{this.operations--;this.notifyDrain();}
   }
 
   async handlePersistedTaskEvent(input: PersistedTaskEvent): Promise<void> {
@@ -753,6 +961,9 @@ export class DesktopGoalCoordinator {
           };
         }
 
+        if(this.closed && !input.snapshot.usage?.known){
+          this.nativeTailUnconfirmed=true;throw Error('goal_native_tail_usage_unconfirmed');
+        }
         const state = await this.service.settleTurn(
           this.context(binding.threadId, 'runtime', document.state.revision),
           {
@@ -1063,7 +1274,7 @@ export class DesktopGoalCoordinator {
     const executionScope = taskInput.executionScope;
     if (executionScope?.kind !== 'goal_turn' || executionScope.goalId !== state.goalId || executionScope.epoch !== state.epoch
       || executionScope.origin !== origin || executionScope.threadId !== threadId) throw Error('goal_continuation_source_mismatch');
-    const prepared = await this.options.taskHost.prepareTask(taskInput);
+    const prepared=this.options.preparePublicTask?await this.options.preparePublicTask(taskInput,{prompt:prompt??state.objective,includeUser:origin==='user'}):await this.options.taskHost.prepareTask(taskInput);
     const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
     if (compensation) await compensation;
     this.options.store.bindTask({ ...scopeToBinding(executionScope, prepared.taskId), attachedAt: null });
@@ -1180,7 +1391,7 @@ export class DesktopGoalCoordinator {
     // task's actual cancellation, never introduce a post-check microtask gap.
     try { guard?.();this.assertExecutionAdmission(threadId, permissionRevision); this.assertNoNativePending(threadId); return undefined; }
     catch (error) {
-      return this.cancelDiscardedGoalTask(taskId, 'permission_revoked').then(() => { throw error; });
+      return this.cancelDiscardedGoalTask(taskId, 'permission_revoked').then(() => { throw error; },raw=>{this.nativeTailUnconfirmed=true;this.stopAccepting();throw new AggregateError([error,raw],'goal_admission_cancel_unconfirmed',{cause:error});});
     }
   }
 
@@ -1254,6 +1465,7 @@ export class DesktopGoalCoordinator {
       activation: this.isArmed(threadId, state.goalId) ? 'armed' as const : 'disarmed' as const,
       ...this.waitingProjection(threadId, state),
     };
+    this.captureProjection(threadId,goal);
     if (!this.closed) this.options.publishGoalChanged?.({ threadId, goal });
     return goal;
   }

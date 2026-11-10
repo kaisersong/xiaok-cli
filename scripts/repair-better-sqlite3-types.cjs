@@ -21,14 +21,14 @@ function locate(relative) {
   inside(absolute);
   const ancestors = [];
   let cursor = root;
-  const rootStat = fs.lstatSync(root);
+  const rootStat = fs.lstatSync(root, { bigint: true });
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('repository-root');
   ancestors.push({ absolute: root, ino: rootStat.ino, dev: rootStat.dev });
   const parts = path.relative(root, absolute).split(path.sep);
   let stat;
   for (let i = 0; i < parts.length; i++) {
     cursor = path.join(cursor, parts[i]);
-    stat = fs.lstatSync(cursor);
+    stat = fs.lstatSync(cursor, { bigint: true });
     if (stat.isSymbolicLink()) fail('symlink-component');
     if (i < parts.length - 1) {
       if (!stat.isDirectory()) fail('not-directory-component');
@@ -38,11 +38,29 @@ function locate(relative) {
   const canonical = fs.realpathSync(absolute);
   inside(canonical);
   if (!stat.isFile()) fail('not-regular-file');
+  // Some supported Windows/libuv versions report path dev=0 but a real volume
+  // ID from fstat. Acquire that ID from a separate read-only handle, rather
+  // than ignoring the device comparison on the actual reading handle.
+  if (process.platform === 'win32' && stat.dev === 0n) {
+    let probe;
+    try {
+      probe = fs.openSync(canonical, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const identity = fs.fstatSync(probe, { bigint: true });
+      const after = fs.lstatSync(canonical, { bigint: true });
+      // Windows does not provide POSIX O_NOFOLLOW here. Retain both path
+      // checks; this is a checkpoint, not an atomic hostile-path guarantee.
+      if (!identity.isFile() || identity.dev === 0n || identity.ino !== stat.ino
+          || identity.size !== stat.size || !after.isFile() || after.isSymbolicLink()
+          || after.ino !== stat.ino || after.dev !== stat.dev || after.size !== stat.size
+          || after.mode !== stat.mode || after.mtimeNs !== stat.mtimeNs) fail('path-identity-change');
+      stat = identity;
+    } finally { if (probe !== undefined) fs.closeSync(probe); }
+  }
   return { absolute: canonical, stat, ancestors };
 }
 function stable(info) {
   for (const item of info.ancestors) {
-    const current = fs.lstatSync(item.absolute);
+    const current = fs.lstatSync(item.absolute, { bigint: true });
     if (!current.isDirectory() || current.isSymbolicLink() || current.ino !== item.ino
         || current.dev !== item.dev) fail('parent-concurrent-change');
     inside(fs.realpathSync(item.absolute));
@@ -50,13 +68,13 @@ function stable(info) {
 }
 function read(relative, maximum = 2 * 1024 * 1024) {
   const info = locate(relative); // Every read rejects symlink ancestors, not just the leaf.
-  if (info.stat.size > maximum) fail('oversized-file');
+  if (info.stat.size > BigInt(maximum)) fail('oversized-file');
   let fd;
   try {
     fd = fs.openSync(info.absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-    const opened = fs.fstatSync(fd);
+    const opened = fs.fstatSync(fd, { bigint: true });
     if (!opened.isFile() || opened.ino !== info.stat.ino || opened.dev !== info.stat.dev
-        || opened.size > maximum) fail('read-file-concurrent-change');
+        || opened.size > BigInt(maximum)) fail('read-file-concurrent-change');
     const data = fs.readFileSync(fd);
     stable(info);
     const current = locate(relative);
@@ -119,7 +137,7 @@ function run(mode) {
   }
   try {
     temporary = path.join(parent, `.sqlite-types-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
-    fd = fs.openSync(temporary, 'wx', original.stat.mode & 0o777);
+    fd = fs.openSync(temporary, 'wx', Number(original.stat.mode & 0o777n));
     fs.writeFileSync(fd, replacement);
     fs.fsyncSync(fd);
     fs.closeSync(fd); fd = undefined;

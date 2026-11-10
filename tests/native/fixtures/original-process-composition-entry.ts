@@ -1,0 +1,11 @@
+export * from './room-root-composition-entry.js';
+export * from '../../../src/runtime/verification/original-process-sdk.js';
+export { ToolRegistry } from '../../../src/ai/tools/index.js';
+export { PermissionManager } from '../../../src/ai/permissions/manager.js';
+export { createBoundedGlobRunner, GLOB_LIMITS } from '../../../src/ai/tools/bounded-glob.js';
+export { ORIGINAL_BOUNDED_GLOB_WORKER_ENTRY } from '../../../src/ai/tools/original-glob-worker-source.js';
+export { grepTool, runFallbackGrepSearch } from '../../../src/ai/tools/grep.js';
+export { readOptionalOriginalTaskHostDeliveryWorkerContext, readOptionalOriginalTaskHostDeliveryWorkerRequest } from '../../../src/runtime/task-host/task-runtime-host.js';
+export { readOptionalOriginalTaskStoreProtectionWorkerContext, readOptionalOriginalTaskStoreProtectionWorkerRequest } from '../../../src/runtime/task-host/snapshot-store.js';
+export { DeliveryVerifier } from '../../../src/runtime/task-host/delivery-verifier.js';
+export { DesktopTaskObservationStore } from '../../../src/runtime/task-host/protected-observation-store.js';

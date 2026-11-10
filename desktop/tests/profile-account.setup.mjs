@@ -3,6 +3,7 @@ import {afterAll,inject} from 'vitest';
 import {mkdtempSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {createRequire,syncBuiltinESMExports} from 'node:module';
+import {assertProfileAccountWorkerReleased} from '../../tests/support/profile-account-ownership.mjs';
 const ownDescriptor=Object.getOwnPropertyDescriptor,define=Object.defineProperty;
 const own=Object.hasOwn,apply=Reflect.apply;
 const descriptorFields=['value','writable','get','set','enumerable','configurable'];
@@ -37,7 +38,7 @@ export function installTestAccountHome(os,accountHome,registerCleanup,synchroniz
    }catch(error){errors.push(error);}
   }
   try{synchronize();}catch(error){errors.push(error);}
-  if(errors.length)throw new AggregateError(errors,'test_profile_account_restore_failed');
+  if(errors.length)throw new AggregateError(errors,'test_profile_account_restore_failed',{cause:errors[0]});
  };
  // Register before the first mutation: hook-registration failure cannot leak.
  registerCleanup(restore);
@@ -45,13 +46,18 @@ export function installTestAccountHome(os,accountHome,registerCleanup,synchroniz
   for(let i=0;i<entries.length;i++){const entry=entries[i];define(os,entry.key,entry.installed);entry.active=true;}
   synchronize();
  }catch(error){
-  try{restore();}catch(cleanupError){throw new AggregateError([error,cleanupError],'test_profile_account_install_failed');}
+  try{restore();}catch(cleanupError){throw new AggregateError([error,cleanupError],'test_profile_account_install_failed',{cause:error});}
   throw error;
  }
  return restore;
 }
 const root=inject('profileTestAccountRoot');
 if(typeof root!=='string'||!root)throw Error('test_profile_account_root_required');
+const ownership=inject('profileTestAccountOwnership');
+assertProfileAccountWorkerReleased(ownership);
 const accountHome=realpathSync(mkdtempSync(join(root,'account-')));
 const require=createRequire(import.meta.url),os=require('node:os');
-installTestAccountHome(os,accountHome,afterAll);
+installTestAccountHome(os,accountHome,restore=>afterAll(()=>{
+ assertProfileAccountWorkerReleased(ownership);
+ restore();
+}));

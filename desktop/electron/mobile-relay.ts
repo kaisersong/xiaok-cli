@@ -1,8 +1,10 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import {deriveMobileRelayRoomId,signMobileRelayRequest,signMobileRelayResponse,verifyMobileRelayRequest,verifyMobileRelayResponse,createMobileRelayReplayGuard} from './mobile-relay-codec.js';
+export {deriveMobileRelayRoomId,signMobileRelayRequest,signMobileRelayResponse,verifyMobileRelayRequest,verifyMobileRelayResponse,createMobileRelayReplayGuard} from './mobile-relay-codec.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
+import { createMobileDisclosureGate, encodeStrictMobileJson, MobileDisclosureError, type MobileDisclosureOptions, type MobileDisclosureRoute } from './mobile-disclosure.js';
 import type {
   MobileDesktopHello,
   MobileDesktopIdentity,
@@ -15,8 +17,6 @@ import type {
 const PROTOCOL_VERSION = '1';
 const DEFAULT_RELAY_URL = 'wss://relay.kaihub.space/ws';
 const DEFAULT_MAX_SNAPSHOT_BYTES = 48 * 1024;
-const DEFAULT_REQUEST_MAX_AGE_MS = 60_000;
-const DEFAULT_REPLAY_TTL_MS = 10 * 60_000;
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1000;
 const DESKTOP_NODE_ID = 'desk';
 
@@ -49,7 +49,7 @@ export interface MobileRelayResponse {
   signature: string;
 }
 
-interface UnsignedMobileRelayResponse extends Omit<MobileRelayResponse, 'signature'> {}
+export interface UnsignedMobileRelayResponse extends Omit<MobileRelayResponse, 'signature'> {}
 
 export interface MobileRelayReplayGuard {
   accept(requestId: string, nowMs?: number): boolean;
@@ -101,7 +101,7 @@ type RelayWebSocketConstructor = new (
   options: { headers: Record<string, string> },
 ) => RelayWebSocketLike;
 
-export interface MobileRelayBridgeOptions {
+export interface MobileRelayBridgeOptions extends MobileDisclosureOptions {
   identity: MobileDesktopIdentity;
   desktopName: string;
   relayUrl: string;
@@ -116,92 +116,6 @@ export interface MobileRelayBridgeOptions {
   reconnectBaseDelayMs?: number;
   now?: () => number;
   onStatus?: (status: MobileRelayStatus) => void;
-}
-
-export function deriveMobileRelayRoomId(roomSecret: string): string {
-  return createHash('sha256').update(roomSecret).digest('hex').slice(0, 32);
-}
-
-export function signMobileRelayRequest(
-  request: UnsignedMobileRelayRequest,
-  mobileAccessToken: string,
-): MobileRelayRequest {
-  return {
-    ...request,
-    signature: signCanonical(request, mobileAccessToken),
-  };
-}
-
-export function signMobileRelayResponse(
-  response: UnsignedMobileRelayResponse,
-  mobileAccessToken: string,
-): MobileRelayResponse {
-  return {
-    ...response,
-    signature: signCanonical(response, mobileAccessToken),
-  };
-}
-
-export function verifyMobileRelayRequest(
-  input: unknown,
-  mobileAccessToken: string,
-  options: {
-    desktopId?: string;
-    nowMs?: number;
-    maxAgeMs?: number;
-    replayGuard?: MobileRelayReplayGuard;
-  } = {},
-): { ok: true; request: MobileRelayRequest } | { ok: false; reason: string; request?: MobileRelayRequest } {
-  const request = parseRelayRequest(input);
-  if (!request) return { ok: false, reason: 'invalid_request' };
-  if (options.desktopId && request.desktopId !== options.desktopId) {
-    return { ok: false, reason: 'desktop_mismatch', request };
-  }
-
-  const { signature: _signature, ...unsigned } = request;
-  if (!verifyCanonical(unsigned, mobileAccessToken, request.signature)) {
-    return { ok: false, reason: 'bad_signature', request };
-  }
-
-  const sentAtMs = Date.parse(request.sentAt);
-  const nowMs = options.nowMs ?? Date.now();
-  const maxAgeMs = options.maxAgeMs ?? DEFAULT_REQUEST_MAX_AGE_MS;
-  if (!Number.isFinite(sentAtMs) || Math.abs(nowMs - sentAtMs) > maxAgeMs) {
-    return { ok: false, reason: 'stale_request', request };
-  }
-
-  if (options.replayGuard && !options.replayGuard.accept(request.requestId, nowMs)) {
-    return { ok: false, reason: 'duplicate_request', request };
-  }
-
-  return { ok: true, request };
-}
-
-export function verifyMobileRelayResponse(
-  input: unknown,
-  mobileAccessToken: string,
-): { ok: true; response: MobileRelayResponse } | { ok: false; reason: string } {
-  const response = parseRelayResponse(input);
-  if (!response) return { ok: false, reason: 'invalid_response' };
-  const { signature: _signature, ...unsigned } = response;
-  if (!verifyCanonical(unsigned, mobileAccessToken, response.signature)) {
-    return { ok: false, reason: 'bad_signature' };
-  }
-  return { ok: true, response };
-}
-
-export function createMobileRelayReplayGuard(ttlMs = DEFAULT_REPLAY_TTL_MS): MobileRelayReplayGuard {
-  const seen = new Map<string, number>();
-  return {
-    accept(requestId: string, nowMs = Date.now()) {
-      for (const [id, expiresAt] of seen) {
-        if (expiresAt <= nowMs) seen.delete(id);
-      }
-      if (seen.has(requestId)) return false;
-      seen.set(requestId, nowMs + ttlMs);
-      return true;
-    },
-  };
 }
 
 /**
@@ -248,6 +162,7 @@ export function loadMobileRelayConfig(input: {
 }
 
 export function createMobileRelayBridge(options: MobileRelayBridgeOptions): MobileRelayBridge {
+  const disclosure = createMobileDisclosureGate(options);
   const roomId = deriveMobileRelayRoomId(options.identity.mobileRelayRoomSecret);
   const WebSocketImpl = options.WebSocketImpl ?? (WebSocket as unknown as RelayWebSocketConstructor);
   const replayGuard = createMobileRelayReplayGuard();
@@ -262,6 +177,14 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
   let lastError: string | null = null;
   let credentialState: MobileRelayCredentialState = 'ok';
   let credentialExpiresAt: string | undefined;
+  let connectionGeneration = 0;
+  type Disclosure = { route: MobileDisclosureRoute; value: unknown };
+  type RoutedResponse = { status: number; body: Record<string, unknown>; disclosure?: Disclosure };
+  const responses = new WeakMap<MobileRelayResponse, { ws: RelayWebSocketLike; generation: number; requestId: string; encoded: string; disclosure?: Disclosure; selectedEncoding?: string }>();
+
+  function isCurrentConnection(ws: RelayWebSocketLike, generation: number): boolean {
+    return running && socket === ws && connectionGeneration === generation && ws.readyState === 1;
+  }
 
   const status = (): MobileRelayStatus => ({
     running,
@@ -307,9 +230,11 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
         'X-Protocol-Version': PROTOCOL_VERSION,
       },
     });
+    const generation = ++connectionGeneration;
     socket = ws;
 
     ws.on('open', () => {
+      if (!isCurrentConnection(ws, generation)) return;
       connected = true;
       reconnectAttempt = 0;
       lastError = null;
@@ -317,15 +242,17 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
       emitStatus();
     });
     ws.on('message', (data) => {
-      void handleSocketMessage(data);
+      if (isCurrentConnection(ws, generation)) void handleSocketMessage(data, ws, generation);
     });
     ws.on('close', () => {
-      if (socket === ws) socket = null;
+      if (socket !== ws || connectionGeneration !== generation) return;
+      socket = null;
       connected = false;
       emitStatus();
       scheduleReconnect();
     });
     ws.on('error', (error) => {
+      if (socket !== ws || connectionGeneration !== generation || !running) return;
       const message = error instanceof Error ? error.message : String(error);
       // The relay answers an invalid/expired token with a 401 handshake response.
       // Treat it as a terminal credential state, not a transient network error.
@@ -354,7 +281,7 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
     }, delay);
   }
 
-  async function handleSocketMessage(data: unknown): Promise<void> {
+  async function handleSocketMessage(data: unknown, ws: RelayWebSocketLike, generation: number): Promise<void> {
     const message = parseRelayEnvelope(data);
     if (!message) return;
     if (message.type === 'relay:hello') {
@@ -372,26 +299,49 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
     });
     if (!verification.ok) {
       if (verification.reason === 'bad_signature' || verification.reason === 'desktop_mismatch' || !verification.request) return;
-      sendRelayResponse(buildErrorResponse(verification.request, verification.reason, now()));
+      sendRelayResponse(prepareResponse(verification.request, {
+        status: verification.reason === 'stale_request' ? 408 : verification.reason === 'duplicate_request' ? 409 : 400,
+        body: { error: verification.reason },
+      }, ws, generation));
       return;
     }
 
-    sendRelayResponse(await handleMobileRequest(verification.request));
+    try {
+      sendRelayResponse(await handleMobileRequest(verification.request, ws, generation));
+    } catch (error) {
+      if (!isCurrentConnection(ws, generation)) return;
+      const forbidden = error instanceof MobileDisclosureError;
+      sendRelayResponse(prepareResponse(verification.request, {
+        status: forbidden ? 403 : 500,
+        body: { error: forbidden ? 'mobile_content_unavailable' : disclosure.protected ? 'mobile_request_unavailable' : error instanceof Error ? error.message : String(error) },
+      }, ws, generation));
+    }
   }
 
-  async function handleMobileRequest(request: MobileRelayRequest): Promise<MobileRelayResponse> {
+  async function handleMobileRequest(request: MobileRelayRequest, ws: RelayWebSocketLike, generation: number): Promise<MobileRelayResponse> {
     const body = await routeMobileRequest(request);
-    return signMobileRelayResponse({
+    return prepareResponse(request, body, ws, generation);
+  }
+
+  function prepareResponse(request: MobileRelayRequest, body: RoutedResponse, ws: RelayWebSocketLike, generation: number): MobileRelayResponse {
+    // Freeze data before signing. Neither signing nor the eventual wire encoder
+    // may invoke producers again or observe subsequent mutations of their DTOs.
+    const selectedEncoding = disclosure.protected && body.disclosure ? encodeStrictMobileJson(body.disclosure.value) : undefined;
+    const fixedBody = JSON.parse(disclosure.protected ? encodeStrictMobileJson(body.body) : JSON.stringify(body.body)) as Record<string, unknown>;
+    const payload = signMobileRelayResponse({
       kind: 'mobile.response',
       requestId: request.requestId,
       desktopId: options.identity.desktopId,
       sentAt: new Date(now()).toISOString(),
       status: body.status,
-      body: body.body,
+      body: fixedBody,
     }, options.identity.mobileAccessToken);
+    const encoded = JSON.stringify({ type: 'relay:event', payload });
+    responses.set(payload, { ws, generation, requestId: request.requestId, encoded, disclosure: body.disclosure, selectedEncoding });
+    return payload;
   }
 
-  async function routeMobileRequest(request: MobileRelayRequest): Promise<{ status: number; body: Record<string, unknown> }> {
+  async function routeMobileRequest(request: MobileRelayRequest): Promise<RoutedResponse> {
     if (request.route === 'hello') {
       const hello = options.getHello
         ? await options.getHello()
@@ -403,17 +353,17 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
       const snapshot = options.getSnapshot
         ? await options.getSnapshot()
         : defaultSnapshot(options.desktopName);
-      if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > maxSnapshotBytes) {
+      if (Buffer.byteLength(disclosure.protected ? encodeStrictMobileJson(snapshot) : JSON.stringify(snapshot), 'utf8') > maxSnapshotBytes) {
         return { status: 413, body: { error: 'snapshot_too_large' } };
       }
-      return { status: 200, body: snapshot as unknown as Record<string, unknown> };
+      return { status: 200, body: snapshot as unknown as Record<string, unknown>, disclosure: { route: 'snapshot', value: snapshot } };
     }
 
     if (request.route === 'chat.send') {
       const text = typeof request.body?.text === 'string' ? request.body.text.trim() : '';
       if (!text) return { status: 400, body: { error: 'message_text_required' } };
       const events = options.sendMessage ? await options.sendMessage(text) : defaultChatEvents(text);
-      return { status: 200, body: { events } };
+      return { status: 200, body: { events }, disclosure: { route: 'chat.send', value: events } };
     }
 
     if (request.route === 'approval.respond') {
@@ -424,7 +374,7 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
           : null;
         if (!id || !decision) return { status: 400, body: { error: 'approval_decision_required' } };
         const approval = await options.respondToApproval({ id, decision });
-        return { status: 200, body: { approval: approval as Record<string, unknown> } };
+        return { status: 200, body: { approval: approval as Record<string, unknown> }, disclosure: { route: 'approval.respond', value: approval } };
       }
       return { status: 403, body: { error: 'desktop_confirmation_required' } };
     }
@@ -435,31 +385,25 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
       if (!options.getArtifactPreview) return { status: 404, body: { error: 'artifact_preview_not_found' } };
       const preview = await options.getArtifactPreview(artifactId);
       if (!preview) return { status: 404, body: { error: 'artifact_preview_not_found' } };
-      return { status: 200, body: preview as unknown as Record<string, unknown> };
+      return { status: 200, body: preview as unknown as Record<string, unknown>, disclosure: { route: 'artifact.preview', value: preview } };
     }
 
     return { status: 404, body: { error: 'not_found' } };
   }
 
-  function buildErrorResponse(request: MobileRelayRequest, reason: string, nowMs: number): MobileRelayResponse {
-    const statusByReason: Record<string, number> = {
-      stale_request: 408,
-      duplicate_request: 409,
-      invalid_request: 400,
-    };
-    return signMobileRelayResponse({
-      kind: 'mobile.response',
-      requestId: request.requestId,
-      desktopId: options.identity.desktopId,
-      sentAt: new Date(nowMs).toISOString(),
-      status: statusByReason[reason] ?? 400,
-      body: { error: reason },
-    }, options.identity.mobileAccessToken);
-  }
-
   function sendRelayResponse(payload: MobileRelayResponse): void {
-    if (!socket || socket.readyState !== 1) return;
-    socket.send(JSON.stringify({ type: 'relay:event', payload }));
+    const receipt = responses.get(payload);
+    if (!receipt || receipt.requestId !== payload.requestId) throw new MobileDisclosureError();
+    responses.delete(payload);
+    if (!connected || !isCurrentConnection(receipt.ws, receipt.generation)) return;
+    if (receipt.disclosure) {
+      if (disclosure.protected && encodeStrictMobileJson(receipt.disclosure.value) !== receipt.selectedEncoding) throw new MobileDisclosureError();
+      disclosure.assert(receipt.disclosure.route, receipt.disclosure.value);
+      if (disclosure.protected && encodeStrictMobileJson(receipt.disclosure.value) !== receipt.selectedEncoding) throw new MobileDisclosureError();
+    }
+    // The policy callback is synchronous, but may stop the bridge itself.
+    if (!connected || !isCurrentConnection(receipt.ws, receipt.generation)) return;
+    receipt.ws.send(receipt.encoded);
   }
 
   return {
@@ -471,6 +415,7 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
     },
 
     stop() {
+      ++connectionGeneration;
       running = false;
       connected = false;
       if (reconnectTimer) {
@@ -489,69 +434,6 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
   };
 }
 
-function signCanonical(value: unknown, secret: string): string {
-  return createHmac('sha256', secret).update(canonicalJson(value)).digest('base64url');
-}
-
-function verifyCanonical(value: unknown, secret: string, signature: string): boolean {
-  const expected = Buffer.from(signCanonical(value, secret), 'utf8');
-  const actual = Buffer.from(signature, 'utf8');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const object = value as Record<string, unknown>;
-  const entries = Object.entries(object)
-    .filter(([, entryValue]) => entryValue !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right));
-  return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${canonicalJson(entryValue)}`).join(',')}}`;
-}
-
-function parseRelayRequest(input: unknown): MobileRelayRequest | null {
-  if (!input || typeof input !== 'object') return null;
-  const candidate = input as Partial<MobileRelayRequest>;
-  if (candidate.kind !== 'mobile.request') return null;
-  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) return null;
-  if (typeof candidate.desktopId !== 'string' || candidate.desktopId.length === 0) return null;
-  if (typeof candidate.mobileNodeId !== 'string' || candidate.mobileNodeId.length === 0) return null;
-  if (typeof candidate.sentAt !== 'string' || candidate.sentAt.length === 0) return null;
-  if (!['hello', 'snapshot', 'chat.send', 'approval.respond', 'artifact.preview'].includes(String(candidate.route))) return null;
-  if (typeof candidate.signature !== 'string' || candidate.signature.length === 0) return null;
-  return {
-    kind: 'mobile.request',
-    requestId: candidate.requestId,
-    desktopId: candidate.desktopId,
-    mobileNodeId: candidate.mobileNodeId,
-    sentAt: candidate.sentAt,
-    route: candidate.route as MobileRelayRequest['route'],
-    body: isRecord(candidate.body) ? candidate.body : {},
-    signature: candidate.signature,
-  };
-}
-
-function parseRelayResponse(input: unknown): MobileRelayResponse | null {
-  if (!input || typeof input !== 'object') return null;
-  const candidate = input as Partial<MobileRelayResponse>;
-  if (candidate.kind !== 'mobile.response') return null;
-  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) return null;
-  if (typeof candidate.desktopId !== 'string' || candidate.desktopId.length === 0) return null;
-  if (typeof candidate.sentAt !== 'string' || candidate.sentAt.length === 0) return null;
-  if (typeof candidate.status !== 'number') return null;
-  if (!isRecord(candidate.body)) return null;
-  if (typeof candidate.signature !== 'string' || candidate.signature.length === 0) return null;
-  return {
-    kind: 'mobile.response',
-    requestId: candidate.requestId,
-    desktopId: candidate.desktopId,
-    sentAt: candidate.sentAt,
-    status: candidate.status,
-    body: candidate.body,
-    signature: candidate.signature,
-  };
-}
-
 function parseRelayEnvelope(data: unknown): { type: string; payload?: unknown } | null {
   const raw = typeof data === 'string'
     ? data
@@ -565,10 +447,6 @@ function parseRelayEnvelope(data: unknown): { type: string; payload?: unknown } 
   } catch {
     return null;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeRelayWebSocketUrl(raw: string): string {

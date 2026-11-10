@@ -1,0 +1,22 @@
+diff --git a/codex-rs/core/src/session/turn.rs b/codex-rs/core/src/session/turn.rs
+--- a/codex-rs/core/src/session/turn.rs
++++ b/codex-rs/core/src/session/turn.rs
+@@ -930,7 +930,7 @@
+     turn_context: &TurnContext,
+     user_input: &[UserInput],
+ ) -> (Vec<String>, Vec<crate::plugins::PluginCapabilitySummary>) {
+-    if crate::guardian::is_basic_session_source(&turn_context.session_source) {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY || crate::guardian::is_basic_session_source(&turn_context.session_source) {
+         return (Vec::new(), Vec::new());
+     }
+ 
+@@ -1741,6 +1741,9 @@
+     sess: &Session,
+     turn_context: &TurnContext,
+ ) -> PreparedToolRecommendations {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        return PreparedToolRecommendations { auth: None, endpoint_candidates: None };
++    }
+     let loaded_plugins = sess
+         .services
+         .plugins_manager

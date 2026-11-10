@@ -1,0 +1,13 @@
+diff --git a/codex-rs/config/Cargo.toml b/codex-rs/config/Cargo.toml
+--- a/codex-rs/config/Cargo.toml
++++ b/codex-rs/config/Cargo.toml
+@@ -10,6 +10,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-auth-owner-only = []
+ 
+ [dependencies]
+ anyhow = { workspace = true }

@@ -1,3 +1,6 @@
+import {retainCommandResult} from '../tools/command-result.js';
+import { getModelFailure } from './model-failure.js';
+import { normalizeRuntimeError } from './runtime-errors.js';
 import {ModelStreamPhysicalOwner,type ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
 import {prepareCompoundRootIntentStageView} from '../../runtime/sol-pi/compound-provider-admission.js';
 import { assertDelegatedObservationOwner } from '../../runtime/sol-pi/delegated-session-owner.js';
@@ -5,7 +8,7 @@ import { withObservationExecutionOwner } from '../../runtime/sol-pi/observation-
 import { assertSemanticCompactionOwner, type SemanticCompactionOwner, type SemanticCompactionOutcome } from '../../runtime/sol-pi/semantic-compaction-owner.js';
 import type { ObservationSessionOwner } from '../../runtime/sol-pi/observation-session-owner.js';
 import { withObservationMetrics, measureToolResult } from '../../runtime/trace/observation-metrics.js';
-import type { Message, MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext } from '../../types.js';
+import type { Message, MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext, ToolExecutionFact } from '../../types.js';
 import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
 import { isSuccessfulModelToolResult } from '../tools/index.js';
@@ -505,6 +508,7 @@ export class AgentRuntime {
             input: toolCall.input,
           });
 
+          let commandFact: ToolExecutionFact | undefined;
           let observationProjectionFailure: { error: unknown } | undefined;
           const toolExecutionContext: ToolExecutionContext = {
             ...baseToolExecutionContext,
@@ -517,17 +521,21 @@ export class AgentRuntime {
                 try { return await this.observationOwner!.projectToolResult(toolCall.id, nativeResult); }
                 catch (error) {
                   observationProjectionFailure = { error };
-                  const ok = isSuccessfulModelToolResult(nativeResult);
+                  const ok = isSuccessfulModelToolResult(nativeResult, commandFact);
                   return `${ok ? '' : 'Error: '}[tool execution ${ok ? 'completed' : 'failed'}; observation disclosure blocked]`;
                 }
               },
             } : {}),
             runtimeFactSink: {
-              emit: (fact) => onEvent({
+              emit: (fact) => {
+                if (toolCall.name === 'bash' && fact.toolName === 'bash' && fact.factKind === 'command_result' && fact.invocationId === toolCall.id)
+                  commandFact = retainCommandResult(commandFact, fact);
+                onEvent({
                 type: 'tool_execution_fact',
                 runId: run.runId,
                 ...fact,
-              }),
+              });
+              },
             },
           };
           const supportsImages = resolveModelCapabilities(this.adapter).supportsImageInput;
@@ -544,14 +552,14 @@ export class AgentRuntime {
               executionProgress: {progress: () => {this.reportActivity({phase:'tool',toolName:toolCall.name});onEvent({type:'execution_progress',runId:run.runId});},wait:()=>{},resume:()=>{}},
             });
             mergedSignal.throwIfAborted();
-            invocationImages = toolImages.finish(isSuccessfulModelToolResult(result));
+            invocationImages = toolImages.finish(isSuccessfulModelToolResult(result, commandFact));
           } finally {
             toolImages.finish(false);
           }
           // Registry guards cannot cover the microtask before this await resumes.
           // Reject cancellation before spilling or retaining a successful result.
           mergedSignal.throwIfAborted();
-          const ok = isSuccessfulModelToolResult(result);
+          const ok = isSuccessfulModelToolResult(result, commandFact);
           const sessionSnapshot = this.session.exportSnapshot();
           if (observationProjectionFailure) {
             toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result, is_error: !ok });
@@ -659,7 +667,10 @@ export class AgentRuntime {
         this.session.appendUserToolResults(toolResults);
       }
       this.session.repairIncompleteToolCalls();
-      onEvent({ type: 'run_failed', runId: run.runId, error: normalized });
+      // Keep the thrown Error identity for owners; public events must not retain its raw payload/cause.
+      const shape = getModelFailure(normalized) ? normalizeRuntimeError(normalized) : undefined;
+      const publicError = shape ? Object.assign(new Error(shape.message), { code: shape.code, retryable: shape.retryable }) : normalized;
+      onEvent({ type: 'run_failed', runId: run.runId, error: publicError });
       throw normalized;
     } finally {
       try { await this.observationOwner?.publishCurrentHistory?.({ strictPrivateProtocol: strictK3Run }); }

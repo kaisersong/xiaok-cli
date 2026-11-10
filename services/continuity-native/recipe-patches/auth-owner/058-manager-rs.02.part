@@ -1,0 +1,29 @@
++        let operation = vault.begin(super::xiaok_vault::Kind::Delete)?;
++        let prior = operation.captured_optional_auth()?;
++        if revoke {
++            operation.check()?;
++            if revoke_auth_tokens(prior.as_ref(), &self.auth_route_config)
++                .await
++                .is_err()
++            {
++                tracing::warn!("Token revocation failed during logout");
++            }
++        }
++        let removed = operation.delete()?;
++        self.xiaok_reload_checked().await?;
++        Ok(removed)
+     }
+ }
+ 
+@@ -3130,3 +3796,11 @@
+ #[cfg(test)]
+ #[path = "account_user_id_tests.rs"]
+ mod account_user_id_tests;
++
++#[cfg(test)]
++#[path = "xiaok_snapshot_tests.rs"]
++mod xiaok_snapshot_tests;
++
++#[cfg(all(test, feature = "xiaok-auth-owner-only"))]
++#[path = "xiaok_vault_tests.rs"]
++mod xiaok_vault_tests;

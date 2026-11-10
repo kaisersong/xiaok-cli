@@ -4,6 +4,7 @@ import type { HooksRunner } from '../../../src/runtime/hooks-runner.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { buildMcpRuntimeTools } from '../../../src/ai/mcp/runtime/tools.js';
+import type { McpInvocationOptions } from '../../../src/ai/mcp/runtime/client.js';
 import { createComputerUseTool } from '../../../src/ai/tools/computer-use.js';
 import { CuaConnectionManager } from '../../../src/platform/mcp/cua-connection-manager.js';
 import { mcpTestContext } from '../../support/mcp-cancellation-context.js';
@@ -184,14 +185,23 @@ describe('MCP cancellation R1: real ToolRegistry boundaries', () => {
 });
 
 describe('MCP cancellation R1: generic builder and CUA production multi-step wrapper', () => {
-  it('M8 passes only per-call signal through the actual generic builder and does not retain the previous caller', async () => {
-    const callTool = vi.fn(async (_name: string, _input: Record<string, unknown>, _options?: unknown) => 'ok');
+  it('M8 passes the original per-call signal and context through the actual generic builder without retaining the previous caller', async () => {
+    const callTool = vi.fn(async (_name: string, _input: Record<string, unknown>, _options?: McpInvocationOptions) => 'ok');
     const schema = { name: 'probe', description: 'fixture', inputSchema: { type: 'object' as const } };
     const tools = buildMcpRuntimeTools({ name: 'cancel', command: 'fixture' }, { listTools: async () => [schema], callTool, dispose() {} }, [schema]);
     const a = new AbortController(); const b = new AbortController();
-    await tools[0]!.execute({}, mcpTestContext(a.signal, { taskId: 'private-task' }));
-    a.abort(new Error('old turn')); await tools[0]!.execute({}, mcpTestContext(b.signal));
-    expect(callTool.mock.calls).toEqual([['probe', {}, { signal: a.signal }], ['probe', {}, { signal: b.signal }]]);
+    const contextA = mcpTestContext(a.signal, { taskId: 'private-task' });
+    const contextB = mcpTestContext(b.signal);
+    await tools[0]!.execute({}, contextA);
+    a.abort(new Error('old turn')); await tools[0]!.execute({}, contextB);
+    expect(callTool.mock.calls).toEqual([
+      ['probe', {}, { signal: a.signal, executionContext: contextA }],
+      ['probe', {}, { signal: b.signal, executionContext: contextB }],
+    ]);
+    expect(callTool.mock.calls[0]![2]?.executionContext).toBe(contextA);
+    expect(callTool.mock.calls[1]![2]?.executionContext).toBe(contextB);
+    expect(callTool.mock.calls[1]![2]?.executionContext).not.toBe(contextA);
+    for (const call of callTool.mock.calls) expect(Object.keys(call[2]!).sort()).toEqual(['executionContext', 'signal']);
   });
 
   it.each(['list_windows', 'click', 'capture_after_lookup', 'capture_after_result'] as const)('M5 stops at the actual CUA %s barrier with no later backend action', async (stage) => {

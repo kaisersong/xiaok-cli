@@ -1,3 +1,5 @@
+import {readPublicationPageBytes} from './controller-client.js';
+import {LEGACY_PUBLICATION_PAGE_BASE64,MAX_PUBLICATION_PAGE_BASE64,MAX_PUBLICATION_PAGE_BYTES} from './publication-page-size.js';
 import {createHash} from 'node:crypto';
 import type {createAuthenticatedControllerClient} from './controller-client.js';
 import type {VerificationOwner} from './proof-authority.js';
@@ -36,12 +38,14 @@ export function createPublicationClient(input:{owner:VerificationOwner;requestSo
   let offset=0,total:number|undefined,payloadHash:string|undefined;const chunks:Buffer[]=[];
   do{
    signal?.throwIfAborted();
-   const page=snapshot(await call('publication.readOwnerPayload',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,operationId:publication.operationId,fullTupleHash:publication.fullTupleHash,offset,maxBytes:262144},signal),['owner','businessRevision','operationId','fullTupleHash','payloadHash','totalBytes','offset','bytes','eof']);
-   if(json(owner(page.owner))!==json(boundOwner)||page.businessRevision!==expected.businessRevision||page.operationId!==publication.operationId||page.fullTupleHash!==publication.fullTupleHash||!Number.isSafeInteger(page.totalBytes)||page.totalBytes<1||page.totalBytes>32*1024**2||typeof page.payloadHash!=='string'||!/^[a-f0-9]{64}$/.test(page.payloadHash)||page.offset!==offset||typeof page.bytes!=='string'||page.bytes.length>349528||typeof page.eof!=='boolean')throw Error('publication_client_payload_page');
+   const requestedMax=readPublicationPageBytes(input.transport);
+   const encodedMax=requestedMax===MAX_PUBLICATION_PAGE_BYTES?MAX_PUBLICATION_PAGE_BASE64:LEGACY_PUBLICATION_PAGE_BASE64;
+   const page=snapshot(await call('publication.readOwnerPayload',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,operationId:publication.operationId,fullTupleHash:publication.fullTupleHash,offset,maxBytes:requestedMax},signal),['owner','businessRevision','operationId','fullTupleHash','payloadHash','totalBytes','offset','bytes','eof']);
+   if(json(owner(page.owner))!==json(boundOwner)||page.businessRevision!==expected.businessRevision||page.operationId!==publication.operationId||page.fullTupleHash!==publication.fullTupleHash||!Number.isSafeInteger(page.totalBytes)||page.totalBytes<1||page.totalBytes>32*1024**2||typeof page.payloadHash!=='string'||!/^[a-f0-9]{64}$/.test(page.payloadHash)||page.offset!==offset||typeof page.bytes!=='string'||page.bytes.length>encodedMax||typeof page.eof!=='boolean')throw Error('publication_client_payload_page');
    if(total!==undefined&&(total!==page.totalBytes||payloadHash!==page.payloadHash))throw Error('publication_client_payload_changed');
    total=page.totalBytes;payloadHash=page.payloadHash;
    const bytes=Buffer.from(page.bytes,'base64');
-   if(bytes.toString('base64')!==page.bytes||bytes.length>262144||offset+bytes.length>total!||page.eof!==(offset+bytes.length===total)||(!bytes.length&&!page.eof))throw Error('publication_client_payload_page');
+   if(bytes.toString('base64')!==page.bytes||bytes.length>requestedMax||offset+bytes.length>total!||page.eof!==(offset+bytes.length===total)||(!bytes.length&&!page.eof))throw Error('publication_client_payload_page');
    chunks.push(bytes);offset+=bytes.length;if(page.eof)break;
   }while(true);
   signal?.throwIfAborted();const bytes=Buffer.concat(chunks,offset);
@@ -50,6 +54,17 @@ export function createPublicationClient(input:{owner:VerificationOwner;requestSo
  }
  return Object.freeze({
   readPayload,
+  /** Compatibility composition; each page keeps the original guarded reader.
+   * This observation is not an atomic transaction or a local write grant. */
+  async readCurrentPayload(signal?:AbortSignal){
+   if(boundOwner.ownerKind!=='loop')throw Error('publication_client_owner');
+   signal?.throwIfAborted();
+   const observed=ownerObservation(await call('publication.observeOwner',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId},signal));
+   signal?.throwIfAborted();
+   if(observed.currentVerification!=='valid'||observed.publication.status!=='committed'||!observed.publication.current)return Object.freeze({observation:observed,payload:null});
+   const payload=await readPayload(observed,signal);
+   return Object.freeze({observation:observed,payload});
+  },
   async prepareRequest(requestId:string,signal?:AbortSignal){id(requestId);const result=challenge(await call('publication.prepareRequest',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,requestSource:source,requestId},signal));pending.add(result);return result;},
   async lookupRequest(requestId:string,signal?:AbortSignal){id(requestId);const raw=await call('publication.lookupRequest',{requestId},signal),v=snapshot(raw,['absent','not_prepared'].includes((raw as any)?.state)?['state']:['state','challenge']);if(v.state==='absent')return Object.freeze({state:'absent' as const});if(v.state==='not_prepared')return Object.freeze({state:'not_prepared' as const});if(v.state!=='prepared')throw Error('publication_client_request');return Object.freeze({state:'prepared' as const,challenge:challenge(v.challenge)});},
   async recoverRequest(requestId:string,signal?:AbortSignal):Promise<PublicationRequestRecovery>{id(requestId);const raw=await call('publication.recoverRequest',{ownerKind:boundOwner.ownerKind,ownerId:boundOwner.ownerId,requestSource:source,requestId},signal);const v=snapshot(raw,(raw as any)?.status==='not_prepared'?['status']:['status','owner','challengeId','operationId','fullTupleHash','challenge']);if(v.status==='not_prepared')return Object.freeze({status:'not_prepared'});const original=challenge(v.challenge);id(v.operationId);if(!['not_approved','settlement_exists'].includes(v.status)||json(owner(v.owner))!==json(boundOwner)||v.challengeId!==original.challengeId||v.fullTupleHash!==original.fullTupleHash)throw Error('publication_client_recovery');return Object.freeze({...v,owner:boundOwner,challenge:original}) as PublicationRequestRecovery;},

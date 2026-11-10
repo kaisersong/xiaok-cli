@@ -1,5 +1,7 @@
 import { ModelStreamPhysicalOwner, type ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { randomUUID } from 'node:crypto';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 import { recoverModelStream, type ModelRecoveryNotice, type ModelRecoveryPolicy } from '../../src/ai/runtime/model-stream-recovery.js';
@@ -9,8 +11,11 @@ export type DesktopTaskRequestPreparer = (request: Request) => Promise<Request>;
 type Input = Request & {
   deadline: number;
   beforeRequest?: () => Promise<void>;
+  beforeEffects?:()=>void;
   prepareRequest?: DesktopTaskRequestPreparer;
   onInvocation?: (id: string) => void;
+  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
+  admitUsage?: (invocationId: string) => DesktopModelUsageAdmission;
   onRecovery?: (notice: ModelRecoveryNotice & { summaryOnly: boolean }) => void | Promise<void>;
   canRecover?: () => boolean;
   summaryOnly?: boolean;
@@ -40,6 +45,15 @@ export function assertDesktopModelPhysicalIdle(scope: DesktopModelPhysicalScope)
   const {owner} = physicalScope(scope); if (owner.hasPending() || owner.hasFailure()) throw Error('desktop_model_physical_resources_pending');
 }
 
+/** Keep the original usage commit inside the physical request's ownership. */
+export async function captureDesktopTaskUsage(consumer: Input['onUsage'], chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string, physicalRun?: ModelStreamPhysicalRun): Promise<void> {
+  if (!consumer) return;
+  let work: void | Promise<void>;
+  try { work = consumer(chunk, invocationId); }
+  catch (error) { physicalRun?.noteReturnFailure(error); throw error; }
+  if (work) { physicalRun?.observeReturn(work); await work; }
+}
+
 /** Recover provider reads, never task/tool execution or authorization/persistence. */
 export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: ModelStreamPhysicalRun): AsyncGenerator<StreamChunk> {
   const deadline = new AbortController();
@@ -53,11 +67,12 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
   armDeadline();
   let messages = input.messages;
   let invocationId = input.invocationId;
-  let prepared = false, prefix = '', sawTool = false;
+  let prepared = false, prefix = '', sawTool = false, usageConsumerFailed = false, usageAdmissionFailed = false;
   let summaryOnly = Boolean(input.summaryOnly);
+  let localUsageFailure: { error: unknown } | undefined;
   try {
     yield* recoverModelStream({ signal, policy: input.policy, physicalRun,
-      shouldRetry: () => prepared,
+      shouldRetry: () => prepared && !usageConsumerFailed && !usageAdmissionFailed,
       onRetry: async notice => {
         if (!summaryOnly && !sawTool && prefix.trim() && input.canRecover?.()) summaryOnly = true;
         // These fragments were visible, but no tool from this interrupted request ran.
@@ -73,14 +88,18 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         let closeFailure: { error: unknown } | undefined;
         let originalBodyFailure: { error: unknown } | undefined;
         const source = (async function*() {
-        prepared = false;
+        prepared = false; usageAdmissionFailed = false;
+        assertBeforeEffects(input.beforeEffects);
         await input.beforeRequest?.();
         requestSignal.throwIfAborted();
+        assertBeforeEffects(input.beforeEffects);
         const request = { ...input, messages, tools: summaryOnly ? [] : input.tools, invocationId,
           options: { ...input.options, signal: requestSignal } };
         const current = input.prepareRequest ? await input.prepareRequest(request) : request;
         requestSignal.throwIfAborted();
+        assertBeforeEffects(input.beforeEffects);
         input.onInvocation?.(invocationId);
+        assertBeforeEffects(input.beforeEffects);
         prepared = true;
         const claimOwner = physicalRun && physicalClaimOwners.get(physicalRun);
         if (physicalRun && !claimOwner) throw Error('desktop_model_physical_claim_invalid');
@@ -88,8 +107,16 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
         // return, even when recovery's outward read has already cancelled.
         const providerRun = claimOwner?.admit();
         let iterator: AsyncIterator<StreamChunk> | undefined;
+        let usageAdmission: DesktopModelUsageAdmission | undefined;
         let text = '';
         try {
+          if (input.admitUsage) {
+            try {
+              if (!providerRun) throw Error('desktop_usage_physical_claim_required');
+              providerRun.assertCurrent();
+              usageAdmission = input.admitUsage(current.invocationId);
+            } catch (error) { usageAdmissionFailed = true; throw error; }
+          }
           iterator = streamDesktopTaskProviderConversation(current)[Symbol.asyncIterator]();
           for (;;) {
             const raw = iterator.next();
@@ -99,6 +126,13 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
             catch (error) { receipt?.classifyFailure(error); throw error; }
             if (next.done) break;
             const chunk = next.value;
+            if (chunk.type === 'usage') {
+              const consumer = usageAdmission
+                ? (value: Extract<StreamChunk, { type: 'usage' }>) => usageAdmission!.commit(value.usage?.inputTokens ?? 0, value.usage?.outputTokens ?? 0)
+                : input.onUsage;
+              try { await captureDesktopTaskUsage(consumer, chunk, current.invocationId, providerRun); }
+              catch (error) { usageConsumerFailed = true; throw error; }
+            }
             if (chunk.type !== 'usage') requestSignal.throwIfAborted();
             if (chunk.type === 'text') { prefix = (prefix + chunk.delta).slice(-12000); text += chunk.delta; }
             if (chunk.type === 'done' && summaryOnly && !text.trim()) throw new Error('summary_recovery_empty');
@@ -118,18 +152,28 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
               if (!observed) providerRun?.noteReturnFailure(physicalError);
               closeFailure = { error: physicalError };
             }
-          } finally { providerRun?.finish(); }
+          } finally {
+            try { usageAdmission?.revoke(); }
+            catch (error) {
+              providerRun?.noteReturnFailure(error);
+              closeFailure = { error: closeFailure ? new AggregateError([closeFailure.error, error], 'desktop_provider_return_and_usage_revoke_failed', { cause: closeFailure.error }) : error };
+            } finally { providerRun?.finish(); }
+          }
         }
         })();
         const checked = async (raw: Promise<IteratorResult<StreamChunk>>): Promise<IteratorResult<StreamChunk>> => {
           let result: IteratorResult<StreamChunk> | undefined, failure: { error: unknown } | undefined;
           try { result = await raw; } catch (error) { failure = { error }; }
           const business = originalBodyFailure ?? failure;
+          const rejectOriginal = (error: unknown): never => {
+            if (usageAdmissionFailed || usageConsumerFailed) localUsageFailure = { error };
+            throw error;
+          };
           if (closeFailure) {
-            if (business && business.error !== closeFailure.error) throw new AggregateError([business.error, closeFailure.error], 'desktop_provider_business_and_return_failed', { cause: business.error });
-            throw closeFailure.error;
+            if (business && business.error !== closeFailure.error) rejectOriginal(new AggregateError([business.error, closeFailure.error], 'desktop_provider_business_and_return_failed', { cause: business.error }));
+            rejectOriginal(closeFailure.error);
           }
-          if (failure) throw failure.error;
+          if (failure) rejectOriginal(failure.error);
           return result!;
         };
         return { [Symbol.asyncIterator]() { return this; },
@@ -137,6 +181,7 @@ export async function* streamDesktopTaskRecovery(input: Input, physicalRun?: Mod
       },
     });
   } catch (error) {
+    if (localUsageFailure) throw localUsageFailure.error;
     if (signal.aborted && (typeof signal.reason !== 'object' || signal.reason === null)) throw new Error('task cancelled');
     throw error;
   } finally { clearTimeout(timer); }

@@ -36,6 +36,9 @@ export interface ModelConfigEntry {
   model: string;
   label: string;
   capabilities?: string[];
+  /** Explicit generated output; input modalities or transport alone are insufficient. */
+  outputModalities?: Array<'text' | 'image' | 'audio'>;
+  purpose?: 'generation' | 'embedding' | 'decision';
   runtimeOptions?: ModelRuntimeOptions;
 }
 
@@ -46,6 +49,9 @@ export interface ProviderModelVariant {
   model: string;
   label: string;
   capabilities?: string[];
+  /** Explicit generated output; input modalities or transport alone are insufficient. */
+  outputModalities?: Array<'text' | 'image' | 'audio'>;
+  purpose?: 'generation' | 'embedding' | 'decision';
   runtimeOptions?: ModelRuntimeOptions;
   runtimeConstraints?: ModelRuntimeConstraints;
 }

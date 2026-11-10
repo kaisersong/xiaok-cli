@@ -3,20 +3,115 @@ on:
   push:
     branches: [master]
   pull_request: {}
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      signed99_cpu_diagnostic:
+        description: 'Diagnostic only: original worker profile after three publications; not signed99 acceptance'
+        type: boolean
+        default: false
+        required: false
+  merge_group: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Classify conservative documentation-only PRs
+        id: classify
+        shell: bash
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+          else
+            git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" "$CI_HEAD_SHA"
+            node .github/scripts/ci-plan.mjs docs
+          fi
   governance:
+    # Keep all three existing branch-protection contexts, including docs-only PRs.
+    name: governance (${{ matrix.os }})
+    needs: changes
+    if: ${{ always() }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ needs.changes.outputs.docs_only == 'true' && 'ubuntu-latest' || matrix.os }}
     steps:
+      - name: Require successful change classification
+        shell: bash
+        env:
+          RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          test "$RESULT" = success
+          case "$DOCS_ONLY" in true|false) ;; *) exit 1 ;; esac
+      - name: Documentation-only PR accepted
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo 'Documentation-only PR; required check completed without dependency installation.'
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.docs_only != 'true'
       - uses: actions/setup-node@v4
+        if: needs.changes.outputs.docs_only != 'true'
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+        if: needs.changes.outputs.docs_only != 'true'
       - run: npm run test:governance
+        if: needs.changes.outputs.docs_only != 'true'
       - run: npm run governance:check
+        if: needs.changes.outputs.docs_only != 'true'
+      - name: CI planning and real Vitest shard regressions
+        if: needs.changes.outputs.docs_only != 'true'
+        run: node --test .github/ci/*.test.mjs
+
+  signed99-worker-cpu-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.signed99_cpu_diagnostic }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.16.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3 node-pty nodejieba
+      - name: Capture original worker profile (expected diagnostic sentinel)
+        id: signed99_cpu
+        run: python3 scripts/diagnostics/signed99-worker-cpu.py --output "${{ runner.temp }}/signed99-worker-cpu"
+      - name: Upload allowlisted diagnostic evidence only
+        if: ${{ always() && steps.signed99_cpu.outputs.artifact_safe == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed99-worker-cpu-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/profile.cpuprofile
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/raw.log
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/vitest.json
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/process.json
+            ${{ runner.temp }}/signed99-worker-cpu/evidence/validation.json
+      - name: Upload schema-only process control metadata
+        if: ${{ always() && steps.signed99_cpu.outputs.control_metadata_safe == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed99-worker-cpu-control-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/signed99-worker-cpu/control/process.json
+            ${{ runner.temp }}/signed99-worker-cpu/control/validation.json

@@ -1,0 +1,29 @@
+diff --git a/codex-rs/ext/extension-api/tests/main_bridge_only.rs b/codex-rs/ext/extension-api/tests/main_bridge_only.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/ext/extension-api/tests/main_bridge_only.rs
+@@ -0,0 +1,24 @@
++#![cfg(feature = "xiaok-main-bridge-only")]
++use codex_extension_api::{ToolName, ToolPolicy};
++#[test]
++fn dedicated_process_policy_rejects_every_non_bridge_tool_even_if_explicitly_allowed() {
++    let names = [
++        ToolName::plain("shell"), ToolName::plain("exec_command"),
++        ToolName::plain("apply_patch"), ToolName::plain("js"),
++        ToolName::namespaced("functions", "exec_command"),
++        ToolName::namespaced("node_repl", "js"),
++        ToolName::namespaced("code_mode", "exec"),
++        ToolName::namespaced("code_mode", "wait"),
++        ToolName::namespaced("agent", "spawn_agent"),
++        ToolName::plain("xiaok.invoke"),
++        ToolName::namespaced("xiaok", "invoke_other"),
++        ToolName::namespaced("mcp__xiaok", "invoke"),
++    ];
++    for name in names {
++        assert!(!ToolPolicy::default().allows(&name), "default registry must reject {name:?}");
++        let forged = ToolPolicy { allowed_tools: Some(vec![name.clone()]), ..Default::default() };
++        assert!(!forged.allows(&name), "explicit policy cannot relax dedicated process {name:?}");
++    }
++    assert!(ToolPolicy::default().allows(&ToolName::namespaced("xiaok", "invoke")));
++    assert!(!ToolPolicy { allowed_tools: Some(vec![]), ..Default::default() }.allows(&ToolName::namespaced("xiaok", "invoke")));
++}

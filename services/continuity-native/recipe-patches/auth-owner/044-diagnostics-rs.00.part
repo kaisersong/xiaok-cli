@@ -1,0 +1,37 @@
+diff --git a/codex-rs/config/src/diagnostics.rs b/codex-rs/config/src/diagnostics.rs
+--- a/codex-rs/config/src/diagnostics.rs
++++ b/codex-rs/config/src/diagnostics.rs
+@@ -199,7 +199,8 @@
+         if let Some(contents) = layer.raw_toml() {
+             let source_name = format_config_layer_source(&layer.name, config_toml_file);
+             let Some(base_dir) = layer.raw_toml_base_dir() else {
+-                tracing::debug!(
++                crate::config_diagnostic!(
++                    debug,
+                     "Skipping raw TOML diagnostics for {source_name} because it has no base directory"
+                 );
+                 continue;
+@@ -224,13 +225,21 @@
+             Ok(contents) => contents,
+             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+             Err(err) => {
+-                tracing::debug!("Failed to read config file {}: {err}", path.display());
++                crate::config_diagnostic!(
++                    debug,
++                    "Failed to read config file {}: {err}",
++                    path.display()
++                );
+                 continue;
+             }
+         };
+ 
+         let Some(parent) = path.parent() else {
+-            tracing::debug!("Config file {} has no parent directory", path.display());
++            crate::config_diagnostic!(
++                debug,
++                "Config file {} has no parent directory",
++                path.display()
++            );
+             continue;
+         };
+         let _guard = AbsolutePathBufGuard::new(parent);

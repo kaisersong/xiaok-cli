@@ -495,6 +495,7 @@ export class GoalService {
       revision: state.revision,
       type,
       actor: context.requestSource,
+      ...(state.terminalReason?{reason:state.terminalReason}:{}),
       recordedAt: this.now(),
     } as const;
   }

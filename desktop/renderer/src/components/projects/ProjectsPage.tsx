@@ -17,7 +17,7 @@ type TabId = 'projects' | 'agents' | 'principles';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
-  const { projects, agents, createProject, connected } = useKSwarm();
+  const { projects, projectsLoaded, agents, createProject, connected } = useKSwarm();
   const { t } = useLocale();
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
@@ -111,7 +111,9 @@ export function ProjectsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'projects' && (
-          projects.length === 0 ? (
+          projects.length === 0 && !projectsLoaded ? (
+            <div role="status" className="flex h-full items-center justify-center text-sm text-[var(--c-text-secondary)]">{t.loading}</div>
+          ) : projects.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-4">
               <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
                 <FolderKanban size={28} className="text-[var(--c-text-secondary)]" />

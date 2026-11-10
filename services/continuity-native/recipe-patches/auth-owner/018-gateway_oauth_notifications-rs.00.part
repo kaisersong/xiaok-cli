@@ -1,0 +1,13 @@
+diff --git a/codex-rs/app-server/src/gateway_oauth_notifications.rs b/codex-rs/app-server/src/gateway_oauth_notifications.rs
+--- a/codex-rs/app-server/src/gateway_oauth_notifications.rs
++++ b/codex-rs/app-server/src/gateway_oauth_notifications.rs
+@@ -27,6 +27,9 @@
+ ) -> AbortOnDropHandle<()> {
+     let mut events = codex_login::subscribe_gateway_auth_status(&auth_manager.runtime_config());
+     AbortOnDropHandle::new(tokio::spawn(async move {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         loop {
+             let change = match events.recv().await {
+                 Ok(change) => change,

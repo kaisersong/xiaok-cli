@@ -1,3 +1,5 @@
+import {readGenericRegistrationData} from './registration-generic-collector.js';
+import type {IntentContractEnrollment} from './intent-contract-enrollment.js';
 import type {Database} from 'better-sqlite3';
 import type {VerificationOwner} from './proof-authority.js';
 import {canonicalVerificationJson as json} from './protocol.js';
@@ -35,11 +37,21 @@ function nonIntentSeed(raw:VerificationOwner):VerificationOwner|undefined {
  const kind=k.value;if(kind!=='task'&&kind!=='goal'&&kind!=='loop'&&kind!=='project'&&kind!=='kswarm')return undefined;
  return {profileId:p.value,ownerKind:kind,ownerId:o.value};
 }
+function intentSeed(raw:VerificationOwner):VerificationOwner|undefined {
+ if(!raw||typeof raw!=='object'||isProxy(raw)||(prototype(raw)!==objectPrototype&&prototype(raw)!==null)||nativeKeys(raw).length!==3)return undefined;
+ const p=descriptor(raw,'profileId'),k=descriptor(raw,'ownerKind'),o=descriptor(raw,'ownerId');
+ if(!p||!k||!o||!nativeOwn(p,'value')||!nativeOwn(k,'value')||!nativeOwn(o,'value')||typeof p.value!=='string'||typeof o.value!=='string'||k.value!=='intent')return undefined;
+ // Primitive string indices avoid a caller-replaced startsWith before entry().
+ const prefix='intent-subject-v1:';if(o.value.length<prefix.length)return undefined;
+ for(let i=0;i<prefix.length;i++)if(o.value[i]!==prefix[i])return undefined;
+ return {profileId:p.value,ownerKind:'intent',ownerId:o.value};
+}
 function append<T>(array:T[],value:T):void{define(array,array.length,{__proto__:null,value,enumerable:true,writable:true,configurable:true} as PropertyDescriptor);}
 // Only private native result arrays, after the complete closing intrinsic
 // fence. Parameter arrays before that fence retain defineProperty above.
 function appendResult<T>(array:T[],value:T):void{apply(nativePush,array,[value]);}
-export const REGISTRATION_TABLE_KEYS=freeze({verification_owner_dependencies:'parent_key',owner_enrollment_intents:'logical_owner_key',verification_registered_owners:'owner_key',verification_owners:'owner_key',mandatory_observation_checks:'owner_key',verification_registered_invocations:'owner_key',owner_enrollment_invocation_receipts:'owner_key',owner_enrollment_goal_sessions:'owner_key',owner_enrollment_loop_subjects:'owner_key',owner_enrollment_intent_contracts:'owner_key',owner_enrollment_kswarm_subjects:'logical_owner_key',migration_publication_intents:'owner_key',verification_application_pointers:'owner_key',verification_application_history:'owner_key',verification_application_transitions:'owner_key'} as const);
+import {REGISTRATION_TABLE_KEYS} from './registration-table-keys.js';
+export {REGISTRATION_TABLE_KEYS} from './registration-table-keys.js';
 const tables=[...Object.keys(REGISTRATION_TABLE_KEYS),'verification_profiles','verification_storage_features'];
 const lower=(v:string)=>v.replace(/[A-Z]/g,c=>c.toLowerCase());
 function fail():never{throw Error('application_registration_changed');}
@@ -161,5 +173,12 @@ export function createRegistrationCensusDatabase(db:Database){
    }
    census.finish();const vector=registrationVector(vectors);return {vector,evidence:census.evidence};
  }
- return freeze({begin:()=>beginCensus(),collectFixedRegistrationData});
+ function collectGenericRegistrationData(owner:VerificationOwner,activation?:{owner:VerificationOwner;invocations:readonly unknown[]},originalIntent?:IntentContractEnrollment):{vector:Record<string,any>[];evidence:unknown}{
+  assertNativeSqliteArrayConstruction();
+  return readGenericRegistrationData(db,beginCensus(),owner,activation,originalIntent);
+ }
+ function collectIntentRegistrationData(raw:VerificationOwner):{vector:Record<string,any>[];evidence:unknown}|undefined{
+  const owner=intentSeed(raw);if(!owner)return undefined;return collectGenericRegistrationData(owner);
+ }
+ return freeze({begin:()=>beginCensus(),collectFixedRegistrationData,collectGenericRegistrationData,collectIntentRegistrationData});
 }

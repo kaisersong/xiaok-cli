@@ -1,0 +1,434 @@
+diff --git a/codex-rs/app-server/src/xiaok_auth_stdio.rs b/codex-rs/app-server/src/xiaok_auth_stdio.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/xiaok_auth_stdio.rs
+@@ -0,0 +1,429 @@
++//! Fixed-role sole physical stdio owner. Ordinary SDK transport is unchanged.
++use crate::outgoing_message::{AuthSnapshotDelivery, OutgoingMessage, QueuedOutgoingMessage};
++use crate::transport::{CHANNEL_CAPACITY, ConnectionOrigin, TransportEvent};
++use crate::xiaok_auth_owner::{AuthOwnerConnection, OwnerIoGuard};
++use codex_app_server_protocol::ClientResponsePayload;
++use codex_app_server_transport::{
++    forward_incoming_message, next_connection_id, serialize_outgoing_message,
++    stdio_initialize_client_name,
++};
++use std::io;
++use std::os::fd::{AsRawFd, RawFd};
++use std::sync::Arc;
++use tokio::io::unix::AsyncFd;
++use tokio::sync::{mpsc, oneshot};
++use tokio::task::JoinHandle;
++
++pub(crate) const MAX_FRAME: usize = 1024 * 1024;
++fn unavailable() -> io::Error {
++    io::Error::other("xiaok_auth_stdio_unavailable")
++}
++
++// No public constructor or fd/caller bool can create this witness. Its only
++// constructor validates the actual process descriptors before opening owner.
++pub(super) struct VerifiedStdio {
++    input: RawFd,
++    output: RawFd,
++}
++impl VerifiedStdio {
++    fn actual() -> io::Result<Self> {
++        validate_fd(libc::STDIN_FILENO)?;
++        validate_fd(libc::STDOUT_FILENO)?;
++        Ok(Self {
++            input: libc::STDIN_FILENO,
++            output: libc::STDOUT_FILENO,
++        })
++    }
++    pub(super) fn write_stdout(
++        &self,
++        bytes: &[u8],
++        physical: &OwnerIoGuard<'_>,
++    ) -> io::Result<usize> {
++        if !physical.is_open() {
++            return Err(unavailable());
++        }
++        // The original owner guard spans exactly one nonblocking syscall.
++        let result = unsafe { libc::write(self.output, bytes.as_ptr().cast(), bytes.len()) };
++        if result < 0 {
++            Err(io::Error::last_os_error())
++        } else {
++            Ok(result as usize)
++        }
++    }
++    fn read_stdin(&self, bytes: &mut [u8], owner: &AuthOwnerConnection) -> io::Result<usize> {
++        let mut physical = owner.io_guard();
++        if !physical.is_open() {
++            return Err(unavailable());
++        }
++        let result = unsafe { libc::read(self.input, bytes.as_mut_ptr().cast(), bytes.len()) };
++        if result == 0 {
++            // Actual read0 and permanent close are in this same lexical guard.
++            physical.close();
++            Ok(0)
++        } else if result < 0 {
++            let error = io::Error::last_os_error();
++            if !matches!(
++                error.kind(),
++                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
++            ) {
++                physical.close();
++            }
++            Err(error)
++        } else {
++            Ok(result as usize)
++        }
++    }
++}
++
++fn validate_fd(fd: RawFd) -> io::Result<()> {
++    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
++    if unsafe { libc::fstat(fd, stat.as_mut_ptr()) } != 0 {
++        return Err(unavailable());
++    }
++    let mode = unsafe { stat.assume_init() }.st_mode & libc::S_IFMT;
++    if mode == libc::S_IFSOCK {
++        let mut kind: libc::c_int = 0;
++        let mut size = std::mem::size_of_val(&kind) as libc::socklen_t;
++        if unsafe {
++            libc::getsockopt(
++                fd,
++                libc::SOL_SOCKET,
++                libc::SO_TYPE,
++                (&mut kind as *mut libc::c_int).cast(),
++                &mut size,
++            )
++        } != 0
++            || kind != libc::SOCK_STREAM
++        {
++            return Err(unavailable());
++        }
++        let mut address = std::mem::MaybeUninit::<libc::sockaddr_storage>::zeroed();
++        let mut size = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
++        if unsafe { libc::getsockname(fd, address.as_mut_ptr().cast(), &mut size) } != 0
++            || unsafe { address.assume_init() }.ss_family as libc::c_int != libc::AF_UNIX
++        {
++            return Err(unavailable());
++        }
++    } else if mode != libc::S_IFIFO {
++        return Err(unavailable());
++    }
++    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
++    let fdflags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
++    if flags < 0
++        || fdflags < 0
++        || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
++        || unsafe { libc::fcntl(fd, libc::F_SETFD, fdflags | libc::FD_CLOEXEC) } < 0
++    {
++        return Err(unavailable());
++    }
++    Ok(())
++}
++struct OutputFd(RawFd);
++impl AsRawFd for OutputFd {
++    fn as_raw_fd(&self) -> RawFd {
++        self.0
++    }
++}
++
++pub(super) enum WriteStep {
++    Complete,
++    Progress,
++    Wait,
++    Drop,
++    Closed,
++}
++enum Frame {
++    Public { bytes: Vec<u8>, offset: usize },
++    Private(Box<AuthSnapshotDelivery>),
++}
++struct Prepared {
++    frame: Frame,
++    ack: Option<oneshot::Sender<()>>,
++}
++fn prepare_message(queued: QueuedOutgoingMessage) -> io::Result<Prepared> {
++    // Reject the public DTO even if accompanied by a forged Any. No ordinary
++    // serializer, fake box or export-revoked branch may authorize it.
++    if matches!(&queued.message, OutgoingMessage::Response(r) if matches!(&*r.result, ClientResponsePayload::XiaokAuthSnapshot(_)))
++    {
++        return Err(unavailable());
++    }
++    let frame = if let Some(payload) = queued.private_auth {
++        Frame::Private(
++            payload
++                .into_any()
++                .downcast::<AuthSnapshotDelivery>()
++                .map_err(|_| unavailable())?,
++        )
++    } else {
++        let mut json = serialize_outgoing_message(queued.message)
++            .ok_or_else(unavailable)?
++            .into_bytes();
++        if json.len() >= MAX_FRAME {
++            return Err(unavailable());
++        }
++        json.push(b'\n');
++        Frame::Public {
++            bytes: json,
++            offset: 0,
++        }
++    };
++    Ok(Prepared {
++        frame,
++        ack: queued.write_complete_tx,
++    })
++}
++fn public_step(
++    io: &VerifiedStdio,
++    owner: &AuthOwnerConnection,
++    bytes: &[u8],
++    offset: &mut usize,
++) -> WriteStep {
++    let mut physical = owner.io_guard();
++    if !physical.is_open() {
++        return WriteStep::Closed;
++    }
++    match io.write_stdout(&bytes[*offset..], &physical) {
++        Ok(0) => {
++            physical.close();
++            WriteStep::Closed
++        }
++        Ok(count) => {
++            *offset += count;
++            if *offset == bytes.len() {
++                WriteStep::Complete
++            } else {
++                WriteStep::Progress
++            }
++        }
++        Err(error)
++            if matches!(
++                error.kind(),
++                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
++            ) =>
++        {
++            WriteStep::Wait
++        }
++        Err(_) => {
++            physical.close();
++            WriteStep::Closed
++        }
++    }
++}
++
++pub(super) async fn start(
++    events: mpsc::Sender<TransportEvent>,
++    initialize_name: oneshot::Sender<String>,
++    install_signal: bool,
++    owner: Arc<AuthOwnerConnection>,
++) -> io::Result<JoinHandle<()>> {
++    let io = Arc::new(VerifiedStdio::actual()?);
++    let writable = AsyncFd::with_interest(OutputFd(io.output), tokio::io::Interest::WRITABLE)
++        .map_err(|_| unavailable())?;
++    owner.open_stdio(&io)?;
++    let start_result = start_open(
++        events,
++        initialize_name,
++        install_signal,
++        Arc::clone(&owner),
++        io,
++        writable,
++    )
++    .await;
++    if start_result.is_err() {
++        owner.close_physical();
++    }
++    start_result
++}
++async fn start_open(
++    events: mpsc::Sender<TransportEvent>,
++    initialize_name: oneshot::Sender<String>,
++    install_signal: bool,
++    owner: Arc<AuthOwnerConnection>,
++    io: Arc<VerifiedStdio>,
++    writable: AsyncFd<OutputFd>,
++) -> io::Result<JoinHandle<()>> {
++    if install_signal {
++        let mut signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGTERM])
++            .map_err(|_| unavailable())?;
++        let owner = Arc::clone(&owner);
++        std::thread::Builder::new()
++            .name("xiaok-auth-signal".into())
++            .spawn(move || {
++                if signals.forever().next().is_some() {
++                    owner.close_physical();
++                }
++            })
++            .map_err(|_| unavailable())?;
++    }
++    let id = next_connection_id();
++    let (writer, mut output) = mpsc::channel::<QueuedOutgoingMessage>(CHANNEL_CAPACITY);
++    events
++        .send(TransportEvent::ConnectionOpened {
++            connection_id: id,
++            origin: ConnectionOrigin::Stdio,
++            auth: None,
++            writer: writer.clone(),
++            disconnect_sender: None,
++        })
++        .await
++        .map_err(|_| unavailable())?;
++    // A bounded raw reader never waits for the async parser or event queue.
++    let (input_tx, mut input) = mpsc::channel::<String>(256);
++    let reader_owner = Arc::clone(&owner);
++    let reader_io = Arc::clone(&io);
++    std::thread::Builder::new()
++        .name("xiaok-auth-stdin".into())
++        .spawn(move || {
++            let mut buffered = Vec::new();
++            let mut chunk = [0u8; 8192];
++            while !reader_owner.closed.is_cancelled() {
++                match reader_io.read_stdin(&mut chunk, &reader_owner) {
++                    Ok(0) => break,
++                    Ok(count) => {
++                        buffered.extend_from_slice(&chunk[..count]);
++                        // The frame budget applies per complete line and to the
++                        // incomplete tail since the last newline. Adjacent
++                        // complete lines must never sum into it: a legal line
++                        // followed by a newline arriving in a later read chunk
++                        // stays a legal line.
++                        while let Some(end) = buffered.iter().position(|b| *b == b'\n') {
++                            let bytes: Vec<_> = buffered.drain(..=end).collect();
++                            if bytes.len() > MAX_FRAME {
++                                reader_owner.close_physical();
++                                return;
++                            }
++                            let Ok(line) = String::from_utf8(bytes) else {
++                                reader_owner.close_physical();
++                                return;
++                            };
++                            if input_tx.try_send(line).is_err() {
++                                reader_owner.close_physical();
++                                return;
++                            }
++                        }
++                        if buffered.len() > MAX_FRAME {
++                            reader_owner.close_physical();
++                            break;
++                        }
++                    }
++                    Err(error)
++                        if matches!(
++                            error.kind(),
++                            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
++                        ) =>
++                    {
++                        // No guard during poll. Shutdown is bounded even with idle stdin.
++                        let mut poll = libc::pollfd {
++                            fd: reader_io.input,
++                            events: libc::POLLIN,
++                            revents: 0,
++                        };
++                        let result = unsafe { libc::poll(&mut poll, 1, 50) };
++                        if result < 0
++                            && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted
++                        {
++                            reader_owner.close_physical();
++                            break;
++                        }
++                    }
++                    Err(_) => break,
++                }
++            }
++            reader_owner.close_physical();
++        })
++        .map_err(|_| unavailable())?;
++    let forward_owner = Arc::clone(&owner);
++    let forward_events = events.clone();
++    let forward = async move {
++        let mut initialize_name = Some(initialize_name);
++        while let Some(line) = input.recv().await {
++            if let Some(name) = stdio_initialize_client_name(&line)
++                && let Some(sender) = initialize_name.take()
++            {
++                let _ = sender.send(name);
++            }
++            let forwarded = tokio::select! {
++                biased;
++                _ = forward_owner.closed.cancelled() => false,
++                result = forward_incoming_message(&forward_events, &writer, id, &line) => result,
++            };
++            if !forwarded {
++                break;
++            }
++        }
++        forward_owner.close_physical();
++    };
++    let write_owner = Arc::clone(&owner);
++    let write = async move {
++        while let Some(queued) = output.recv().await {
++            let Ok(mut prepared) = prepare_message(queued) else {
++                write_owner.close_physical();
++                break;
++            };
++            loop {
++                let result = match &mut prepared.frame {
++                    Frame::Public { bytes, offset } => {
++                        public_step(&io, &write_owner, bytes, offset)
++                    }
++                    Frame::Private(delivery) => delivery.step(&io),
++                };
++                match result {
++                    WriteStep::Complete => {
++                        if let Some(ack) = prepared.ack.take() {
++                            let _ = ack.send(());
++                        }
++                        break;
++                    }
++                    WriteStep::Drop => break, // dropping ack is cancellation, never write success
++                    WriteStep::Closed => {
++                        write_owner.close_physical();
++                        return;
++                    }
++                    WriteStep::Progress => {
++                        tokio::task::yield_now().await;
++                    }
++                    WriteStep::Wait => {
++                        // CancellationToken registration cannot lose an earlier close.
++                        // Export revocation wakes only a private pending delivery.
++                        let ready = match &prepared.frame {
++                            Frame::Private(delivery) => tokio::select! {
++                                biased;
++                                _ = delivery.closed().cancelled() => return,
++                                _ = delivery.revoked().cancelled() => continue,
++                                _ = delivery.cancelled().cancelled() => continue,
++                                ready = writable.writable() => ready,
++                            },
++                            Frame::Public { .. } => tokio::select! {
++                                biased;
++                                _ = write_owner.closed.cancelled() => return,
++                                ready = writable.writable() => ready,
++                            },
++                        };
++                        match ready {
++                            Ok(mut guard) => guard.clear_ready(),
++                            Err(_) => {
++                                write_owner.close_physical();
++                                return;
++                            }
++                        }
++                    }
++                }
++            }
++        }
++        write_owner.close_physical();
++    };
++    Ok(tokio::spawn(async move {
++        tokio::select! { biased;
++            _ = owner.closed.cancelled() => {},
++            _ = forward => {},
++            _ = write => {},
++        }
++        owner.close_physical();
++        let _ = events
++            .send(TransportEvent::ConnectionClosed { connection_id: id })
++            .await;
++    }))
++}
++#[cfg(test)]
++#[path = "xiaok_auth_stdio_tests.rs"]
++mod tests;

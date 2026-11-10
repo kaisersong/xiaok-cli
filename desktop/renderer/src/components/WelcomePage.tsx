@@ -1,5 +1,6 @@
+import {AssistantCalendarSourceCard} from './assistant/AssistantCalendarSourceCard';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FolderKanban } from 'lucide-react';
 import { ChatInput } from './ChatInput';
 import { api } from '../api';
@@ -78,7 +79,11 @@ function useTypewriter(text: string, speed = 80) {
 
 export function WelcomePage() {
   const navigate = useNavigate();
-  const [prompt, setPrompt] = useState('');
+  const location = useLocation();
+  const [prompt, setPrompt] = useState(() => {
+    const draft = location.state?.assistantDraftPrompt;
+    return typeof draft === 'string' ? draft : '';
+  });
   const [automation, setAutomation] = useState<AutomationOverviewSnapshotView | null>(null);
   const [automationLoadState, setAutomationLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [assistantSnapshot, setAssistantSnapshot] = useState<AssistantHomeSnapshot | null>(null);
@@ -100,27 +105,20 @@ export function WelcomePage() {
   const automationLoading = automationLoadState === 'loading';
   const automationUnavailable = automationLoadState === 'error';
 
+  const assistantReads=useRef({active:false,busy:false,queued:false,revision:0});
+  const assistantReadRequest=useRef<()=>Promise<void>>(async()=>{});
   const loadAssistantOverview = useCallback(async () => {
-    const assistantApi = getAssistantDesktopApi();
-    if (!assistantApi?.getAssistantOverview) {
-      setAssistantSnapshot(null);
-      setAssistantCandidates([]);
-      setAssistantLoadState('unavailable');
-      return;
-    }
+    const owner=assistantReads.current;if(!owner.active)return;owner.revision++;
+    if(owner.busy){owner.queued=true;return;}owner.busy=true;const revision=owner.revision;
+    const current=()=>owner.active&&assistantReads.current===owner&&owner.revision===revision;
     try {
-      const overview = await assistantApi.getAssistantOverview();
-      setAssistantSnapshot(buildAssistantHomeProjection(overview));
-      setAssistantCandidates(overview.candidates ?? []);
-      setAssistantLoadState('ready');
-      setAssistantOperationUnknown(false);
-    } catch {
-      setAssistantOperationUnknown(true);
-      setAssistantSnapshot(null);
-      setAssistantCandidates([]);
-      setAssistantLoadState('unavailable');
-    }
+      const assistantApi=getAssistantDesktopApi();if(!assistantApi?.getAssistantOverview)throw Error('assistant_unavailable');
+      const overview=await assistantApi.getAssistantOverview();if(!current())return;
+      setAssistantSnapshot(buildAssistantHomeProjection(overview));setAssistantCandidates(overview.candidates??[]);setAssistantLoadState('ready');setAssistantOperationUnknown(false);
+    } catch {if(current()){setAssistantOperationUnknown(true);setAssistantSnapshot(null);setAssistantCandidates([]);setAssistantLoadState('unavailable');}}
+    finally {owner.busy=false;if(owner.active&&assistantReads.current===owner&&owner.queued){owner.queued=false;void assistantReadRequest.current();}}
   }, []);
+  assistantReadRequest.current=loadAssistantOverview;
 
   useEffect(() => {
     let active = true;
@@ -143,7 +141,9 @@ export function WelcomePage() {
   }, []);
 
   useEffect(() => {
-    void loadAssistantOverview();
+    const owner={active:true,busy:false,queued:false,revision:0};assistantReads.current=owner;void loadAssistantOverview();
+    const stop=getDesktopApi()?.onAssistantInboxChanged?.(()=>{void loadAssistantOverview();});
+    return ()=>{owner.active=false;stop?.();};
   }, [loadAssistantOverview]);
 
   const updateAssistantStatus = async (action: 'activateAssistant' | 'pauseAssistant' | 'resumeAssistant') => {
@@ -153,6 +153,7 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    assistantReads.current.revision++;
     setAssistantOperationUnknown(false);
     setAssistantBusy(true);
     try {
@@ -172,6 +173,7 @@ export function WelcomePage() {
       setAssistantLoadState('unavailable');
       return;
     }
+    assistantReads.current.revision++;
     setAssistantOperationUnknown(false);
     setAssistantBusyCandidateId(candidateId);
     try {
@@ -275,6 +277,7 @@ export function WelcomePage() {
         onActivateAssistant={() => updateAssistantStatus('activateAssistant')}
         onPauseAssistant={() => updateAssistantStatus('pauseAssistant')}
         onResumeAssistant={() => updateAssistantStatus('resumeAssistant')}
+        onCalendarSourceChanged={loadAssistantOverview}
         onOpenAssistantDetails={openAssistantDetails}
         onCloseAssistantDetails={() => setAssistantDetailsOpen(false)}
         onAcceptAssistantCandidate={(candidateId, collectionId) => decideAssistantCandidate(candidateId, 'accept', collectionId)}
@@ -304,6 +307,7 @@ type HomeContentProps = {
   onActivateAssistant: () => Promise<void>;
   onPauseAssistant: () => Promise<void>;
   onResumeAssistant: () => Promise<void>;
+  onCalendarSourceChanged: () => Promise<void>;
   onOpenAssistantDetails: () => void;
   onCloseAssistantDetails: () => void;
   onAcceptAssistantCandidate: (candidateId: string, collectionId?: string) => Promise<void>;
@@ -331,6 +335,7 @@ function ConversationFirstHome({
   onActivateAssistant,
   onPauseAssistant,
   onResumeAssistant,
+  onCalendarSourceChanged,
   onOpenAssistantDetails,
   onCloseAssistantDetails,
   onAcceptAssistantCandidate,
@@ -364,6 +369,7 @@ function ConversationFirstHome({
           onResume={onResumeAssistant}
           onOpenDetails={onOpenAssistantDetails}
         />
+        <AssistantCalendarSourceCard onChanged={()=>{void onCalendarSourceChanged();}}/>
       </div>
       <section className="mt-[clamp(5rem,15vh,8rem)] w-full border-y border-[var(--c-border)] py-4" aria-labelledby="welcome-overview-title">
         <div className="mb-3 flex items-center justify-between gap-3">

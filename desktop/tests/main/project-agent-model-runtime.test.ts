@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, it, expect, vi } from 'vitest';
 import { createDesktopServices } from '../../electron/desktop-services.js';
+import {openOwnedWorkflowNormalCase} from '../support/owned-workflow-normal-case.js';
 
 describe('project selected model through real Desktop runtime and HTTP provider',()=>{
  it('keeps a completed tool result when the pinned model fails, then uses current model',async()=>{
@@ -21,14 +22,17 @@ describe('project selected model through real Desktop runtime and HTTP provider'
   });
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
   writeFileSync(join(configDir,'config.json'),JSON.stringify({schemaVersion:2,defaultProvider:'local',defaultModelId:'current',providers:{local:{type:'custom',protocol:'openai_legacy',baseUrl:`http://127.0.0.1:${(server.address() as any).port}/v1`,apiKey:'fixture'}},models:{selected:{provider:'local',model:'selected',label:'Selected',capabilities:['tools','image_in']},current:{provider:'local',model:'current',label:'Current',capabilities:['tools']}},defaultMode:'interactive',channels:{}}));
-  const gateway={request:vi.fn(async()=>new Response(JSON.stringify({agents:[{id:'worker',runtimeType:'xiaok',desktopModelId:'selected'}]}))),getDesktopMutationToken:()=> 'fixture'};
-  const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:gateway as any});
+  const owned=await openOwnedWorkflowNormalCase({project:{id:'p',name:'Project',goal:'Test'},workflowName:'selected_model_fixture',phaseTitle:'Write',prompt:'Write once',label:'Write once'});
+  const ownedFetch=globalThis.fetch;globalThis.fetch=(input,init)=>{const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);return url.origin===`http://127.0.0.1:${(server.address() as any).port}`?owned.fixture.nativeFetch(input,init):ownedFetch(input,init);};
+  const request=owned.kswarmService.request.bind(owned.kswarmService);
+  const requestSpy=vi.spyOn(owned.kswarmService,'request').mockImplementation(async(path,init)=>path==='/agents'?new Response(JSON.stringify({agents:[{id:'xiaok-worker',runtimeType:'xiaok',desktopModelId:'selected'}]})):request(path,init));
+  const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:owned.kswarmService});
   try{
-    const result=await services.runKSwarmHandoffTask({targetParticipantId:'worker',handoff:{kind:'kswarm_task_handoff_v1',runId:'r',project:{id:'p',name:'Project',goal:'Test',workFolder:root},task:{id:'t',title:'Write once',requiredOutputs:[]}}});
+    const result=await services.runKSwarmHandoffTask({targetParticipantId:'xiaok-worker',handoff:{kind:'kswarm_task_handoff_v1',runId:'r',project:{id:'p',name:'Project',goal:'Test',workFolder:root},task:{id:'t',title:'Write once',requiredOutputs:[]}}});
     expect(result.summary).toContain('done');expect(requests.map(r=>r.model)).toEqual(['selected','selected','current']);
     expect(requests[2].messages.some((m:any)=>m.role==='tool'&&m.tool_call_id==='write-once')).toBe(true);
     expect(readFileSync(join(root,'result.txt'),'utf8')).toBe('once');
-  }finally{await services.disposeMultiAgent();await new Promise<void>(r=>server.close(()=>r()));if(old===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=old;rmSync(root,{recursive:true,force:true});}
+  }finally{requestSpy.mockRestore();await owned.close(services);server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));if(old===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=old;rmSync(root,{recursive:true,force:true});}
  },20000);
  it('preserves references and explicit follow-current through real KSwarm store reopen',async()=>{
   const root=mkdtempSync(join(tmpdir(),'project-model-store-'));

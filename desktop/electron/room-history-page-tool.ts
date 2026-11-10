@@ -24,6 +24,8 @@
 import type { Tool } from '../../src/types.js';
 import { getRoomHistoryCapability } from './room-history-capability-registry.js';
 
+export const ROOM_HISTORY_PAGE_TOOL_NAME = 'getRoomMessagesPage';
+
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 
@@ -54,7 +56,7 @@ export function createGetRoomMessagesPageTool(): Tool {
   return {
     permission: 'safe',
     definition: {
-      name: 'getRoomMessagesPage',
+      name: ROOM_HISTORY_PAGE_TOOL_NAME,
       description: '在协作空间任务执行期间按需补取更早的历史消息，用于确认当前上下文窗口不完整时的具体历史内容。仅在协作空间任务中可用；对普通任务调用无效果。',
       inputSchema: {
         type: 'object',

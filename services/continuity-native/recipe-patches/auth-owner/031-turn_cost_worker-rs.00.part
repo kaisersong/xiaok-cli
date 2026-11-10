@@ -1,0 +1,13 @@
+diff --git a/codex-rs/app-server/src/turn_cost_worker.rs b/codex-rs/app-server/src/turn_cost_worker.rs
+--- a/codex-rs/app-server/src/turn_cost_worker.rs
++++ b/codex-rs/app-server/src/turn_cost_worker.rs
+@@ -99,6 +99,9 @@
+ 
+ impl TurnCostWorker {
+     pub(crate) fn spawn(config: Arc<Config>, auth_manager: Arc<AuthManager>) -> Option<Self> {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return None;
++        }
+         let has_otel_log_exporter = matches!(
+             config.otel.exporter,
+             OtelExporterKind::OtlpHttp { .. } | OtelExporterKind::OtlpGrpc { .. }

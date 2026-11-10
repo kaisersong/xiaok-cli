@@ -1,0 +1,139 @@
+name: Original DSH producer registration
+on:
+  pull_request: {}
+  workflow_dispatch:
+    inputs:
+      kswarm_ref:
+        description: Exact coordinated KSwarm commit SHA
+        required: true
+      mydocs_ref:
+        description: Exact coordinated mydocs commit SHA
+        required: true
+permissions:
+  contents: read
+jobs:
+  cli-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    defaults:
+      run:
+        working-directory: xiaok-cli
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xiaok-cli
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require the readonly private sibling checkout token
+        shell: bash
+        env:
+          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+        run: |
+          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
+            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/mydocs
+          ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
+          path: mydocs
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: xiaok-cli/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: npm ci --ignore-scripts
+      - name: CLI checker compatibility at its own minimum; no KSwarm product load
+        run: node --test tests/governance/dsh-producer-registration.test.mjs
+      - run: python ../mydocs/xiaok-cli/design/dsh-implementation/generate-indexes.py --check
+  original-boundary:
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.22.0', '24']
+    defaults:
+      run:
+        working-directory: xiaok-cli
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xiaok-cli
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Coordinated PR branches must exist in both siblings. There is no
+      # fallback to master or an unrelated primary checkout. The exact checked
+      # out SHAs are captured below; missing/mismatched registrations fail.
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: ${{ inputs.kswarm_ref || github.head_ref || github.ref_name }}
+          path: kswarm
+          persist-credentials: false
+      - name: Require the readonly private sibling checkout token
+        shell: bash
+        env:
+          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+        run: |
+          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
+            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/mydocs
+          ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
+          path: mydocs
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: xiaok-cli/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix ../kswarm
+      - name: Retain actual cross-repository identities
+        run: >-
+          node --input-type=module -e "import fs from 'node:fs';import {execFileSync} from 'node:child_process';const rows={};for(const name of ['xiaok-cli','kswarm','mydocs'])rows[name]=execFileSync('git',['rev-parse','HEAD'],{cwd:'../'+name,encoding:'utf8'}).trim();fs.writeFileSync('dsh-producer-source-shas.json',JSON.stringify(rows));console.log(JSON.stringify(rows));"
+      - name: Preserve every original frozen requirement and case
+        run: python ../mydocs/xiaok-cli/design/dsh-implementation/generate-indexes.py --check
+      - name: Exact original runtime surface and same registration
+        shell: bash
+        run: npm run check:dsh-producer-registration -- --run-regression | tee dsh-producer-check-and-runtime.tap
+      - name: Checker regression tests
+        run: node --test tests/governance/dsh-producer-registration.test.mjs
+      - name: Real original Hub alias, ordinary and protected protocol regressions
+        working-directory: kswarm
+        run: >-
+          node --test --test-reporter=tap
+          test/hub-producer-registration.test.js
+          test/dsh-owner-foundation.test.js
+          test/dsh-admission-owner.test.js
+          test/project-protocol-create.test.js
+          test/reserved-plan-protocol-recognition.test.js
+      - name: Existing complete protected protocol suite
+        working-directory: kswarm
+        shell: bash
+        run: npm run test:protected-protocol | tee dsh-protected-protocol.tap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dsh-producer-registration-node-${{ matrix.node }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            xiaok-cli/dsh-producer-source-shas.json
+            xiaok-cli/dsh-producer-check-and-runtime.tap
+            kswarm/dsh-protected-protocol.tap
+          if-no-files-found: error

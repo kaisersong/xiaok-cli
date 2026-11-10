@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterEach, expect, it, vi} from 'vitest';
 import {createServer} from 'node:http';
-import {mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, existsSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -166,4 +166,15 @@ it.each(['write-denied', 'readonly', 'shell-enabled', 'unknown-key', 'denied-com
 it('revokes the real registry when the workflow read owner closes', async () => {
   const f = await issued(); await closeNativeWorkflowReadPort(f.port);
   await expect(f.registry.executeTool('write', {file_path: join(f.workspace.artifacts, 'report.md'), content: 'BAD'})).rejects.toThrow('workflow_stored_restrictions_denied');
+});
+
+it('a private local freshness guard is rechecked after original facts IO before artifact mkdir or registry construction',async()=>{
+ const f=await issued();f.registry.dispose();rmdirSync(f.workspace.artifacts);let current=true,created:Awaited<ReturnType<typeof createNativeWorkflowArtifactRegistry>>|undefined,failure:unknown;const fault=Error('original Main reader no longer current');
+ const forward=vi.mocked(globalThis.fetch).getMockImplementation()!;
+ vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{const response=await forward(input,init);current=false;return response;});
+ try{try{created=await (createNativeWorkflowArtifactRegistry as any)(f.checkpoint,()=>{if(!current)throw fault;});}catch(error){failure=error;}expect(existsSync(f.workspace.artifacts)).toBe(false);expect(failure).toBe(fault);expect(created).toBeUndefined();}finally{created?.registry.dispose();}
+});
+it.each(['boolean','promise'])('a %s local guard result never creates artifact directories or grants authority',async kind=>{
+ const f=await issued();f.registry.dispose();rmdirSync(f.workspace.artifacts);let created:Awaited<ReturnType<typeof createNativeWorkflowArtifactRegistry>>|undefined,failure:unknown;
+ try{try{created=await (createNativeWorkflowArtifactRegistry as any)(f.checkpoint,()=>kind==='boolean'?true:Promise.reject(Error('async local guard rejected')));}catch(error){failure=error;}expect(existsSync(f.workspace.artifacts)).toBe(false);expect(failure).toBeInstanceOf(Error);expect(created).toBeUndefined();}finally{created?.registry.dispose();}
 });

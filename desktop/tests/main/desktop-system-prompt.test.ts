@@ -3,6 +3,20 @@ import { homedir } from 'node:os';
 import { buildDesktopSystemPrompt, VISUAL_PDF_EXPORT_GUIDANCE } from '../../electron/desktop-system-prompt.js';
 
 describe('Desktop system prompt contract', () => {
+  it('chooses built-in visual output from business intent without asking for tool names', () => {
+    const prompt = buildDesktopSystemPrompt();
+    expect(prompt).toContain('render_ui');
+    for (const term of ['图表', '指标卡', '筛选', 'CSV']) expect(prompt).toContain(term);
+    expect(prompt).toMatch(/不.*(?:点名|说出).*工具名/);
+    expect(prompt).toMatch(/工具.*可用/);
+    expect(prompt).toContain('普通问答');
+    expect(prompt).toContain('纯文本');
+    expect(prompt).toMatch(/不能.*(?:替代|代替).*报告/);
+    expect(prompt).toContain('不编造数据');
+    expect(prompt).toContain('当前工具权限');
+    expect(prompt).toMatch(/不要.*(?:添加|构造).*字段/);
+  });
+
   it('keeps the base policy compact and uses runtime environment paths', () => {
     const prompt = buildDesktopSystemPrompt();
     expect(prompt.length).toBeLessThanOrEqual(5000);

@@ -24,7 +24,7 @@ Group=xiaokvm
 Environment=PATH=/usr/local/lib/xiaok-engine:/usr/sbin:/usr/bin:/sbin:/bin
 RuntimeDirectory=xiaok-engine
 RuntimeDirectoryMode=0750
-ExecStart=/usr/local/lib/xiaok-engine/dockerd --host=unix:///run/xiaok-engine/docker.sock --group=xiaokvm --data-root=/var/lib/xiaok-engine --exec-root=/run/xiaok-engine/runtime --pidfile=/run/xiaok-engine/docker.pid --bridge=none --iptables=false --ip6tables=false --ip-forward=false --userland-proxy=false
+ExecStart=/usr/local/lib/xiaok-engine/dockerd --host=unix:///run/xiaok-engine/docker.sock --group=xiaokvm --data-root=/var/lib/xiaok-engine --exec-root=/run/xiaok-engine/runtime --pidfile=/run/xiaok-engine/docker.pid --bridge=none --iptables=false --ip6tables=false --ip-forward=false --userland-proxy=false --feature=containerd-snapshotter=false --storage-driver=overlay2
 Delegate=yes
 KillMode=process
 Restart=no

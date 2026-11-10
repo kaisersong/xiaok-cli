@@ -1,0 +1,23 @@
+diff --git a/codex-rs/app-server/src/config_manager.rs b/codex-rs/app-server/src/config_manager.rs
+--- a/codex-rs/app-server/src/config_manager.rs
++++ b/codex-rs/app-server/src/config_manager.rs
+@@ -79,6 +79,19 @@
+         arg0_paths: Arg0DispatchPaths,
+         thread_config_loader: Arc<dyn ThreadConfigLoader>,
+     ) -> Self {
++        let mut loader_overrides = loader_overrides;
++        let mut cli_overrides = cli_overrides;
++        if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++            // Dedicated private home is selected by main before this first config load.
++            loader_overrides.ignore_project_config = true;
++            loader_overrides.ignore_user_and_project_exec_policy_rules = true;
++            loader_overrides.packaged_defaults_path = None;
++            loader_overrides.user_config_path = None;
++            loader_overrides.managed_config_path = Some(codex_home.join("disabled-host-settings").join("managed.toml"));
++            loader_overrides.system_config_path = Some(codex_home.join("disabled-host-settings").join("system.toml"));
++            cli_overrides.clear();
++        }
++        let strict_config = strict_config || codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY;
+         let network_policy = codex_http_client::NetworkPolicyController::default();
+         Self {
+             codex_home,

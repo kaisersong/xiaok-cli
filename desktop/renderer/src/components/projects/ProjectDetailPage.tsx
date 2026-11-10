@@ -649,11 +649,15 @@ export function ProjectDetailPage() {
   };
 
   const describeDispatchResult = (result: DispatchTasksResult | null | undefined) => {
-    const workflowCount = (result?.workflowRuns?.length ?? 0) + (result?.workflowNodeDispatches?.length ?? 0);
-    if (workflowCount > 0) return t.projectsDetailDispatchWorkflowStarted;
-    const dispatchedCount = result?.dispatched?.length ?? 0;
-    if (dispatchedCount > 0) return t.projectsDetailDispatchTasksDispatched(dispatchedCount);
-    return t.projectsDetailDispatchNone;
+    if(!result?.ok)return t.projectsDetailDispatchFailed;
+    const count=result.operation.children.length;
+    if(!count)return t.projectsDetailDispatchNone;
+    const stored=t.projectsDetailDispatchIntentStored(count);
+    if(result.preparationObservationUnavailable)return stored+' '+t.projectsDetailDispatchObservationUnavailable;
+    if(!result.preparationObservations)return stored;
+    let present=0,missing=0,unavailable=0;
+    for(const observation of result.preparationObservations){if(observation.status==='present')present++;else if(observation.status==='missing')missing++;else unavailable++;}
+    return stored+' '+t.projectsDetailDispatchObservationSummary(present,missing,unavailable);
   };
 
   const startRetryCooldown = () => {
@@ -673,7 +677,7 @@ export function ProjectDetailPage() {
       } else if (action === 'approve') {
         showNotice({ action: 'approve', kind: 'success', message: t.projectsDetailApproveSuccess }, 5_000);
       } else if (action === 'dispatch') {
-        showNotice({ action: 'dispatch', kind: 'success', message: describeDispatchResult(result) }, 5_000);
+        showNotice({ action: 'dispatch', kind: result?.ok===true?'success':'error', message: describeDispatchResult(result) }, 5_000);
       }
     } catch {
       if (action === 'approve') {
@@ -1019,9 +1023,13 @@ export function ProjectDetailPage() {
     && !latestWorkflowRun.scope?.taskId
     && latestWorkflowRun.status === 'running',
   );
-  const dispatchableTaskCount = detail.dispatchPlan?.dispatchedTasks?.length
-    ?? detail.dispatchPlan?.dispatchable?.length
-    ?? tasks.filter(t => t.status === 'pending').length;
+  // Recording an intent does not require a currently online execution slot.
+  // Main re-reads the protected plan and owns admission for this action.
+  const dispatchableTaskCount = Math.max(
+    detail.dispatchPlan?.dispatchedTasks?.length ?? 0,
+    detail.dispatchPlan?.dispatchable?.length ?? 0,
+    tasks.filter(task => task.status === 'pending').length,
+  );
   const showApprove = !workflowHasProjectProgress && (project.status === 'created' || project.status === 'draft' || project.status === 'planning');
   const showRetryPlan = canRetryPlanForProject(project, plan, tasks);
   const showInterruptedPlanHint = isInterruptedPlanProject(project, plan, tasks);
@@ -1078,7 +1086,7 @@ export function ProjectDetailPage() {
               </button>
             )}
             {showDispatch && (
-              <button type="button" onClick={() => handleAction('dispatch', () => dispatchTasks(projectId!, project?.poAgent))}
+              <button type="button" onClick={() => handleAction('dispatch', () => dispatchTasks(projectId!))}
                 disabled={actionLoading !== null}
                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[var(--c-text-primary)] bg-[var(--c-bg-deep)] hover:brightness-[0.95] disabled:opacity-50">
                 <Send size={12} /><span>{actionLoading === 'dispatch' ? '...' : t.projectsDetailDispatch}</span>

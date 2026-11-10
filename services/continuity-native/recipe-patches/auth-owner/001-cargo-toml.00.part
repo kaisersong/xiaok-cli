@@ -1,0 +1,13 @@
+diff --git a/codex-rs/app-server-protocol/Cargo.toml b/codex-rs/app-server-protocol/Cargo.toml
+--- a/codex-rs/app-server-protocol/Cargo.toml
++++ b/codex-rs/app-server-protocol/Cargo.toml
+@@ -11,6 +11,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-auth-owner-only = []
+ 
+ [dependencies]
+ anyhow = { workspace = true }

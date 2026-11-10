@@ -1,0 +1,34 @@
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -93,6 +93,7 @@
+     )
+ }
+ 
++mod xiaok_main_bridge;
+ mod analytics_utils;
+ mod app_info;
+ mod app_server_tracing;
+@@ -504,6 +505,22 @@
+     auth: WebsocketAuthSettings,
+     runtime_options: AppServerRuntimeOptions,
+ ) -> IoResult<AppServerExit> {
++    let strict_config = strict_config || codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY;
++    let mut runtime_options = runtime_options;
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        if !matches!(&transport, AppServerTransport::Stdio) || std::env::var("XIAOK_NATIVE_ISOLATED_V1").as_deref() != Ok("1") {
++            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_stdio_required"));
++        }
++        let home = find_codex_home()?;
++        let expected = std::fs::canonicalize(home.join("workspace"))?;
++        if std::fs::canonicalize(std::env::current_dir()?)? != expected {
++            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_cwd_required"));
++        }
++        runtime_options.plugin_startup_tasks = PluginStartupTasks::Skip;
++        runtime_options.remote_control_startup_mode = RemoteControlStartupMode::DisabledEphemeral;
++        runtime_options.code_mode_host_transport = CodeModeHostTransport::Local;
++        runtime_options.managed_daemon = false;
++    }
+     #[cfg(target_os = "windows")]
+     let _registered_core = codex_windows_sandbox::registered_core_requested();
+     let managed_daemon = matches!(&transport, AppServerTransport::UnixSocket { .. })

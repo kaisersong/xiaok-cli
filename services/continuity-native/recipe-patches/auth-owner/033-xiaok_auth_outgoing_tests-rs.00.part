@@ -1,0 +1,381 @@
+diff --git a/codex-rs/app-server/src/xiaok_auth_outgoing_tests.rs b/codex-rs/app-server/src/xiaok_auth_outgoing_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server/src/xiaok_auth_outgoing_tests.rs
+@@ -0,0 +1,376 @@
++use super::*;
++use crate::message_processor::{ConnectionSessionState, InitializedConnectionSessionState};
++use crate::transport::ConnectionOrigin;
++use crate::xiaok_auth_owner::AuthOwnerConnection;
++use base64::Engine;
++use codex_login::{AuthConfig, AuthCredentialsStoreMode, AuthKeyringBackendKind, AuthManager};
++use std::os::unix::fs::PermissionsExt;
++use tokio::time::{Duration, timeout};
++use wiremock::matchers::{method, path};
++use wiremock::{Mock, MockServer, ResponseTemplate};
++
++fn context(n: i64, method: &str) -> RequestContext {
++    RequestContext::new(
++        ConnectionRequestId {
++            connection_id: ConnectionId(42),
++            request_id: RequestId::Integer(n),
++        },
++        method,
++        Span::none(),
++        None,
++    )
++}
++fn owner() -> (Arc<AuthOwnerConnection>, Arc<ConnectionSessionState>) {
++    let session = Arc::new(ConnectionSessionState::new(ConnectionOrigin::Stdio));
++    session
++        .initialize(InitializedConnectionSessionState {
++            experimental_api_enabled: false,
++            opted_out_notification_methods: Default::default(),
++            app_server_client_name: "auth-unit".into(),
++            client_version: "1".into(),
++            request_attestation: false,
++            client_mcp_extensions: Default::default(),
++        })
++        .unwrap();
++    let owner = Arc::new(AuthOwnerConnection::new());
++    owner.bind(ConnectionId(42), &session).unwrap();
++    (owner, session)
++}
++async fn manager() -> (tempfile::TempDir, Arc<AuthManager>) {
++    let home = tempfile::tempdir().unwrap();
++    std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
++    codex_login::initialize_xiaok_auth_vault(home.path()).unwrap();
++    let routes = codex_login::test_support::transport_default_auth_route_config();
++    let manager = AuthManager::shared_from_auth_config(
++        AuthConfig {
++            codex_home: home.path().into(),
++            auth_credentials_store_mode: AuthCredentialsStoreMode::File,
++            keyring_backend_kind: AuthKeyringBackendKind::Direct,
++            forced_login_method: None,
++            chatgpt_base_url: None,
++            forced_chatgpt_workspace_id: None,
++            managed_auth_policy: Default::default(),
++            auth_route_config: routes.clone(),
++        },
++        false,
++    )
++    .await
++    .unwrap();
++    let issuer = MockServer::start().await;
++    let claims = serde_json::json!({"email":"synthetic@example.invalid",
++        "https://api.openai.com/auth":{"chatgpt_account_id":"account-a","chatgpt_user_id":"user-a","chatgpt_plan_type":"plus"}});
++    let id_token = format!(
++        "e30.{}.SYNTHETIC_SIGNATURE",
++        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string())
++    );
++    Mock::given(method("POST")).and(path("/oauth/token"))
++        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
++            "id_token":id_token,"access_token":"SYNTH_ACCESS_CANARY","refresh_token":"SYNTH_REFRESH_CANARY"})))
++        .expect(1).mount(&issuer).await;
++    let mut options = codex_login::ServerOptions::new(
++        home.path().into(),
++        codex_login::CLIENT_ID.into(),
++        None,
++        AuthCredentialsStoreMode::File,
++        AuthKeyringBackendKind::Direct,
++        routes,
++    );
++    options.port = 0;
++    options.open_browser = false;
++    options.issuer = issuer.uri();
++    options.xiaok_operation = Some(manager.xiaok_begin_login().unwrap());
++    let server = codex_login::run_login_server(options).unwrap();
++    let auth_url = url::Url::parse(&server.auth_url).unwrap();
++    let query: std::collections::HashMap<_, _> = auth_url.query_pairs().into_owned().collect();
++    let mut callback = url::Url::parse(&query["redirect_uri"]).unwrap();
++    callback
++        .query_pairs_mut()
++        .append_pair("state", &query["state"])
++        .append_pair("code", "synthetic-original-code");
++    let client = codex_http_client::HttpClientBuilder::new()
++        .without_redirects()
++        .build_direct()
++        .unwrap();
++    let response = client.get(callback).send().await.unwrap();
++    assert_eq!(response.status(), 302);
++    let success = response.headers()["location"].to_str().unwrap().to_owned();
++    assert!(!success.contains("id_token"));
++    assert!(
++        client
++            .get(success)
++            .send()
++            .await
++            .unwrap()
++            .status()
++            .is_success()
++    );
++    timeout(Duration::from_secs(3), server.block_until_done())
++        .await
++        .unwrap()
++        .unwrap();
++    manager.reload().await;
++    assert!(manager.xiaok_managed_auth_snapshot().is_ok());
++    (home, manager)
++}
++fn fixed_error(envelope: OutgoingEnvelope) {
++    let OutgoingEnvelope::ToConnection {
++        message: OutgoingMessage::Error(error),
++        ..
++    } = envelope
++    else {
++        panic!("expected fixed error")
++    };
++    assert_eq!(error.error.message, "xiaok_auth_unavailable");
++    assert!(!format!("{error:?}").contains("CANARY"));
++}
++
++#[tokio::test]
++async fn xiaok_auth_owner_registry_retains_lifetime_ids_without_replacing_original_context() {
++    let (tx, _rx) = mpsc::channel(1);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    let original = context(1, "xiaok/auth/snapshot");
++    assert!(
++        out.try_register_xiaok_request_context(original.clone())
++            .await
++    );
++    assert!(
++        !out.try_register_xiaok_request_context(context(1, "account/logout"))
++            .await
++    );
++    let retained = out
++        .take_request_context(&original.request_id)
++        .await
++        .unwrap();
++    assert!(Arc::ptr_eq(
++        &retained.xiaok_identity,
++        &original.xiaok_identity
++    ));
++    assert!(
++        !out.try_register_xiaok_request_context(original.clone())
++            .await
++    );
++    out.connection_closed(ConnectionId(42)).await;
++    assert!(!out.try_register_xiaok_request_context(original).await);
++}
++#[tokio::test]
++async fn xiaok_auth_owner_registry_has_byte_and_count_budgets_without_eviction() {
++    let (tx, _rx) = mpsc::channel(1);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    for value in [String::new(), "x".repeat(129)] {
++        let mut c = context(1, "account/read");
++        c.request_id.request_id = RequestId::String(value);
++        assert!(!out.try_register_xiaok_request_context(c).await);
++    }
++    let mut c = context(1, "account/read");
++    c.request_id.request_id = RequestId::String("x".repeat(128));
++    assert!(out.try_register_xiaok_request_context(c.clone()).await);
++    out.take_request_context(&c.request_id).await;
++    for n in 1..65_536 {
++        let c = context(n, "account/read");
++        let id = c.request_id.clone();
++        assert!(out.try_register_xiaok_request_context(c).await);
++        out.take_request_context(&id).await;
++    }
++    assert!(
++        !out.try_register_xiaok_request_context(context(65_536, "account/read"))
++            .await
++    );
++    let guard = out.request_contexts.lock().await;
++    assert_eq!(guard.seen.len(), 65_536);
++    assert_eq!(guard.active.len(), 0);
++}
++#[tokio::test]
++async fn xiaok_auth_owner_duplicate_error_bounds_oversize_id_echo_to_the_frame_budget() {
++    let (tx, mut rx) = mpsc::channel(2);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    let mut oversized = context(1, "account/read");
++    oversized.request_id.request_id = RequestId::String("y".repeat(1_048_500));
++    out.send_xiaok_duplicate_error(oversized.request_id).await;
++    let OutgoingEnvelope::ToConnection {
++        message: OutgoingMessage::Error(bounded),
++        ..
++    } = rx.recv().await.unwrap()
++    else {
++        panic!("expected fixed error")
++    };
++    assert_eq!(bounded.error.message, "xiaok_auth_request_id_rejected");
++    assert_eq!(bounded.id, RequestId::String(String::new()));
++    assert!(serde_json::to_string(&bounded).unwrap().len() < 1024 * 1024);
++    // Every id whose fixed frame fits the budget keeps its verbatim echo.
++    let mut echoed_id = context(2, "account/read");
++    echoed_id.request_id.request_id = RequestId::String("x".repeat(129));
++    out.send_xiaok_duplicate_error(echoed_id.request_id.clone())
++        .await;
++    let OutgoingEnvelope::ToConnection {
++        message: OutgoingMessage::Error(echoed),
++        ..
++    } = rx.recv().await.unwrap()
++    else {
++        panic!("expected fixed error")
++    };
++    assert_eq!(echoed.id, echoed_id.request_id.request_id);
++    assert_eq!(echoed.error.message, "xiaok_auth_request_id_rejected");
++}
++#[tokio::test]
++async fn xiaok_auth_owner_narrow_sender_requires_original_consumable_context_and_redacts_wrappers()
++{
++    let (_home, manager) = manager().await;
++    let (owner, session) = owner();
++    let (tx, mut rx) = mpsc::channel(2);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    let c = context(1, "xiaok/auth/snapshot");
++    assert!(out.try_register_xiaok_request_context(c.clone()).await);
++    out.send_xiaok_auth_snapshot_checked(
++        c.request_id.clone(),
++        &c,
++        manager.xiaok_managed_auth_snapshot().unwrap(),
++        &manager,
++        &owner,
++        &session,
++    )
++    .await;
++    let envelope = rx.recv().await.unwrap();
++    let debug = format!("{envelope:?}");
++    assert!(!debug.contains("CANARY"));
++    assert!(!debug.contains("account-a"));
++    let OutgoingEnvelope::ToConnection {
++        message,
++        private_auth,
++        ..
++    } = envelope
++    else {
++        panic!("expected original targeted delivery");
++    };
++    assert!(!serde_json::to_string(&message).unwrap().contains("CANARY"));
++    let delivery = private_auth
++        .expect("original opaque delivery")
++        .into_any()
++        .downcast::<AuthSnapshotDelivery>()
++        .ok()
++        .expect("only narrow sender can construct delivery");
++    assert_eq!(delivery.snapshot.access_token(), "SYNTH_ACCESS_CANARY");
++    assert_eq!(delivery.snapshot.account_id(), "account-a");
++    assert!(Arc::ptr_eq(&delivery.manager, &manager));
++    assert!(Arc::ptr_eq(&delivery.owner, &owner));
++    assert!(Arc::ptr_eq(&delivery.session, &session));
++    assert_eq!(delivery.offset, 0);
++    assert!(
++        delivery.frame.is_none(),
++        "no bearer DTO is serialized at enqueue"
++    );
++    out.send_xiaok_auth_snapshot_checked(
++        c.request_id.clone(),
++        &c,
++        manager.xiaok_managed_auth_snapshot().unwrap(),
++        &manager,
++        &owner,
++        &session,
++    )
++    .await;
++    fixed_error(rx.recv().await.unwrap());
++}
++#[tokio::test]
++async fn xiaok_auth_owner_narrow_sender_rejects_context_substitution_and_public_sibling() {
++    let (_home, manager) = manager().await;
++    let (owner, session) = owner();
++    let (tx, mut rx) = mpsc::channel(2);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    for (n, method) in [(1, "xiaok/auth/snapshot"), (2, "account/read")] {
++        let c = context(n, method);
++        let forged = context(n, "xiaok/auth/snapshot");
++        assert!(out.try_register_xiaok_request_context(c.clone()).await);
++        out.send_xiaok_auth_snapshot_checked(
++            c.request_id.clone(),
++            &forged,
++            manager.xiaok_managed_auth_snapshot().unwrap(),
++            &manager,
++            &owner,
++            &session,
++        )
++        .await;
++        fixed_error(rx.recv().await.unwrap());
++    }
++}
++#[tokio::test]
++async fn xiaok_auth_owner_snapshot_checks_after_real_output_reserve_wait() {
++    for action in [
++        "close",
++        "logout",
++        "cancel",
++        "clear_context",
++        "foreign_manager",
++    ] {
++        let (_home, manager) = manager().await;
++        let (owner, session) = owner();
++        let (tx, mut rx) = mpsc::channel(1);
++        let out = Arc::new(OutgoingMessageSender::new(
++            tx,
++            AnalyticsEventsClient::disabled(),
++        ));
++        let c = context(1, "xiaok/auth/snapshot");
++        assert!(out.try_register_xiaok_request_context(c.clone()).await);
++        let held = out.sender.clone().reserve_owned().await.unwrap();
++        let snap = manager.xiaok_managed_auth_snapshot().unwrap();
++        let (_foreign_home, foreign) = manager_fixture_for_foreign().await;
++        let send_manager = if action == "foreign_manager" {
++            foreign
++        } else {
++            Arc::clone(&manager)
++        };
++        let future = out.send_xiaok_auth_snapshot_checked(
++            c.request_id.clone(),
++            &c,
++            snap,
++            &send_manager,
++            &owner,
++            &session,
++        );
++        tokio::pin!(future);
++        assert!(
++            futures::poll!(future.as_mut()).is_pending(),
++            "real reserve must wait for original queue capacity"
++        );
++        match action {
++            "close" => session.rpc_gate.close().await,
++            "logout" => {
++                manager.logout().await.unwrap();
++            }
++            "cancel" => c.cancellation.cancel(),
++            "clear_context" => out.connection_closed(ConnectionId(42)).await,
++            "foreign_manager" => {}
++            _ => unreachable!(),
++        }
++        drop(held);
++        timeout(Duration::from_secs(2), future).await.unwrap();
++        fixed_error(rx.recv().await.unwrap());
++    }
++}
++async fn manager_fixture_for_foreign() -> (tempfile::TempDir, Arc<AuthManager>) {
++    manager().await
++}
++#[tokio::test]
++async fn xiaok_auth_owner_generic_senders_cannot_emit_secret_payload() {
++    let (tx, mut rx) = mpsc::channel(2);
++    let out = OutgoingMessageSender::new(tx, AnalyticsEventsClient::disabled());
++    for n in 1..=2 {
++        let dto = codex_app_server_protocol::XiaokAuthSnapshotResponse {
++            access_token: "FORGED_CANARY".into(),
++            account_id: "a".into(),
++            user_id: "u".into(),
++            plan: None,
++            credential_generation: "0".into(),
++            owner_generation: "0".into(),
++            owner_incarnation: "forged".into(),
++        };
++        let c = context(n, "xiaok/auth/snapshot");
++        assert!(out.try_register_xiaok_request_context(c.clone()).await);
++        let payload = ClientResponsePayload::XiaokAuthSnapshot(dto);
++        if n == 1 {
++            out.send_response_as(c.request_id, payload).await;
++        } else {
++            out.send_response_as_checked(c.request_id, payload, || Ok(()))
++                .await;
++        }
++        fixed_error(rx.recv().await.unwrap());
++    }
++}

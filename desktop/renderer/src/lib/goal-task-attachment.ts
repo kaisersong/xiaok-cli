@@ -1,11 +1,12 @@
+import type { TaskEventCoordinate } from '../../../shared/context-continuity-types';
 export interface GoalTaskAttachmentInput {
   prepared: { threadId: string; taskId: string; attachmentId: string };
   currentThreadId: string;
   isCurrent?: () => boolean;
   isCandidateCurrent: () => boolean;
   updateThreadTaskId: (threadId: string, taskId: string) => Promise<void>;
-  subscribeTask: (taskId: string, handler: (event: unknown) => void) => () => void;
-  onEvent: (event: unknown) => void;
+  subscribeTask: (taskId: string, handler: (event: unknown, source?: TaskEventCoordinate) => void) => () => void;
+  onEvent: (event: unknown, source?: TaskEventCoordinate) => void;
   onSubscribed: (unsubscribe: () => void) => void;
   ackGoalTaskAttached: (input: { threadId: string; attachmentId: string }) => Promise<void>;
 }

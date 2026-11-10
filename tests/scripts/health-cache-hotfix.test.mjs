@@ -10,6 +10,11 @@ import { pathToFileURL } from 'node:url';
 const patchRoot = process.env.XIAOK_HEALTH_HOTFIX_TEST_DIR ?? join(process.cwd(), 'data', 'hotfixes', 'windows-health-cache-1.5.7');
 const installer = process.env.XIAOK_HEALTH_HOTFIX_TEST_DIR ? join(patchRoot, 'apply-health-cache-hotfix.mjs') : join(process.cwd(), 'scripts', 'apply-health-cache-hotfix.mjs');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+function spawnFixture(command, args, options) {
+  const result = spawnSync(command, args, options);
+  console.info(JSON.stringify({ kind: 'owned-hotfix-fixture-child', pid: result.pid ?? null, status: result.status, signal: result.signal }));
+  return result;
+}
 function fixture(version = '1.5.7') {
   const root = mkdtempSync(join(tmpdir(), 'xiaok-health-hotfix-'));
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'xiaokcode', version }));
@@ -18,12 +23,15 @@ function fixture(version = '1.5.7') {
     const target = join(root, item.file); mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, readFileSync(join(patchRoot, 'original', item.file)));
   }
-  mkdirSync(join(root, 'dist', 'utils'), { recursive: true });
-  writeFileSync(join(root, 'dist', 'utils', 'atomic-file.js'), readFileSync(join(process.cwd(), 'dist', 'utils', 'atomic-file.js')));
+  // Fixed real runtime import closure; these support files are not hotfix payload entries.
+  for (const file of ['dist/utils/atomic-file.js', 'dist/runtime/task-host/source-sync-custody.js']) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), readFileSync(join(process.cwd(), file)));
+  }
   return { root, manifest };
 }
 function run(root, ...args) {
-  return spawnSync(process.execPath, [installer, root, '--patch-dir', patchRoot, ...args], { encoding: 'utf8' });
+  return spawnFixture(process.execPath, [installer, root, '--patch-dir', patchRoot, ...args], { encoding: 'utf8' });
 }
 test('dry run verifies the real npm 1.5.7 originals without changing the installation', () => {
   const { root, manifest } = fixture();
@@ -80,7 +88,7 @@ test('the installed production module starts with an unwritable cache directory'
     const result = run(root); assert.equal(result.status, 0, result.stderr);
     const blocker = join(root, 'cache-blocker'); writeFileSync(blocker, 'existing user file');
     const script = `const {FileCapabilityHealthStore}=await import(process.argv[1]);const store=new FileCapabilityHealthStore(process.argv[2]);const saved=store.set('repo',{updatedAt:1,summary:'live',capabilities:[]});if(saved!==false||store.get('repo')?.summary!=='live')throw Error('installed cache isolation failed');`;
-    const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', script, pathToFileURL(join(root, 'dist', 'platform', 'runtime', 'health-store.js')).href, join(blocker, 'health.json')], { encoding: 'utf8' });
+    const smoke = spawnFixture(process.execPath, ['--input-type=module', '-e', script, pathToFileURL(join(root, 'dist', 'platform', 'runtime', 'health-store.js')).href, join(blocker, 'health.json')], { encoding: 'utf8' });
     assert.equal(smoke.status, 0, smoke.stderr);
     assert.equal(readFileSync(blocker, 'utf8'), 'existing user file');
   } finally { rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }

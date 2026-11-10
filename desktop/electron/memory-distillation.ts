@@ -1,7 +1,8 @@
+import { isCompactionModel, normalizeMemoryConfiguration } from '../../src/ai/memory/configuration.js';
 import type { Config } from '../../src/types.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 
-type BuildLlm = (config: Config, modelId?: string) => Promise<(prompt: string) => Promise<string>>;
+type BuildLlm = (config: Config, modelId?: string) => Promise<(prompt: string, signal?: AbortSignal) => Promise<string>>;
 
 /** Resolve at call time so changing the main model does not require restarting Desktop. */
 export function createDesktopMemoryLlm(
@@ -12,12 +13,15 @@ export function createDesktopMemoryLlm(
     const { createLLMFromAdapter } = await import('../../src/ai/memory/layered-store.js');
     return createLLMFromAdapter(createAdapterFromBinding(resolveRuntimeModelBinding(config, modelId)));
   },
-): (prompt: string) => Promise<string> {
-  return async prompt => {
+  expectedModelId?: string,
+): (prompt: string, signal?: AbortSignal) => Promise<string> {
+  return async (prompt, signal) => {
+    signal?.throwIfAborted();
     const config = await readConfig();
-    const requested = config.memory?.modelId;
-    const modelId = requested && config.models[requested] ? requested : undefined;
-    return (await build(config, modelId))(prompt);
+    const memory = normalizeMemoryConfiguration(config);
+    const modelId = memory.compaction?.modelId ?? config.defaultModelId;
+    if ((expectedModelId !== undefined && modelId !== expectedModelId) || memory.legacyModelUnresolved || !isCompactionModel(config, modelId)) throw new Error('invalid_compaction_model');
+    const llm = await build(config, modelId); signal?.throwIfAborted(); return llm(prompt, signal);
   };
 }
 

@@ -1,30 +1,8 @@
 name: Loop ordinary route fence
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/electron/loop-*.ts'
-      - 'desktop/electron/completion-evidence-store.ts'
-      - 'src/runtime/verification/**'
-      - 'tests/runtime/verification/loop-database-source-route.test.ts'
-      - 'desktop/tests/main/loop-database-owner.test.ts'
-      - 'desktop/tests/main/loop-database-metadata.test.ts'
-      - 'desktop/tests/main/loop-database-source-observation.test.ts'
-      - 'desktop/tests/main/loop-store.test.ts'
-      - 'desktop/tests/main/completion-evidence-store.test.ts'
-      - 'tests/support/**'
-      - 'desktop/tests/setup.ts'
-      - 'desktop/tests/profile-account.setup.mjs'
-      - 'desktop/tests/setup-host-env.ts'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'desktop/package.json'
-      - 'desktop/package-lock.json'
-      - 'vitest.config.ts'
-      - 'desktop/vitest.config.ts'
-      - 'desktop/tsconfig*.json'
-      - 'scripts/generate-desktop-service-overrides.mjs'
-      - '.github/workflows/loop-open-fence.yml'
   pull_request:
     paths:
       - 'desktop/electron/loop-*.ts'
@@ -49,9 +27,19 @@ on:
       - 'desktop/tsconfig*.json'
       - 'scripts/generate-desktop-service-overrides.mjs'
       - '.github/workflows/loop-open-fence.yml'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/vitest*.config.*'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   loop-route:
     strategy:
@@ -118,7 +106,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: kaisersong/kswarm
-          ref: 16c3ed14c5493a82d000d69d34e4b1c933187433
+          ref: fe0b4688c65b85e8d50c3c72db6f4d5027c0e80c
           path: kswarm
       - name: Build Desktop Main (Node24 only)
         if: ${{ matrix.node == '24' }}

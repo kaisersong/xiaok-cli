@@ -1,28 +1,29 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import * as fs from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { registerRawAccessDeadlineCase, registerHeldFileCapacityCases } from '../support/post-seal-callback-io-fixture.js';
 import { join } from 'node:path';
 import type { EventEmitter } from 'node:events';
 import type { PassThrough } from 'node:stream';
 import { taskHostDirectory, snapshotFixture, type VerifierContract } from '../fixtures/desktop-post-seal-verifier-contract.js';
-import { deferred, bounded, nextTurn } from '../fixtures/desktop-post-seal-harness.js';
-import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
+import { bounded, nextTurn } from '../fixtures/desktop-post-seal-harness.js';
 
 interface WorkerDouble extends EventEmitter {
   stdout: PassThrough; stderr: PassThrough; request?: unknown;
   terminate: ReturnType<typeof vi.fn>; exit(code: number): void;
 }
 const sdk = vi.hoisted(() => ({ workers: [] as WorkerDouble[], constructorError: false, terminateError: false }));
-vi.mock('node:fs/promises', async importOriginal => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, open: vi.fn(actual.open), access: vi.fn(actual.access) };
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, open: vi.fn(actual.open), access: vi.fn(actual.access), read: vi.fn(actual.read), close: vi.fn(actual.close) };
 });
-vi.mock('node:worker_threads', async () => {
+vi.mock('node:worker_threads', async importNative => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+  const originalNative=await importNative<typeof import('node:worker_threads')>();
+
   const { EventEmitter } = await import('node:events'); const { PassThrough } = await import('node:stream');
-  return { Worker: class extends EventEmitter {
+  return { Worker: preserveNativeWorkerGetters(originalNative.Worker,class extends EventEmitter {
     stdout = new PassThrough(); stderr = new PassThrough(); request?: unknown;
     private finish!: (code: number) => void;
     private stopped = new Promise<number>(resolve => { this.finish = resolve; });
@@ -33,7 +34,7 @@ vi.mock('node:worker_threads', async () => {
     postMessage(value: unknown) { this.request = value; }
     terminate = vi.fn(() => sdk.terminateError ? Promise.reject(new Error('SDK terminate failed')) : this.stopped);
     exit(code: number) { this.emit('exit', code); this.finish(code); }
-  } };
+  }) };
 });
 
 describe('R4 verifier owner protocol and physical exit accounting (controlled SDK, not CPU evidence)', () => {
@@ -175,32 +176,7 @@ describe('R4 verifier owner protocol and physical exit accounting (controlled SD
     expect(await bounded(task.outcome)).toMatchObject({ ok: false, error: { code: 'delivery_timeout' } });
   });
 
-  it('D17 a raw access settling after the monotonic deadline starts no open even before the timer callback runs', async () => {
-    vi.useFakeTimers({ toFake: ['performance'] });
-    const verifier = await owner(); const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-effect-deadline-'));
-    const path = join(root, 'artifact.pdf'); writeFileSync(path, '%PDF-1.7'); const uri = pathToFileURL(path).href;
-    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    const baselineOpens = vi.mocked(fs.open).mock.calls.length;
-    vi.mocked(fs.access).mockImplementation(async requested => {
-      expect(requested).toBe(new URL(uri).pathname);
-      await actual.access(path); vi.advanceTimersByTime(101);
-    });
-    const snapshot = snapshotFixture({ prompt: '生成 PDF 文件' });
-    const task = run(verifier, undefined, performance.now() + 100, snapshot); const worker = await workerAt(0);
-    const value = frame(worker);
-    Object.assign(value.result, { guard: { kind: 'evaluate', expectation: { ownerKind: 'task', ownerId: snapshot.taskId,
-      expectedKinds: ['file_artifact'], source: 'task_spec', confidence: 'explicit' }, evidence: [{ ownerKind: 'task', ownerId: snapshot.taskId,
-      kind: 'file_artifact', summary: 'PDF', uri, metadata: { kind: 'pdf' } }] } });
-    try {
-      worker.emit('message', JSON.stringify(value) + '\n'); worker.exit(0);
-      expect(await bounded(task.outcome)).toMatchObject({ ok: false, error: { code: 'delivery_timeout' } });
-      expect(vi.mocked(fs.open).mock.calls.length - baselineOpens).toBe(0);
-      expect(task.raw).toContain(vi.mocked(fs.access).mock.results.at(-1)!.value);
-    } finally {
-      vi.mocked(fs.access).mockImplementation(actual.access); await Promise.allSettled(task.raw);
-      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
-    }
-  });
+  registerRawAccessDeadlineCase({ owner, run, workerAt, frame, sdk });
 
   it.each([65535, 65536, 65537])('D13 exact Worker output frame %i bytes includes the newline and is checked before parse/IO', async size => {
     const verifier = await owner(); const snapshot = snapshotFixture({ prompt: '解释结果', events: [{ type: 'result', result: { summary: 'fixture answer', artifacts: [] } }] });
@@ -222,74 +198,6 @@ describe('R4 verifier owner protocol and physical exit accounting (controlled SD
     expect(await bounded(task.outcome)).toMatchObject({ ok: false, error: { code: 'verifier_protocol_error' } });
   });
 
-  it.each((['abort', 'deadline'] as const).flatMap(cause => (['open', 'read'] as const).map(phase => ({ cause, phase }))))(
-    'D6/D16/D17 CPU exited but raw $phase/close pending at $cause keeps both slots (controlled SDK contract, not Windows native IO)', async ({ cause, phase }) => {
-    const verifier = await owner();
-    const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-sdk-')); const path = join(root, 'artifact.pdf'); writeFileSync(path, '%PDF-1.7');
-    const original = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
-    // Controlled SDK maps the legacy URI pathname to a real backing handle.
-    // This does not claim Windows file:// URI quality was fixed by this change.
-    const legacyPath = new URL(pathToFileURL(path).href).pathname;
-    const firstOpen = vi.mocked(fs.open).mock.results.length;
-    vi.mocked(fs.access).mockImplementation(async requested => { expect(requested).toBe(legacyPath); await original.access(path); });
-    const opened = deferred(); const openRelease = deferred(); const closing = deferred(); const closeRelease = deferred();
-    type ObservedSpy = { mock: { calls: unknown[][] }; mockRestore(): void };
-    const handles: Array<{ handle: Awaited<ReturnType<typeof fs.open>>; read: ObservedSpy; close: ObservedSpy }> = [];
-    vi.mocked(fs.open).mockImplementation(async (...args) => {
-      expect(args[0]).toBe(legacyPath);
-      const handle = await original.open(path, args[1], args[2]); const close = handle.close.bind(handle);
-      const nativeRead = handle.read.bind(handle);
-      const readSpy = vi.spyOn(handle, 'read');
-      if (phase === 'read') {
-        // The native backing read is real; its SDK result is deliberately held.
-        // This tests the raw Promise contract, not an impossible FIFO pread wait.
-        const delayedRead = async (...readArgs: unknown[]) => {
-          const result = Reflect.apply(nativeRead, handle, readArgs) as Promise<unknown>;
-          if (handles.length === 2 && handles.every(item => item.read.mock.calls.length > 0)) opened.resolve();
-          await openRelease.promise; return result;
-        };
-        readSpy.mockImplementation(delayedRead as Parameters<typeof readSpy.mockImplementation>[0]);
-      }
-      const closeSpy = vi.spyOn(handle, 'close').mockImplementation(async () => {
-        if (handles.every(item => item.close.mock.calls.length > 0)) closing.resolve();
-        await closeRelease.promise; return close();
-      });
-      handles.push({ handle, read: readSpy, close: closeSpy });
-      if (phase === 'open') { if (handles.length === 2) opened.resolve(); await openRelease.promise; }
-      return handle;
-    });
-    const snapshot: TaskSnapshot = snapshotFixture({ prompt: '生成 PDF 文件', events: [
-      { type: 'artifact_recorded', artifactId: 'a', kind: 'pdf', label: 'PDF', filePath: pathToFileURL(path).href, previewAvailable: false, turnId: 'turn' },
-    ] });
-    const controllers = [new AbortController(), new AbortController()]; const tasks = controllers.map(controller => run(verifier, controller.signal, performance.now() + (cause === 'deadline' ? 100 : 3000), snapshot));
-    try {
-      for (let index = 0; index < 2; index++) {
-        const worker = await workerAt(index); const value = frame(worker);
-        Object.assign(value.result, { guard: { kind: 'evaluate', expectation: { ownerKind: 'task', ownerId: snapshot.taskId,
-          expectedKinds: ['file_artifact'], source: 'task_spec', confidence: 'explicit' }, evidence: [{ ownerKind: 'task', ownerId: snapshot.taskId,
-          kind: 'file_artifact', summary: 'PDF', uri: pathToFileURL(path).href, metadata: { artifactId: 'a', kind: 'pdf' } }] } });
-        worker.emit('message', JSON.stringify(value) + '\n'); worker.exit(0);
-      }
-      await bounded(opened.promise);
-      for (const result of vi.mocked(fs.open).mock.results.slice(firstOpen)) expect(tasks.flatMap(task => task.raw)).toContain(result.value);
-      if (cause === 'deadline') await new Promise(resolve => setTimeout(resolve, 110));
-      else controllers.forEach(controller => controller.abort(new Error('app_shutdown')));
-      expect(await bounded(run(verifier).outcome)).toMatchObject({ ok: false, error: { code: 'verifier_capacity' } });
-      expect(sdk.workers).toHaveLength(2);
-      openRelease.resolve(); await bounded(closing.promise);
-      handles.forEach(item => { expect(item.read).toHaveBeenCalledTimes(phase === 'open' ? 0 : 1); expect(item.close).toHaveBeenCalledOnce(); });
-      expect(await bounded(run(verifier).outcome)).toMatchObject({ ok: false, error: { code: 'verifier_capacity' } });
-      expect(sdk.workers).toHaveLength(2); closeRelease.resolve();
-      await Promise.all(tasks.map(task => task.outcome)); await Promise.all(tasks.flatMap(task => task.raw).map(promise => promise.catch(() => undefined)));
-      const next = run(verifier); const worker = await workerAt(2); emit(worker); worker.exit(0);
-      expect(await bounded(next.outcome)).toMatchObject({ ok: true });
-    } finally {
-      openRelease.resolve(); closeRelease.resolve(); controllers.forEach(controller => controller.abort());
-      await Promise.allSettled(tasks.flatMap(task => task.raw));
-      vi.mocked(fs.open).mockImplementation(original.open);
-      vi.mocked(fs.access).mockImplementation(original.access);
-      for (const item of handles) { item.read.mockRestore(); item.close.mockRestore(); await item.handle.close().catch(() => {}); }
-      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
-    }
-  });
+  registerHeldFileCapacityCases({ owner, run, workerAt, frame, sdk });
+
 });

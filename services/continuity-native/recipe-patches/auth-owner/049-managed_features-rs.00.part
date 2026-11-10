@@ -1,0 +1,13 @@
+diff --git a/codex-rs/core/src/config/managed_features.rs b/codex-rs/core/src/config/managed_features.rs
+--- a/codex-rs/core/src/config/managed_features.rs
++++ b/codex-rs/core/src/config/managed_features.rs
+@@ -287,7 +287,8 @@
+     startup_warnings: &mut Option<&mut Vec<String>>,
+     message: String,
+ ) {
+-    tracing::warn!("{message}");
++    let message = codex_config::config_warning_message(message);
++    codex_config::config_diagnostic!(warn, "{message}");
+     if let Some(startup_warnings) = startup_warnings.as_deref_mut() {
+         startup_warnings.push(message);
+     }

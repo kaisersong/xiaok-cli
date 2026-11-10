@@ -1,7 +1,10 @@
 import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
+import { formatModelRecoveryNotice } from './chat-model-recovery.js';
+import { sanitizeModelFailure } from '../ai/runtime/model-failure.js';
 import {inspectProfileAccountHome,ProfileAccountHomeError} from '../runtime/verification/profile-account-home.js';
 import {getUiCopy} from '../ui/locale.js';
 import {readNativeLookupRows,readNativeJournalLength,readNativeLookupSubjects,readIntentText} from '../runtime/intent-delegation/chat-intent-data.js';
+import { waitForTerminalCursorReport } from '../ui/terminal-cursor.js';
 import { confirmChatPermission } from './chat-permission.js';
 import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
@@ -44,6 +47,7 @@ import type { Command } from 'commander';
 import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import type { IntentPlanDraft } from '../ai/intent-delegation/types.js';
+import {loadRuntimeConfig,createRuntimeAdapter} from '../utils/runtime-config.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
 import { isPermissionMode, loadLastPermissionMode, saveLastPermissionMode, resolveInitialPermissionMode } from './chat-permission-mode.js';
 import { loadCredentials } from '../auth/token-store.js';
@@ -534,18 +538,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // 加载配置和凭据
   log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
-  let config = await loadConfig();
+  let runtimeConfig = opts.observationPolicy ? undefined : loadRuntimeConfig();
+  let config = runtimeConfig?.config ?? await loadConfig();
   if (observationPolicy) config = prepareObservationConfig(config, observationPolicy);
   let adapter: ModelAdapter;
   setCrashContext({startupPhase:'adapter'});
   try {
-    const bootstrap = observationPolicy ? { config, adapter: createAdapter(config) } : await createChatAdapterWithLoginBootstrap(config, {
+    const bootstrap = observationPolicy ? { config, adapter: createAdapter(config) } : runtimeConfig && (runtimeConfig.hasModelCredentials || runtimeConfig.hasCredentials && Boolean(resolveRuntimeModelBinding(config,undefined,false).apiKey)) ? {config,adapter:createRuntimeAdapter(runtimeConfig)} : await createChatAdapterWithLoginBootstrap(config, {
       interactive: isTTY(),
       hasInitialInput: initialInput !== undefined,
       cancellation: { signal: bootstrapAbort.signal, onInterrupt: dispatchInterrupt, trackWrite: work => { trackOwnedWrite(work); } },
     });
     config = bootstrap.config;
     adapter = bootstrap.adapter;
+    if(runtimeConfig && bootstrap.config!==runtimeConfig.config){
+      runtimeConfig=loadRuntimeConfig();config=runtimeConfig.config;adapter=createRuntimeAdapter(runtimeConfig);
+    }
   } catch (e) {
     if (e !== finalizationReason) finalizationErrors.push(e);
     writeError(String(e));
@@ -565,7 +573,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   setCrashContext({startupPhase:'credentials'});
   const creds = await loadCredentials();
-  const devApp = await getDevAppIdentity();
+  const devApp = runtimeConfig ? null : await getDevAppIdentity();
   const cwd = process.cwd();
   const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
   setCrashContext({startupPhase:'platform'});
@@ -816,8 +824,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         watchdog.observeRuntimeEvent(event);
         if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json) writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
         if (event.type === 'model_recovery') {
-          log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
-          if (!opts.print && !opts.json) writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
+          log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs, failure: sanitizeModelFailure(event.failure) });
+          if (!opts.print && !opts.json) writeOrchestrationBlock(`\n${formatModelRecoveryNotice(event)}\n`);
         }
         onRuntimeActivity?.(event);
       });
@@ -1378,6 +1386,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
     runInteractiveBash: !opts.print && !opts.json && process.stdin.isTTY && process.stdout.isTTY && process.platform !== 'win32'
       ? async (input, context) => {
+        if (!await waitForTerminalCursorReport()) return `Error: ${getUiCopy().terminalRedrawPending}`;
+        // Claim only after the await: concurrent requests must recheck ownership.
         if (interactiveBashActive) return 'Error: 本地交互终端正被另一条命令使用，请稍后重试。';
         context?.signal?.throwIfAborted();
         interactiveBashActive = true;
@@ -3426,7 +3436,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return (profile?.label ?? providerId).toLowerCase();
   };
   // 首次使用引导：没有任何可用 provider key 时，在欢迎页下方提示 xiaok login
-  const hasAnyProviderKey = listProviderProfiles().some(
+  const hasAnyProviderKey = runtimeConfig?.hasModelCredentials || listProviderProfiles().some(
     (profile) => resolveProviderApiKey(config, profile.id) !== '',
   );
   inputReader.setTranscriptLogger(transcriptLogger);
@@ -3743,6 +3753,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     };
 
     inputReader.setToggleTranscriptHandler(async () => {
+      if (!await waitForTerminalCursorReport()) {
+        scrollRegion.writeAtContentCursor(`\n${getUiCopy().terminalRedrawPending}\n`);
+        return;
+      }
       await openTranscriptPager({
         buffer: transcriptBuffer,
         host: {
@@ -4758,14 +4772,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           defaultModelId: selected.modelId,
         };
         try {
-          const nextAdapter = createAdapter(newConfig);
+          const nextRuntime = runtimeConfig ? {...runtimeConfig,config:newConfig} : undefined;
+          const nextAdapter = nextRuntime ? createRuntimeAdapter(nextRuntime) : createAdapter(newConfig);
           const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
           const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
           const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
-          await saveConfig(newConfig);
-          adapter = nextAdapter;
+          if(runtimeConfig){runtimeConfig=runtimeConfig.selectModel(newConfig);adapter=createRuntimeAdapter(runtimeConfig);}else{await saveConfig(newConfig);adapter=nextAdapter;}
           modelCapabilities = nextModelCapabilities;
-          config = newConfig;
+          config = runtimeConfig?.config ?? newConfig;
           intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
           commandAgent.setAdapter(adapter);
           if (currentProfile !== nextProfile) writeCommandOutput(trimmed, '模型协议已切换，历史已转换为最近的可见上下文（最多 40KB）。\n');

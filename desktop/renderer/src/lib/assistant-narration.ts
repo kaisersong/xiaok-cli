@@ -8,8 +8,16 @@ export function separateAssistantNarration(text: string): string {
 /** Keep display result deduplication aligned with narration without rewriting
  * durable results or replacing a separately authored final summary. */
 export function projectNarrationSummary<T extends { summary: string }>(result: T, formatted: string,
-  events: ReadonlyArray<{ type: string; delta?: string }>): T {
-  if (!formatted.trim()) return result;
+  events: ReadonlyArray<{ type: string; delta?: string }>, committed = false): T {
+  if (!formatted.trim() && !committed) return result;
   const raw = events.filter(event => event.type === 'assistant_delta').map(event => event.delta ?? '').join('');
   return result.summary.trim() === raw.trim() ? { ...result, summary: formatted.trim() } : result;
+}
+
+/** Only suppress a full, provable echo of deltas already committed to the body. */
+export function pendingNarration(pending: string, fallback: string,
+  events: ReadonlyArray<{ type: string; delta?: string }>, committed: boolean): string {
+  if (pending || !committed) return pending || fallback;
+  const raw = events.filter(event => event.type === 'assistant_delta').map(event => event.delta ?? '').join('');
+  return raw.trim() && fallback.trim() === raw.trim() ? '' : fallback;
 }

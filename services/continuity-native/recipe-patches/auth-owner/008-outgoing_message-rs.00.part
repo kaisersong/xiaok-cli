@@ -1,0 +1,41 @@
+diff --git a/codex-rs/app-server-transport/src/outgoing_message.rs b/codex-rs/app-server-transport/src/outgoing_message.rs
+--- a/codex-rs/app-server-transport/src/outgoing_message.rs
++++ b/codex-rs/app-server-transport/src/outgoing_message.rs
+@@ -47,6 +47,8 @@
+ pub struct QueuedOutgoingMessage {
+     pub message: OutgoingMessage,
+     pub write_complete_tx: Option<oneshot::Sender<()>>,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub private_auth: Option<PrivateAuthPayload>,
+ }
+ 
+ impl QueuedOutgoingMessage {
+@@ -54,6 +56,28 @@
+         Self {
+             message,
+             write_complete_tx: None,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+         }
+     }
+ }
++
++// The transport cannot construct or authorize the app-server's private delivery.
++// This envelope is deliberately not Clone/Serialize and never debugs its Any.
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub struct PrivateAuthPayload(Box<dyn std::any::Any + Send>);
++#[cfg(feature = "xiaok-auth-owner-only")]
++impl PrivateAuthPayload {
++    pub fn new(value: Box<dyn std::any::Any + Send>) -> Self {
++        Self(value)
++    }
++    pub fn into_any(self) -> Box<dyn std::any::Any + Send> {
++        self.0
++    }
++}
++#[cfg(feature = "xiaok-auth-owner-only")]
++impl fmt::Debug for PrivateAuthPayload {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str("PrivateAuthPayload { <redacted> }")
++    }
++}

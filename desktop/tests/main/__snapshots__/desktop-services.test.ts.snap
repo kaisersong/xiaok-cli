@@ -1,0 +1,16 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`desktop services > runs a kswarm handoff through desktop runtime and returns artifact provenance 1`] = `
+"KSwarm 项目任务执行。
+执行者：xiaok-po
+项目：Project
+目标：Write report
+产物目录：<ROOT>/artifacts/run-d7698aa451927d10abeb54b4f954f8e0
+已有项目资料目录（只读参考，当前产物写入上面的产物目录）：<ROOT>/artifacts
+任务：Write
+任务说明：Write markdown
+必须产出：markdown, report_html, json
+本任务必须写入至少一个完整产物文件到产物目录；不要只在摘要里描述文件，最终交接必须能看到文件路径。
+如果用户要求把已有 HTML、Canvas、报告、幻灯片或网页产物导出为 PDF，必须从对应视觉产物执行浏览器打印/print-to-pdf，保留原产物版式；不要用 make-pdf 或普通 Markdown 转 PDF 重新排版，除非用户明确要求 Markdown 文档 PDF。
+不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。"
+`;

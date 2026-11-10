@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { promisify } from 'node:util';
 import { mkdtemp, realpath, readFile, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
@@ -38,16 +39,21 @@ export function createRoomExternalDiscussionAdapter(options:{
 }):RoomExternalDiscussionAdapter {
   const env=safeEnvironment(options.env??process.env);
   const profiles=Object.fromEntries(Object.entries(options.profiles).map(([key,value])=>[key,{...value,argsPrefix:[...(value?.argsPrefix??[])]}])) as typeof options.profiles;
-  async function probe(runtime:RoomExternalDiscussionRuntime):Promise<RoomExternalDiscussionCapability>{
+  async function probe(runtime:RoomExternalDiscussionRuntime,beforeEffects?:()=>void):Promise<RoomExternalDiscussionCapability>{
+    let guardFailure:{error:unknown}|undefined;
+    const fresh=()=>{try{assertBeforeEffects(beforeEffects);}catch(error){guardFailure={error};throw error;}};
+    fresh();
     const denied=(reason:string):RoomExternalDiscussionCapability=>({protocol:'room_discussion_v1',runtime,supported:false,reason});
     if(process.platform==='win32')return denied('room_discussion_process_group_unsupported');
     if(runtime==='kiro')return denied('room_discussion_isolation_unverified');
     const profile=profiles[runtime];if(!profile||!isAbsolute(profile.executable))return denied('room_discussion_executable_unavailable');
     try{
       await realpath(profile.executable);
+      fresh();
       // The capability probe also disables startup hooks/settings, not just the
       // model execution. Unknown flag combinations fail closed.
       const {stdout}=await execFileAsync(profile.executable,[...(profile.argsPrefix??[]),...(runtime==='xiaok'?['--room-discussion-v1','--probe']:[...qoderIsolationArgs,'--help'])],{env,cwd:tmpdir(),timeout:10000,maxBuffer:1024*1024});
+      fresh();
       if(runtime==='xiaok'){
         const marker=JSON.parse(stdout.trim());
         if(marker.protocol!=='room_discussion_v1'||marker.runtime!=='xiaok'||Object.keys(proof).some(key=>marker[key]!==true))return denied('room_discussion_isolation_unverified');
@@ -56,20 +62,23 @@ export function createRoomExternalDiscussionAdapter(options:{
         // This supported Qoder distribution exposes the actual hook-disable
         // setting in its JS bundle; unknown/native variants stay unavailable.
         const entry=profile.argsPrefix?.find(arg=>isAbsolute(arg)&&/\.[cm]?js$/.test(arg))??profile.executable;
-        const executable=await readFile(await realpath(entry),'utf8');
+        const canonical=await realpath(entry);fresh();
+        const executable=await readFile(canonical,'utf8');fresh();
         if(!executable.includes('disableAllHooks'))return denied('room_discussion_hooks_unverified');
       }
       return {protocol:'room_discussion_v1',runtime,supported:true,proof};
-    }catch{return denied('room_discussion_probe_failed');}
+    }catch(error){if(guardFailure&&Object.is(error,guardFailure.error))throw error;return denied('room_discussion_probe_failed');}
   }
   return {probe,async execute(input){
+    const fresh=()=>{input.signal.throwIfAborted();assertBeforeEffects(input.beforeEffects);};
+    fresh();
     input.signal.throwIfAborted();
-    if(!(await probe(input.runtime)).supported)throw new Error('room_discussion_unsupported');
-    input.signal.throwIfAborted();
+    if(!(await probe(input.runtime,fresh)).supported)throw new Error('room_discussion_unsupported');
+    fresh();
     const profile=profiles[input.runtime]!;
     const neutralRoot=await mkdtemp(join(options.temporaryRoot??tmpdir(),'xiaok-room-discussion-'));
     const prepared={operationId:input.operationId,runtime:input.runtime,neutralRoot,ownerPid:process.pid,phase:'prepared' as const};
-    try{await input.onPrepared(prepared);input.signal.throwIfAborted();}
+    try{fresh();await input.onPrepared(prepared);fresh();}
     catch(error){
       // This is a live fact before any spawn call, not an inference from an old
       // prepared journal after restart. Do not conflate the two recovery cases.
@@ -91,7 +100,10 @@ export function createRoomExternalDiscussionAdapter(options:{
       const identity=await execFileAsync('/bin/ps',['-o','lstart=','-p',String(child.pid)],{env,timeout:3000});
       if(!identity.stdout.trim())throw new Error('room_discussion_process_identity_unavailable');
       started={...prepared,phase:'running',pid:child.pid,processGroupId:child.pid,processStartIdentity:identity.stdout.trim()};
-      await input.onStarted(started);input.signal.throwIfAborted();
+      // Account for the supervisor that already exists even if its business
+      // start was revoked while identity IO was pending. Only the next CLI
+      // input is a new start; its guard follows the durable ownership callback.
+      await input.onStarted(started);fresh();
       const args=input.runtime==='xiaok'?['--room-discussion-v1']:[
         ...qoderIsolationArgs,
         '--system-prompt','You are a discussion-only participant. No tools, hooks, MCP, prior sessions, or filesystem context are available. Answer only the supplied discussion text.',

@@ -1,0 +1,17 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomUUID} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';
+import {ConversationActivityStore} from '../../../src/runtime/conversation-activity/store.js';
+const cleanup:Array<()=>void>=[];afterEach(()=>{vi.restoreAllMocks();for(const close of cleanup.splice(0).reverse())close();});
+function fixture(){const root=mkdtempSync(join(tmpdir(),'native-gap-commit-'));cleanup.push(()=>rmSync(root,{recursive:true,force:true}));const file=join(root,'activity.sqlite'),store=new ConversationActivityStore(file);cleanup.push(()=>store.close());store.prepareAssociation({operationId:'op',creationIdempotencyKey:'op',origin:{profileId:'profile',workspaceId:'workspace',threadId:'thread',actorId:'user'}});store.bindWork({operationId:'op',watchId:'watch',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'session',workId:'task'});const {delivery}=store.enrollNativeAttentionSource('watch',{sourceKind:'codex_native_approval',taskId:'task',taskSessionId:'session',executionThreadId:'thread',nativeSessionId:'native-session',nativeThreadId:'native-thread',nativeTurnId:'native-turn',nativeGeneration:1,nativeIncarnation:randomUUID()});const event={schemaVersion:1,eventId:'future',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'session',workId:'task',sourceSequence:2,transportGeneration:0,kind:'heartbeat',receivedAt:1,evidenceRefs:[]};return{file,store,delivery,event};}
+function capture(run:()=>unknown):unknown{try{run();return undefined;}catch(error){return error;}}
+for(const path of ['direct','retained'] as const){
+ function gap(f:ReturnType<typeof fixture>){if(path==='direct')f.store.ingest('watch',f.event,f.delivery);else f.store.ingestRetainedPage('watch',{sourceDataEpoch:'session',coveredThrough:2,gapRanges:[],events:[f.event]},f.delivery);}
+ it(`${path}: retains the actual SQLite marker failure and rolls back without accepting an event`,()=>{
+  const f=fixture(),db=new DatabaseSync(f.file);try{db.exec("CREATE TRIGGER native_gap_marker_fault BEFORE INSERT ON activity_attention_native_coverage_lost BEGIN SELECT RAISE(ABORT,'native_gap_marker_io'); END");const error=capture(()=>gap(f));expect(error).toBeInstanceOf(Error);expect((error as Error).message).toContain('native_gap_marker_io');expect(f.store.getNativeAttentionEnrollment('watch')?.coverageLost).toBe(false);expect(f.store.getProjection('watch')?.sourceSequence).toBe(0);}finally{db.close();}
+ });
+ it.each(['before','after'] as const)(`${path}: keeps the exact %s-COMMIT lower-call error over the semantic rejection and fences later writes`,phase=>{
+  const f=fixture(),primary=Error('actual_commit_'+phase),original=DatabaseSync.prototype.exec;let armed=true,begins=0;
+  vi.spyOn(DatabaseSync.prototype,'exec').mockImplementation(function(this:DatabaseSync,sql:string){if(sql==='BEGIN IMMEDIATE')begins++;if(sql==='COMMIT'&&armed&&phase==='before')throw primary;const result=original.call(this,sql);if(sql==='COMMIT'&&armed&&phase==='after')throw primary;return result;});
+  expect(capture(()=>gap(f))).toBe(primary);armed=false;expect(f.store.getNativeAttentionEnrollment('watch')?.coverageLost).toBe(phase==='after');const before=begins;expect(()=>f.store.setFreshness('watch','fresh',undefined,f.delivery)).toThrow('conversation_activity_write_unconfirmed');expect(begins).toBe(before);expect(f.store.getProjection('watch')?.sourceSequence).toBe(0);
+ });
+}

@@ -1,0 +1,422 @@
+[
+  {
+    "path": ".gitignore",
+    "sha256": "fdcd4443a20bc9a30970a087ceca0350f11297c09e51ae951b4fef5cda511635",
+    "size": 663,
+    "mode": "100644"
+  },
+  {
+    "path": ".governance-log/Kevin-MBP.local-1780497846.jsonl",
+    "sha256": "c90fa5699df5b339d476e341c8bc2e55d43e0e23213d411c17a5fefeda2c8c8a",
+    "size": 1922,
+    "mode": "100644"
+  },
+  {
+    "path": "LICENSE",
+    "sha256": "c1a88db6ca1937061f216a1405c6a73ed7a7529b89e1e6357dc72cd53099581b",
+    "size": 10788,
+    "mode": "100644"
+  },
+  {
+    "path": "README.md",
+    "sha256": "b1c32d9d1cec1496796d0efff23f5822ceb2b6e0e0bb71ecebc1bfead9166423",
+    "size": 11840,
+    "mode": "100644"
+  },
+  {
+    "path": "README.zh-CN.md",
+    "sha256": "1fbaeb8687d3e6d42014806b21cbe083bcb1645077d4b1819696091b303f6ebc",
+    "size": 10132,
+    "mode": "100644"
+  },
+  {
+    "path": "docs/canvas-plugin-implementation-plan-v2.md",
+    "sha256": "8bf2e35c3f2dae77cdb789de5b8738a4b427a4c278d34211de1c0b492f1d47ba",
+    "size": 34570,
+    "mode": "100644"
+  },
+  {
+    "path": "docs/canvas-plugin-implementation-plan-v3.md",
+    "sha256": "048447a621bd0d25e4e9e2b529d1f9dfa535bab03052de681391a3be216164be",
+    "size": 41201,
+    "mode": "100644"
+  },
+  {
+    "path": "docs/canvas-plugin-implementation-plan-v4.md",
+    "sha256": "4ff1a8eda764ba29a01878748a765bf2f221963dd18dcdbd6faf47ae3732eb9d",
+    "size": 28211,
+    "mode": "100644"
+  },
+  {
+    "path": "docs/canvas-plugin-implementation-plan.md",
+    "sha256": "c60cc9ac6e40530345abaeca8d56bbc4157996cc4f43d055be5511254d50aa74",
+    "size": 27914,
+    "mode": "100644"
+  },
+  {
+    "path": "docs/sync-maintenance.md",
+    "sha256": "fa932801edada6e4a6eb03e24126bbf5e30d5319b0e0daf64ad2f57a353dd12d",
+    "size": 5366,
+    "mode": "100644"
+  },
+  {
+    "path": "package-lock.json",
+    "sha256": "b04d3446548ba3989d59f03fcb55361476ab00a53ea48a1966df0dbe71946f22",
+    "size": 5775,
+    "mode": "100644"
+  },
+  {
+    "path": "package.json",
+    "sha256": "3e09aa37dd16f98a971cc052f9cde7bbe14855815e899acf2551d028613e87f7",
+    "size": 220,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/cua-computer-use/plugin.json",
+    "sha256": "2084e6227ac3fd1be83e83eb222a973e25715b9a7a3470c954653202ef0cbbf0",
+    "size": 1300,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/cua-computer-use/skills/computer-use/SKILL.md",
+    "sha256": "ca09968674d79ee6f09074329640be31ad34a6d783aca1541f2c298e2ca65fd3",
+    "size": 4717,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/.gitignore",
+    "sha256": "78fdf60be6f18fb23de10d4d8b47f8ee5253af5cfaaf150915b66d4bd7d46aba",
+    "size": 27,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/README.md",
+    "sha256": "7fb01345e02a43c3da67f81dcc748ffd662cf06f3e0a3e9ef970e5de5442f990",
+    "size": 4300,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/evals/canvas-eval.mjs",
+    "sha256": "b3537612be1d99c5af97161004a4c3fa37d3a4772b37677b42d018f56fcac7ed",
+    "size": 7930,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/index.html",
+    "sha256": "623559cbaf5329785c06b1ab80f983ba0d41948896d92633c62f4e206525dc27",
+    "size": 287,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/dist/server.bundle.js",
+    "sha256": "0f080f13cbd536da0ec414589f25d3fd89b85e7ad265e7119d487e20df7f6a18",
+    "size": 856223,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/package-lock.json",
+    "sha256": "9942fa5069188d555df2bb297d2391c2eafdcf8136513152aaba227be0945397",
+    "size": 16308,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/package.json",
+    "sha256": "143acbd46ca69806a588bb622568727f2b51e9ddd130a4f99c3dce161753e06d",
+    "size": 414,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/mcp-servers/canvas-server/server.mjs",
+    "sha256": "74af8ea71cb859db619b8662db5956783d704246a35caf335a0f7410c77721ea",
+    "size": 28685,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/package-lock.json",
+    "sha256": "6c9eb89f934940b102564662223d9d06c045790bca0e1dd1da844822eab7d9e5",
+    "size": 168386,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/package.json",
+    "sha256": "b3ba65fa8f28927514967c46d373088e4f9f39326127fa962c6c86a01fd6e978",
+    "size": 426,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/plugin.json",
+    "sha256": "bb94259e1226fa07887f748b97b3fdf25a847a7ce6080cecadf4fea5e60d2a6b",
+    "size": 1233,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/scripts/prebuild.mjs",
+    "sha256": "27c4c6ce9df4a911232246b9cd5c7b65a4b6b6194840088391d65caaa1259ca8",
+    "size": 1409,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/scripts/start-canvas.mjs",
+    "sha256": "cf137c76f1e250e5f2c1d558be503e05ad4f70688c3ed39adebc7b36d890bf55",
+    "size": 6940,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/server/index.mjs",
+    "sha256": "3cd20cb5362a6bf369ad197eeceed8f8804c21298b12e2fb11e3aab532cb0601",
+    "size": 20519,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-annotate/SKILL.md",
+    "sha256": "e2adaa6ed138161291f90f819c185875a4f8bd85766137436b283f3cf7f1caa4",
+    "size": 1962,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-edit/SKILL.md",
+    "sha256": "04cfaf0eac81c00a59fe2238fc8623fd5cbfb523d6ecaec8efedf7095f20bdee",
+    "size": 6601,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-image-gen/SKILL.md",
+    "sha256": "1cda98a6a8123eabdd4c8becbf121c5768398d9b5588f5f53686508ea61a46b7",
+    "size": 2786,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-insert/SKILL.md",
+    "sha256": "739d739baa9e1748539a78e425ab666bb869b02614d63b242ea2428319e31793",
+    "size": 1311,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-open/SKILL.md",
+    "sha256": "00d2e65348bb2e53175af1fe2809e5da4064e878ff468d203cc60ecedcd635d5",
+    "size": 4763,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/skills/canvas-open/launcher.html",
+    "sha256": "8c7080bdf689ab297a13e4ca8ba6c17f7eaf23e11c96ad912e873d905b27c202",
+    "size": 1521,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/src/App.tsx",
+    "sha256": "66d813726a7ea3384ce704ccd219805ac85050bb833047fb5e7da80c2c37ffca",
+    "size": 30324,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/src/main.tsx",
+    "sha256": "afda97f0e153231ee6445a40502056327741ccf31096a368928f49ac509d4a3a",
+    "size": 229,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/src/styles.css",
+    "sha256": "243576a6c85b98a301e14824688955174ae095dbf03dec6fefa6ecf2e9d4e2bf",
+    "size": 6157,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/tests/mcp.test.mjs",
+    "sha256": "aa5666f2fecab0d38464cfc7bcd63d2399ec161ee0339df8db080b4cb942ee18",
+    "size": 4300,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/tsconfig.json",
+    "sha256": "bc5a8f82b38480cb716bc6b1b09e5e95b85a326df43d846bab32554938bdc345",
+    "size": 360,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-infinity-canvas/vite.config.ts",
+    "sha256": "eaaa3d9ab09f2f54e30c4fc29364247d001320951bdeed0e6516c6db2ef8e3fc",
+    "size": 391,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/requirements.txt",
+    "sha256": "652b8181365754246af416da9cf25645d41e92f3ca6057050388e790e6d2b596",
+    "size": 62,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/server.py",
+    "sha256": "da8050d8712ca2bb7cfa5e7e47dd12fecc26103b319b765123abc181e38254d1",
+    "size": 6540,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-meeting-assistant/plugin.json",
+    "sha256": "38732b5f4e63f3fe3899d504ba2ddfc9b6064cd9a09e1492f6943edc3e5e0dfb",
+    "size": 691,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-meeting-assistant/skills/meeting-summarizer/SKILL.md",
+    "sha256": "f3c0dfb39f98b69b12586b17be7b6be70b158a757daf0690ef81e2c76511bea1",
+    "size": 805,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-meeting-assistant/tests/test_meeting_transcriber.py",
+    "sha256": "89cad7e994354701a247f3e5197013f21b94fed35f3acee9f0b05706d3ea3d22",
+    "size": 5533,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/evals/cases/competitor-analysis.report.md",
+    "sha256": "4696c2ad201ae083a6cff1f3be4308fc97821b185e2c49f996cde5b993a6bdd0",
+    "size": 1710,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/evals/cases/sales-dashboard.report.md",
+    "sha256": "2aa2c472651abef9057d850e86407e8c7261f8c809526e780c685412fe98e30b",
+    "size": 1446,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/evals/cases/tech-architecture.report.md",
+    "sha256": "d736202ffcc7be1bd1516973f87025b14f056b154d66dde413b6c14cab05f26e",
+    "size": 2479,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/evals/rubric.json",
+    "sha256": "835a538b0476882f775a1f649c755ac02615bab7e1a9b7bdbed73f8012fbe051",
+    "size": 1009,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/evals/run-evals.ts",
+    "sha256": "87a6389b06f323b599999116fd3a75769f1ecc13962c31d3f047a4c4ea809283",
+    "size": 4269,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.d.ts",
+    "sha256": "43e818adf60173644896298637f47b01d5819b17eda46eaa32d0c7d64724d012",
+    "size": 31,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.js",
+    "sha256": "82557a1cacf5fa2a3545ba9c5ffde72d69b76328661616a89462e98a23a0fb05",
+    "size": 2742,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/cli.js.map",
+    "sha256": "332ecfda5aa99fc467c9325ae9a67be3be0dd4a5cffa0cbc2729ad175e3afe91",
+    "size": 2953,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.d.ts",
+    "sha256": "3f58c8061338deee9ffb907035a6b117aa0ce10d4492b9d320786b15c39ff873",
+    "size": 885,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.js",
+    "sha256": "c6c01f654ead9da31d18f33dade5dce7e2ec827a8a13808b36a0ca71fef336cd",
+    "size": 5816,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/frontmatter.js.map",
+    "sha256": "25f2cb57df9f7610b5c47c723a238c1ecf67177403cd1368a72f5230568f39ad",
+    "size": 6602,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.d.ts",
+    "sha256": "fbf55a26e228eae79666ea8efec247fa82c970c200af3b98af7f53d169c9931d",
+    "size": 1110,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.js",
+    "sha256": "54ef76a2699fad99fe3517893bc2687957ca9c0b4267412a152771ca8017cdc9",
+    "size": 4852,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/parser/ir-parser.js.map",
+    "sha256": "f0bf8043203ca189ae059a50f57e45787f95a3ed26d46366fc3096db4bdbc975",
+    "size": 4752,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.d.ts",
+    "sha256": "b2c42dc094b9cad7150c647d76d28cc14acd325cc71d1495fffc2ddd4dad204f",
+    "size": 243,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.js",
+    "sha256": "4f4592d2ccaf7ca1857ccb9ef9e0745821d0ce67df371fc686769eab71a0b43e",
+    "size": 705,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/callout.js.map",
+    "sha256": "c83dec8ed7d42d5042907065c2efd1048cdd57c3400dcc69dbd2306fa9318991",
+    "size": 706,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.d.ts",
+    "sha256": "6426104ae71161c37d0afe9826eefbbdd82b7dcfed0addf188fd7fd64d0bfdef",
+    "size": 327,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.js",
+    "sha256": "72655681738e13d794f0569e4633ec2ca2a80cb9a9cb5734489be7a22af4cb41",
+    "size": 8499,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/chart.js.map",
+    "sha256": "fb8fa040ee07bb7a906055ae4f61f19495c04d8c0de656e3fb5b6ec80d8e081c",
+    "size": 8715,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.d.ts",
+    "sha256": "39fc51cf5ff11d4bec70de7c5f2db937f414d5127f629a1de7a9937f66da0d52",
+    "size": 311,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.js",
+    "sha256": "14cde23e53e7ccf9bc3f5ed5f7c39681adb22b8428f6d4e1385f6b1735a4c9ba",
+    "size": 787,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/code.js.map",
+    "sha256": "387671f44a3cd5b6c1f108af05fcab690d7cf5aa7aa0aee42a91b0e5454410f1",
+    "size": 762,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.d.ts",
+    "sha256": "489fdd99904a8e33abead908f429f2225f26bbb5c5ac859c64c5c3fc5ff2bb55",
+    "size": 297,
+    "mode": "100644"
+  },
+  {
+    "path": "plugins/kai-report-creator/mcp-servers/report-renderer/dist/renderer/components/diagram.js",
+    "sha256": "8dfc67077ca5b3e9280a575a11e0bc5a17d70122b90a18f7450a1e728249f8e6",
+    "size": 15174,
+    "mode": "100644"
+  }
+]

@@ -39,12 +39,12 @@ export async function activityFixture(cleanup: Cleanup) {
   } as unknown as KSwarmService;
   const services = createDesktopServices({ dataRoot: join(root, 'data'), workspaceRoot: root, knowledgeDbPath: join(root, 'knowledge.sqlite'),
     pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService });
-  cleanup.push(() => services.disposeMultiAgent());
+  cleanup.push(async () => {await services.disposeMultiAgent();});
   const boundary = services.multiAgent!; await boundary.ready;
   await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const service = boundary.service, internals = service as unknown as Internals, store = internals.options.store;
   const db = (store as unknown as { db: NativeDb }).db;
-  cleanup.push(() => db.setAuthorizer(null));
+  if (nativeAuthorizer) cleanup.push(() => db.setAuthorizer(null));
   const contexts: DesktopAgentExecutionContext[] = [];
   const observedGroups = new Map<string, LiveFacts>();
   const capture = (context: DesktopAgentExecutionContext) => {

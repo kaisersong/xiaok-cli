@@ -1,3 +1,4 @@
+import {readProtectedJsonSync,saveProtectedJson,updateProtectedJson} from '../../src/utils/protected-json-async.js';
 import {assertConnectorsUser,captureConnectorsInput} from './connectors-authority.js';
 import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
@@ -21,9 +22,8 @@ import {
  * DeepSeek Search & Fetch 复用模型配置的 DeepSeek key，由
  * ConnectorsService 运行时注入；deepseekApiKey 持续不落本文件。
  *
- * Keys are stored in plaintext — same approach as model provider API keys
- * in this app. The file lives under the user-local app data directory which
- * is not world-readable on macOS/Windows.
+ * Secrets are stored in the OS credential store. JSON contains bound references only;
+ * Main receives plaintext only inside the trusted connector runtime.
  */
 
 export interface ConnectorsStoreOptions {
@@ -50,19 +50,7 @@ export class ConnectorsStore {
     if (!existsSync(this.filePath)) {
       return { config: cloneDefaultConnectorsConfig(), status: 'missing' };
     }
-    let raw: string;
-    try {
-      raw = readFileSync(this.filePath, 'utf-8');
-    } catch {
-      return { config: cloneDefaultConnectorsConfig(), status: 'parse_failed' };
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      this.backupAndRemove();
-      return { config: cloneDefaultConnectorsConfig(), status: 'parse_failed' };
-    }
+    const parsed=readProtectedJsonSync(this.filePath)!;
     if (!parsed || parsed.schemaVersion !== 1) {
       this.backupAndRemove();
       return { config: cloneDefaultConnectorsConfig(), status: 'parse_failed' };
@@ -81,8 +69,10 @@ export class ConnectorsStore {
     return this.enqueue(() => this.doSave(snapshot));
   }
 
-  private doSave(input: unknown): ConnectorsConfig {
-    const normalized = normalizeConnectorsConfig(input);
+  private async doSave(input: unknown): Promise<ConnectorsConfig> {
+    const captured=structuredClone(input) as ConnectorsConfig;const old=this.load().config;
+    for(const part of ['search','fetch'] as const)for(const [field,value] of Object.entries(captured[part]??{}))if(value==='••••••••') {const previous=(old[part] as unknown as Record<string,unknown>)[field];if(typeof previous!=='string'||!previous)throw Error('credential_config_changed');(captured[part] as unknown as Record<string,unknown>)[field]=previous;}
+    const normalized = normalizeConnectorsConfig(captured);
 
     // deepseekApiKey 是运行时从「模型配置」注入的（见 connectors-service.ts），
     // 不落 connectors.json，避免与模型配置形成两份可漂移的 key 副本。
@@ -103,14 +93,8 @@ export class ConnectorsStore {
       },
     };
 
-    this.persist(persisted);
+    await saveProtectedJson(this.filePath,persisted);
     return persisted as ConnectorsConfig;
-  }
-
-  private persist(data: Record<string, unknown>): void {
-    const tmp = `${this.filePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-    renameSync(tmp, this.filePath);
   }
 
   private backupAndRemove(): void {
@@ -123,7 +107,9 @@ export class ConnectorsStore {
     }
   }
 
-  private enqueue<T>(fn: () => T): Promise<T> {
+  async replaceCredential(part:'search'|'fetch',field:string,value:string,expected:string,request:ConnectorsMutationRequest,signal?:AbortSignal):Promise<void>{assertConnectorsUser(request);const allowed=part==='search'?['tavilyApiKey','braveApiKey','firecrawlApiKey']:['jinaApiKey','firecrawlApiKey'];if(!allowed.includes(field))throw Error('credential_target_unavailable');await updateProtectedJson(this.filePath,raw=>{const current=normalizeConnectorsConfig(raw);if(JSON.stringify(current)!==expected)throw Error('credential_target_changed');(current[part] as unknown as Record<string,unknown>)[field]=value;return {schemaVersion:1,...current};},signal);}
+
+  private enqueue<T>(fn: () => T|Promise<T>): Promise<T> {
     const task = this.writeQueue.then(() => fn());
     this.writeQueue = task.then(() => {}, () => {});
     return task;

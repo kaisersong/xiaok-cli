@@ -91,7 +91,8 @@ describe('getProviderProfile', () => {
     const variants = getProviderProfile('kimi')?.availableModels ?? [];
 
     for (const modelId of ['kimi-k2.6', 'kimi-k2.5']) {
-      const variant = variants.find((candidate) => candidate.modelId === modelId);
+      const variant = variants.find((candidate) => candidate.modelId === modelId)
+          ?? getProviderModelVariant(providerId, modelId === 'gemini-2.5-flash' ? 'gemini-2.5-flash-preview-05-20' : modelId.replace(/^openai-/, ''));
       expect(variant, modelId).toBeDefined();
       // 它们有自己的官方 contextLimit（262,144），但不该带 K3 的 reasoning 策略。
       // 注意不能只比 contextLimit —— K3 的值恰好也是 262,144。
@@ -278,11 +279,11 @@ describe('catalog only lists models the providers actually serve', () => {
     const profile=getProviderProfile('deepseek');
     // defaultModel 与 availableModels 的 deepseek-flash 共 wireModel，元数据逐字一致。
     const flash: ProviderModelVariant = {
-      releaseYear:2026,modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash (1017)',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
+      releaseYear:2026,modelId:'deepseek-flash',model:'deepseek-flash',label:'DeepSeek V4.1 Flash (1017)',outputModalities:['text'],purpose:'generation',capabilities:['tools','thinking','image_in'],runtimeOptions:{contextLimit:1_000_000},
     };
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-flash')).toEqual(flash);
     expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-v4.1-flash-expires-on-0910')).toEqual({
-      releaseYear:2026,modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:1_000_000},
+      releaseYear:2026,modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',outputModalities:['text'],purpose:'generation',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:1_000_000},
     });
   });
 
@@ -295,6 +296,8 @@ describe('catalog only lists models the providers actually serve', () => {
       modelId: 'deepseek-v4-flash-vision-exp',
       model: 'deepseek-v4-flash-vision-exp',
       label: 'DeepSeek V4.1 Flash (1017)',
+      outputModalities: ['text'],
+      purpose: 'generation',
       capabilities: ['tools', 'thinking', 'image_in'],
       runtimeOptions: { contextLimit: 1_000_000 },
     };

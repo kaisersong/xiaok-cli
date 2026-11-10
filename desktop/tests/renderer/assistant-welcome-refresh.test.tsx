@@ -1,0 +1,14 @@
+import {it,expect,vi,afterEach,beforeEach} from 'vitest';
+import {render,screen,act,cleanup,waitFor,fireEvent} from '@testing-library/react';
+import {MemoryRouter} from 'react-router-dom';
+import {LocaleProvider} from '../../renderer/src/contexts/LocaleContext';
+import {WelcomePage} from '../../renderer/src/components/WelcomePage';
+const h=vi.hoisted(()=>({overview:vi.fn(),pause:vi.fn(),stop:vi.fn(),changed:undefined as (()=>void)|undefined}));
+vi.mock('../../renderer/src/shared/desktop',()=>({getDesktopApi:()=>({getAssistantOverview:h.overview,pauseAssistant:h.pause,onAssistantInboxChanged:(fn:()=>void)=>{h.changed=fn;return h.stop}})}));
+vi.mock('../../renderer/src/api',()=>({api:{getAutomationOverviewSnapshot:async()=>({generatedAt:1,sourceVersions:{loopStore:1,timedActionStore:1},globalBackgroundAutoRunEnabled:false,totals:{loops:0,userLoops:0,schedules:0,activeSchedules:0,diagnostics:0,recentFailures:0},recentFailures:[]})}}));
+vi.mock('../../renderer/src/contexts/KSwarmContext',()=>({useKSwarm:()=>({connected:false,projectsLoaded:false,projects:[],serviceStatus:null})}));
+vi.mock('../../renderer/src/components/ChatInput',()=>({ChatInput:()=> <textarea/>}));
+const profile={id:'default-personal-assistant',status:'active',locale:'zh',timeZone:'Asia/Shanghai',morningTime:'08:30',eveningTime:'22:30',workdays:[0,1,2,3,4,5,6],quietHours:{start:'22:00',end:'08:00'},dataScopes:['tasks'],createdAt:1,updatedAt:1};
+const overview={profile,suggestions:[{id:'one',title:'初始建议',summary:'safe'}],candidates:[],pendingCandidateCount:0};
+beforeEach(()=>{localStorage.setItem('xiaok:locale','zh');h.overview.mockReset().mockResolvedValue(overview);h.pause.mockReset().mockResolvedValue({...profile,status:'paused'});h.stop.mockReset();});afterEach(cleanup);
+it('coalesces changed events and cannot resurrect an active snapshot after a newer pause',async()=>{const v=render(<MemoryRouter><LocaleProvider><WelcomePage/></LocaleProvider></MemoryRouter>);await screen.findByText('初始建议');let old!:(v:unknown)=>void;h.overview.mockImplementationOnce(()=>new Promise(r=>{old=r})).mockResolvedValue({...overview,profile:{...profile,status:'paused'},suggestions:[]});act(()=>h.changed?.());await waitFor(()=>expect(h.overview).toHaveBeenCalledTimes(2));fireEvent.click(screen.getByRole('button',{name:'暂停小K助理'}));await waitFor(()=>expect(h.pause).toHaveBeenCalledTimes(1));act(()=>{for(let i=0;i<10;i++)h.changed?.()});await act(async()=>old({...overview,suggestions:[{id:'stale',title:'迟到的旧建议',summary:'stale'}]}));await screen.findByText('小K助理已暂停');expect(screen.queryByText('迟到的旧建议')).toBeNull();expect(h.overview.mock.calls.length).toBeLessThanOrEqual(3);v.unmount();expect(h.stop).toHaveBeenCalledTimes(1);const count=h.overview.mock.calls.length;act(()=>h.changed?.());expect(h.overview).toHaveBeenCalledTimes(count);});

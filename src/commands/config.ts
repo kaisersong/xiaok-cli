@@ -1,3 +1,5 @@
+import {getCredentialStore,setCredentialStore} from '../utils/system-credentials.js';
+import {defaultKimDecisionRuntime} from '../ai/kim/runtime.js';
 import { isKimiCodingRuntimeModel } from '../ai/providers/kimi-models.js';
 import type { Command } from 'commander';
 import type { ModelConfigEntry, ProviderConfig, ProviderModelVariant } from '../ai/providers/types.js';
@@ -123,6 +125,11 @@ export function registerConfigCommands(program: Command): void {
   const config = program.command('config').description('管理 xiaok 工作台配置');
 
   const configSet = config.command('set').description('设置配置项');
+  configSet.command('credential-store <mode>').description('凭证存储：file（默认）或 keychain')
+    .action((mode:string)=>{
+      if(mode!=='file'&&mode!=='keychain')throw Error('凭证存储只支持 file 或 keychain');
+      setCredentialStore(mode);console.log(`凭证存储：${mode==='file'?'文件（默认）':'系统钥匙串'}`);
+    });
 
   configSet
     .command('model <value>')
@@ -238,6 +245,8 @@ export function registerConfigCommands(program: Command): void {
       console.log(`已为 ${provider} 设置 API Key${switched ? `，并切换为默认提供商` : ''}`);
     });
 
+  configSet.command('kim-enabled <enabled>').description('Enable or disable local K-IM group-message judgments').action(async(value:string)=>{if(!['true','false'].includes(value))throw Error('kim_enabled_requires_boolean');await defaultKimDecisionRuntime.save({enabled:value==='true'},'user');console.log('K-IM '+(value==='true'?'enabled':'disabled'));});
+  configSet.command('kim-base-url <url>').description('Set the local K-IM service origin').action(async(baseUrl:string)=>{const result=await defaultKimDecisionRuntime.save({baseUrl},'user');console.log('K-IM '+result.baseUrl);});
   // System One（Jev）是辅助决策模型，不走 providers/models，单独一组命令。
   configSet
     .command('system-one-api-key <key>')
@@ -372,6 +381,7 @@ export function registerConfigCommands(program: Command): void {
     .command('get <key>')
     .description('获取配置项（如 model）')
     .action(async (key: string) => {
+      if(key==='credential-store'){console.log(getCredentialStore());return;}
       const cfg = await loadConfig();
       if (key === 'model') {
         const m = cfg.models[cfg.defaultModelId];

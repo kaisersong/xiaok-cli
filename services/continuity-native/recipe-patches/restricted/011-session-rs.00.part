@@ -1,0 +1,30 @@
+diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
+--- a/codex-rs/core/src/session/session.rs
++++ b/codex-rs/core/src/session/session.rs
+@@ -634,7 +634,7 @@
+     session_source: &SessionSource,
+ ) -> Vec<SkillError> {
+     // Guardian does not consume skills, including the legacy empty-registry catalog.
+-    if crate::guardian::is_basic_session_source(session_source) {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY || crate::guardian::is_basic_session_source(session_source) {
+         return Vec::new();
+     }
+     let plugins_input = config.plugins_config_input();
+@@ -1165,7 +1165,7 @@
+             .unwrap_or_else(|| session_configuration.cwd().to_path_buf());
+         let auth_and_mcp_fut = async move {
+             let auth = mcp_auth.await;
+-            if config_for_mcp.features.plugin_recommendations_enabled() {
++            if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && config_for_mcp.features.plugin_recommendations_enabled() {
+                 let plugins_config = config_for_mcp.plugins_config_input();
+                 let auth_for_prewarm = auth.clone();
+                 // Fetch the catalog while MCP and plugin/skill initialization continue.
+@@ -1438,7 +1438,7 @@
+                 );
+             let use_executor_shell_snapshots =
+                 prefer_executor_shell_snapshots && !credential_broker_active;
+-            let shell_snapshot = if config.features.enabled(Feature::ShellSnapshot)
++            let shell_snapshot = if !codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY && config.features.enabled(Feature::ShellSnapshot)
+                 && (!use_executor_shell_snapshots || credential_broker_available)
+             {
+                 let snapshot_credential_broker = credential_broker_available.then(|| {

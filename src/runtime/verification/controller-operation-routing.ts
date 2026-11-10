@@ -1,3 +1,4 @@
+import {MAIN_ROOT_FAMILY_METHODS} from './main-root-family-enrollment-data.js';
 import {canonicalVerificationJson} from './protocol.js';
 import {COMPLETION_METHODS,type CompletionMethod} from './completion-transport.js';
 import type {ControllerPeer,PublicControllerMethod} from './controller-public-daemon.js';
@@ -18,6 +19,7 @@ export function createControllerOperationRouting(input:{assertCurrent():void;ren
   // Capture the original authenticated request before lifecycle callbacks or I/O.
   payload=JSON.parse(canonicalVerificationJson(payload));peer=structuredClone(peer);
   current();signal.throwIfAborted();
+  if(MAIN_ROOT_FAMILY_METHODS.includes(method as never))return completion(method as CompletionMethod,payload,peer,signal);
   if(method==='verification.recoverRequest'){if(!verificationRecoverRequest)throw Error('controller_verification_method');return verificationRecoverRequest(payload,peer,signal);}
   if(method==='verification.lookupRequest'||method==='verification.retireRequest'){const handler=method==='verification.lookupRequest'?verificationLookupRequest:verificationRetireRequest;if(!handler)throw Error('controller_verification_method');return handler(payload,peer);}
   if(method==='verification.prepareRequest'){if(!verificationPrepareRequest)throw Error('controller_verification_method');await renew(signal);current();signal.throwIfAborted();return verificationPrepareRequest(payload,peer,signal);}

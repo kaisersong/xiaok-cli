@@ -1,0 +1,53 @@
+diff --git a/codex-rs/app-server/src/transport.rs b/codex-rs/app-server/src/transport.rs
+--- a/codex-rs/app-server/src/transport.rs
++++ b/codex-rs/app-server/src/transport.rs
+@@ -142,6 +142,9 @@
+     connection_id: ConnectionId,
+     message: OutgoingMessage,
+     write_complete_tx: Option<tokio::sync::oneshot::Sender<()>>,
++    #[cfg(feature = "xiaok-auth-owner-only")] private_auth: Option<
++        codex_app_server_transport::PrivateAuthPayload,
++    >,
+ ) -> bool {
+     let Some(connection_state) = connections.get(&connection_id) else {
+         warn!("dropping message for disconnected connection: {connection_id:?}");
+@@ -156,6 +159,8 @@
+     let queued_message = QueuedOutgoingMessage {
+         message,
+         write_complete_tx,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        private_auth,
+     };
+     if connection_state.can_disconnect() {
+         match writer.try_send(queued_message) {
+@@ -210,10 +215,18 @@
+             connection_id,
+             message,
+             write_complete_tx,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth,
+         } => {
+-            let _ =
+-                send_message_to_connection(connections, connection_id, message, write_complete_tx)
+-                    .await;
++            let _ = send_message_to_connection(
++                connections,
++                connection_id,
++                message,
++                write_complete_tx,
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                private_auth,
++            )
++            .await;
+         }
+         OutgoingEnvelope::Broadcast { message } => {
+             let target_connections: Vec<ConnectionId> = connections
+@@ -235,6 +248,8 @@
+                     connection_id,
+                     message.clone(),
+                     /*write_complete_tx*/ None,
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    None,
+                 )
+                 .await;
+             }

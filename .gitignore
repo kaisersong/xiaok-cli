@@ -99,3 +99,12 @@ docs/skill-observability-design.md
 
 # MSVC leaves this intermediate object next to the payload it produces
 /data/verification/windows/**/*.obj
+
+/native/root-resource-authority/build/
+
+# Generated fixed Broker Native and portable runtime resources.
+native/broker-authority-source/build/
+
+# CI shard evidence (uploaded per run, never committed)
+/ci-shard-reports/
+/ci-shard-downloads/

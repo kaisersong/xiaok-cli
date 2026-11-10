@@ -5,28 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const electronMocks = vi.hoisted(() => ({
-  clipboardRead: vi.fn(),
-  clipboardReadImage: vi.fn(),
-  openExternal: vi.fn(),
-  openPath: vi.fn(),
-  showOpenDialog: vi.fn(),
-}));
+const electronMocks = {openPath: vi.fn()};
 
-vi.mock('electron', () => ({
-  app: { getPath: () => '/tmp/xiaok-electron-test' },
-  clipboard: {
-    read: electronMocks.clipboardRead,
-    readImage: electronMocks.clipboardReadImage,
-  },
-  dialog: { showOpenDialog: electronMocks.showOpenDialog },
-  shell: {
-    openExternal: electronMocks.openExternal,
-    openPath: electronMocks.openPath,
-  },
-}));
-
-import { registerDesktopIpc } from '../../electron/ipc.js';
 import { CompletionEvidenceStore } from '../../electron/completion-evidence-store.js';
 import { LoopStore } from '../../electron/loop-store.js';
 import { recoverTaskSnapshotSync } from '../../../src/runtime/task-host/snapshot-store.js';
@@ -51,7 +31,6 @@ describe('desktop loop output action IPC', () => {
     const ipcMain = {
       handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler),
     };
-    const window = { isDestroyed: () => false, webContents: { send: vi.fn() } };
     const services = {
       getDataRoot: () => join(rootDir, 'data'),
       recoverTask: async (taskId: string) => {
@@ -64,15 +43,6 @@ describe('desktop loop output action IPC', () => {
         return { snapshot };
       },
     };
-    const loopRuntime = {
-      loopStore,
-      evidenceStore,
-      scanner: {},
-      runner: { runLoopNow: vi.fn() },
-      listAnomalies: vi.fn(() => []),
-    };
-
-    await registerDesktopIpc(ipcMain as never, window as never, services as never, { loopRuntime } as never);
     outputService=createLoopOutputService({store:loopStore,evidenceStore,gate:new DesktopShutdownGate(),captureAdmission:()=>()=>{},taskPort:{recoverTask:async id=>(await services.recoverTask(id)).snapshot??undefined},openPath:electronMocks.openPath});
     registerLoopOutputIpc(ipcMain as never,outputService,()=>true);
   });

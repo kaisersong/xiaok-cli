@@ -1,0 +1,78 @@
+diff --git a/codex-rs/app-server-transport/src/transport/mod.rs b/codex-rs/app-server-transport/src/transport/mod.rs
+--- a/codex-rs/app-server-transport/src/transport/mod.rs
++++ b/codex-rs/app-server-transport/src/transport/mod.rs
+@@ -16,6 +16,7 @@
+ use tokio::sync::mpsc;
+ use tokio_util::sync::CancellationToken;
+ use tracing::error;
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ use tracing::warn;
+ 
+ /// Size of the bounded channels used to communicate between tasks. The value
+@@ -41,6 +42,8 @@
+ pub use remote_control::start_remote_control;
+ pub use remote_control::take_remote_control_disabled_env;
+ pub use stdio::start_stdio_connection;
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub use stdio::stdio_initialize_client_name;
+ pub use unix_socket::AppServerStartupLock;
+ pub use unix_socket::DaemonShutdownAccess;
+ pub use unix_socket::acquire_app_server_startup_lock;
+@@ -204,11 +207,11 @@
+ 
+ static CONNECTION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+ 
+-fn next_connection_id() -> ConnectionId {
++pub fn next_connection_id() -> ConnectionId {
+     ConnectionId(CONNECTION_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
+ }
+ 
+-async fn forward_incoming_message(
++pub async fn forward_incoming_message(
+     transport_event_tx: &mpsc::Sender<TransportEvent>,
+     writer: &mpsc::Sender<QueuedOutgoingMessage>,
+     connection_id: ConnectionId,
+@@ -219,6 +222,12 @@
+             enqueue_incoming_message(transport_event_tx, writer, connection_id, message).await
+         }
+         Err(err) => {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            {
++                let _ = err;
++                error!("xiaok_auth_invalid_message");
++            }
++            #[cfg(not(feature = "xiaok-auth-owner-only"))]
+             error!("Failed to deserialize JSONRPCMessage: {err}");
+             true
+         }
+@@ -235,6 +244,16 @@
+         connection_id,
+         message,
+     };
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    {
++        // Fixed auth-owner role: a full event queue is backpressure to await.
++        // Replacing an unexamined request with a lower-side overload reply
++        // would bypass the lifetime request ID registry (duplicate revocation)
++        // and write outside the single outbound FIFO.
++        let _ = writer;
++        return transport_event_tx.send(event).await.is_ok();
++    }
++    #[cfg(not(feature = "xiaok-auth-owner-only"))]
+     match transport_event_tx.try_send(event) {
+         Ok(()) => true,
+         Err(mpsc::error::TrySendError::Closed(_)) => false,
+@@ -266,7 +285,12 @@
+     }
+ }
+ 
+-fn serialize_outgoing_message(outgoing_message: OutgoingMessage) -> Option<String> {
++pub fn serialize_outgoing_message(outgoing_message: OutgoingMessage) -> Option<String> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    if matches!(&outgoing_message, OutgoingMessage::Response(response) if matches!(&*response.result, codex_app_server_protocol::ClientResponsePayload::XiaokAuthSnapshot(_)))
++    {
++        return None;
++    }
+     match serde_json::to_string(&outgoing_message) {
+         Ok(json) => Some(json),
+         Err(err) => {

@@ -1,0 +1,27 @@
+diff --git a/desktop/electron/main.ts b/desktop/electron/main.ts
+index e368132b..98060dbc 100644
+--- a/desktop/electron/main.ts
++++ b/desktop/electron/main.ts
+@@ -112,7 +112,8 @@ import {
+ import { registerSemanticDesktopIpc } from './semantic-ipc.js';
+ import { createCollaborationRoomService } from './collaboration-room-service.js';
+ import { randomUUID } from 'node:crypto';
+-import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
++import { createCollaborationRoomBrokerClient, createRoomAuthorizationContextReader } from './collaboration-room-broker-client.js';
++import { ROOM_AUTHORIZATION_PROJECTION_CAPABLE, selectRoomAuthorizationReadMode } from './room-authorization-build-capability.js';
+ import { setRoomHistoryBrokerClient } from './room-history-page-tool.js';
+ import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
+ import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
+@@ -1409,7 +1410,12 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
+   // room binding would fail verifyRoot as "identity changed" after an update.
+   void roomWorkspaceStore.healBindingRoots().then(healed => { if (healed.length) debugMain('room-workspace:identity-healed', healed); }).catch(() => undefined);
+   const rawRoomWorkspaceBroker = createRoomWorkspaceBrokerClient({ token: kswarmService.getIntentBrokerRoomToken(), isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true });
++  const authorizationRead = selectRoomAuthorizationReadMode(ROOM_AUTHORIZATION_PROJECTION_CAPABLE, process.env.XIAOK_ROOM_AUTHORIZATION_READ_MODE);
++  debugMain('room-authorization:mode', authorizationRead);
+   const scopedRoomClients = createRoomProjectScopeGuard({
++    authorizationReadMode: authorizationRead.activeMode,
++    authorizationContextReader: authorizationRead.activeMode === 'projection'
++      ? createRoomAuthorizationContextReader({ token: kswarmService.getIntentBrokerRoomToken(), origin: 'http://127.0.0.1:4318' }) : undefined,
+     roomClient: rawCollaborationRoomBrokerClient, workspaceBroker: rawRoomWorkspaceBroker,
+     kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
+   });

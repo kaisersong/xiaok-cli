@@ -1,0 +1,62 @@
+diff --git a/codex-rs/app-server/src/main.rs b/codex-rs/app-server/src/main.rs
+--- a/codex-rs/app-server/src/main.rs
++++ b/codex-rs/app-server/src/main.rs
+@@ -77,8 +77,24 @@
+ }
+ 
+ fn main() -> anyhow::Result<()> {
+-    let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
+-    arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        let mut args = std::env::args_os();
++        let argv0 = args.next().unwrap_or_default();
++        let name = std::path::Path::new(&argv0).file_name().and_then(|name| name.to_str());
++        let allowed_name = if cfg!(windows) { "codex-app-server.exe" } else { "codex-app-server" };
++        let remaining: Vec<_> = args.collect();
++        if name != Some(allowed_name)
++            || !(remaining.is_empty() || remaining == [std::ffi::OsString::from("--strict-config")])
++        {
++            anyhow::bail!("xiaok_native_entrypoint_forbidden");
++        }
++    }
++    let remote_control_disabled = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        true
++    } else {
++        codex_app_server::take_remote_control_disabled_env()
++    };
++    let run = move |arg0_paths: Arg0DispatchPaths| async move {
+         let AppServerArgs {
+             config_overrides,
+             code_mode_host,
+@@ -133,7 +149,30 @@
+             std::process::exit(0);
+         }
+         Ok(())
+-    })
++    };
++    if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        // Never enter upstream helper dispatch, dotenv loading or PATH alias setup.
++        // Match the pinned upstream runtime's 16 MiB main/worker stack budget.
++        let handle = std::thread::Builder::new()
++            .name("xiaok-native-main".to_string())
++            .stack_size(16 * 1024 * 1024)
++            .spawn(move || -> anyhow::Result<()> {
++                tokio::runtime::Builder::new_multi_thread()
++                    .enable_all()
++                    .thread_stack_size(16 * 1024 * 1024)
++                    .build()?
++                    .block_on(run(Arg0DispatchPaths {
++                        codex_self_exe: Some(std::env::current_exe()?),
++                        ..Default::default()
++                    }))
++            })?;
++        match handle.join() {
++            Ok(result) => result,
++            Err(payload) => std::panic::resume_unwind(payload),
++        }
++    } else {
++        arg0_dispatch_or_else(run)
++    }
+ }
+ 
+ fn disable_managed_config_from_debug_env() -> bool {

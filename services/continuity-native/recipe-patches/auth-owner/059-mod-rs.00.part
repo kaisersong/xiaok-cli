@@ -1,0 +1,14 @@
+diff --git a/codex-rs/login/src/auth/mod.rs b/codex-rs/login/src/auth/mod.rs
+--- a/codex-rs/login/src/auth/mod.rs
++++ b/codex-rs/login/src/auth/mod.rs
+@@ -10,6 +10,10 @@
+ mod storage;
+ mod util;
+ mod workload_identity;
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub(crate) mod xiaok_vault;
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub use xiaok_vault::{XiaokAuthOperation, initialize_xiaok_auth_vault};
+ 
+ mod external_bearer;
+ mod manager;

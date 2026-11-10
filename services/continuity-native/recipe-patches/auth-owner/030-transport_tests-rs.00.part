@@ -1,0 +1,84 @@
+diff --git a/codex-rs/app-server/src/transport_tests.rs b/codex-rs/app-server/src/transport_tests.rs
+--- a/codex-rs/app-server/src/transport_tests.rs
++++ b/codex-rs/app-server/src/transport_tests.rs
+@@ -63,6 +63,8 @@
+                     range: None,
+                 },
+             )),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -103,6 +105,8 @@
+                     range: None,
+                 },
+             )),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -143,6 +147,8 @@
+                     range: None,
+                 },
+             )),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -183,6 +189,8 @@
+         OutgoingEnvelope::ToConnection {
+             connection_id,
+             message: app_server_notification(thread_realtime_started_notification()),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -215,6 +223,8 @@
+             OutgoingEnvelope::ToConnection {
+                 connection_id,
+                 message: app_server_notification(notification),
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                private_auth: None,
+                 write_complete_tx: None,
+             },
+         )
+@@ -253,6 +263,8 @@
+         OutgoingEnvelope::ToConnection {
+             connection_id,
+             message: app_server_notification(thread_realtime_started_notification()),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -325,6 +337,8 @@
+                     available_decisions: None,
+                 },
+             }),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -392,6 +406,8 @@
+                     available_decisions: None,
+                 },
+             }),
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            private_auth: None,
+             write_complete_tx: None,
+         },
+     )
+@@ -545,6 +561,8 @@
+                         range: None,
+                     },
+                 )),
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                private_auth: None,
+                 write_complete_tx: None,
+             },
+         )

@@ -1,3 +1,82 @@
+import {
+  assertOriginalBrokerAdmissionClient,
+  readOriginalRoomSnapshot,
+  claimOriginalRoomWake,
+} from './collaboration-room-broker-client.js';
+import {
+  bindOriginalRoomProjectScopeGuardClient,
+  readOptionalOriginalScopedRoomWakeAcceptance,
+} from './room-project-scope-guard.js';
+import { captureDispatchBusinessData } from '../../src/runtime/conversation-activity/dispatch-business-data.js';
+import { appendIntrinsic } from '../../src/runtime/verification/intrinsic-async-collection.js';
+import type { RoomTurnCustody } from './original-room-turn-custody.js';
+const roomSetPrototype = Object.setPrototypeOf,
+  roomFreeze = Object.freeze,
+  roomSort = Array.prototype.sort,
+  roomSlice = Array.prototype.slice;
+const originalDispatchers = new WeakMap<object, OriginalRoomWakeAcceptance>(),
+  dispatcherGet = WeakMap.prototype.get,
+  dispatcherSet = WeakMap.prototype.set,
+  dispatcherApply = Reflect.apply;
+const originalDispatcherClients = new WeakMap<object, object>(),
+  originalDispatcherServices = new WeakMap<object, unknown>();
+/** Exact original composition relation only: no HTTP, host registration,
+ * callback verifier or Native permission is created by this binding. */
+export function bindOriginalScopedRoomWakeDispatcher(
+  dispatcher: unknown,
+  service: unknown,
+): void {
+  const entry = dispatcherApply(dispatcherGet, originalDispatchers, [
+    dispatcher,
+  ]) as OriginalRoomWakeAcceptance | undefined;
+  const client = dispatcherApply(dispatcherGet, originalDispatcherClients, [
+    dispatcher,
+  ]) as object | undefined;
+  if (!entry || !client) throw Error('ROOM_TURN_ORIGINAL_DISPATCHER_REQUIRED');
+  const prior = dispatcherApply(dispatcherGet, originalDispatcherServices, [
+    dispatcher,
+  ]);
+  if (prior !== undefined && prior !== service)
+    throw Error('ROOM_SCOPED_ORIGINAL_SERVICE_MISMATCH');
+  if (!bindOriginalRoomProjectScopeGuardClient(client, service))
+    assertOriginalBrokerAdmissionClient(client, service);
+  dispatcherApply(dispatcherSet, originalDispatcherServices, [
+    dispatcher,
+    service,
+  ]);
+}
+export interface OriginalRoomWakeCandidate {
+  readonly envelope: CollaborationRoomTurnEnvelope;
+  readonly source: Record<string, unknown>;
+}
+export interface OriginalRoomWakeAcceptance {
+  collect(
+    input: {
+      roomId: string;
+      roomMessageId: string;
+      logicalAgentIds: readonly string[];
+    },
+    context: RoomTurnCustody,
+  ): Promise<readonly OriginalRoomWakeCandidate[]>;
+  claim(
+    input: {
+      roomId: string;
+      roomMessageId: string;
+      logicalAgentId: string;
+      hostParticipantId: string;
+    },
+    context: RoomTurnCustody,
+  ): Promise<Record<string, unknown>>;
+}
+export function readOriginalRoomWakeAcceptance(
+  dispatcher: object,
+): OriginalRoomWakeAcceptance {
+  const entry = dispatcherApply(dispatcherGet, originalDispatchers, [
+    dispatcher,
+  ]) as OriginalRoomWakeAcceptance | undefined;
+  if (!entry) throw Error('ROOM_TURN_ORIGINAL_DISPATCHER_REQUIRED');
+  return entry;
+}
 interface RoomWakeBrokerPort {
   getRoomSnapshot(roomId: string): Promise<unknown>;
   claimWake(input: unknown): Promise<unknown>;
@@ -65,13 +144,15 @@ export function buildRoomContextWindow(
   roomMessages: Array<Record<string, unknown>>,
   { windowSize = 20, now = new Date() }: { windowSize?: number; now?: Date } = {},
 ): { window: RoomContextWindow; windowedMessages: Array<Record<string, unknown>> } {
-  const sorted = [...roomMessages].sort((a, b) => {
+  const sorted: Array<Record<string, unknown>>=[];
+  for(let i=0;i<roomMessages.length;i++)appendIntrinsic(sorted,roomMessages[i]!);
+  dispatcherApply(roomSort,sorted,[(a:Record<string,unknown>, b:Record<string,unknown>) => {
     const seqA = Number(a.roomSequence ?? 0);
     const seqB = Number(b.roomSequence ?? 0);
     return seqA - seqB;
-  });
+  }]);
   const totalMessages = sorted.length;
-  const windowedMessages = sorted.slice(-windowSize);
+  const windowedMessages = dispatcherApply(roomSlice,sorted,[-windowSize]) as Array<Record<string,unknown>>;
   const isComplete = windowedMessages.length === totalMessages;
   const fromSequence = windowedMessages.length > 0 ? Number(windowedMessages[0].roomSequence ?? 0) : 0;
   const toSequence = windowedMessages.length > 0
@@ -92,6 +173,13 @@ export function buildRoomContextWindow(
     },
     windowedMessages,
   };
+}
+
+function originalTurnEnvelope(roomId:string,roomMessageId:string,logicalAgentId:string,room:Record<string,unknown>,source:Record<string,unknown>,scopedMessages:Array<Record<string,unknown>>,attachmentPaths:string[]):CollaborationRoomTurnEnvelope {
+ const {window:contextWindow,windowedMessages}=buildRoomContextWindow(scopedMessages);
+ const messages:CollaborationRoomTurnEnvelope['messages']=[];
+ for(let i=0;i<windowedMessages.length;i++){const message=windowedMessages[i]!;appendIntrinsic(messages,{messageId:asString(message.messageId),sender:message.sender,kind:asString(message.kind),...(asString(message.text)?{text:asString(message.text)}:{}),...(asString(message.replyToMessageId)?{replyToMessageId:asString(message.replyToMessageId)}:{}),...(isRecord(message.contextScope)?{contextScope:message.contextScope as {kind:string;projectId?:string}}:{})});}
+ return {roomId,roomTitle:asString(room.title),roomRevision:Number(room.revision||0),roomMessageId,logicalAgentId,attachmentPaths,contextScope:isRecord(source.contextScope)?source.contextScope as {kind:string;projectId?:string}:{kind:'room_only'},contextWindow,messages};
 }
 
 /**
@@ -254,18 +342,7 @@ export function createCollaborationRoomWakeDispatcher({
       }
       if (executeTurn) {
         try {
-          const { window: contextWindow, windowedMessages } = buildRoomContextWindow(scopedMessages);
-          const outcome = await executeTurn({
-            roomId: input.roomId, roomTitle: asString(room.title), roomRevision: Number(room.revision || 0),
-            roomMessageId: input.roomMessageId, logicalAgentId, attachmentPaths,
-            contextScope: isRecord(source.contextScope) ? source.contextScope as { kind: string; projectId?: string } : { kind: 'room_only' },
-            contextWindow,
-            messages: windowedMessages.map(message => ({ messageId: asString(message.messageId), sender: message.sender, kind: asString(message.kind),
-              ...(asString(message.text) ? { text: asString(message.text) } : {}),
-              ...(asString(message.replyToMessageId) ? { replyToMessageId: asString(message.replyToMessageId) } : {}),
-              ...(isRecord(message.contextScope) ? { contextScope: message.contextScope as { kind: string; projectId?: string } } : {}),
-            })),
-          });
+          const outcome = await executeTurn(originalTurnEnvelope(input.roomId,input.roomMessageId,logicalAgentId,room,source,scopedMessages,attachmentPaths));
           await settleAgent(logicalAgentId, outcome.ok ? 'completed' : 'failed');
         } catch { await settleAgent(logicalAgentId, 'failed'); }
         return;
@@ -328,5 +405,33 @@ export function createCollaborationRoomWakeDispatcher({
     return { ok: true, completed, failed };
   }
 
-  return { dispatchMessage };
+  const originalDispatcher={dispatchMessage};
+  const collect=async(input:{roomId:string;roomMessageId:string;logicalAgentIds:readonly string[]},context:RoomTurnCustody):Promise<readonly OriginalRoomWakeCandidate[]>=>{
+    const scoped=readOptionalOriginalScopedRoomWakeAcceptance(brokerClient);
+    const raw=scoped?await scoped.collect(input,context):await readOriginalRoomSnapshot(brokerClient,context,input.roomId);
+    const snapshot=captureDispatchBusinessData(raw,value=>context.inventory(value)) as Record<string,unknown>;
+    if(snapshot.ok!==true||!isRecord(snapshot.room)||snapshot.room.roomId!==input.roomId||snapshot.room.status!=='active'||!Array.isArray(snapshot.messages)||!Array.isArray(snapshot.members))throw Error('ROOM_TURN_SNAPSHOT_UNAVAILABLE');
+    let source:Record<string,unknown>|undefined;const roomMessages:Array<Record<string,unknown>>=[];
+    for(let i=0;i<snapshot.messages.length;i++){const message=snapshot.messages[i];if(isRecord(message)&&message.roomId===input.roomId){appendIntrinsic(roomMessages,message);if(message.messageId===input.roomMessageId)source=message;}}
+    if(!source)throw Error('ROOM_TURN_MESSAGE_NOT_FOUND');
+    const sourceScope=isRecord(source.contextScope)?source.contextScope:{kind:'room_only'},scopedMessages:Array<Record<string,unknown>>=[],attachments:string[]=[];
+    for(let i=0;i<roomMessages.length;i++){const message=roomMessages[i]!,scope=isRecord(message.contextScope)?message.contextScope:{kind:'room_only'};if(scope.kind===sourceScope.kind&&(scope.kind!=='project'||scope.projectId===sourceScope.projectId))appendIntrinsic(scopedMessages,message);}
+    const sourceRef=isRecord(source.sourceRef)?source.sourceRef:null;
+    if(sourceRef?.kind==='user_attachments'&&Array.isArray(sourceRef.attachments))for(let i=0;i<sourceRef.attachments.length;i++){const attachment=sourceRef.attachments[i];if(isRecord(attachment)&&asString(attachment.filePath))appendIntrinsic(attachments,asString(attachment.filePath));}
+    const candidates:OriginalRoomWakeCandidate[]=[];
+    for(let i=0;i<input.logicalAgentIds.length;i++){
+      const agent=input.logicalAgentIds[i]!;let member=false;
+      for(let j=0;j<snapshot.members.length;j++){const row=snapshot.members[j];if(isRecord(row)&&row.status==='active'&&isRecord(row.subject)&&row.subject.kind==='agent'&&row.subject.logicalAgentId===agent)member=true;}
+      if(!member)throw Error('ROOM_TURN_MEMBERSHIP_REQUIRED');
+      if(await context.sdk<boolean>(canExecute,undefined,[agent])!==true)throw Error('ROOM_TURN_UNSUPPORTED');context.current();
+      appendIntrinsic(candidates,{source,envelope:originalTurnEnvelope(input.roomId,input.roomMessageId,agent,snapshot.room,source,scopedMessages,attachments)});
+    }
+    context.current();roomSetPrototype(candidates,null);return roomFreeze(candidates);
+  };
+  dispatcherApply(dispatcherSet,originalDispatcherClients,[originalDispatcher,brokerClient]);
+  dispatcherApply(dispatcherSet,originalDispatchers,[originalDispatcher,roomFreeze({collect,claim:(input:{roomId:string;roomMessageId:string;logicalAgentId:string;hostParticipantId:string},context:RoomTurnCustody)=>{
+    const scoped=readOptionalOriginalScopedRoomWakeAcceptance(brokerClient);
+    return scoped?scoped.claim(input,context):claimOriginalRoomWake(brokerClient,context,input);
+  }})]);
+  return originalDispatcher;
 }

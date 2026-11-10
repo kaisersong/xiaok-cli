@@ -2,7 +2,7 @@ import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
 import {lstatSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir,userInfo} from 'node:os';
-import {join} from 'node:path';
+import {join,parse} from 'node:path';
 import {registerOrdinarySQLiteLayout,registerOrdinaryProfileSource,readOrdinaryProfileSources} from '../../../src/runtime/verification/ordinary-profile-source-registry.js';
 const state=vi.hoisted(()=>({stats:new Map<string,bigint>(),errors:new Map<string,string>(),template:'',bug:false,capacitySuffix:false,calls:0,devices:new Map<string,bigint>(),diagnosticFailure:false,writes:0}));
 vi.mock('node:fs',async load=>{const fs=await load<typeof import('node:fs')>();return {...fs,
@@ -108,8 +108,11 @@ it.each(['EACCES','EIO'])('retains sqlite database rows on database %s',code=>{
 function compactTable(count:number){
  const initial=join(root,'initial');mkdirSync(initial);register(initial);
  const dev=String(lstatSync(root,{bigint:true}).dev);
- const sources=Array.from({length:count},(_,index)=>{const directory=join(root,'row-'+index);const inode=String(10000+index);state.stats.set(directory,BigInt(inode));return [hash(['session-root',dev,inode,null]),hash([directory,'session-root',null]),'session-root',directory,dev,inode,'session-root-v1',null,null];});
- writeFileSync(registry,JSON.stringify({version:3,sourceVersion:1,uid:userInfo().uid,generation:'9',legacyInventoryRequired:true,sources}));return sources;
+ const sources=Array.from({length:count},(_,index)=>{const directory=join(parse(root).root,'registry-prune-virtual-row-'+index);const inode=String(10000+index);state.stats.set(directory,BigInt(inode));return [hash(['session-root',dev,inode,null]),hash([directory,'session-root',null]),'session-root',directory,dev,inode,'session-root-v1',null,null];});
+ // Only the existing synthetic stat/realpath leaves see these short paths; no root-level IO occurs.
+ const bytes=JSON.stringify({version:3,sourceVersion:1,uid:userInfo().uid,generation:'9',legacyInventoryRequired:true,sources});
+ expect(Buffer.byteLength(bytes)).toBeLessThan(524288);
+ writeFileSync(registry,bytes);return sources;
 }
 it('keeps all 2000 compact live rows when under capacity',()=>{
  compactTable(2000);const current=join(root,'current');mkdirSync(current);register(current);

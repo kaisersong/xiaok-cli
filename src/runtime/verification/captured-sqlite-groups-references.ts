@@ -1,3 +1,5 @@
+import {DSH_A_AUTHORITY_TABLES} from '../multi-agent/dsh-admission-authority-data.js';
+import {declareCapturedDshAuthorityRow} from './captured-dsh-authority-references.js';
 import {freezeCapturedData,parseCapturedSourceJson} from './captured-source-json.js';
 import {mergeProtectedObservationClosures,type ProtectedObservationClosure} from '../../ai/runtime/protected-observation-closure.js';
 import type {CapturedGroupsRow} from './captured-sqlite-groups-row.js';
@@ -53,6 +55,28 @@ export function declareCapturedGroupsRow(row:CapturedGroupsRow):Readonly<{refere
   for(const key of['fixedAckBytes','followupAckBytes'])if(v[key]!==undefined){if(typeof v[key]!=='string')unmapped.push(path+'.'+key);else control(parseCapturedSourceJson(v[key]),path+'.'+key);}
   known(v,path,['groupId','operationId','requestHash','command','applyState','result','managedTurnReservation','followupInput','followupAcceptedResult','followupAckBytes','presentationReservation','fixedAckBytes']);
  }
+ if(row.table==='dsh_a_profile_migrations'||row.table==='dsh_a_source_binding_revisions'){
+  const body=object(row.json.data_json,'data_json');
+  unmapped.push('dsh_a_authority_requires_explicit_restore_qualification');
+  if(body&&row.table==='dsh_a_source_binding_revisions'){
+   fields(body,'data_json',{bindingId:'dsh-source-binding'});
+   const binding=object(body.binding,'data_json.binding');
+   if(binding){fields(binding,'data_json.binding',{bindingId:'dsh-source-binding'});const auth=object(binding.authScope,'data_json.binding.authScope');if(auth)fields(auth,'data_json.binding.authScope',{tenantId:'dsh-tenant',workspaceId:'dsh-workspace',connectionId:'dsh-source-connection',providerAccountId:'dsh-provider-account',repositoryId:'dsh-provider-repository'});}
+  }
+  return freezeCapturedData({references,unmapped,observationDeclarations});
+ }
+ if(row.table==='dsh_a_profile'){unmapped.push('dsh_a_store_requires_explicit_restore_qualification');return freezeCapturedData({references,unmapped,observationDeclarations});}
+ if(row.table==='dsh_a_source_bindings'||row.table==='dsh_a_inbox'||row.table==='dsh_a_input_proofs'||row.table==='dsh_a_object_heads'){
+  const data=object(row.json.data_json,'data_json');if(data){unmapped.push('data_json.derived_identities_require_original_A_rebinding');
+   // Explicit DSH namespaces: never invent a chat/session owner for a Source row.
+   if(row.table==='dsh_a_source_bindings'){const binding=object(data.binding,'data_json.binding');if(binding){fields(binding,'data_json.binding',{bindingId:'dsh-source-binding'});const auth=object(binding.authScope,'data_json.binding.authScope');if(auth)fields(auth,'data_json.binding.authScope',{tenantId:'dsh-tenant',workspaceId:'dsh-workspace',connectionId:'dsh-source-connection',providerAccountId:'dsh-provider-account',repositoryId:'dsh-provider-repository'});}}
+   if(row.table==='dsh_a_inbox'){fields(data,'data_json',{inputId:'dsh-source-input'});const envelope=object(data.envelope,'data_json.envelope');if(envelope){fields(envelope,'data_json.envelope',{snapshotRef:'dsh-source-snapshot'});const thread=object(envelope.thread,'data_json.envelope.thread');if(thread)fields(thread,'data_json.envelope.thread',{sourceBindingId:'dsh-source-binding',tenantId:'dsh-tenant',workspaceId:'dsh-workspace',repositoryId:'dsh-provider-repository'});}}
+   if(row.table==='dsh_a_input_proofs'){const cell=row.cells.input_id;if(cell?.type==='text')ref(cell.value,'dsh-source-input','input_id');}
+   if(row.table==='dsh_a_object_heads'){const cell=row.cells.binding_id;if(cell?.type==='text')ref(cell.value,'dsh-source-binding','binding_id');}
+  }
+  return freezeCapturedData({references,unmapped,observationDeclarations});
+ }
+ for(let i=0;i<DSH_A_AUTHORITY_TABLES.length;i++)if(row.table===DSH_A_AUTHORITY_TABLES[i])return declareCapturedDshAuthorityRow(row);
  const sql:Record<string,string>={run_id:'agent-activity-run',group_id:'group',thread_id:'thread',profile_id:'profile',workspace_id:'workspace',boot_id:'boot',active_group_id:'group',source_task_id:'task',preparation_id:'preparation',resource_id:'resource',agent_id:'agent',content_id:'content',message_id:'message',operation_id:'operation',event_id:'event'};
  for(const[key,namespace]of Object.entries(sql)){const cell=row.cells[key];if(cell?.type==='text')ref(cell.value,namespace,key);}
  const required:Readonly<Record<string,readonly string[]>>={activity_runs:['run_id','group_id'],activity_members:['run_id','member_id','group_id'],thread_bindings:['thread_id','profile_id','workspace_id'],boot_owners:['boot_id'],groups:['group_id','thread_id','boot_id'],agents:['group_id','agent_id'],events:['group_id','event_id','agent_id'],messages:['message_id','group_id','receiver_id'],contents:['content_id','group_id','agent_id'],operations:['group_id','operation_id'],root_turns:['source_task_id','group_id','preparation_id','boot_id'],managed_resources:['resource_id','group_id','agent_id'],workspace_execution_authorizations:['profile_id','workspace_id']};

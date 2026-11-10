@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 // The check must really resolve and load setupFiles; it must not regress to grepping config text.
@@ -10,10 +10,12 @@ mkdirSync(join(repo, '.test-cache'), { recursive: true });
 const tmp = mkdtempSync(join(repo, '.test-cache', 'env-check-test-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-function check(name: string, config: string, runDir = repo) {
+function check(name: string, config: string, runDir = repo, canaryFile?: string) {
   const file = join(tmp, name);
   writeFileSync(file, config);
-  const result = spawnSync(process.execPath, [script, '--config', file, '--run-dir', runDir], { cwd: repo, encoding: 'utf8', timeout: 120_000 });
+  const args = [script, '--config', file, '--run-dir', runDir];
+  if (canaryFile) args.push('--canary', canaryFile);
+  const result = spawnSync(process.execPath, args, { cwd: repo, encoding: 'utf8', timeout: 120_000 });
   return { status: result.status, out: `${result.stdout}${result.stderr}` };
 }
 const canary = "include: ['tests/support/host-env-isolation.test.ts']";
@@ -48,4 +50,25 @@ describe('check-test-env-isolation.mjs is not text matching', () => {
     expect(result.out).toContain('test env isolation check passed');
     expect(result.status).toBe(0);
   });
+
+  it('runs the canary despite a base config name filter that excludes every case', () => {
+    const selectedCanary = join(tmp, 'selected-canary.test.ts'), receipt = join(tmp, 'selected-canary.executed');
+    writeFileSync(selectedCanary, `import {it} from 'vitest';\nimport {writeFileSync} from 'node:fs';\nit('actual selected canary executes', () => writeFileSync(${JSON.stringify(receipt)}, 'executed'));`);
+    const result = check('filtered.config.mjs', `export default { test: { environment: 'node', setupFiles: ['./tests/support/setup-host-env.ts'], testNamePattern: /THIS_CANARY_NAME_DOES_NOT_EXIST/, passWithNoTests: true } };`, repo, selectedCanary);
+    expect(result.out).toContain('test env isolation check passed');
+    expect(result.status).toBe(0);
+    expect(existsSync(receipt)).toBe(true);
+    expect(readFileSync(receipt, 'utf8')).toBe('executed');
+  });
+
+  it('rejects an unrelated strict setup failure instead of counting any nonzero exit as leak detection', () => {
+    const setup = join(tmp, 'unrelated-strict-failure.ts');
+    const actualIsolation = relative(tmp, join(repo, 'tests', 'support', 'setup-host-env.ts')).split(sep).join('/');
+    writeFileSync(setup, `if (process.env.XIAOK_TEST_ENV_STRICT === '1') throw Error('UNRELATED_STRICT_SETUP_FAILURE');\nawait import(${JSON.stringify(actualIsolation)});`);
+    const result = check('wrong-control.config.mjs', `export default { test: { ${canary}, environment: 'node', setupFiles: [${JSON.stringify(setup)}] } };`);
+    expect(result.status).toBe(1);
+    expect(result.out).toContain('strict-mode control did not fail');
+    expect(result.out).toContain('UNRELATED_STRICT_SETUP_FAILURE');
+  });
+
 });

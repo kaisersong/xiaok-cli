@@ -33,9 +33,9 @@ function createMockService(responses: Response[]): { service: KSwarmService; req
 describe('workflow script KSwarm controller', () => {
   it('authenticates every workflow mutation with the trusted main credential', async () => {
     const { service } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-auth' } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-auth' } }),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-auth', status: 'completed' } }),
+      jsonResponse({ ok: true, workflowProposal: {projectId:'proj-auth', id: 'proposal-auth' } }),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-auth', id: 'run-auth' } }),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-auth', id: 'run-auth', status: 'completed' } }),
     ]);
     service.getDesktopMutationToken = () => 'main-owned-test-token';
     const original = service.request.bind(service);
@@ -47,9 +47,9 @@ describe('workflow script KSwarm controller', () => {
   });
   it('creates, starts, and completes a script-generated workflow run through KSwarm HTTP', async () => {
     const { service, requests } = createMockService([
-      jsonResponse({ ok: true, workflowProposal: { id: 'proposal-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 201),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1', status: 'completed' } }, 200),
+      jsonResponse({ ok: true, workflowProposal: {projectId:'proj-1', id: 'proposal-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-1', id: 'run-1' } }, 201),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-1', id: 'run-1', status: 'completed' } }, 200),
     ]);
     const preview = {
       ok: true,
@@ -82,8 +82,8 @@ describe('workflow script KSwarm controller', () => {
       result: { summary: '完成' },
     });
 
-    expect(started.workflowProposal).toEqual({ id: 'proposal-1' });
-    expect(completed.workflowRun).toEqual({ id: 'run-1', status: 'completed' });
+    expect(started.workflowProposal).toEqual({ projectId:'proj-1', id: 'proposal-1' });
+    expect(completed.workflowRun).toEqual({ projectId:'proj-1', id: 'run-1', status: 'completed' });
     expect(requests.map((request) => [request.method, request.path])).toEqual([
       ['POST', '/projects/proj-1/workflows/script-generated/proposal'],
       ['POST', '/projects/proj-1/workflows/script-generated/runs'],
@@ -99,14 +99,14 @@ describe('workflow script KSwarm controller', () => {
       jsonResponse({
         ok: true,
         nodeId: 'script-agent-1',
-        workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
+        workflowRun: {projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
       }, 201),
       jsonResponse({
-        workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
+        workflowRun: {projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
       }),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '检查完成' } }],
         },
       }),
@@ -162,16 +162,16 @@ describe('workflow script KSwarm controller', () => {
       jsonResponse({
         ok: true,
         parallelGroup: { id: 'script-parallel-1' },
-        workflowRun: { id: 'run-1', parallelGroups: [{ id: 'script-parallel-1' }] },
+        workflowRun: {projectId:'proj-1', id: 'run-1', parallelGroups: [{ id: 'script-parallel-1' }] },
       }, 201),
       jsonResponse({
         ok: true,
         nodeId: 'script-agent-1',
-        workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
+        workflowRun: {projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-1', status: 'running' }] },
       }, 201),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           nodes: [{ id: 'script-agent-1', status: 'completed', output: { summary: '事实复核完成' } }],
         },
       }),
@@ -241,7 +241,7 @@ describe('workflow script KSwarm controller', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [{
             id: 'script-parallel-1',
             primitiveId: 'parallel-1',
@@ -255,7 +255,7 @@ describe('workflow script KSwarm controller', () => {
       }),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [],
           nodes: [{
             id: 'script-agent-1',
@@ -329,8 +329,8 @@ describe('workflow script KSwarm controller', () => {
       jsonResponse({ ok: true }, 202),
       jsonResponse({ ok: true }, 202),
       jsonResponse({ ok: true, verdict: { ok: false, failures: ['missing summary'], warnings: [] } }, 200),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 200),
-      jsonResponse({ ok: true, workflowRun: { id: 'run-1' } }, 200),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-1', id: 'run-1' } }, 200),
+      jsonResponse({ ok: true, workflowRun: {projectId:'proj-1', id: 'run-1' } }, 200),
     ]);
     const controller = createKSwarmWorkflowScriptController({
       kswarmService: service,
@@ -387,11 +387,11 @@ describe('workflow script KSwarm controller', () => {
     expect(requests[6].body).toEqual({ action: 'skip', label: '分支 2', reason: 'budget_skipped' });
   });
 
-  it('reuses completed stable node results through the node result API and treats null phaseTitle as wildcard', async () => {
+  it('reuses completed stable node results through the original run snapshot and treats null phaseTitle as wildcard', async () => {
     const { service, requests } = createMockService([
       jsonResponse({
         ok: true,
-        node: {
+        workflowRun:{projectId:'proj-1',id:'run-1',nodes:[{
           id: 'node-run-1-1',
           kind: 'agent_task',
           status: 'completed',
@@ -402,7 +402,7 @@ describe('workflow script KSwarm controller', () => {
             options: null,
             script: { phaseTitle: '任意阶段' },
           },
-        },
+        }]},
       }),
     ]);
     const controller = createKSwarmWorkflowScriptController({
@@ -426,7 +426,7 @@ describe('workflow script KSwarm controller', () => {
 
     expect(result).toEqual({ summary: 'cached' });
     expect(requests.map((request) => [request.method, request.path])).toEqual([
-      ['GET', '/projects/proj-1/workflows/run-1/nodes/node-run-1-1'],
+      ['GET', '/projects/proj-1/workflows/run-1'],
     ]);
   });
 
@@ -434,7 +434,7 @@ describe('workflow script KSwarm controller', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [{
             id: 'script-parallel-1',
             primitiveId: 'parallel-1',
@@ -448,7 +448,7 @@ describe('workflow script KSwarm controller', () => {
       }),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [],
           nodes: [{
             id: 'script-agent-1',
@@ -519,7 +519,7 @@ describe('workflow script KSwarm controller', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           nodes: [{
             id: 'script-agent-11',
             kind: 'agent_task',
@@ -575,7 +575,7 @@ describe('workflow script KSwarm controller', () => {
     const { service, requests } = createMockService([
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [{
             id: 'script-parallel-1',
             primitiveId: 'parallel-1',
@@ -589,7 +589,7 @@ describe('workflow script KSwarm controller', () => {
       }),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           parallelGroups: [],
           nodes: [{
             id: 'script-agent-2',
@@ -614,12 +614,12 @@ describe('workflow script KSwarm controller', () => {
       jsonResponse({
         ok: true,
         nodeId: 'script-agent-2',
-        workflowRun: { id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'running' }] },
+        workflowRun: {projectId:'proj-1', id: 'run-1', nodes: [{ id: 'script-agent-2', status: 'running' }] },
         dispatches: [{ nodeId: 'script-agent-2', attempt: 2 }],
       }, 200),
       jsonResponse({
         workflowRun: {
-          id: 'run-1',
+          projectId:'proj-1', id: 'run-1',
           nodes: [{ id: 'script-agent-2', status: 'completed', output: { summary: '证据复核已完成' } }],
         },
       }),

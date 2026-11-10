@@ -1,5 +1,11 @@
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import vm from 'node:vm';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import {isMainThread} from 'node:worker_threads';
+import {readOptionalWorkflowScriptWorkerOrigin} from './workflow-script-worker-origin.js';
+import {runOriginalWorkflowScriptWorker} from './workflow-script-worker.js';
+import {readCurrentOriginalRootExecutionContext} from '../../src/runtime/verification/original-root-execution-context.js';
+import {createWorkflowScriptVmBoundary,workflowScriptThunkSource} from './workflow-script-vm-boundary.js';
 
 import {
   type EvidenceCheck,
@@ -92,6 +98,8 @@ export interface WorkflowScriptController {
 }
 
 export interface WorkflowScriptRuntimeOptions {
+  beforeEffects?:()=>void;
+  isKnownBusinessFailure?:(error:unknown)=>boolean;
   controller: WorkflowScriptController;
   concurrency?: number;
   policy?: WorkflowScriptValidationPolicy;
@@ -107,6 +115,9 @@ export interface WorkflowScriptRunResult {
   meta: WorkflowScriptMeta;
   scriptHash: string;
   analysis: WorkflowScriptAnalysis;
+  /** Original owner diagnostics, not business success or physical-release proof. */
+  tailFailures?:unknown[];
+  policyConsumedFailures?:unknown[];
 }
 
 export interface WorkflowScriptTerminalResult {
@@ -127,7 +138,7 @@ type BranchContext = {
 export async function runWorkflowScript(
   script: string,
   {
-    controller,
+    controller,beforeEffects,isKnownBusinessFailure,
     concurrency = 4,
     policy = {},
     syncTimeoutMs = 1_000,
@@ -135,10 +146,36 @@ export async function runWorkflowScript(
     workspaceRoot = process.cwd(),
   }: WorkflowScriptRuntimeOptions,
 ): Promise<WorkflowScriptRunResult> {
+  if(isMainThread){const origin=readOptionalWorkflowScriptWorkerOrigin(controller);if(origin)return runOriginalWorkflowScriptWorker(script,{controller,beforeEffects,isKnownBusinessFailure,concurrency,policy,syncTimeoutMs,workflowRunId,workspaceRoot});if(readCurrentOriginalRootExecutionContext()!==null)throw Error('WORKFLOW_WORKER_ORIGINAL_ORIGIN_REQUIRED');}
   if (!controller || typeof controller.createAgentNode !== 'function') {
     throw workflowScriptError('workflow_script_controller_required', 'workflow script controller is required');
   }
 
+  let controlFailure:{error:unknown}|undefined,admissionClosed=false;
+  const pending=new Set<Promise<unknown>>(),cleanupFailures:unknown[]=[],tailFailures=new Set<unknown>(),policyConsumedFailures=new Set<unknown>();
+  const fresh=()=>{if(controlFailure)throw controlFailure.error;try{assertBeforeEffects(beforeEffects);}catch(error){controlFailure={error};throw error;}};
+  const consumeBusinessFailure=(error:unknown)=>{if(isKnownBusinessFailure?.(error)===true)policyConsumedFailures.add(error);};
+  const formatBranchFailure=(error:unknown,branch:string)=>{consumeBusinessFailure(error);return formatParallelBranchFailure(error,branch);};
+  const own=<T>(begin:()=>T|Promise<T>,admission=false,settlement=false):Promise<T>=>{
+    let complete!:(value:T|PromiseLike<T>)=>void,fail!:(error:unknown)=>void;
+    const reservation=new Promise<T>((resolve,reject)=>{complete=resolve;fail=reject;});
+    pending.add(reservation);
+    void reservation.then(()=>pending.delete(reservation),error=>{pending.delete(reservation);tailFailures.add(error);if(settlement)cleanupFailures.push(error);});
+    try{
+      if(admission){if(admissionClosed){const error=Error('workflow_script_admission_closed');controlFailure??={error};throw error;}fresh();}
+      Promise.resolve(begin()).then(complete,fail);
+    }catch(error){fail(error);}
+    return reservation;
+  };
+  // This is the same runtime/controller owner, with no second execution queue.
+  // Existing admitted settlement is allowed after a new-start guard fails.
+  const originalController=controller,guardedController={} as WorkflowScriptController;
+  const producers=new Set<keyof WorkflowScriptController>(['createAgentNode','beginParallelGroup','requestUserInput','reserveBudget','verifyEvidence']);
+  const methods:Array<keyof WorkflowScriptController>=['createAgentNode','emitPhase','emitLog','requestUserInput','beginParallelGroup','reserveBudget','consumeBudget','releaseBudget','checkRemainingBudget','verifyEvidence','markNodeIntervention','markBranchSkipped'];
+  for(const name of methods){const method=originalController[name];if(typeof method!=='function')continue;
+    Object.defineProperty(guardedController,name,{enumerable:true,value:(...args:unknown[])=>own(()=>{if(producers.has(name))fresh();return Reflect.apply(method,originalController,args);},false,name==='consumeBudget'||name==='releaseBudget')});
+  }
+  controller=guardedController;fresh();
   const validation = validateWorkflowScript(script, { policy });
   if (!validation.ok) {
     throw workflowScriptError(validation.error, validation.message || validation.error, validation);
@@ -210,7 +247,7 @@ export async function runWorkflowScript(
       permissions: normalizePermissionPolicy(normalizedOptions?.permissions),
       stableKey: normalizeOptionalString(normalizedOptions?.stableKey) || undefined,
     };
-    return limit(() => runAgentAttempt(input, normalizedOptions));
+    return limit(() => {fresh();return runAgentAttempt(input, normalizedOptions);});
   }
 
   async function runAgentAttempt(input: WorkflowScriptAgentInput, options: Record<string, unknown> | null): Promise<unknown> {
@@ -282,7 +319,7 @@ export async function runWorkflowScript(
       return currentResult;
     } catch (error) {
       if (budgetPolicy && !lastAttemptConsumed && lastAttemptId) {
-        await controller.releaseBudget!({ runId, nodeId: input.nodeId!, attemptId: lastAttemptId, tokens: estimate });
+        try{await controller.releaseBudget!({ runId, nodeId: input.nodeId!, attemptId: lastAttemptId, tokens: estimate });}catch(cleanup){throw new AggregateError([error,cleanup],'workflow_script_budget_settlement_failed',{cause:error});}
       }
       throw error;
     }
@@ -352,7 +389,7 @@ export async function runWorkflowScript(
             try {
               results.push(await task.run());
             } catch (error) {
-              results.push(formatParallelBranchFailure(error, task.label));
+              results.push(formatBranchFailure(error, task.label));
             }
             spent += estimates[index];
             continue;
@@ -377,7 +414,7 @@ export async function runWorkflowScript(
       const settled = await Promise.allSettled(tasks.map(task => task.run()));
       return settled.map((item, index) => item.status === 'fulfilled'
         ? { ok: true, value: item.value }
-        : formatParallelBranchFailure(item.reason, tasks[index].label));
+        : formatBranchFailure(item.reason, tasks[index].label));
     }
     if (failurePolicy === 'quorum') {
       const quorum = Math.max(1, Math.floor(Number(normalizedOptions?.quorum || items.length)));
@@ -385,9 +422,9 @@ export async function runWorkflowScript(
       const values = settled
         .filter((item): item is PromiseFulfilledResult<unknown> => item.status === 'fulfilled')
         .map(item => item.value);
-      if (values.length >= quorum) return values;
+      if (values.length >= quorum){for(const item of settled)if(item.status==='rejected')consumeBusinessFailure(item.reason);return values;}
       const failures = settled
-        .map((item, index) => item.status === 'rejected' ? formatParallelBranchFailure(item.reason, tasks[index].label) : null)
+        .map((item, index) => item.status === 'rejected' ? formatBranchFailure(item.reason, tasks[index].label) : null)
         .filter(Boolean);
       throw workflowScriptError('workflow_script_parallel_quorum_not_met', 'parallel quorum was not met', {
         quorum,
@@ -457,7 +494,7 @@ export async function runWorkflowScript(
   }
 
   const workflow = Object.freeze({
-    requestUserInput: async (question: unknown, options: unknown = null): Promise<unknown> => {
+    requestUserInput: (question: unknown, options: unknown = null): Promise<unknown> => own(async()=>{
       if (typeof controller.requestUserInput !== 'function') {
         throw workflowScriptError('workflow_script_user_input_unavailable', 'requestUserInput is not available in this runtime');
       }
@@ -467,7 +504,7 @@ export async function runWorkflowScript(
         scriptHash,
         workflowId,
       });
-    },
+    },true),
     finish: (result: unknown = null): never => {
       throw new WorkflowScriptTerminalSignal({
         status: 'finished',
@@ -483,45 +520,37 @@ export async function runWorkflowScript(
     needsRubricClarification: (reason: unknown): never => {
       throw new WorkflowScriptTerminalSignal(normalizeTerminalResult('needs_rubric_clarification', reason));
     },
-    loopUntil,
+    loopUntil:(...args:Parameters<typeof loopUntil>)=>own(()=>loopUntil(...args),true),
   });
 
-  const context = vm.createContext(
+  const boundary = createWorkflowScriptVmBoundary(
     {
-      agent,
-      phase,
-      parallel,
-      pipeline,
-      log,
+      agent:(...args:Parameters<typeof agent>)=>own(()=>agent(...args),true),
+      phase:(...args:Parameters<typeof phase>)=>own(()=>phase(...args),true),
+      parallel:(...args:Parameters<typeof parallel>)=>own(()=>parallel(...args),true),
+      pipeline:(...args:Parameters<typeof pipeline>)=>own(()=>pipeline(...args),true),
+      log:(...args:Parameters<typeof log>)=>own(()=>log(...args),true),
       workflow,
-      JSON,
-      Array,
-      Boolean,
-      Number,
-      Object,
-      Promise,
-      Set,
-      Map,
-      String,
     },
-    {
-      name: `xiaok-workflow-script:${scriptHash}`,
-      codeGeneration: { strings: false, wasm: false },
-    },
+    `xiaok-workflow-script:${scriptHash}`,
   );
   const compiled = new vm.Script(`(async () => {\n${parsed.body}\n})()`, {
     filename: `workflow-script-${scriptHash}.js`,
   });
 
-  let result: unknown;
+  let result: unknown,bodyFailure:{error:unknown}|undefined;
   let terminal: WorkflowScriptTerminalResult | null = null;
   try {
-    result = await compiled.runInContext(context, { timeout: syncTimeoutMs });
+    fresh();result = await boundary.observe(compiled.runInContext(boundary.context, { timeout: syncTimeoutMs }));
   } catch (error) {
-    if (!(error instanceof WorkflowScriptTerminalSignal)) throw error;
-    terminal = error.terminal;
-    result = terminal.status === 'finished' ? terminal.result : terminal;
+    if (error instanceof WorkflowScriptTerminalSignal){terminal=error.terminal;result=terminal.status==='finished'?terminal.result:terminal;}
+    else bodyFailure={error};
   }
+  admissionClosed=true;
+  while(pending.size)await Promise.allSettled([...pending]);
+  const failures=[...new Set([...(controlFailure?[controlFailure.error]:[]),...(bodyFailure?[bodyFailure.error]:[]),...cleanupFailures])];
+  if(failures.length===1)throw failures[0];
+  if(failures.length)throw new AggregateError(failures,'workflow_script_original_operation_failed',{cause:failures[0]});
   assertJsonSerializable(result, 'workflow_script_result_not_serializable');
   return {
     ok: true,
@@ -530,6 +559,8 @@ export async function runWorkflowScript(
     meta,
     scriptHash,
     analysis,
+    ...(tailFailures.size?{tailFailures:[...tailFailures]}:{}),
+    ...(policyConsumedFailures.size?{policyConsumedFailures:[...policyConsumedFailures]}:{}),
   };
 
   async function runThunkOrValue(item: unknown): Promise<unknown> {
@@ -644,7 +675,7 @@ function estimateTokens(prompt: string, options: Record<string, unknown> | null,
 
 function estimateFromThunk(item: unknown, multiplier: number): number {
   if (typeof item !== 'function') return Math.ceil(Math.max(1, multiplier));
-  const source = Function.prototype.toString.call(item);
+  const source = workflowScriptThunkSource(item);
   const match = source.match(/\bestimatedTokens\s*:\s*(\d+(?:\.\d+)?)/);
   if (match) return Math.ceil(Number(match[1]));
   return Math.ceil(Math.max(1, multiplier));
@@ -667,7 +698,7 @@ function normalizeFailurePolicy(value: unknown): 'required_all' | 'collect_error
 
 function inferBranchLabel(item: unknown, index: number): string {
   if (typeof item !== 'function') return `分支 ${index + 1}`;
-  const source = Function.prototype.toString.call(item);
+  const source = workflowScriptThunkSource(item);
   const labelMatch = source.match(/\blabel\s*:\s*(['"`])((?:\\.|(?!\1).)*?)\1/);
   return labelMatch?.[2]?.trim() || `分支 ${index + 1}`;
 }

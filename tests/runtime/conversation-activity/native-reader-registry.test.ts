@@ -1,0 +1,63 @@
+import {afterEach,expect,it,vi} from 'vitest';
+import {mkdtempSync,rmSync,chmodSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomUUID} from 'node:crypto';
+import {ConversationActivityOwnerHost} from '../../../src/runtime/conversation-activity/owner-host.js';
+import {ConversationActivityOwnerClient} from '../../../src/runtime/conversation-activity/owner-client.js';
+const cleanup:Array<()=>void|Promise<void>>=[];afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
+async function fixture(){const root=mkdtempSync(join(tmpdir(),'native-reader-registry-'));cleanup.push(()=>rmSync(root,{recursive:true,force:true}));let allowed=true,scopeAllowed=true;const host=new ConversationActivityOwnerHost({dataRoot:root,profileId:'profile',actorId:'user',nativeSourceSupported:true,getThread:threadId=>threadId==='thread'?{threadId,profileId:'profile',workspaceId:'workspace',deleteState:'none'}:null,canObserveWork:()=>allowed,authorizeProducer:thread=>thread==='thread'&&scopeAllowed});await host.start();cleanup.push(()=>host.stop());const client=()=>{const result=new ConversationActivityOwnerClient(root,'producer');cleanup.push(()=>result.dispose());return result;};const producer=client(),other=client();const native=async<T=any>(method:string,params:Record<string,unknown>={})=>(await producer.requestNative<T>(method,params)).value;
+ async function bind(watchId='watch'){await producer.request('prepare',{threadId:'thread',operationId:watchId,creationIdempotencyKey:watchId});await producer.request('bind',{operationId:watchId,watchId,source:'task_host',logicalSourceId:'host',sourceDataEpoch:'host-session',workId:'task',runId:'run'});}
+ await bind();const reference={sourceKind:'codex_native_approval',taskId:'task',taskSessionId:'host-session',executionThreadId:'thread',nativeSessionId:'native-session',nativeThreadId:'native-thread',nativeTurnId:'native-turn',nativeGeneration:1,nativeIncarnation:randomUUID()};const one={inputId:randomUUID(),expectedDigest:'a'.repeat(64),requestDigest:'b'.repeat(64)},two={inputId:randomUUID(),expectedDigest:'c'.repeat(64),requestDigest:'d'.repeat(64)};
+ const inventory=(slot:any,revision:number,questions=[one,two])=>({sourceKind:'codex_native_approval',watchId:slot.watchId,readerIncarnation:reference.nativeIncarnation,sourceLeaseId:slot.sourceLeaseId,enrollmentIncarnation:slot.enrollmentIncarnation,bindingDigest:slot.bindingDigest,reference,coverage:'native_approvals_exclusive_execution_v1',inventoryRevision:revision,inventoryDigest:revision.toString(16).padStart(64,'0'),taskStatus:questions.length?'input_required':'working',businessOutcome:'unknown',questions});
+ return{root,host,producer,other,client,native,bind,reference,one,two,inventory,setAllowed:(value:boolean)=>{allowed=value;},setScopeAllowed:(value:boolean)=>{scopeAllowed=value;}};
+}
+it('requires the current Native source socket capability and qualifies only an existing exact task binding',async()=>{
+ const f=await fixture();await expect(f.producer.request('nativeReaderQualify',{watchId:'watch',reference:f.reference})).rejects.toThrow(/activity_native_source_forbidden|activity_native_source_unsupported/);
+ await expect(f.native('nativeReaderQualify',{watchId:'watch',reference:{...f.reference,taskSessionId:'foreign'}})).rejects.toThrow('activity_native_source_binding_conflict');
+ expect(f.host.store.getNativeAttentionEnrollment('watch')).toBeNull();const first=await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});expect(first.sourceKind).toBe('codex_native_approval');expect(first.sourceLeaseId).toMatch(/^[a-f0-9-]{36}$/);
+ const again=await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});expect(again.sourceLeaseId).toBe(first.sourceLeaseId);
+ await expect(f.other.requestNative('nativeReaderQualify',{watchId:'watch',reference:f.reference})).rejects.toThrow('attention_reader_busy');
+});
+it('finalizes the complete original Native metadata inventory without accepting omissions or copied lease ids',async()=>{
+ const f=await fixture();await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});
+ async function read(revision:number,questions=[f.one,f.two]){const round=await f.native('attentionReadBegin',{watchId:'watch'});expect(round.memberSlots).toHaveLength(1);return f.native('attentionReadFinalize',{roundId:round.roundId,inventories:round.readerSlots.map((slot:any)=>f.inventory(slot,revision,questions))});}
+ const first=await read(1);expect(first.view.presentation.questions).toHaveLength(2);const second=await read(2,[f.two]);expect(second.view.presentation.questions).toHaveLength(1);expect(second.view.presentation.questions[0].sourceRevision).toBe(1);const final=await read(3,[]);expect(final.view.projection.executionState).toBe('running');
+ for(const changed of ['omit','lease'] as const){const round=await f.native('attentionReadBegin',{watchId:'watch'});const inventory=f.inventory(round.readerSlots[0],4,[]);await expect(f.native('attentionReadFinalize',{roundId:round.roundId,inventories:changed==='omit'?[]:[{...inventory,sourceLeaseId:randomUUID()}]})).rejects.toThrow(/attention_inventory/);}
+});
+it('keeps each watch enrollment and lease while reading one physical Native turn through two aliases',async()=>{
+ const f=await fixture();await f.bind('alias');await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});await f.native('nativeReaderQualify',{watchId:'alias',reference:f.reference});const round=await f.native('attentionReadBegin',{watchId:'watch'});expect(round.readerSlots).toHaveLength(2);expect(new Set(round.readerSlots.map((slot:any)=>slot.enrollmentIncarnation)).size).toBe(2);expect(new Set(round.readerSlots.map((slot:any)=>slot.sourceLeaseId)).size).toBe(2);
+ const result=await f.native('attentionReadFinalize',{roundId:round.roundId,inventories:round.readerSlots.map((slot:any)=>f.inventory(slot,1))});expect(result.view.presentation.questions).toHaveLength(2);
+});
+it('reserves the exact watch before asynchronous authorization so two sockets cannot overwrite one Native lease',async()=>{
+ const f=await fixture();await f.producer.authorizeNativeSource();await f.other.authorizeNativeSource();let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});const original=f.host.service.authorizeRead.bind(f.host.service);vi.spyOn(f.host.service,'authorizeRead').mockImplementationOnce(async(...args)=>{const result=await original(...args);enter();await gate;return result;});
+ const first=f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});void first.catch(()=>{});try{await Promise.race([entered,first.then(()=>{throw Error('fixture_qualify_did_not_suspend');})]);await expect(f.other.requestNative('nativeReaderQualify',{watchId:'watch',reference:f.reference})).rejects.toThrow('attention_reader_busy');}finally{release();}await first;
+});
+it('reauthorizes terminal-only recovery on a new socket using the actual original terminal receipt, with no live collection slot',async()=>{
+ const f=await fixture();await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});const {delivery}=f.host.store.enrollNativeAttentionSource('watch',f.reference);f.host.store.ingest('watch',{schemaVersion:1,eventId:'terminal',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'host-session',workId:'task',runId:'run',sourceSequence:1,transportGeneration:0,kind:'completed',receivedAt:1,evidenceRefs:[]},delivery);f.producer.dispose();
+ await vi.waitFor(async()=>expect((await f.other.requestNative<any>('nativeReaderQualify',{watchId:'watch'})).value.mode).toBe('terminal'));
+ const round=(await f.other.requestNative<any>('attentionReadBegin',{watchId:'watch'})).value;expect(round.readerSlots).toEqual([]);expect(round.memberSlots).toHaveLength(1);expect(round.memberSlots[0].mode).toBe('terminal');const result=(await f.other.requestNative<any>('attentionReadFinalize',{roundId:round.roundId,inventories:[]})).value;expect(result.view.projection.executionState).toBe('completed');expect(result.view.presentation.questions).toEqual([]);
+});
+it('does not turn a live caller omission into terminal qualification',async()=>{const f=await fixture();await expect(f.native('nativeReaderQualify',{watchId:'watch'})).rejects.toThrow(/attention_native_terminal_unverified|attention_inventory_unavailable/);expect(f.host.store.getNativeAttentionEnrollment('watch')).toBeNull();});
+it('checks current credential and scope again when a Native round is finalized',async()=>{
+ const f=await fixture();await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});const round=await f.native('attentionReadBegin',{watchId:'watch'});f.setAllowed(false);await expect(f.native('attentionReadFinalize',{roundId:round.roundId,inventories:round.readerSlots.map((slot:any)=>f.inventory(slot,1))})).rejects.toThrow('activity_source_forbidden');
+ f.setAllowed(true);const next=await f.native('attentionReadBegin',{watchId:'watch'});chmodSync(join(f.root,'activity-owner.native-source.credentials.json'),0o644);try{await expect(f.native('attentionReadFinalize',{roundId:next.roundId,inventories:next.readerSlots.map((slot:any)=>f.inventory(slot,1))})).rejects.toThrow(/activity_native_source_unsupported|activity_native_source_credentials/);}finally{chmodSync(join(f.root,'activity-owner.native-source.credentials.json'),0o600);}
+});
+
+it('invalidates disconnected live leases and round tickets before a new socket explicitly requalifies the stored binding',async()=>{
+ const f=await fixture();await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});const old=await f.native('attentionReadBegin',{watchId:'watch'});f.producer.dispose();
+ await vi.waitFor(async()=>{await expect(f.other.requestNative('attentionReadBegin',{watchId:'watch'})).rejects.toThrow(/attention_reader_forbidden/);});
+ await vi.waitFor(async()=>expect((await f.other.requestNative<any>('nativeReaderQualify',{watchId:'watch',reference:f.reference})).value.sourceLeaseId).not.toBe(old.readerSlots[0].sourceLeaseId));
+ await expect(f.other.requestNative('attentionReadFinalize',{roundId:old.roundId,inventories:old.readerSlots.map((slot:any)=>f.inventory(slot,1))})).rejects.toThrow('attention_round_conflict');
+ const next=(await f.other.requestNative<any>('attentionReadBegin',{watchId:'watch'})).value;expect(next.readerSlots[0].enrollmentIncarnation).toBe(old.readerSlots[0].enrollmentIncarnation);
+});
+it('rechecks the original producer scope after qualification authorization suspends, before any enrollment',async()=>{
+ const f=await fixture();await f.producer.authorizeNativeSource();let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;}),original=f.host.service.authorizeRead.bind(f.host.service);
+ vi.spyOn(f.host.service,'authorizeRead').mockImplementationOnce(async(...args)=>{const value=await original(...args);enter();await gate;return value;});
+ const pending=f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference}),rejected=expect(pending).rejects.toThrow('activity_producer_forbidden');await entered;f.setScopeAllowed(false);release();await rejected;expect(f.host.store.getNativeAttentionEnrollment('watch')).toBeNull();
+});
+it('rejects a newly joined complete Native member after begin suspends rather than reading a partial anchor',async()=>{
+ const f=await fixture();await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;}),original=f.host.service.canReadSource.bind(f.host.service);
+ vi.spyOn(f.host.service,'canReadSource').mockImplementationOnce(async(...args)=>{const value=await original(...args);enter();await gate;return value;});const pending=f.native('attentionReadBegin',{watchId:'watch'}),rejected=expect(pending).rejects.toThrow('attention_source_conflict');await entered;
+ try{await f.bind('alias');await f.native('nativeReaderQualify',{watchId:'alias',reference:f.reference});}finally{release();}await rejected;
+});
+it('normalizes a reordered closed reference before reusing the same actual Native lease',async()=>{
+ const f=await fixture();const first=await f.native('nativeReaderQualify',{watchId:'watch',reference:f.reference});const reversed=Object.fromEntries(Object.entries(f.reference).reverse());const next=await f.native('nativeReaderQualify',{watchId:'watch',reference:reversed});expect(next.sourceLeaseId).toBe(first.sourceLeaseId);
+});

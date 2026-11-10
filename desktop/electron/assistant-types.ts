@@ -2,6 +2,7 @@ import type {AssistantCandidateKind, AssistantCandidateStatus, AssistantEvidence
 export type {AssistantCandidateKind, AssistantCandidateStatus, AssistantEvidenceRef, AssistantCandidate} from '../../src/runtime/loop/producer-types.js';
 export const DEFAULT_PERSONAL_ASSISTANT_ID = 'default-personal-assistant' as const;
 export const ASSISTANT_EVENING_LOOP_ID = 'personal-assistant-evening-reflection' as const;
+export const ASSISTANT_CHECK_LOOP_ID='personal-assistant-transaction-check' as const;
 export const ASSISTANT_MORNING_LOOP_ID = 'personal-assistant-morning-briefing' as const;
 
 export type AssistantStatus = 'needs_consent' | 'active' | 'paused';

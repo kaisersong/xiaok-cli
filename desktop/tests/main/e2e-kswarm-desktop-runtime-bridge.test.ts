@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,7 +12,8 @@ import {
   createKSwarmRuntimeBridgeBrokerClient,
   submitKSwarmRuntimeResultToBroker,
 } from '../../electron/kswarm-runtime-bridge.js';
-import type { KSwarmService } from '../../electron/kswarm-service.js';
+import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
+import {createHash} from 'node:crypto';
 
 interface StartedProcess {
   child: ChildProcess;
@@ -102,9 +104,11 @@ async function waitForCondition<T>(
 async function startKSwarmForE2E(input: {
   brokerUrl: string;
   tempHome: string;
+  mutationToken:string;
+  scope:{profileId:string;workspaceId:string};
 }): Promise<{ kswarm: StartedProcess; kswarmUrl: string; mutationToken: string }> {
   let lastLogs = '';
-  const mutationToken = `desktop-e2e-${Date.now()}`;
+  const mutationToken = input.mutationToken;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const kswarmPort = await reservePort();
     const kswarmUrl = `http://127.0.0.1:${kswarmPort}`;
@@ -116,6 +120,8 @@ async function startKSwarmForE2E(input: {
         BROKER_URL: input.brokerUrl,
         KSWARM_PORT: String(kswarmPort),
         KSWARM_DESKTOP_MUTATION_TOKEN: mutationToken,
+        KSWARM_DESKTOP_PROFILE_ID:input.scope.profileId,
+        KSWARM_DESKTOP_WORKSPACE_ID:input.scope.workspaceId,
         HOME: input.tempHome,
         USERPROFILE: input.tempHome,
       },
@@ -137,22 +143,6 @@ async function startKSwarmForE2E(input: {
   throw new Error(`failed to start kswarm after port retries\n${lastLogs}`);
 }
 
-function createKSwarmHttpService(baseUrl: string, mutationToken: string): KSwarmService {
-  return {
-    start: async () => {},
-    stop: async () => {},
-    restart: async () => {},
-    getStatus: () => ({ running: true, port: Number(new URL(baseUrl).port), pid: 1, restartCount: 0, lastError: null }),
-    onStatusChange: () => () => {},
-    request: async (path: string, init?: RequestInit) => fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        ...Object.fromEntries(new Headers(init?.headers).entries()),
-        'x-kswarm-mutation-token': mutationToken,
-      },
-    }),
-  } as unknown as KSwarmService;
-}
 
 function emitReceipt(input: { sessionId: string; emitRuntimeEvent: (event: any) => void }, note: string): void {
   input.emitRuntimeEvent({
@@ -218,20 +208,26 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
     );
     let kswarm: StartedProcess | null = null;
 
-    const clients: Array<{ stop(): void }> = [];
+    const clients: Array<{ stop(): void|Promise<void> }> = [];
+    const previous={fetch:globalThis.fetch,entry:process.env.KSWARM_SERVER_PATH,brokerEntry:process.env.BROKER_SERVER_PATH};
+    process.env.KSWARM_SERVER_PATH=join(__dirname,'..','..','..','..','kswarm','src','server','index.js');
+    process.env.BROKER_SERVER_PATH=join(__dirname,'..','..','..','..','intent-broker','src','cli.js');
+    const scope={profileId:createHash('sha256').update(dataRoot).digest('hex'),workspaceId:createHash('sha256').update(tempWorkFolder).digest('hex')};
+    const kswarmService=createKSwarmService({desktopProjectScope:scope,spawnProcess:(()=>{throw Error('fixture_unowned_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_unowned_kill_denied');}});
+    let services:ReturnType<typeof createDesktopServices>|undefined;
     try {
       await waitForCondition(
         () => fetchJson<{ ok: boolean }>(`${brokerUrl}/health`),
         (value) => value.ok === true,
         20_000,
       );
-      const startedKSwarm = await startKSwarmForE2E({ brokerUrl, tempHome });
+      const startedKSwarm = await startKSwarmForE2E({ brokerUrl, tempHome,scope,mutationToken:kswarmService.getDesktopMutationToken() });
       kswarm = startedKSwarm.kswarm;
       kswarmUrl = startedKSwarm.kswarmUrl;
       const mutationToken = startedKSwarm.mutationToken;
 
-      const kswarmService = createKSwarmHttpService(kswarmUrl, mutationToken);
-      const services = createDesktopServices({
+      globalThis.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);const destination=(url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.port==='4400'?kswarmUrl:(url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.port==='4318'?brokerUrl:undefined;try{const response=await previous.fetch(destination?destination+url.pathname+url.search:input,init);if(destination&&url.pathname==='/health')console.log(JSON.stringify({test:'owned-manager-health',port:url.port,status:response.status}));return response;}catch(error){if(destination&&url.pathname==='/health')console.log(JSON.stringify({test:'owned-manager-health-failure',port:url.port,error:error instanceof Error?error.message:String(error)}));throw error;}};
+      const desktopServices = createDesktopServices({
         dataRoot,
         kswarmService,
         now: () => Date.now(),
@@ -313,10 +309,11 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
           emitReceipt({ sessionId, emitRuntimeEvent }, 'ok');
         },
       });
+      services=desktopServices;
       const runtimeBridge = {
-        ...createKSwarmRuntimeBridge({
+        ...createKSwarmRuntimeBridge({kswarmService:kswarmService,
           allowedRoots: [join(tempHome, '.kswarm', 'projects'),join(tempHome, '.kswarm', 'handoff-packages')],
-          runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
+          runDesktopTask: (input) => desktopServices.runKSwarmHandoffTask(input),
           submitResult: (input) => submitKSwarmRuntimeResultToBroker({
             brokerUrl,
             participantId: 'xiaok-desktop',
@@ -327,12 +324,12 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
             result: input.result,
           }),
         }),
-        handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo(input),
-        handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReviewSubmission(input),
-        handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
-        handleReadinessProbe: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReadinessProbe(input),
+        handleAssignPo: async (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => {const result=await desktopServices.runKSwarmAssignPo(input);console.log(JSON.stringify({test:'original-e2e-assign-result',ok:result.ok,error:result.ok?undefined:result.error}));return result;},
+        handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => desktopServices.runKSwarmReviewSubmission(input),
+        handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => desktopServices.runKSwarmPlanApproved(input),
+        handleReadinessProbe: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => desktopServices.runKSwarmReadinessProbe(input),
       };
-      const desktopHostClient = createKSwarmRuntimeBridgeBrokerClient({
+      const desktopHostClient = createKSwarmRuntimeBridgeBrokerClient({kswarmService:kswarmService,
         brokerUrl,
         participantId: 'xiaok-desktop',
         participantKind: 'service',
@@ -447,9 +444,12 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
         kswarm?.logs() ?? '',
       ].join('\n'));
     } finally {
-      for (const client of clients) client.stop();
+      for (const client of clients) await client.stop();
+      await services?.closeTaskSourceWritersForMigration();await services?.disposeMultiAgent();
+      await sealAndDrainKSwarmServiceInstance(kswarmService);
       await kswarm?.stop();
       await broker.stop();
+      globalThis.fetch=previous.fetch;if(previous.entry===undefined)delete process.env.KSWARM_SERVER_PATH;else process.env.KSWARM_SERVER_PATH=previous.entry;if(previous.brokerEntry===undefined)delete process.env.BROKER_SERVER_PATH;else process.env.BROKER_SERVER_PATH=previous.brokerEntry;
     }
   }, 90_000);
 });

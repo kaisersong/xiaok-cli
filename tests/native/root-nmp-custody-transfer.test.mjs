@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {spawn,spawnSync} from 'node:child_process';
+import {readFileSync,writeFileSync,lstatSync,readdirSync} from 'node:fs';
+import {join} from 'node:path';
+import {prepareRootNmpTransferFixture} from './helpers/root-nmp-transfer-fixture.mjs';
+const require=createRequire(import.meta.url),mac={skip:process.platform!=='darwin',timeout:30000};
+test('actual Native source and helper retain one original issuer lock continuously across descriptor transfer',mac,async()=>{
+ const p=await prepareRootNmpTransferFixture();process.env.XIAOK_CONFIG_DIR=join(p.root,'config');const api=require(p.binary),s=api.openOriginal();api.installFresh(s);
+ for(let i=0;i<7;i++){api.enqueue(s,api.fixtureSubject(s,i));if(i<5){const c=api.claimNext(s);api.consumeLaunch(s,c.reservation);}}
+ const ledger=api.readOriginalRootPoolLedger(s);api.close(s);const file=join(p.domain,'root-resource-v1.sqlite'),before=readFileSync(file),inode=lstatSync(file,{bigint:true}).ino;
+ const child=spawn(p.supervisor,[String(process.getuid())],{env:{PATH:'/usr/bin:/bin',XIAOK_CONFIG_DIR:join(p.root,'config')},stdio:['pipe','pipe','pipe']});
+ const record={pid:child.pid,root:p.root,node:process.version,stdout:'',stderr:'',exitCode:null,signal:null};writeFileSync(join(p.root,'transfer-run.json'),JSON.stringify(record,null,2));
+ let buffer='',readyResolve,readyReject;const ready=new Promise((yes,no)=>{readyResolve=yes;readyReject=no;}),exit=new Promise(yes=>child.once('close',(code,signal)=>{record.exitCode=code;record.signal=signal;readyReject(Error('supervisor exited before READY'));yes();}));
+ child.on('error',readyReject);child.stdout.on('data',bytes=>{record.stdout+=bytes;buffer+=bytes;for(;;){const i=buffer.indexOf('\n');if(i<0)break;const line=buffer.slice(0,i);buffer=buffer.slice(i+1);try{const value=JSON.parse(line);if(value.state==='held')child.stdin.write('TRANSFER\n');if(value.event==='custody-ready')readyResolve(value);}catch{}}});child.stderr.on('data',bytes=>{record.stderr+=bytes;});
+ try{
+  const facts=await ready;assert.equal(facts.sourceClosed,true);assert.equal(facts.helperHeld,true);assert.ok(facts.sourcePid>0);assert.ok(facts.helperPid>0);
+  const observed=spawnSync(process.execPath,['-e',`const a=require(process.argv[1]);try{const s=a.openOriginal();a.close(s);process.exitCode=1;}catch(e){console.log(e.message);process.exitCode=e.message==='ROOT_RESOURCE_ISSUER_BUSY'?0:2;}`,p.binary],{encoding:'utf8',env:{...process.env,XIAOK_CONFIG_DIR:join(p.root,'config')}});record.writerProbe={pid:observed.pid,status:observed.status,signal:observed.signal,stdout:observed.stdout,stderr:observed.stderr};assert.equal(observed.status,0,observed.stdout+observed.stderr);
+  child.stdin.end('STOP\n');await exit;assert.equal(record.exitCode,0,record.stderr+record.stdout);assert.equal(record.signal,null);assert.deepEqual(readFileSync(file),before);assert.equal(lstatSync(file,{bigint:true}).ino,inode);
+  const reopened=api.openOriginal();const after=api.readOriginalRootPoolLedger(reopened);api.close(reopened);assert.equal(after.canonicalJson,ledger.canonicalJson);assert.deepEqual(readdirSync(p.fixedRoot),[]);
+ }finally{if(record.exitCode===null&&record.signal===null){child.stdin.end('STOP\n');await exit;}writeFileSync(join(p.root,'transfer-run.json'),JSON.stringify(record,null,2));console.log(JSON.stringify({kind:'own-original-transfer',...record,scope:'Native component, no production grant',gui:0}));}
+});
+test('foreign receivers are rejected without traps and ordinary holders cannot invent an inherited birth',mac,async()=>{
+ const p=await prepareRootNmpTransferFixture();process.env.XIAOK_CONFIG_DIR=join(p.root,'config');const api=require(p.binary),source=require(join(p.root,'native/darwin-universal/root_resource_ledger_source.node')),s=api.openOriginal();api.installFresh(s);api.close(s);const h=source.holdExistingOriginalRootPoolLedger();let traps=0;const proxy=new Proxy(h,{get(){traps++;throw 0;},ownKeys(){traps++;throw 0;},getPrototypeOf(){traps++;throw 0;}}),transfer=h.prepareOriginalRootPoolAdoptionTransfer;
+ try{for(const receiver of [proxy,{},Object.create(h),{...h},null])assert.throws(()=>Reflect.apply(transfer,receiver,[]),/HOLD_REQUIRED/);assert.equal(traps,0);assert.throws(()=>h.prepareOriginalRootPoolAdoptionTransfer(undefined),/ARGUMENT/);assert.throws(()=>h.prepareOriginalRootPoolAdoptionTransfer(),/BIRTH_REQUIRED/);h.check();}finally{h.close();h.assertClosed();}
+});
+for(const fault of ['bad-nonce','wrong-file','helper-close-zero'])test('actual transfer keeps '+fault+' unknown while attempting both child negative paths',mac,async()=>{
+ const p=await prepareRootNmpTransferFixture({fault});process.env.XIAOK_CONFIG_DIR=join(p.root,'config');const api=require(p.binary),s=api.openOriginal();api.installFresh(s);api.close(s);const file=join(p.domain,'root-resource-v1.sqlite'),before=readFileSync(file),inode=lstatSync(file,{bigint:true}).ino;
+ const child=spawn(p.supervisor,[String(process.getuid())],{env:{PATH:'/usr/bin:/bin',XIAOK_CONFIG_DIR:join(p.root,'config')},stdio:['pipe','pipe','pipe']}),record={pid:child.pid,root:p.root,fault,stdout:'',stderr:'',code:null,signal:null};writeFileSync(join(p.root,'fault-run.json'),JSON.stringify(record,null,2));
+ let buffer='';const exit=new Promise((yes,no)=>{child.on('error',no);child.on('close',(code,signal)=>{record.code=code;record.signal=signal;yes();});});child.stderr.on('data',bytes=>{record.stderr+=bytes;});child.stdout.on('data',bytes=>{record.stdout+=bytes;buffer+=bytes;for(;;){const i=buffer.indexOf('\n');if(i<0)break;const line=buffer.slice(0,i);buffer=buffer.slice(i+1);try{const value=JSON.parse(line);if(value.state==='held')child.stdin.write('TRANSFER\n');if(value.event==='custody-ready')child.stdin.end('STOP\n');}catch{}}});
+ try{await exit;assert.equal(record.code,79,record.stdout+record.stderr);assert.equal(record.signal,null);const rows=record.stdout.trim().split('\n').map(line=>JSON.parse(line)),last=rows.find(value=>value.event==='custody-end');assert.equal(last.unknown,true);assert.equal(last.errorPresent,true);assert.ok(last.sourcePid>0);assert.ok(last.helperPid>0);assert.equal(last.sourceStatus===0||last.sourceStatus===79*256,true);assert.equal(last.helperStatus===0||last.helperStatus===79*256,true);assert.deepEqual(readFileSync(file),before);assert.equal(lstatSync(file,{bigint:true}).ino,inode);assert.deepEqual(readdirSync(p.fixedRoot),[]);if(fault==='helper-close-zero'){const helper=rows.find(value=>value.scope==='custody-component-only');assert.equal(helper.unknown,true);assert.equal(helper.firstErrno,0);assert.equal(helper.knownClosed,false);}}
+ finally{writeFileSync(join(p.root,'fault-run.json'),JSON.stringify(record,null,2));console.log(JSON.stringify({kind:'own-transfer-negative',...record,gui:0,scope:'does not establish Source or namespace qualification'}));}
+});

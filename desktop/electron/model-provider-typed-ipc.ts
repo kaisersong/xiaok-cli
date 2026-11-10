@@ -8,6 +8,8 @@ import type { IpcHandleRegistrar, IpcHandlerListener } from './shutdown-aware-ip
 import { registerIpcHandler, type RiskTag } from './ipc-runtime.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { MODEL_PROVIDER_INPUT_SCHEMAS, MODEL_PROVIDER_OUTPUT_SCHEMAS, type ModelProviderMethod } from '../shared/model-provider-ipc-contract.js';
+import type {MainDshControlSource} from './main-dsh-control-source.js';
+import type {IpcMainInvokeEvent} from 'electron';
 export function captureModelProviderInput<T>(input: T, schema: ZodTypeAny): T {
   const captured = captureIpcData(input, 'model_config_input_invalid');
   if (!schema.safeParse(captured).success) throw Error('model_config_input_invalid');
@@ -27,11 +29,11 @@ export const MODEL_PROVIDER_RISK_TAGS: Readonly<Record<ModelProviderMethod, read
   createManagedXiaokAgent: [...configEffects, 'network', 'exec', 'external-process', 'internal-mutation'],
 });
 const nativeActors = new AsyncLocalStorage<NativeActor | undefined>();
-const owners = new WeakMap<IpcHandleRegistrar, { service: Service | null; authorize?: Authorize; installed: Set<ModelProviderMethod>; registrar: IpcHandleRegistrar }>();
-export function registerModelProviderIpc(ipc: IpcHandleRegistrar, rawService?: Service, authorize?: Authorize): void {
+const owners = new WeakMap<IpcHandleRegistrar, { service: Service | null; authorize?: Authorize; probeSource?:MainDshControlSource; installed: Set<ModelProviderMethod>; registrar: IpcHandleRegistrar }>();
+export function registerModelProviderIpc(ipc: IpcHandleRegistrar, rawService?: Service, authorize?: Authorize,probeSource?:MainDshControlSource): void {
   const service = rawService ?? null;
   let owner = owners.get(ipc);
-  if (owner && (owner.service !== service || owner.authorize !== authorize)) throw Error('model_config_registrar_owner_conflict');
+  if (owner && (owner.service !== service || owner.authorize !== authorize||owner.probeSource!==probeSource)) throw Error('model_config_registrar_owner_conflict');
   if (!owner) {
     const registrar: IpcHandleRegistrar = Object.freeze({ handle(channel: string, listener: IpcHandlerListener) {
       return ipc.handle(channel, async (event, ...args) => {
@@ -43,7 +45,7 @@ export function registerModelProviderIpc(ipc: IpcHandleRegistrar, rawService?: S
         return nativeActors.run(actor as NativeActor | undefined, () => listener(event, ...args));
       });
     } });
-    owner = { service, authorize, installed: new Set(), registrar }; owners.set(ipc, owner);
+    owner = { service, authorize,probeSource, installed: new Set(), registrar }; owners.set(ipc, owner);
   }
   for (const method of methods) {
     if (owner.installed.has(method)) continue;
@@ -71,7 +73,14 @@ export function registerModelProviderIpc(ipc: IpcHandleRegistrar, rawService?: S
           case 'getSystemOneConfig': result = service.getSystemOneConfig(); break;
           case 'saveSystemOneConfig': result = service.saveSystemOneConfig(args[0] as Parameters<Service['saveSystemOneConfig']>[0], 'user'); break;
           case 'createManagedXiaokAgent': result = service.createManagedXiaokAgent(args[0] as Parameters<Service['createManagedXiaokAgent']>[0], { requestSource: 'user' }); break;
-          case 'testProviderConnection': result = service.testProviderConnection(args[0] as Parameters<Service['testProviderConnection']>[0], 'user'); break;
+          case 'testProviderConnection': {
+            const input=args[0] as Parameters<Service['testProviderConnection']>[0];
+            if(!probeSource){result=service.testProviderConnection(input,'user');break;}
+            const frame=probeSource.openModelProbe(event as IpcMainInvokeEvent,{schemaVersion:1,purpose:'test_provider_connection',providerId:input.providerId,modelId:input.modelId??null},'user');
+            try{result=await service.testProviderConnection(input,'user',frame.proof);}
+            finally{frame.release();}
+            break;
+          }
           case 'listAvailableModelsForProvider': result = service.listAvailableModelsForProvider(args[0] as string); break;
           case 'deleteProvider': result = service.deleteProvider(args[0] as string, { requestSource: 'user' }); break;
           case 'deleteModel': result = service.deleteModel(args[0] as string, { requestSource: 'user' }); break;

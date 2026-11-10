@@ -17,14 +17,16 @@ import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-con
 
 const compiled = vi.hoisted(() => ({ output: '', root: '' }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       if (String(filename) === source && !compiled.output) throw new Error('compiled fixed Worker is not ready');
       super(String(filename) === source ? compiled.output : filename, options);
     }
-  } };
+  }) };
 });
 beforeAll(async () => { Object.assign(compiled, await compileVerifierEntry('delivery-verifier-worker.ts')); });
 afterAll(() => { if (compiled.root) rmSync(compiled.root, { recursive: true, force: true, maxRetries: 3 }); });

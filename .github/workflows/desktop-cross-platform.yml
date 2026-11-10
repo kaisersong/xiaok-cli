@@ -9,26 +9,26 @@ name: Desktop Cross-Platform Tests
 # needs the sidecar repos and has unrelated Windows temp-dir teardown flakiness.
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'desktop/**'
-      - 'src/ai/runtime/**'
-      - 'src/runtime/task-host/**'
-      - 'src/ai/adapters/**'
-      - 'src/ai/providers/kimi-models.ts'
-      - 'src/ai/memory/segment.ts'
-      - 'src/ai/memory/layered-store.ts'
-      - 'src/platform/mcp/python-server.ts'
-      - 'tests/platform/mcp/python-server.test.ts'
-      - 'scripts/read-kimi-coding-models.mjs'
-      - 'scripts/verify-packaged-kimi-smoke-result.mjs'
-      - 'scripts/check-desktop-sibling-pins.mjs'
-      - '.github/workflows/desktop-cross-platform.yml'
-      - '.github/workflows/desktop-release.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'src/runtime/bundled-yzj-cli.ts'
+      - 'src/runtime/context-continuity/**'
+      - 'src/runtime/enterprise-cli-*.ts'
+      - 'data/skills/dingtalk-cli/**'
+      - 'data/skills/feishu-cli/**'
+      - 'data/skills/wecom-cli/**'
+      - 'src/commands/yzj-cli.ts'
+      - 'src/ai/skills/defaults.ts'
+      - 'data/yzj-cli/**'
+      - 'data/skills/yzj-cli/**'
+      - 'tests/runtime/*yzj-cli*.test.ts'
+      - 'tests/commands/yzj-cli.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
       - 'src/ai/runtime/**'
       - 'src/runtime/task-host/**'
       - 'src/ai/adapters/**'
@@ -40,9 +40,28 @@ on:
       - 'scripts/read-kimi-coding-models.mjs'
       - 'scripts/verify-packaged-kimi-smoke-result.mjs'
       - 'scripts/check-desktop-sibling-pins.mjs'
+      - 'src/ai/runtime/**'
       - '.github/workflows/desktop-cross-platform.yml'
       - '.github/workflows/desktop-release.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sibling-pin-consistency:
@@ -108,9 +127,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.14.0'
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -118,12 +139,28 @@ jobs:
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
 
+      - name: Verify packaged CLI preparation contract
+        run: node --test tests/workflows/desktop-yzj-package-prerequisites.test.mjs
+
       - name: Install desktop dependencies
-        # --ignore-scripts skips the better-sqlite3/electron native postinstall,
-        # which is unnecessary for these unit tests + renderer build and whose
-        # bash `$(...)` step is fragile under npm's cmd.exe script shell on Windows.
+        # Keep native rebuild lifecycle scripts disabled. Real Electron imports
+        # need the separate locked installer below, even in ordinary Node tests.
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      - name: Compile the real main graph for the memory close regression
+        working-directory: desktop
+        shell: bash
+        run: |
+          node node_modules/typescript/bin/tsc -p tsconfig.electron.json
+          node ../scripts/copy-harness-runtime.mjs
+          node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Run cross-platform path tests
         run: >
@@ -134,15 +171,33 @@ jobs:
           tests/main/skill-runtime-path-escape.test.ts
           tests/renderer/changed-files-tree-relativize.test.ts
           tests/main/cross-platform-path-guard.test.ts
+          tests/main/bundled-yzj-cli-package.test.ts
+          tests/main/bundled-yzj-cli-runtime.test.ts
+          tests/main/bundled-yzj-cli-command.test.ts
+          tests/main/enterprise-cli-runtime.test.ts
+          tests/main/enterprise-cli-service.test.ts
+          tests/main/enterprise-cli-ipc.test.ts
+          tests/renderer/enterprise-cli-connectors.test.tsx
+          tests/main/yzj-cli-auth-service.test.ts
+          tests/main/yzj-cli-auth-ipc.test.ts
+          tests/renderer/yzj-cli-auth-card.test.tsx
           tests/renderer/project-artifact-actions.test.tsx
           tests/main/read-file-content-binary.test.ts
           tests/main/file-ipc-schema.test.ts
           tests/main/ipc-handler-test-injection.test.ts
           tests/main/shutdown-aware-ipc-main.test.ts
           tests/main/desktop-text-repetition.test.ts
+          tests/renderer/chat-shell-repetition.test.tsx
+          tests/renderer/chat-shell-repetition-structured.test.tsx
+          tests/renderer/chat-shell-repetition-history.test.tsx
           tests/main/desktop-task-stream-recovery.test.ts
           tests/main/kimi-packaged-smoke.test.ts
           tests/main/desktop-memory-store-close.test.ts
+          tests/main/context-continuity-projection.test.ts
+          tests/main/context-continuity-navigation.test.ts
+          tests/main/context-continuity-navigation-race.test.ts
+          tests/main/context-continuity-profile.test.ts
+          tests/main/context-continuity-profile-custody.test.ts
           tests/main/packaged-segmentation-smoke.test.ts
           tests/main/windows-kimi-packaged-smoke-contract.test.ts
           tests/main/kimi-harness-contract.test.ts
@@ -177,9 +232,25 @@ jobs:
           tests/renderer/model-recommendations.test.ts
           tests/main/desktop-services-model-catalog.test.ts
 
+      - name: Desktop services and model recommendation tests
+        run: >-
+          cd desktop && npm run test -- --run
+          tests/main/desktop-services-pure-node-import.test.ts
+          tests/main/desktop-services-scheduled-task-authority.test.ts
+          tests/renderer/model-recommendations.test.ts
+          tests/main/desktop-services-model-catalog.test.ts
+
       - name: Activity owner handoff regression (macOS)
         if: runner.os == 'macOS'
         run: cd desktop && npm run test -- --run tests/main/activity-owner-attach-retry.test.ts
+
+      - name: Verify pinned ordinary Broker runtime
+        run: |
+          cd desktop
+          node scripts/prepare-broker-runtime.mjs --all
+          npm test -- --run tests/main/broker-node-runtime.test.ts tests/main/broker-runtime-owner.test.ts tests/main/broker-runtime-packaging.test.ts
+
+      - uses: ./.github/actions/room-activity
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
@@ -203,9 +274,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24.16.0'
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -224,6 +297,17 @@ jobs:
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
 
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+
+      - name: Prepare locked bundled Yunzhijia binary before packaging
+        working-directory: desktop
+        run: node scripts/prepare-packaged-yzj-cli.cjs
+
+      - name: Verify prepared bundled CLI lifecycle
+        run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
+
       - name: Build nodejieba native binding for packaged segmentation (#150 M6)
         # npm ci --ignore-scripts skips nodejieba's node-pre-gyp install, so the
         # packaged app would ship without build/Release/nodejieba.node and the
@@ -238,21 +322,16 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 828c4c11122fcbbb50837c34aaac3b98a9f79404
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 16c3ed14c5493a82d000d69d34e4b1c933187433
+          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 2dd1f40dc5e0fc5438a2086d13963cc67489db45
+          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
-      - name: Install sidecar dependencies
-        shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          cd ../kswarm && bash "$retry" npm ci --omit=dev
-          cd ../intent-broker && bash "$retry" npm ci --omit=dev
+      - uses: ./.github/actions/install-desktop-sidecars
 
       - name: Build report-renderer bundle
         shell: bash
@@ -308,6 +387,10 @@ jobs:
         run: cd desktop && npm run build
         env:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
+
+      - name: Prepare pinned ordinary Broker runtime
+        working-directory: desktop
+        run: node scripts/prepare-broker-runtime.mjs
 
       - name: Package Windows Kimi smoke app
         shell: bash

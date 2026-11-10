@@ -12,16 +12,18 @@ import { authorizationFixture, authorizationRequest, deferred } from '../fixture
 
 const nativeProtection = vi.hoisted(() => ({ output: '', root: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
       if (mapped && !nativeProtection.output) throw Error('fresh fixed protection Worker required');
       super(mapped ? nativeProtection.output : filename, options);
       if (mapped) { nativeProtection.starts++; this.once('exit', () => nativeProtection.exits++); }
     }
-  } };
+  }) };
 });
 beforeAll(async () => { Object.assign(nativeProtection, await compileProtectionWorkerEntry()); });
 afterAll(() => {

@@ -97,6 +97,7 @@ function memoryStore(): MemoryStore & { records: Map<string, MemoryRecord>; save
 }
 
 function createController(input: {
+  readMorningConversation?: import('../../electron/assistant-controller.js').AssistantControllerOptions['readMorningConversation'];
   candidates?: AssistantCandidate[];
   memory?: ReturnType<typeof memoryStore>;
   kbStore?: KbStore;
@@ -127,6 +128,7 @@ function createController(input: {
       kbStore,
       resolveProjectCwd: input.resolveProjectCwd,
       listMorningSuggestions: input.listMorningSuggestions,
+      readMorningConversation:input.readMorningConversation,
       now: () => 100,
     }),
   };
@@ -358,3 +360,5 @@ describe('AssistantController', () => {
     expect(addSource).not.toHaveBeenCalled();
   });
 });
+
+it('rechecks active profile and publication freshness after the morning read resolves',async()=>{for(const change of ['pause','revoke'] as const){let done!:(v:any)=>void;const fresh=vi.fn(()=>true);const f=createController({readMorningConversation:()=>new Promise(resolve=>{done=resolve})});f.assistantService.bootstrap.mockReturnValue({profile:{...profile,status:'active'}});const pending=f.controller.getOverview();if(change==='pause')f.assistantService.bootstrap.mockReturnValue({profile:{...profile,status:'paused'}});else fresh.mockReturnValue(false);done({messages:[{id:'m',kind:'morning',createdAt:1,title:'title',text:'private'}],suggestions:[{id:'s',title:'private',summary:''}],current:fresh});const result=await pending;expect(result.morningMessages).toEqual([]);expect(result.suggestions).toEqual([]);}});

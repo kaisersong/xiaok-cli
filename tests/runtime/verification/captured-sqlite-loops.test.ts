@@ -1,3 +1,5 @@
+import {LOOP_ASSISTANT_PRODUCT_TABLES} from '../../../src/runtime/verification/loop-assistant-product-source-schema.js';
+import {ORIGINAL_LOOP_TABLES,ORIGINAL_COMBINED_LOOP_TABLES} from '../../support/loop-original-table-population.js';
 import {afterAll,afterEach,beforeAll,expect,it,vi} from 'vitest';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,realpathSync,statSync,rmSync,copyFileSync} from 'node:fs';
@@ -56,7 +58,7 @@ it.each([false,true])('retains all actual constructors and nullable failed compl
  expect(facts.kind).toBe('captured-loop-sqlite-declarations');expect(facts.sources).toHaveLength(paths.length);
  const source=facts.sources.at(-1)!;expect(source.tables.completion_records).toHaveLength(2);expect(source.tables.completion_records.find(row=>row.id==='failed-record')).toMatchObject({expectation_id:null,ok:0});
  expect(source.tables.completion_evidence).toMatchObject([{id:'answer',orphaned_at:4}]);
- expect(Object.keys(facts.sources[0]!.tables)).toHaveLength(split?23:27);expect(source.snapshotHash).toBe(before.sources.at(-1)!.snapshotHash);expect(Object.isFrozen(source.tables.completion_records[0])).toBe(true);
+ expect(Object.keys(facts.sources[0]!.tables)).toHaveLength(split?47:51);expect(Object.keys(facts.sources[0]!.tables).filter(name=>!['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage',...LOOP_ASSISTANT_PRODUCT_TABLES].includes(name))).toHaveLength(split?23:27);expect(Object.keys(facts.sources[0]!.tables).filter(name=>!['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage',...LOOP_ASSISTANT_PRODUCT_TABLES].includes(name)).sort()).toEqual(split?ORIGINAL_LOOP_TABLES:ORIGINAL_COMBINED_LOOP_TABLES);expect(Object.keys(facts.sources[0]!.tables).filter(name=>['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].includes(name)).sort()).toEqual(['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].slice().sort());expect(Object.keys(facts.sources[0]!.tables).filter(name=>(LOOP_ASSISTANT_PRODUCT_TABLES as readonly string[]).includes(name)).sort()).toEqual([...LOOP_ASSISTANT_PRODUCT_TABLES].sort());expect(source.snapshotHash).toBe(before.sources.at(-1)!.snapshotHash);expect(Object.isFrozen(source.tables.completion_records[0])).toBe(true);
  expect(()=>readCapturedSQLiteLoopSources({...owner},token)).toThrow('brand');expect(()=>readCapturedSQLiteLoopSources(owner,{...token})).toThrow('brand');await owner.checkCurrent();
 });
 it.each([
@@ -183,7 +185,7 @@ it.each(['session','invocation','revision'])('rejects altered verification execu
 function constraintFixture(clear=false){const path=join(root,`constraints-${serial++}.sqlite`),store=new LoopStore(path),loopId='artifact-evidence-regression';try{store.ensureBuiltInLoops(1);const began=store.beginLoopRun(loopId,{kind:'manual'},2,1000,{requestSource:'user'});if(began.status!=='started')throw Error('begin');const input={loopId,source:'user_manual' as const,rule:'Original rule',sourceRunId:began.run.id,failureKind:'executor_failed',failureReason:'original reason',now:3};const first=store.addConstraint(input),second=store.addConstraint({...input,rule:'Replacement rule',now:4});store.startLoopStage(began.run.id,loopId,'execute',5,{taskId:'external-original-task',injectedConstraintIds:[first.id,second.id]});if(clear)store.clearLoopRunHistory(loopId);return{path,first,second,runId:began.run.id};}finally{store.close();}}
 it.each([false,true])('retains original supersession and soft historical run after clear=%s',async clear=>{const f=constraintFixture(clear),{owner,token}=await captured([f.path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');const source=readCapturedSQLiteLoopSources(owner,token).sources[0]!;expect(source.tables.loop_learned_constraints).toHaveLength(2);expect(source.references.filter(ref=>ref.id===f.runId&&ref.relation==='loop_learned_constraints.source_run')).toHaveLength(2);expect(source.tables.loop_runs).toHaveLength(clear?0:1);if(!clear){expect(source.references.some(ref=>ref.namespace==='task'&&ref.id==='external-original-task')).toBe(true);expect(source.references.filter(ref=>ref.namespace==='loop-constraint')).toHaveLength(2);}});
 it.each(['missing','cycle','source'])('rejects original constraint inconsistency: %s',async mode=>{const f=constraintFixture();change(f.path,mode==='missing'?"UPDATE loop_learned_constraints SET superseded_by='missing'":mode==='cycle'?"UPDATE loop_learned_constraints SET superseded_by=id":"UPDATE loop_learned_constraints SET source='invented'");const{owner,token}=await captured([f.path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(()=>readCapturedSQLiteLoopSources(owner,token)).toThrow();});
-it('accepts all three original legacy table layouts after the actual constructor ADD COLUMN migrations',async()=>{const fresh=join(root,`migration-reference-${serial++}.sqlite`),first=new LoopStore(fresh);first.close();const reference=new DatabaseSync(fresh),path=join(root,`migration-old-${serial++}.sqlite`),db=new DatabaseSync(path);try{for(const [table,columns]of [['loop_definitions',['origin','deleted_at','delete_reason']],['loop_runs',['duration_ms','logical_run_key']],['user_loop_templates',['contract_json','contract_schema_version']]] as const){let sql=String(reference.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(table)!.sql);for(const column of columns)sql=sql.replace(new RegExp('^\\s*'+column+'[^\\n]*,?\\s*$','m'),'');sql=sql.replace(/,\s*\)/,')');db.exec(sql);}}finally{db.close();reference.close();}const migrated=new LoopStore(path);try{migrated.ensureBuiltInLoops(1);}finally{migrated.close();}const{owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(Object.keys(readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables)).toHaveLength(23);});
+it('accepts all three original legacy table layouts after the actual constructor ADD COLUMN migrations',async()=>{const fresh=join(root,`migration-reference-${serial++}.sqlite`),first=new LoopStore(fresh);first.close();const reference=new DatabaseSync(fresh),path=join(root,`migration-old-${serial++}.sqlite`),db=new DatabaseSync(path);try{for(const [table,columns]of [['loop_definitions',['origin','deleted_at','delete_reason']],['loop_runs',['duration_ms','logical_run_key']],['user_loop_templates',['contract_json','contract_schema_version']]] as const){let sql=String(reference.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(table)!.sql);for(const column of columns)sql=sql.replace(new RegExp('^\\s*'+column+'[^\\n]*,?\\s*$','m'),'');sql=sql.replace(/,\s*\)/,')');db.exec(sql);}}finally{db.close();reference.close();}const migrated=new LoopStore(path);try{migrated.ensureBuiltInLoops(1);}finally{migrated.close();}const{owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');const historicalTables=Object.keys(readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables);expect(historicalTables).toHaveLength(47);expect(historicalTables.filter(name=>(LOOP_ASSISTANT_PRODUCT_TABLES as readonly string[]).includes(name)).sort()).toEqual([...LOOP_ASSISTANT_PRODUCT_TABLES].sort());expect(historicalTables.filter(name=>!['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage',...LOOP_ASSISTANT_PRODUCT_TABLES].includes(name))).toHaveLength(23);expect(historicalTables.filter(name=>!['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage',...LOOP_ASSISTANT_PRODUCT_TABLES].includes(name)).sort()).toEqual(ORIGINAL_LOOP_TABLES);expect(historicalTables.filter(name=>['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].includes(name)).sort()).toEqual(['assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].slice().sort());});
 
 it('preserves finite fractional ordinary producer values despite SQLite INTEGER affinity',async()=>{const path=join(root,`fractional-${serial++}.sqlite`),store=new LoopStore(path),completion=new CompletionEvidenceStore(path);try{store.ensureBuiltInLoops(0.25);const began=store.beginLoopRun('artifact-evidence-regression',{kind:'manual'},1.25,1000,{requestSource:'user'});if(began.status!=='started')throw Error('begin');store.finishLoopRunWithDuration(began.run.id,0.5);completion.upsertExpectation({id:'fractional-time',ownerKind:'task',ownerId:'fractional-owner',expectedKinds:['answer'],source:'task_spec',confidence:'explicit',now:1.25});completion.upsertExpectation({id:'fractional-time',ownerKind:'task',ownerId:'fractional-owner',expectedKinds:['answer'],source:'task_spec',confidence:'explicit',now:0.75});completion.insertEvidence({id:'fractional-evidence',ownerKind:'task',ownerId:'fractional-owner',kind:'answer',summary:'actual ordinary evidence',metadata:{responseId:'actual'},now:2.25});completion.completeOwnerWithEvidence({ownerKind:'task',ownerId:'fractional-owner',recordId:'fractional-record',now:3.25});}finally{completion.close();store.close();}const{owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');const source=readCapturedSQLiteLoopSources(owner,token).sources[0]!;expect(source.tables.loop_runs[0]!.duration_ms).toBe(0.5);expect(source.tables.completion_expectations[0]).toMatchObject({created_at:1.25,updated_at:0.75});expect(source.tables.completion_records[0]!.created_at).toBe(3.25);});
 
@@ -354,3 +356,109 @@ it('preserves actual candidate-backed exports when original history clear is ref
  const path=exportFixture(),store=new LoopStore(path);try{expect(()=>store.clearLoopRunHistory('artifact-evidence-regression')).toThrow('FOREIGN KEY');expect(store.listLoopArtifactExports().items).toHaveLength(2);}finally{store.close();}
  const{owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables.loop_artifact_exports).toHaveLength(2);
 });
+
+async function calendarSourceFixture(revoke=false){
+ const now=Date.parse('2026-11-09T00:00:00Z'),path=join(root,`calendar-${serial++}.sqlite`),store=new LoopStore(path);
+ const {AssistantCalendarSource}=await import('../../../desktop/electron/assistant-calendar-source.js'),{AssistantYzjClient}=await import('../../../desktop/electron/assistant-yzj-cli.js');
+ const cloud=new AssistantYzjClient({run:async args=>args[0]==='whoami'?{success:true,data:{orgId:'org',openId:'self'}}:{success:true,data:{list:[{id:'原日程',title:'原始日程内容',startDate:now+1,endDate:now+2}],count:1,more:false}}});
+ const source=new AssistantCalendarSource({store,cloud});
+ try{await source.enable({requestSource:'user'});await source.collect({now,requestSource:'user'});if(revoke)source.disable({requestSource:'user'});}
+ finally{try{await source.close();}finally{store.close();}}
+ return path;
+}
+it('captures the actual calendar constructor and all typed cells/raw JSON without source-authority inference',async()=>{
+ const path=await calendarSourceFixture(),original=new DatabaseSync(path,{readOnly:true});let raw:string;
+ try{raw=String(original.prepare('SELECT snapshot_json FROM assistant_calendar_generations').get()!.snapshot_json);}finally{original.close();}
+ const {owner,token}=await captured([path]),{iterateCapturedSQLiteLoopSources}=await import('../../../src/runtime/verification/captured-sqlite-loops.js');
+ const events=[...iterateCapturedSQLiteLoopSources(owner,token)],rows=events.filter(e=>e.kind==='row'&&e.table.startsWith('assistant_calendar_'));
+ expect(rows).toHaveLength(2);
+ const grant=rows.find(e=>e.kind==='row'&&e.table==='assistant_calendar_connection')!,generation=rows.find(e=>e.kind==='row'&&e.table==='assistant_calendar_generations')!;
+ expect(grant.kind==='row'&&Object.keys(grant.cells)).toEqual(['id','epoch','enabled','binary_path','account_hash']);
+ expect(generation.kind==='row'&&generation.cells.snapshot_json).toEqual({type:'text',value:raw!});
+ expect(generation.kind==='row'&&generation.parsed.snapshot_json).toMatchObject({status:'partial',events:[{title:'原始日程内容',allDay:'unknown',cancelled:'unknown'}]});expect(events.at(-1)?.kind).toBe('complete');
+ const {iterateCapturedProfileDeclarations}=await import('../../../src/runtime/verification/captured-profile-mapper.js'),mapped=[];
+ for await(const event of iterateCapturedProfileDeclarations(owner,token))mapped.push(event);
+ for(const [table,columns]of [['assistant_calendar_connection',['id','epoch','enabled','binary_path','account_hash']],['assistant_calendar_generations',['id','epoch','collected_at','snapshot_json']]] as const)for(const column of columns){
+  expect(mapped.some(event=>event.kind==='gap'&&event.origin.path.startsWith(table+'[')&&event.origin.path.endsWith('.'+column))).toBe(true);
+ }
+ expect(mapped.at(-1)).toMatchObject({kind:'complete',enumerationComplete:true});
+});
+it('retains the original calendar sqlite_sequence after local revocation without inventing a live generation',async()=>{
+ const path=await calendarSourceFixture(true),{owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');
+ const tables=readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables;expect(tables.assistant_calendar_generations).toEqual([]);expect(tables.assistant_calendar_connection).toMatchObject([{epoch:2,enabled:0,binary_path:'',account_hash:''}]);expect(tables.sqlite_sequence).toContainEqual({name:'assistant_calendar_generations',seq:1});
+});
+it('continues reading an original cold Loop layout without calendar extension tables',async()=>{
+ const path=fixture()[0]!;change(path,'DROP INDEX assistant_calendar_latest;DROP TABLE assistant_calendar_generations;DROP TABLE assistant_calendar_connection;DROP TABLE assistant_calendar_memory_settings;DROP TABLE assistant_derived_run_markers;DROP TABLE assistant_derived_lineage');
+ const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables).not.toHaveProperty('assistant_calendar_connection');
+});
+it.each([
+ ['missing-calendar-table','DROP TABLE assistant_calendar_generations'],
+ ['missing-calendar-index','DROP INDEX assistant_calendar_latest'],
+ ['calendar-epoch-mismatch','UPDATE assistant_calendar_generations SET epoch=99'],
+ ['calendar-json-mismatch','UPDATE assistant_calendar_generations SET collected_at=99'],
+ ['unknown-calendar-sequence',"INSERT INTO sqlite_sequence(name,seq) VALUES('unknown-calendar',1)"],
+ ['calendar-added-column','ALTER TABLE assistant_calendar_connection ADD COLUMN caller_grant TEXT'],
+] as const)('rejects actual calendar layout/history corruption: %s',async(_name,sql)=>{
+ const path=await calendarSourceFixture();change(path,sql);const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(()=>readCapturedSQLiteLoopSources(owner,token)).toThrow();
+});
+
+
+async function derivedSourceFixture(){
+ const path=join(root,`derived-${serial++}.sqlite`),store=new LoopStore(path),profile={id:'default-personal-assistant' as const,status:'active' as const,locale:'en' as const,timeZone:'UTC',eveningTime:'22:30',morningTime:'08:30',workdays:[1],quietHours:{start:'23:00',end:'07:00'},dataScopes:['tasks' as const],createdAt:1,updatedAt:1};
+ try{store.ensureBuiltInLoops(1);store.setLoopStatus('personal-assistant-morning-briefing','active',2);store.ensureAssistantProfile(profile);
+  const consent=store.setAssistantCalendarMemorySettings({ownerId:'desktop-user:'+ 'c'.repeat(64),profileId:profile.id,enabled:true,expectedRevision:0,requestSource:'user'});
+  const begin=store.beginLoopRun('personal-assistant-morning-briefing',{kind:'manual'},3,1000,{requestSource:'user'});if(begin.status!=='started')throw Error('fixture');
+  const {assistantDerivedHash}=await import('../../../desktop/electron/assistant-derived-data.js');
+  const lineage={version:1 as const,profileId:profile.id,profileRevision:assistantDerivedHash(profile),parents:[],memory:{ownerId:consent.ownerId,consentRevision:consent.revision,records:[]}};
+  const current=()=>assistantDerivedHash(store.getAssistantProfile(profile.id))===lineage.profileRevision&&store.getAssistantCalendarMemorySettings({ownerId:consent.ownerId,profileId:profile.id}).revision===consent.revision;
+  store.recordAssistantDerivedLineage(begin.run.id,lineage,current);return {path,runId:begin.run.id};
+ }finally{store.close();}
+}
+it('captures every original consent/derived table cell and exact lineage bytes as gaps, never as approval or Native qualification',async()=>{
+ const {path,runId}=await derivedSourceFixture(),db=new DatabaseSync(path,{readOnly:true});let expected:Record<string,unknown[]>;
+ try{expected=Object.fromEntries(['assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].map(table=>[table,db.prepare('SELECT * FROM '+table).all()]));}finally{db.close();}
+ const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js'),{iterateCapturedSQLiteLoopSources}=await import('../../../src/runtime/verification/captured-sqlite-loop-stream.js');
+ const facts=readCapturedSQLiteLoopSources(owner,token);for(const [table,rows]of Object.entries(expected!))expect(facts.sources[0]!.tables[table]).toEqual(rows);
+ const events=[...iterateCapturedSQLiteLoopSources(owner,token)],rows=events.filter(event=>event.kind==='row'&&Object.hasOwn(expected!,event.table));expect(rows).toHaveLength(3);
+ for(const row of rows){if(row.kind!=='row')throw Error('fixture');for(const column of Object.keys(row.cells))expect(row.cells[column]!.type).not.toBe('null');if(row.table==='assistant_derived_lineage')expect(row.cells.lineage_json).toEqual({type:'text',value:(expected!.assistant_derived_lineage[0] as Record<string,unknown>).lineage_json});}
+ expect(facts.sources[0]!.tables.assistant_derived_run_markers).toEqual([{run_id:runId,profile_id:'default-personal-assistant'}]);
+ const {iterateCapturedProfileDeclarations}=await import('../../../src/runtime/verification/captured-profile-mapper.js'),mapped=[];for await(const event of iterateCapturedProfileDeclarations(owner,token))mapped.push(event);for(const row of rows){if(row.kind!=='row')throw Error('fixture');for(const column of Object.keys(row.cells))expect(mapped.some(event=>event.kind==='gap'&&event.origin.path.startsWith(row.table+'[')&&event.origin.path.endsWith('.'+column))).toBe(true);}expect(mapped.at(-1)).toMatchObject({kind:'complete',enumerationComplete:true});
+});
+it('still accepts the original two-table calendar layout when no consent/derived extension has ever been created',async()=>{
+ const path=await calendarSourceFixture();change(path,'DROP TABLE assistant_calendar_memory_settings;DROP TABLE assistant_derived_run_markers;DROP TABLE assistant_derived_lineage');const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');const tables=readCapturedSQLiteLoopSources(owner,token).sources[0]!.tables;
+ expect(Object.keys(tables).sort()).toEqual([...ORIGINAL_LOOP_TABLES,'assistant_calendar_connection','assistant_calendar_generations'].sort());
+});
+it.each([
+ ['missing-derived-table','DROP TABLE assistant_derived_lineage'],
+ ['consent-invalid-enabled','UPDATE assistant_calendar_memory_settings SET enabled=2'],
+ ['consent-negative-revision','UPDATE assistant_calendar_memory_settings SET revision=-1'],
+ ['lineage-json-invalid',`UPDATE assistant_derived_lineage SET lineage_json='{}'`],
+ ['derived-orphan',`UPDATE assistant_derived_run_markers SET run_id='missing-run'`],
+ ['derived-profile-mismatch',`UPDATE assistant_derived_lineage SET profile_id='other-profile'`],
+ ['derived-extra-column','ALTER TABLE assistant_derived_lineage ADD COLUMN approval INTEGER'],
+] as const)('rejects original consent/derived schema or semantic corruption without silently dropping cells: %s',async(_name,sql)=>{
+ const {path}=await derivedSourceFixture();change(path,sql);const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(()=>readCapturedSQLiteLoopSources(owner,token)).toThrow();
+});
+
+function assistantProductFixture(){
+ const path=join(root,`assistant-product-${serial++}.sqlite`),store=new LoopStore(path);store.close();
+ const db=new DatabaseSync(path);try{
+  for(const table of LOOP_ASSISTANT_PRODUCT_TABLES){db.exec('DELETE FROM '+table);const columns=db.prepare('PRAGMA table_info('+table+')').all();
+   const names=columns.map(row=>String(row.name)),values=columns.map(row=>row.type==='INTEGER'?1:row.name==='analysis_status'?'complete':String(row.name).endsWith('_json')?'{"retained":"组合𠮷é","fact":1}':`original-${table}-${String(row.name)}-组合𠮷é`);
+   db.prepare('INSERT INTO '+table+'('+names.join(',')+') VALUES('+names.map(()=>'?').join(',')+')').run(...values);
+  }
+ }finally{db.close();}return path;
+}
+it('captures every cell of the actual nineteen assistant product tables including both original AUTOINCREMENT journals',async()=>{
+ const path=assistantProductFixture(),db=new DatabaseSync(path,{readOnly:true});let expected:Record<string,Record<string,unknown>[]>;try{expected=Object.fromEntries(LOOP_ASSISTANT_PRODUCT_TABLES.map(table=>[table,db.prepare('SELECT * FROM '+table).all()]));}finally{db.close();}
+ const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js'),source=readCapturedSQLiteLoopSources(owner,token).sources[0]!;
+ for(const table of LOOP_ASSISTANT_PRODUCT_TABLES){expect(source.tables[table],table).toEqual(expected[table]);expect(source.tables[table]).toHaveLength(1);}
+ expect(source.tables.sqlite_sequence).toContainEqual({name:'assistant_launch_events',seq:1});expect(source.tables.sqlite_sequence).toContainEqual({name:'assistant_launch_confirmation_history',seq:1});
+ const {iterateCapturedProfileDeclarations}=await import('../../../src/runtime/verification/captured-profile-mapper.js'),events:Record<string,any>[]=[];for await(const event of iterateCapturedProfileDeclarations(owner,token))events.push(event);
+ expect(events.at(-1)).toMatchObject({kind:'complete',enumerationComplete:true});for(const table of LOOP_ASSISTANT_PRODUCT_TABLES)for(const column of Object.keys(expected[table]![0]!)){const prefix=table+'[1].'+column;expect(events.some(event=>event.kind==='gap'&&event.origin.sourceId==='source-0'&&(event.origin.path===prefix||event.origin.path.startsWith(prefix+'.'))),prefix).toBe(true);}
+ await owner.checkCurrent();
+});
+it.each(['missing','regressed','foreign'] as const)('rejects changed assistant journal sequence without dropping product history: %s',async kind=>{const path=assistantProductFixture();change(path,kind==='missing'?"DELETE FROM sqlite_sequence WHERE name='assistant_launch_events'":kind==='regressed'?"UPDATE sqlite_sequence SET seq=0 WHERE name='assistant_launch_events'":"INSERT INTO sqlite_sequence(name,seq) VALUES('foreign_journal',1)");const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(()=>readCapturedSQLiteLoopSources(owner,token)).toThrow();});
+
+it('retains the exact pre-product Loop population without fabricating new assistant tables',async()=>{const paths=fixture(),path=paths[0]!;change(path,LOOP_ASSISTANT_PRODUCT_TABLES.map(table=>'DROP TABLE '+table).join(';'));const {owner,token}=await captured(paths),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js'),source=readCapturedSQLiteLoopSources(owner,token).sources[0]!;expect(Object.keys(source.tables).filter(name=>(LOOP_ASSISTANT_PRODUCT_TABLES as readonly string[]).includes(name))).toEqual([]);expect(Object.keys(source.tables).sort()).toEqual([...ORIGINAL_COMBINED_LOOP_TABLES,'assistant_calendar_connection','assistant_calendar_generations','assistant_calendar_memory_settings','assistant_derived_run_markers','assistant_derived_lineage'].sort());});
+it.each(['partial-group','extra-column'] as const)('rejects altered fixed product schema: %s',async mode=>{const path=assistantProductFixture();change(path,mode==='partial-group'?'DROP TABLE assistant_analysis_attempts':'ALTER TABLE assistant_analysis_selection ADD COLUMN unexpected TEXT');const {owner,token}=await captured([path]),{readCapturedSQLiteLoopSources}=await import('../../support/captured-loop-stream-collector.js');expect(()=>readCapturedSQLiteLoopSources(owner,token)).toThrow('schema');});

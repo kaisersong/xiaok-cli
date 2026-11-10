@@ -5,10 +5,10 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 class WorkerArchive(unittest.TestCase):
     def test_real_tar_content_and_config_binding(self):
-        config = json.dumps({'architecture':'arm64','os':'linux','config':{'User':''}}).encode()
-        image = hashlib.sha256(config).hexdigest()
         layer = b'actual frozen layer bytes'
         layerhash = hashlib.sha256(layer).hexdigest()
+        config = json.dumps({'architecture':'arm64','os':'linux','config':{'User':''},'rootfs':{'type':'layers','diff_ids':['sha256:'+layerhash]}}).encode()
+        image = hashlib.sha256(config).hexdigest()
         manifest = json.dumps([{'Config':'blobs/sha256/'+image,'Layers':['blobs/sha256/'+layerhash]}]).encode()
         with tempfile.TemporaryDirectory() as folder:
             path = pathlib.Path(folder)/'worker.tar'

@@ -1,0 +1,115 @@
+[
+  {
+    "worktree": "xiaok-cli-unfinished-20261001",
+    "baselineCommit": "a89d7319ed0596e98de1b3d1ee9be268959d1b48",
+    "baselineBranch": "archive/worktrees-20261101/cli-unfinished-20261001",
+    "pendingChanges": 2332,
+    "archiveFile": "xiaok-cli-unfinished-20261001.tar.gz",
+    "archiveSha256": "bfeb6e913ca73444c423e1ecd7cae3092a6ac7791b7e857dd5d9f6ee95652304",
+    "privateDiagnosticFilesKeptLocally": [
+      "review-a20-original-worker-trace-r2.json",
+      "review-installed-metadata-codex-mutation-r3.json"
+    ],
+    "generatedAndLocalOnlyFiles": 0,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-cli-unfinished-integration-20261005",
+    "baselineCommit": "d54615ba0508b464db85d168e14260af4b289edd",
+    "baselineBranch": "archive/worktrees-20261101/cli-unfinished-integration-20261005",
+    "pendingChanges": 740,
+    "archiveFile": "xiaok-cli-unfinished-integration-20261005.tar.gz",
+    "archiveSha256": "fae21188e037add785f5f416db6cfb92ccf5f448b0dc30198535f3845f730b75",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 2950,
+    "originalMergeInProgress": true
+  },
+  {
+    "worktree": "xiaok-desktop-observation-20261028",
+    "baselineCommit": "be0c2eead146d6dd90b9799f5a826b6368af7771",
+    "baselineBranch": "archive/worktrees-20261101/desktop-observation-20261028",
+    "pendingChanges": 0,
+    "archiveFile": "xiaok-desktop-observation-20261028.tar.gz",
+    "archiveSha256": "2ab5466240b79c9311667e1f89d5c483e7fa970510fd46d35d587c7a4397e88b",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 1,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-desktop-oom-20261022",
+    "baselineCommit": "ed87a5066e647e2f89ae6fefbedecb2dba5b050a",
+    "baselineBranch": "archive/worktrees-20261101/desktop-oom-20261022",
+    "pendingChanges": 70,
+    "archiveFile": "xiaok-desktop-oom-20261022.tar.gz",
+    "archiveSha256": "333532ee25c9ad22804ed2582bcd473ff64063efb874c3ae46a35beec9fa5bf5",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 1,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-final-deliverables-local-20261031",
+    "baselineCommit": "3c904faa7ca7f22183ac3ea2f64f57b7722f2f17",
+    "baselineBranch": "archive/worktrees-20261101/final-deliverables-local-20261031",
+    "pendingChanges": 0,
+    "archiveFile": "xiaok-final-deliverables-local-20261031.tar.gz",
+    "archiveSha256": "4874efad4d96235dd79f6092c36d45d1d958b9e8603e9798dd8fb5a2fc0a0c8f",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 0,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-kimi-terminal-20261031",
+    "baselineCommit": "404774d100dc3bfc3610a79fe4ec1d2e2f3f2ea4",
+    "baselineBranch": "archive/worktrees-20261101/kimi-terminal-20261031",
+    "pendingChanges": 5,
+    "archiveFile": "xiaok-kimi-terminal-20261031.tar.gz",
+    "archiveSha256": "241598cb4f8a5b2187c6004b943bf793ba7369e5b472b828449808b747fbd3fb",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 1,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-mcp-home-pr-20261014",
+    "baselineCommit": "e87ad0a15fa3c8939483a0d7d924b0c1f12f20ae",
+    "baselineBranch": "archive/worktrees-20261101/mcp-home-pr-20261014",
+    "pendingChanges": 4,
+    "archiveFile": "xiaok-mcp-home-pr-20261014.tar.gz",
+    "archiveSha256": "084a0a6d072c5d26786a9fc411f02d7d0d0754b7642f58b05dde40c8a55fc1fa",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 1,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-memory-settings-20261011",
+    "baselineCommit": "a8405bb3aa12fb30f6fa8c01b752432ede4b581d",
+    "baselineBranch": "archive/worktrees-20261101/memory-settings-20261011",
+    "pendingChanges": 42,
+    "archiveFile": "xiaok-memory-settings-20261011.tar.gz",
+    "archiveSha256": "4b4beac8d3b22aa9f965ea989e664f4833a810c9d611ba693b045d3d3bd90ecb",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 1,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-provider-sse-errors-20261023",
+    "baselineCommit": "32376ca5b20ed8f1d7973d32b44770579e62f364",
+    "baselineBranch": "archive/worktrees-20261101/provider-sse-errors-20261023",
+    "pendingChanges": 252,
+    "archiveFile": "xiaok-provider-sse-errors-20261023.tar.gz",
+    "archiveSha256": "1e7b80eda0b6387301858366e453d3fb640293c806bf19aab20fc1d1b8902cb9",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 0,
+    "originalMergeInProgress": false
+  },
+  {
+    "worktree": "xiaok-provider-stream-release-20261022",
+    "baselineCommit": "32bac2529ba966673f9c3147fedad8b5edd20c1a",
+    "baselineBranch": "archive/worktrees-20261101/provider-stream-release-20261022",
+    "pendingChanges": 251,
+    "archiveFile": "xiaok-provider-stream-release-20261022.tar.gz",
+    "archiveSha256": "0ab6a64cf2efaa06cb36b585e334de840abd2c326534d3ddc8cd38f655eddf27",
+    "privateDiagnosticFilesKeptLocally": [],
+    "generatedAndLocalOnlyFiles": 0,
+    "originalMergeInProgress": false
+  }
+]

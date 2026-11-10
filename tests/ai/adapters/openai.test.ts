@@ -2742,8 +2742,8 @@ describe('OpenAIAdapter', () => {
     });
     const normalized = normalizeRuntimeError(caught);
     expect(normalized).toMatchObject({ code: 'model_failed', retryable: false });
-    expect(normalized.message).toContain('http_status=401');
-    expect(normalized.message).toContain('provider_code=invalid_api_key');
+    expect(normalized.message).toContain('HTTP 401');
+    expect(normalized.message).toContain('业务码 invalid_api_key');
     for (const output of [String(caught), JSON.stringify(caught), JSON.stringify(normalized)]) {
       expect(output).not.toContain('PRIVATE_REASONING_CANARY');
       expect(output).not.toContain('sk-private-key');
@@ -4596,4 +4596,17 @@ describe('memory-only DeepSeek thinking mode', () => {
       expect(await captureChatCompletionRequest(adapter, [], [], { reasoningMode: 'disabled' })).not.toHaveProperty('thinking');
     },
   );
+});
+
+
+describe('OpenAI generative UI admission',()=>{
+ it.each([true,false])('previews strict Kimi UI only after official reasoning (admitted=%s)',async admitted=>{
+  const OpenAI=(await import('openai')).default;const instance=new OpenAI({apiKey:'fixture'});
+  vi.spyOn(instance.chat.completions,'create').mockResolvedValue({async *[Symbol.asyncIterator](){
+   yield {choices:[{delta:{...(admitted?{reasoning_content:''}:{}),tool_calls:[{index:0,id:'ui-call',function:{name:'render_ui',arguments:'{"title":"Live","sections":[{"kind":"text","content":"Hello"}]}'}}]},finish_reason:'tool_calls'}]};
+  }} as never);
+  const adapter=createStrictKimiAdapter();(adapter as unknown as {client:typeof instance}).client=instance;
+  const chunks:StreamChunk[]=[];try{for await(const chunk of adapter.stream([],[{name:'render_ui',description:'',inputSchema:{type:'object',properties:{}}}],''))chunks.push(chunk);}catch(error){if(admitted)throw error;}
+  expect(chunks.filter(c=>c.type==='ui_preview')).toHaveLength(admitted?1:0);
+ });
 });

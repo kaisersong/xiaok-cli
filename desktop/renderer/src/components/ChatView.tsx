@@ -1,3 +1,10 @@
+import type {AssistantMessage} from '../../../shared/assistant-inbox-contract';
+import { A2uiInlineCard } from './a2ui/A2uiInlineCard';
+import { inlineUiKey, isInlineUiArtifact, separateInlineUiOutputs } from '../lib/inline-ui';
+import type {InterruptedTask} from '../lib/interrupted-task';
+import { LegacyContextImport } from './LegacyContextImport';
+import { CopyContextReferenceButton, ContextReferenceCard, contextLinksInText } from './ContextReference';
+import { ContextHistorySearch } from './ContextHistorySearch';
 import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
@@ -9,7 +16,6 @@ import { UserDecisionCard } from './UserDecisionCard';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { ConversationIndexRail } from './ConversationIndexRail';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
@@ -19,7 +25,6 @@ import { fileBasename, filePathIdentity, normalizeClipboardFilePath } from '../l
 import { projectFinalDeliverables } from '../lib/final-deliverables';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
-import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -188,9 +193,12 @@ export interface ComputerUseActionData {
 }
 
 export interface ChatMessage {
+  contextSource?: { sourceId: string; sourceMessageId: string };
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card' | 'ui_card' | 'assistant_message';
   content: string;
+  createdAt?:number;
+  assistantMessage?:AssistantMessage;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
@@ -199,6 +207,7 @@ export interface ChatMessage {
   computerUseAction?: ComputerUseActionData;
   result?: TaskResult | null;
   generatedFiles?: GeneratedFile[];
+  uiCard?: { artifact?: ArtifactSummary; previewToolUseId?: string; sourceTaskId?: string };
 }
 
 export interface GeneratedFile {
@@ -227,6 +236,16 @@ function findAssistantTextInCurrentTurn(messages: ChatMessage[], endIndex: numbe
     if (message.role === 'user' || message.role === 'result_card') return '';
   }
   return '';
+}
+
+function findAssistantReferencesInCurrentTurn(messages: ChatMessage[], endIndex: number): string {
+  const segments: string[] = [];
+  for (let index = endIndex - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === 'user' || message.role === 'result_card') break;
+    if (message.role === 'assistant') segments.push(message.content);
+  }
+  return segments.reverse().join('\n\n');
 }
 
 function projectResultForDisplay(result: TaskResult | null, assistantText: string): TaskResult | null {
@@ -262,6 +281,16 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  uiPreviews?: Array<{toolUseId:string;sourceTaskId?:string;title:string;content:string}>;
+  emptyContent?: ReactNode;
+  assistantContent?: ReactNode;
+  assistantHasMessages?: boolean;
+  assistantFocusKey?: string;
+  onAssistantFocusHandled?:()=>void;
+  conversationHeader?: ReactNode;
+  localCommands?: import('./ChatInput').LocalChatCommand[];
+  inputAccessory?: ReactNode;
+  contextNavigation?: string;
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
   activityContent?: ReactNode;
@@ -272,6 +301,8 @@ interface ChatViewProps {
   streamingText: string;
   status: 'idle' | 'running' | 'waiting_user' | 'completed' | 'failed';
   currentQuestion: NeedsUserQuestion | null;
+  interruptedTask?: InterruptedTask | null;
+  onInterruptedChoice?: (choiceId: string) => void | boolean | Promise<void | boolean>;
   result: TaskResult | null;
   generatedFiles: GeneratedFile[];
   prompt: string;
@@ -279,6 +310,7 @@ interface ChatViewProps {
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void | boolean | Promise<void | boolean>;
   onQueue?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   queuedText?: string | null;
+  inputError?: string | null;
   onCancelQueue?: () => void;
   onAnswer: (choiceId: string) => void;
   onCancel: () => void;
@@ -290,16 +322,41 @@ interface ChatViewProps {
   onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
 }
 
-export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, historyContent, pendingApprovalCount = 0,
-  executionConnection,
+export function ChatView({ uiPreviews = [],
+  emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantFocusKey, onAssistantFocusHandled, historyContent,
+  thread, contextNavigation, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
+  executionConnection, localCommands, inputAccessory,
   generatedFiles,
-  prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
+  prompt, onPromptChange, onSubmit, onQueue, queuedText, inputError, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
   initialFiles,
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
+  const tailStart=messages.findLastIndex(m=>m.role!=='assistant_message')+1;
+  const trailingAssistantMessages=messages.slice(tailStart);
+  const bodyMessages = useMemo(() => {
+    const seen = new Set(messages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
+    return messages.slice(0,tailStart).flatMap(message => {
+      const fallback: ChatMessage[] = [];
+      if (message.role === 'result_card') for (const artifact of message.result?.artifacts ?? []) {
+        const key = inlineUiKey(artifact);
+        if (!isInlineUiArtifact(artifact) || seen.has(key)) continue;
+        seen.add(key);
+        fallback.push({ id: `inline-ui:${key}`, role: 'ui_card', content: '', uiCard: { artifact } });
+      }
+      return [...fallback, message];
+    });
+  }, [messages,tailStart]);
+  const displayedUiKeys = new Set(bodyMessages.flatMap(message => message.uiCard?.artifact ? [inlineUiKey(message.uiCard.artifact)] : []));
+  const standaloneInlineArtifacts = (result?.artifacts ?? []).filter(artifact => {
+    const key = inlineUiKey(artifact);
+    if (!isInlineUiArtifact(artifact) || displayedUiKeys.has(key)) return false;
+    displayedUiKeys.add(key);
+    return true;
+  });
+  const showEntry = Boolean(emptyContent) && !assistantHasMessages && messages.length === 0 && !streamingText && status === 'idle';
+  const canContinueInterruption = Boolean(interruptedTask && interruptedTask.taskId === thread.taskIds.at(-1) && (status === 'failed' || status === 'idle') && !currentQuestion);
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const historyAnchorRef = useRef<{ id: string; top: number; firstId: string } | null>(null);
@@ -351,7 +408,9 @@ export function ChatView({
     () => promptIndexEntries[0]?.id ?? null,
   );
   const currentTurnAssistantText = findAssistantTextInCurrentTurn(messages, messages.length) || streamingText;
-  const standaloneOutputs = projectFinalDeliverables(result, generatedFiles, currentTurnAssistantText, isA2uiArtifact);
+  const standaloneDeliverables = projectFinalDeliverables(result, generatedFiles,
+    `${findAssistantReferencesInCurrentTurn(bodyMessages, bodyMessages.length)}\n${streamingText}`, isInlineUiArtifact);
+  const standaloneOutputs = separateInlineUiOutputs(standaloneDeliverables.result, standaloneDeliverables.generatedFiles);
   const standaloneDisplayResult = projectResultForDisplay(standaloneOutputs.result, currentTurnAssistantText);
   const standaloneResultEligible = status === 'completed' || status === 'idle';
   const showStandaloneResult = !hasResultCardInCurrentTurn(messages)
@@ -407,7 +466,7 @@ export function ChatView({
       const { scrollTop, scrollHeight, clientHeight } = el;
       const atBottom = scrollHeight - scrollTop - clientHeight < 50;
       isAtBottomRef.current = atBottom;
-      setShowScrollToBottom(!atBottom);
+      setShowScrollToBottom(!showEntry && !atBottom);
       scheduleActivePromptUpdate();
     };
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -418,10 +477,16 @@ export function ChatView({
         activeIndexFrameRef.current = null;
       }
     };
-  }, [scheduleActivePromptUpdate]);
+  }, [scheduleActivePromptUpdate, showEntry]);
 
   // Throttled auto-scroll: only when at bottom, max once per 100ms
   useEffect(() => {
+    if (showEntry) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      isAtBottomRef.current = true;
+      setShowScrollToBottom(false);
+      return;
+    }
     if (!isAtBottomRef.current) return;
     const now = Date.now();
     if (now - lastScrollTimeRef.current < 100) return;
@@ -429,7 +494,17 @@ export function ChatView({
     const scroller = scrollRef.current;
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
-  }, [messages, streamingText, status]);
+  }, [messages, streamingText, status, showEntry]);
+
+  const handledAssistantFocus=useRef(new Set<string>());
+  useEffect(()=>{
+    if(!assistantFocusKey||handledAssistantFocus.current.has(assistantFocusKey))return;
+    const scroller=scrollRef.current,targets=scroller?.querySelectorAll<HTMLElement>('[data-assistant-focus-target]'),target=targets?.[targets.length-1];
+    if(!scroller||!target)return;
+    handledAssistantFocus.current.add(assistantFocusKey);historyAnchorRef.current=null;isAtBottomRef.current=false;
+    scroller.scrollTo({top:Math.max(0,scroller.scrollTop+target.getBoundingClientRect().top-scroller.getBoundingClientRect().top-scroller.clientTop),behavior:'instant' as ScrollBehavior});
+    setShowScrollToBottom(true);onAssistantFocusHandled?.();
+  },[assistantFocusKey,assistantContent,assistantHasMessages,messages,status,onAssistantFocusHandled]);
 
   // Approvals can arrive after the last text chunk inside the stream throttle.
   // Follow them only for readers already following the latest output; keep
@@ -453,8 +528,19 @@ export function ChatView({
     return () => window.removeEventListener('keydown', handler);
   }, [onToggleCanvas]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(contextNavigation ?? '');
+    const task = params.get('sourceTask'), message = params.get('sourceMessage');
+    if (!task || !message) return;
+    const target = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-context-source]') ?? [])
+      .find(node => node.dataset.contextSource === JSON.stringify([task, message]));
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [contextNavigation, messages, thread.id]);
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      {(assistantHasMessages || !(messages.length === 0 && !streamingText && status === 'idle')) && conversationHeader}
+      <LegacyContextImport key={`legacy:${thread.id}`} thread={thread} />
+      <div className="flex justify-end px-4"><ContextHistorySearch key={`search:${thread.id}`} conversationId={thread.id}/><CopyContextReferenceButton key={thread.id} conversationId={thread.id} /></div>
       <ConversationIndexRail
         entries={promptIndexEntries}
         activeId={activePromptId}
@@ -469,16 +555,18 @@ export function ChatView({
         className="flex-1 overflow-x-hidden overflow-y-auto"
         style={{ userSelect: 'text' }}
       >
-        <div className="mx-auto max-w-[800px] px-14 py-6">
+        {showEntry ? emptyContent : <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
+            {assistantContent}
             {historyContent && <div onClickCapture={captureHistoryAnchor}>{historyContent}</div>}
-            {messages.map((msg, index) => {
-              const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(messages, index) : '';
+            {bodyMessages.map((msg, index) => {
+              const assistantText = msg.role === 'result_card' ? findAssistantTextInCurrentTurn(bodyMessages, index) : '';
               const outputs = msg.role === 'result_card'
-                ? projectFinalDeliverables(msg.result ?? null, msg.generatedFiles ?? [], assistantText, isA2uiArtifact)
+                ? projectFinalDeliverables(msg.result ?? null, msg.generatedFiles ?? [], findAssistantReferencesInCurrentTurn(bodyMessages, index), isInlineUiArtifact)
                 : { result: null, generatedFiles: [] };
-              const displayResult = projectResultForDisplay(outputs.result, assistantText);
-              const resultGeneratedFiles = outputs.generatedFiles;
+              const visibleOutputs = separateInlineUiOutputs(outputs.result, outputs.generatedFiles);
+              const displayResult = projectResultForDisplay(visibleOutputs.result, assistantText);
+              const resultGeneratedFiles = visibleOutputs.generatedFiles;
               if (msg.role === 'result_card' && !hasResultCardContent(displayResult, resultGeneratedFiles)) return null;
               return (
                 <div
@@ -488,6 +576,7 @@ export function ChatView({
                     else messageAnchorRefs.current.delete(msg.id);
                   } : undefined}
                   data-message-anchor={msg.role === 'user' ? msg.id : undefined}
+                  data-context-source={msg.contextSource ? JSON.stringify([msg.contextSource.sourceId, msg.contextSource.sourceMessageId]) : undefined}
                   className={`${msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''} ${msg.role === 'user' ? 'scroll-mt-6' : ''}`}
                 >
                 {msg.role === 'user' ? (
@@ -497,9 +586,13 @@ export function ChatView({
                     </div>
                     <div className="mt-0.5 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/usermsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
+                ) : msg.role === 'assistant_message' && msg.assistantMessage ? (<AssistantMessageBubble message={msg.assistantMessage}/>) : msg.role === 'ui_card' ? (
+                  <A2uiInlineCard artifact={msg.uiCard?.artifact} preview={status === 'running' ? uiPreviews.find(preview =>
+                    preview.toolUseId === msg.uiCard?.previewToolUseId && (preview.sourceTaskId ?? thread.currentTaskId) === msg.uiCard?.sourceTaskId) : undefined} />
                 ) : msg.role === 'progress' ? (
                   <div className="flex items-center gap-2 py-1 text-sm text-[var(--c-text-secondary)] select-text">
                     <div className="relative size-3 shrink-0" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -576,6 +669,7 @@ export function ChatView({
                     {displayResult?.summary?.trim() && (
                       <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
                         <CopyButton text={displayResult.summary} />
+                        {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                         <SaveToKbButton text={displayResult.summary} />
                       </div>
                     )}
@@ -587,10 +681,12 @@ export function ChatView({
                     </div>
                     <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/assistantmsg:opacity-100">
                       <CopyButton text={msg.content} />
+                      {msg.contextSource && <CopyContextReferenceButton conversationId={thread.id} sourceMessage={msg.contextSource} />}
                       <SaveToKbButton text={msg.content} />
                     </div>
                   </>
                 )}
+                  {contextLinksInText(msg.content).map(url => <ContextReferenceCard key={url} url={url} targetConversationId={thread.id} />)}
                 </div>
               );
             })}
@@ -602,6 +698,7 @@ export function ChatView({
               </div>
             )}
 
+            {standaloneResultEligible && standaloneInlineArtifacts.map(artifact => <A2uiInlineCard key={inlineUiKey(artifact)} artifact={artifact} />)}
             {/* Result card + generated files (only if not already shown as a message) */}
             {showStandaloneResult ? (
               <ResultCard
@@ -645,7 +742,14 @@ export function ChatView({
             )}
 
             {/* Error */}
-            {status === 'failed' && (
+            {canContinueInterruption ? (
+              <div role="note" className="space-y-3 py-2">
+                <p className="text-sm text-[var(--c-text-secondary)]">{onInterruptedChoice && interruptedTask?.choices?.length ? t.chatView.interruptedChoices : t.chatView.interruptedContinue}</p>
+                {onInterruptedChoice && interruptedTask?.choices?.map(choice => <button key={choice.id} type="button"
+                  onClick={() => { void onInterruptedChoice?.(choice.id); }}
+                  className="block rounded-lg border border-[var(--c-border)] px-4 py-2 text-left text-sm text-[var(--c-text-primary)] hover:bg-[var(--c-bg-card)]">{choice.label}</button>)}
+              </div>
+            ) : status === 'failed' && (
               <div className="flex items-start gap-3 py-2">
                 <svg viewBox="0 0 16 16" className="mt-0.5 size-4 shrink-0 text-red-500" fill="currentColor">
                   <path d="M8 1a7 7 0 100 14A7 7 0 008 1zM7 4.5a1 1 0 112 0v3a1 1 0 11-2 0v-3zm1 7a1 1 0 100-2 1 1 0 000 2z" />
@@ -654,9 +758,10 @@ export function ChatView({
               </div>
             )}
 
+            {trailingAssistantMessages.map(message=>message.assistantMessage?<AssistantMessageBubble key={message.id} message={message.assistantMessage}/>:null)}
             <div />
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Scroll to bottom floating button */}
@@ -686,7 +791,11 @@ export function ChatView({
         }}
       >
         {activityContent}
-        <ChatInput
+        {contextLinksInText(prompt).length > 0 && <div className="mx-auto w-full max-w-[760px] px-4">{contextLinksInText(prompt).map(url => <ContextReferenceCard key={`draft:${url}:${thread.id}`} url={url} targetConversationId={thread.id} />)}</div>}
+      {inputError ? <p role="alert" className="px-4 py-2 whitespace-pre-wrap text-sm text-[var(--c-danger)]">{inputError}</p> : null}
+        {inputAccessory}
+      <ChatInput
+          localCommands={localCommands}
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}
@@ -880,16 +989,6 @@ function ResultCard({
       {hasArtifacts && (
         <div className="mt-3 flex flex-col gap-2">
           {artifacts.map(a => {
-            if (isA2uiArtifact(a)) {
-              return (
-                <A2uiResultArtifactPreview
-                  key={a.artifactId}
-                  artifact={a}
-                  onArtifactClick={onArtifactClick}
-                  onArtifactOpenExternal={onArtifactOpenExternal}
-                />
-              );
-            }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
             const displayTitle = fileBasename(a.title) || a.title;
             const info = {
@@ -989,101 +1088,4 @@ function ResultCard({
   );
 }
 
-function isA2uiArtifact(artifact: ArtifactSummary): boolean {
-  return artifact.kind === 'a2ui'
-    || isA2UIMimeType(artifact.mimeType)
-    || artifact.title.endsWith('.a2ui.json')
-    || Boolean(artifact.filePath?.endsWith('.a2ui.json'));
-}
-
-function A2uiResultArtifactPreview({
-  artifact,
-  onArtifactClick,
-  onArtifactOpenExternal,
-}: {
-  artifact: ArtifactSummary;
-  onArtifactClick?: (artifact: ArtifactOpenInfo, options?: ArtifactOpenOptions) => void;
-  onArtifactOpenExternal?: (artifact: ArtifactOpenInfo) => void;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const { t } = useLocale();
-
-  useEffect(() => {
-    let cancelled = false;
-    setContent(null);
-    setFailed(false);
-    if (!artifact.filePath) {
-      setFailed(true);
-      return () => {
-        cancelled = true;
-      };
-    }
-    api.readFileContent(artifact.filePath)
-      .then((result) => {
-        if (cancelled) return;
-        if (result.error) {
-          setFailed(true);
-          return;
-        }
-        setContent(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact.artifactId, artifact.filePath]);
-
-  const info = {
-    artifactId: artifact.artifactId,
-    sourceTaskId: artifact.sourceTaskId,
-    title: artifact.title,
-    kind: artifact.kind,
-    filePath: artifact.filePath,
-    mimeType: artifact.mimeType,
-  };
-  return (
-    <div
-      className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3"
-      data-testid={`a2ui-artifact-${artifact.title}`}
-    >
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-[var(--c-text-heading)]">{artifact.title}</div>
-          <div className="text-xs text-[var(--c-text-tertiary)]">Interactive UI · A2UI</div>
-        </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            if ((e.metaKey || e.ctrlKey) && onArtifactOpenExternal) onArtifactOpenExternal(info);
-            else onArtifactClick?.(info);
-          }}
-          className="shrink-0 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-hover)]"
-          data-testid={`generated-file-${artifact.title}`}
-        >
-          {t.chatView.open}
-        </button>
-      </div>
-      {failed ? (
-        <div role="alert" className="text-sm text-[var(--c-text-secondary)]">{t.chatView.a2uiLoadFailed}</div>
-      ) : content === null ? (
-        <div className="text-sm text-[var(--c-text-tertiary)]">{t.chatView.a2uiLoading}</div>
-      ) : (
-        <A2uiArtifactBlock
-          content={content}
-          artifactRef={{
-            artifactId: artifact.artifactId,
-            type: 'artifact',
-            title: artifact.title,
-            filename: artifact.title,
-            key: artifact.filePath,
-            mime_type: artifact.mimeType || A2UI_MIME_TYPE,
-            size: artifact.sizeBytes,
-          }}
-        />
-      )}
-    </div>
-  );
-}
+function AssistantMessageBubble({message}:{message:AssistantMessage}){return <article data-testid="assistant-proactive-message" data-message-id={message.id} data-assistant-focus-target={message.kind==='morning'?true:undefined} className="max-w-[663px] text-sm leading-relaxed text-[var(--c-text-primary)]"><div className="mb-2 flex items-center gap-3 text-xs text-[var(--c-text-tertiary)]"><span>{message.title}</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleString()}</time></div><div className="whitespace-pre-wrap break-words select-text">{message.text}</div></article>;}

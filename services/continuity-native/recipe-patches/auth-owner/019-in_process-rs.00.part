@@ -1,0 +1,12 @@
+diff --git a/codex-rs/app-server/src/in_process.rs b/codex-rs/app-server/src/in_process.rs
+--- a/codex-rs/app-server/src/in_process.rs
++++ b/codex-rs/app-server/src/in_process.rs
+@@ -495,6 +495,8 @@
+         let (processor_tx, mut processor_rx) = mpsc::channel::<ProcessorCommand>(channel_capacity);
+         let mut processor_handle = tokio::spawn(async move {
+             let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                xiaok_auth_connection: Arc::new(crate::xiaok_auth_owner::AuthOwnerConnection::new()),
+                 outgoing: Arc::clone(&processor_outgoing),
+                 analytics_events_client,
+                 arg0_paths: args.arg0_paths,

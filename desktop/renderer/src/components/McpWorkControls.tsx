@@ -10,8 +10,8 @@ export function McpWorkControls({ watchId, needsInput, revision }: { watchId: st
     let live = true;
     if (!needsInput) { setForms([]); return; }
     const api = getDesktopApi();
-    if (!api?.getMcpTaskInputs) { setError(true); return; }
-    void api.getMcpTaskInputs(watchId).then(value => { if (live) { setForms(value); setError(false); } }).catch(() => { if (live) setError(true); });
+    if (!api?.getMcpTaskInputs) { setForms([]); setError(true); return; }
+    void api.getMcpTaskInputs(watchId).then(value => { if (live) { setForms(value); setError(false); } }).catch(() => { if (live) { setForms([]); setError(true); } });
     return () => { live = false; };
   }, [watchId, needsInput, revision]);
   const cancel = async () => {

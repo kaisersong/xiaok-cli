@@ -1,0 +1,55 @@
+name: Snapshot history and physical custody
+on:
+  pull_request:
+    paths:
+      - 'src/runtime/task-host/**'
+      - 'src/runtime/verification/**'
+      - 'tests/runtime/task-host/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/node-headers/**'
+      - '.github/workflows/snapshot-history.yml'
+  push:
+    branches: [master]
+  merge_group: {}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  snapshot-history:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2022]
+        node: ['22.14.0', '24.16.0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Prepare private test configuration before module imports
+        run: node -e "const fs=require('node:fs'),path=require('node:path'),config=path.join(process.env.RUNNER_TEMP,'snapshot-history');fs.mkdirSync(config,{recursive:true,mode:0o700});fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_CONFIG_DIR='+config+'\n')"
+      - name: Prepare node-gyp headers
+        uses: ./.github/actions/node-headers
+      - name: Install locked root dependencies
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci
+      - name: Compile the actual source and test graph
+        run: npm run test:sandbox:build
+      - name: Read durable snapshots through the original physical owner
+        run: >-
+          npm run test:sandbox:run --
+          .test-dist/tests/runtime/task-host/snapshot-current-inspection.test.js
+          .test-dist/tests/runtime/task-host/snapshot-store.test.js
+          .test-dist/tests/runtime/task-host/snapshot-store-ordinary-physical.test.js
+          .test-dist/tests/runtime/task-host/snapshot-store-close-physical.test.js
+          .test-dist/tests/runtime/task-host/snapshot-store-windows-temp-identity.test.js
+          .test-dist/tests/runtime/task-host/snapshot-protection-worker.test.js
+          --maxWorkers=1 --no-file-parallelism

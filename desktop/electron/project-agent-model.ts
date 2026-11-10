@@ -1,11 +1,13 @@
 import type { ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
+import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { ModelTextRepetitionGuard, MODEL_TEXT_REPETITION_CODE } from '../../src/ai/runtime/model-text-repetition.js';
 import { randomUUID } from 'node:crypto';
 import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
-import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import { captureDesktopTaskUsage, streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import type { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
@@ -68,6 +70,7 @@ export async function createProjectAgentModel(options: {
       let closingFailure: { error: unknown } | undefined, closingBusiness: { error: unknown } | undefined;
       const source = (async function* () {
       for (;;) {
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const messages: Message[] = switched ? input.messages.map(message => ({...message, content: message.content.filter(block => block.type !== 'thinking')})).filter(message => message.content.length > 0) : input.messages;
@@ -79,25 +82,37 @@ export async function createProjectAgentModel(options: {
           return;
         }
         await input.beforeRequest?.();
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const invocationId = randomUUID();
         const request = {...input, adapter, messages, systemPrompt, invocationId};
         const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
+        assertBeforeEffects(input.beforeEffects);
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         input.onInvocation?.(invocationId);
+        assertBeforeEffects(input.beforeEffects);
         const chunks: StreamChunk[] = [];
         const textGuard = new ModelTextRepetitionGuard();
         let providerFailed = false;
+        let usageConsumerFailed = false;
+        let usageAdmissionFailed = false;
+        let usageAdmission: DesktopModelUsageAdmission | undefined;
         let providerError: unknown;
         const attempt = new AbortController();
         const attemptSignal = prepared.options?.signal
           ? AbortSignal.any([prepared.options.signal, attempt.signal]) : attempt.signal;
-        const iterator = streamDesktopTaskProviderConversation({ ...prepared,
-          options: { ...prepared.options, signal: attemptSignal },
-        })[Symbol.asyncIterator]();
+        let iterator: AsyncIterator<StreamChunk> | undefined;
         try {
+          if (input.admitUsage) {
+            try {
+              if (!physicalRun) throw Error('desktop_usage_physical_claim_required');
+              physicalRun.assertCurrent();
+              usageAdmission = input.admitUsage(prepared.invocationId);
+            } catch (error) { usageAdmissionFailed = true; throw error; }
+          }
+          iterator = streamDesktopTaskProviderConversation({ ...prepared, options: { ...prepared.options, signal: attemptSignal } })[Symbol.asyncIterator]();
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for (;;) {
             let next: IteratorResult<StreamChunk>;
@@ -108,29 +123,53 @@ export async function createProjectAgentModel(options: {
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
-            if (chunk.type === 'usage') { yield chunk; continue; }
+            if (chunk.type === 'usage') {
+              const consumer = usageAdmission
+                ? (value: Extract<StreamChunk, { type: 'usage' }>) => usageAdmission!.commit(value.usage?.inputTokens ?? 0, value.usage?.outputTokens ?? 0)
+                : input.onUsage;
+              try { await captureDesktopTaskUsage(consumer, chunk, prepared.invocationId, physicalRun); }
+              catch (error) { usageConsumerFailed = true; throw error; }
+              yield chunk; continue;
+            }
             if (chunk.type === 'text') textGuard.append(chunk.delta);
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
         } catch (error) { providerFailed = true; providerError = error; }
         finally {
+          // Per-attempt signal: release every selected request (success or failure, e.g. text repetition); keep the task signal live.
           attempt.abort();
           let observedReturn = false;
-          try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
+          try { const raw = iterator?.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
           catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
+          finally {
+            try { usageAdmission?.revoke(); }
+            catch (error) {
+              physicalRun?.noteReturnFailure(error);
+              closingFailure = { error: closingFailure ? new AggregateError([closingFailure.error, error], 'project_provider_return_and_usage_revoke_failed', { cause: closingFailure.error }) : error };
+              if (providerFailed) closingBusiness = { error: providerError };
+            }
+          }
         }
         if (closingFailure) return;
+        if (usageConsumerFailed || usageAdmissionFailed) throw providerError;
         input.options?.signal?.throwIfAborted();
         if (!providerFailed && (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim())))) {
           providerFailed = true;
           providerError = new Error('project_agent_model_incomplete_response');
         }
         if (providerFailed) {
+          if (providerError && typeof providerError === 'object' && (providerError as { code?: unknown }).code === MODEL_TEXT_REPETITION_CODE) {
+            // Keep accepted narration, but never execute buffered tool calls from a failed reply.
+            for (const chunk of chunks) if (chunk.type === 'text') yield chunk;
+          }
           if (isBoundaryFailure(providerError)) throw providerError;
+          assertBeforeEffects(input.beforeEffects);
           const current = resolveRuntimeModelBinding(await options.loadConfig());
+          assertBeforeEffects(input.beforeEffects);
           if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw providerError;
           await input.onRecovery?.({summaryOnly: false});
+          assertBeforeEffects(input.beforeEffects);
           input.options?.signal?.throwIfAborted();
           if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
           canFallback = false;

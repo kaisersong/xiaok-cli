@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import { createSessionExecutionAuthority, createSessionExecutionContext } from '../../../src/ai/runtime/session-store/execution-authority.js';
 import { parseObservationPolicyFile } from '../../../src/runtime/sol-pi/product-bootstrap.js';
-import { prepareSemanticSummaryAttempt, finishSemanticSummaryAttempt, resolveSemanticSummaryAttempt } from '../../../src/runtime/sol-pi/semantic-summary-attempt.js';
+import { prepareSemanticSummaryAttempt, finishSemanticSummaryAttempt, resolveSemanticSummaryAttempt, readOriginalSemanticSummaryModelTransport } from '../../../src/runtime/sol-pi/semantic-summary-attempt.js';
 import { testOnlyCapacity } from '../../support/sol-pi-capacity.js';
 const profileSetupPath = join(process.cwd(), 'tests', 'support', 'profile-account-child.setup.mjs');
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -94,3 +94,9 @@ it('retains the full durable charge after real SIGKILL without reconstructing a 
   }finally{await lease.releaseAfterDrain();}
  }finally{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');await exit;}
 },20000);
+
+it('semantic model transport rejects copied and foreign refs before any getter or proxy operation',()=>{
+ let calls=0;const foreign=new Proxy({}, {get(){calls++;throw Error();},getOwnPropertyDescriptor(){calls++;throw Error();},getPrototypeOf(){calls++;throw Error();}});
+ expect(()=>readOriginalSemanticSummaryModelTransport(foreign)).toThrow('ORIGINAL_TRANSPORT_REQUIRED');expect(calls).toBe(0);
+ expect(()=>readOriginalSemanticSummaryModelTransport({fetch:()=>{},physicalFetch:()=>{}})).toThrow('ORIGINAL_TRANSPORT_REQUIRED');
+});

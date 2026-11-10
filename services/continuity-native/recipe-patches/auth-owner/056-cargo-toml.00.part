@@ -1,0 +1,15 @@
+diff --git a/codex-rs/login/Cargo.toml b/codex-rs/login/Cargo.toml
+--- a/codex-rs/login/Cargo.toml
++++ b/codex-rs/login/Cargo.toml
+@@ -7,7 +7,11 @@
+ [lints]
+ workspace = true
+ 
++[features]
++xiaok-auth-owner-only = ["dep:libc", "codex-config/xiaok-auth-owner-only"]
++
+ [dependencies]
++libc = { workspace = true, optional = true }
+ codex-utils-process = { workspace = true }
+ anyhow = { workspace = true }
+ base64 = { workspace = true }

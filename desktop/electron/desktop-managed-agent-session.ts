@@ -1,4 +1,5 @@
 import { createDesktopModelPhysicalScope, closeDesktopModelPhysicalScope, waitDesktopModelPhysicalIdle, assertDesktopModelPhysicalIdle } from './desktop-task-stream.js';
+import type { DesktopModelUsageAdmission } from './desktop-model-usage-admission.js';
 import { consumeDelegatedObservationExecutionPlan, assertDelegatedObservationPaused, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner, type DelegatedObservationExecutionPlan } from '../../src/runtime/sol-pi/delegated-session-owner.js';
 import { bindDesktopDelegatedObservationSession, type DesktopObservationBinding } from './desktop-observation-owner.js';
 import type { DesktopMultiAgentService, DesktopObservationChildPreparation } from './desktop-multi-agent-service.js';
@@ -11,31 +12,18 @@ import type { SkillCatalog } from '../../src/ai/skills/loader.js';
 import type { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import type { MaterialRecord } from '../../src/runtime/task-host/types.js';
 import type { TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
-import { buildSynthesizedProviderContext, isStrictKimiK3Adapter, projectProviderPrivateMessages } from '../../src/ai/runtime/provider-private-projection.js';
-import { completedForkMessages } from '../../src/ai/agents/completed-fork-messages.js';
+import { isStrictKimiK3Adapter } from '../../src/ai/runtime/provider-private-projection.js';
 import { randomUUID } from 'node:crypto';
 import type { DesktopAgentExecutionContext } from './desktop-multi-agent-service.js';
 import { runDesktopToolLoop } from './desktop-services.js';
 import {bindCompoundFinalPublicationConsumer,runCompoundTurnInput} from '../../src/runtime/sol-pi/compound-publication-producer.js';
 import {getCompoundPublicationOwnerBinding} from '../../src/runtime/sol-pi/compound-managed-lifecycle.js';
 
-export interface DesktopAgentFork {
-  mode: 'none' | 'completed_prefix' | 'synthesized'; truncated: boolean; messages: Message[];
-}
-
-export function buildDesktopAgentFork(adapter: object, parent: readonly Message[], enabled: boolean): DesktopAgentFork {
-  if (!enabled) return { mode: 'none', truncated: false, messages: [] };
-  const complete = completedForkMessages(parent);
-  if (!isStrictKimiK3Adapter(adapter)) return { mode: 'completed_prefix', truncated: complete.length !== parent.length, messages: structuredClone([...complete]) };
-  // Use the existing strict schema/visibility projection, never stringify private
-  // provider blocks or infer strictness from a caller-controlled model name.
-  const visible = projectProviderPrivateMessages(complete);
-  const envelope = buildSynthesizedProviderContext('subagent', visible);
-  const records = (JSON.parse(envelope) as { records: Array<{ ordinal: number }> }).records;
-  const firstVisible = visible.findIndex(message => message.content.length > 0);
-  const truncated = complete.length !== parent.length || firstVisible >= 0 && (records.length === 0 || records[0].ordinal > firstVisible);
-  return { mode: 'synthesized', truncated, messages: [{ role: 'user', content: [{ type: 'text', text: envelope }] }] };
-}
+export {buildDesktopAgentFork,type DesktopAgentFork} from './desktop-managed-agent-fork.js';
+import {buildDesktopAgentFork,type DesktopAgentFork} from './desktop-managed-agent-fork.js';
+const originalManagedSessions=new WeakSet<object>(),managedSessionHas=WeakSet.prototype.has,managedSessionAdd=WeakSet.prototype.add,managedSessionApply=Reflect.apply;
+export function isOriginalDesktopManagedAgentSession(value:unknown):boolean{return !!value&&(typeof value==='object')&&managedSessionApply(managedSessionHas,originalManagedSessions,[value]);}
+export function disposeOriginalDesktopManagedAgentSession(this:unknown):Promise<void>{if(!isOriginalDesktopManagedAgentSession(this))throw Error('TASK_MANAGED_SESSION_REQUIRED');return managedSessionApply(originalManagedSessionDispose,this,[]);}
 
 export interface DesktopManagedAgentSessionOptions {
   observationOwner?: ObservationSessionOwner;
@@ -53,6 +41,7 @@ export interface DesktopManagedAgentSessionOptions {
   skillCatalog: SkillCatalog;
   emitRuntimeEvent(event: Parameters<TaskRunnerInput['emitRuntimeEvent']>[0], context: DesktopAgentExecutionContext): void | Promise<void>;
   onUsage?(inputTokens: number, outputTokens: number, usageId: string | undefined, context: DesktopAgentExecutionContext): void | Promise<void>;
+  admitUsage?(context: DesktopAgentExecutionContext, invocationId: string): DesktopModelUsageAdmission;
   onToolFinished?(context: DesktopAgentExecutionContext, fact: { executionEventId: string; toolName: string; ok: boolean }): void | Promise<void>;
   maxIterations?: number;
   runObservedTurn?<T>(work:(signal:AbortSignal)=>Promise<T>):Promise<T>;
@@ -92,6 +81,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
   private lastTurnId?: string;
 
   constructor(private readonly options: DesktopManagedAgentSessionOptions) {
+    managedSessionApply(managedSessionAdd,originalManagedSessions,[this]);
     if (options.model !== undefined || options.modelCapability !== undefined) throw new Error('desktop_multi_agent_model_override_unsupported');
     const fork = buildDesktopAgentFork(options.adapter, options.parentMessages ?? [], options.forkContext !== false);
     this.fork = Object.freeze({ mode: fork.mode, truncated: fork.truncated });
@@ -190,6 +180,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
           materials: this.options.materials, materialRegistry: this.options.materialRegistry,
           skillInvocation: null, skillCatalog: this.options.skillCatalog, maxIterations: this.options.maxIterations,
           mailbox: context.mailbox, onUsage: (incoming, outgoing, usageId) => this.options.onUsage?.(incoming, outgoing, usageId, context),
+          admitUsage: this.options.admitUsage ? invocationId => this.options.admitUsage!(context, invocationId) : undefined,
           onActivity: activity?.onActivity,
           emitRuntimeEvent: async event => {
             if (event.type === 'assistant_delta' || event.type === 'tool_finished' && event.invoked === true) activity?.onActivity({ phase: 'model' });
@@ -224,6 +215,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
         finally { this.scope?.dispose(); this.scope = undefined; }
       }
       if (modelBodyFailure) throw modelBodyFailure.error;
+      boundSignal.throwIfAborted();
       return modelResult!;
     };
     const execution=Promise.resolve().then(()=>this.observed&&this.options.runObservedTurn?this.options.runObservedTurn(execute):execute());
@@ -257,16 +249,35 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
     return this.disposal;
   }
   private async disposeOwned(): Promise<void> {
-    await this.deactivate();
-    await closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason);
-    await this.running?.catch(() => {});
+    const failures: Array<{ error: unknown } | undefined> = [];
+    const pending: Promise<void>[] = [];
+    const observed = this.observed, running = this.running;
+    // Start every negative operation before joining.
+    const attempt = (action: () => void | Promise<void>) => {
+      const index = failures.length; failures.push(undefined);
+      try { pending.push(Promise.resolve(action()).then(() => {}, error => { failures[index] = { error }; })); }
+      catch (error) { failures[index] = { error }; }
+    };
+    attempt(() => this.deactivate());
+    attempt(() => closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason));
+    if (observed) {
+      attempt(() => observed.child.execution?.dispose());
+      attempt(() => observed.host.drainTransport());
+    }
+    await Promise.all(pending);
+    // Running reports its business error separately; this join grants no physical receipt.
+    await running?.catch(() => {});
+    const errors = failures.flatMap(failure => failure ? [failure.error] : []);
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'desktop_managed_session_shutdown_failed', { cause: errors[0] });
     this.scope?.dispose(); this.scope = undefined;
-    if (this.observed) {
-      try { await this.observed.child.execution?.dispose(); await this.observed.host.drainTransport(); }
-      finally { this.observed.child.owner.dispose(); this.observed.initialScope?.dispose(); }
+    if (observed) {
+      observed.child.owner.dispose(); observed.initialScope?.dispose();
     }
     await this.options.releaseResources?.();
     this.messages = [];
   }
 
 }
+
+const originalManagedSessionDispose=DesktopManagedAgentSession.prototype.dispose;

@@ -1,0 +1,29 @@
+import {afterEach,it,expect,vi} from 'vitest';
+import {cleanup,render,screen,fireEvent} from '@testing-library/react';
+import {MemoryRouter} from 'react-router-dom';
+import {LocaleProvider} from '../../renderer/src/contexts/LocaleContext';
+const descriptor=Object.getOwnPropertyDescriptor(window,'xiaokDesktop');
+afterEach(()=>{cleanup();localStorage.clear();if(descriptor)Object.defineProperty(window,'xiaokDesktop',descriptor);else delete (window as any).xiaokDesktop;});
+const disabled={enabled:false,epoch:0,lastCompleteWatermark:null,snapshot:{status:'disabled',epoch:0,collectedAt:null,from:null,to:null,errorCode:null,events:[]}};
+const connected={...disabled,enabled:true,epoch:1,snapshot:{...disabled.snapshot,epoch:1,status:'unavailable',errorCode:'source_unavailable'}};
+const partial={...connected,snapshot:{...connected.snapshot,status:'partial',collectedAt:1794210000000,from:1794123600000,to:1794814800000,errorCode:'event_semantics_unknown',recordCount:1,events:[{id:'a'.repeat(64),observationRevision:'b'.repeat(64),title:'<b>Review</b>',start:1794210000000,end:1794213600000,timeZone:null,allDay:'unknown',cancelled:'unknown'}]}};
+function install(){const api={getAssistantCalendarMemorySettings:vi.fn(async()=>({enabled:false,revision:0})),configureAssistantCalendarMemory:vi.fn(async()=>({enabled:true,revision:1})),getAssistantCalendarStatus:vi.fn(async()=>disabled),connectAssistantCalendar:vi.fn(async()=>connected),disconnectAssistantCalendar:vi.fn(async()=>({...disabled,epoch:2,snapshot:{...disabled.snapshot,epoch:2}})),refreshAssistantCalendar:vi.fn(async()=>partial)};Object.defineProperty(window,'xiaokDesktop',{configurable:true,value:api});return api;}
+async function card(){const {AssistantCalendarSourceCard}=await import('../../renderer/src/components/assistant/AssistantCalendarSourceCard');render(<LocaleProvider><AssistantCalendarSourceCard/></LocaleProvider>);}
+it('shows the user opt-in and uses only zero-argument real bridge operations',async()=>{const api=install();localStorage.setItem('xiaok:locale','zh');await card();fireEvent.click(await screen.findByRole('button',{name:'连接并允许读取日历'}));await screen.findByRole('button',{name:'断开只读来源'});expect(api.connectAssistantCalendar).toHaveBeenCalledExactlyOnceWith();expect(api.refreshAssistantCalendar).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'刷新已观察日程'}));await screen.findByText('<b>Review</b>');expect(api.refreshAssistantCalendar).toHaveBeenCalledExactlyOnceWith();expect(document.querySelector('b')).toBeNull();expect(screen.getByText('仅显示已观察记录，可能有遗漏；全天与取消状态尚未确认。')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'断开只读来源'}));await screen.findByRole('button',{name:'连接并允许读取日历'});expect(screen.queryByText('<b>Review</b>')).toBeNull();expect(api.disconnectAssistantCalendar).toHaveBeenCalledExactlyOnceWith();});
+it('distinguishes an unavailable source from an empty complete calendar in English',async()=>{const api=install();api.getAssistantCalendarStatus.mockResolvedValue(connected as never);localStorage.setItem('xiaok:locale','en');await card();expect(await screen.findByText('The source is unavailable. This does not mean there are no events.')).toBeInTheDocument();expect(screen.queryByText('No events')).toBeNull();expect(api.refreshAssistantCalendar).not.toHaveBeenCalled();});
+it('does not duplicate a held connection request or apply its late response after unmount',async()=>{const api=install();let release!:(value:unknown)=>void;api.connectAssistantCalendar.mockImplementation(()=>new Promise(resolve=>{release=resolve;}) as never);localStorage.setItem('xiaok:locale','en');await card();const button=await screen.findByRole('button',{name:'Connect and allow calendar reads'});fireEvent.click(button);fireEvent.click(button);expect(api.connectAssistantCalendar).toHaveBeenCalledTimes(1);cleanup();release(connected);await Promise.resolve();expect(api.refreshAssistantCalendar).not.toHaveBeenCalled();});
+
+vi.mock('../../renderer/src/contexts/KSwarmContext',()=>({useKSwarm:()=>({connected:false,projectsLoaded:false,projects:[],serviceStatus:null})}));
+vi.mock('../../renderer/src/api',()=>({api:{getAutomationOverviewSnapshot:async()=>({generatedAt:1,sourceVersions:{loopStore:1,timedActionStore:1},globalBackgroundAutoRunEnabled:false,totals:{loops:0,userLoops:0,schedules:0,activeSchedules:0,diagnostics:0,recentFailures:0},recentFailures:[]})}}));
+it('refreshes the real WelcomePage overview after the user withdraws memory consent through the nested source card',async()=>{
+ const installed=install();localStorage.setItem('xiaok:locale','zh');
+ const profile={id:'default-personal-assistant',status:'active',locale:'zh',timeZone:'Asia/Shanghai',morningTime:'08:30',eveningTime:'22:30',workdays:[0,1,2,3,4,5,6],quietHours:{start:'22:00',end:'08:00'},dataScopes:['tasks'],createdAt:1,updatedAt:1};
+ const overview=vi.fn().mockResolvedValueOnce({profile,suggestions:[{id:'one',title:'撤回前的私有建议',summary:'private'}],candidates:[],pendingCandidateCount:0}).mockResolvedValue({profile,suggestions:[],candidates:[],pendingCandidateCount:0});
+ Object.assign(installed,{getAssistantOverview:overview});
+ installed.getAssistantCalendarMemorySettings.mockResolvedValue({enabled:true,revision:1});installed.configureAssistantCalendarMemory.mockResolvedValue({enabled:false,revision:2});
+ const {WelcomePage}=await import('../../renderer/src/components/WelcomePage');
+ render(<MemoryRouter><LocaleProvider><WelcomePage/></LocaleProvider></MemoryRouter>);
+ await screen.findByText('撤回前的私有建议');const control=await screen.findByRole('checkbox');expect(control).toBeChecked();fireEvent.click(control);
+ await vi.waitFor(()=>{expect(overview).toHaveBeenCalledTimes(2);expect(screen.queryByText('撤回前的私有建议')).toBeNull();});
+ expect(installed.configureAssistantCalendarMemory).toHaveBeenCalledExactlyOnceWith({enabled:false,expectedRevision:1});
+});

@@ -1,7 +1,10 @@
+import { lazy, Suspense } from 'react';
+import { useAssistantFocus } from './hooks/useAssistantFocus';
 import { Navigate, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { WelcomePage } from './components/WelcomePage';
 import { ChatShell } from './components/ChatShell';
+import { ContextReferenceLanding } from './components/ContextReferenceLanding';
 import { AutomationsPage } from './components/automations/AutomationsPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
@@ -11,8 +14,11 @@ import { CollaborationRoomPage } from './components/collaboration/CollaborationR
 import { ScheduledTaskToast } from './components/ScheduledTaskToast';
 import { useScheduledTaskBootstrap } from './hooks/useScheduledTaskBootstrap';
 
+const AssistantPage = lazy(() => import('./components/assistant/AssistantPage').then(module => ({ default: module.AssistantPage })));
+
 export function App() {
   useScheduledTaskBootstrap();
+  useAssistantFocus();
 
   return (
     <>
@@ -21,7 +27,9 @@ export function App() {
         <Route path="meeting-recorder/:collectionId" element={<KnowledgePage />} />
         <Route element={<AppLayout />}>
           <Route index element={<WelcomePage />} />
+          <Route path="assistant" element={<Suspense fallback={null}><AssistantPage /></Suspense>} />
           <Route path="t/:taskId" element={<ChatShell />} />
+          <Route path="context/:refId" element={<ContextReferenceLanding />} />
           <Route path="scheduled" element={<Navigate to="/automations/schedules" replace />} />
           <Route path="automations" element={<AutomationsPage />} />
           <Route path="automations/:tab" element={<AutomationsPage />} />

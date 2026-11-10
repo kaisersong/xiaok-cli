@@ -130,6 +130,8 @@ The CLI can ask about material delegation choices when interactive input is avai
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
+- Model and connector credentials default to an unencrypted private file in the configuration directory (`credentials/store.json`, directory mode `0700` and file mode `0600` on macOS/Linux). Choose `keychain` explicitly to use the system credential store. Existing keychain references are imported into file storage when first used; the original keychain items are retained. Switching to keychain copies and verifies entries before replacing file metadata. If copying fails partway, the complete file store remains active; native items already written may remain.
+
 
 ### Install from npm
 
@@ -144,10 +146,34 @@ The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`.
 > **npm >= 11.16 users:** npm blocks dependency install/postinstall scripts by default. If you see a warning like `install scripts not yet covered by allowScripts`, install with:
 >
 > ```bash
-> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
 > ```
 >
 > The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). The example also allows the CLI health check, `node-pty` and SQLite install scripts. For persistent policy, merge the required package names into your existing allowlist; do not overwrite unrelated entries. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
+
+#### Built-in Yunzhijia CLI
+
+CLI and Desktop include the official `@yunzhijia/cli`. Ask xiaok to work with Yunzhijia messages, calendars, contacts, and documents; its built-in skill reads the CLI's current embedded guide. Existing shell permissions still apply.
+
+```bash
+xiaok yzj-cli --version
+xiaok yzj-cli auth login
+xiaok yzj-cli calendar event list --start 2026-11-05 --end 2026-11-05
+xiaok yzj-cli im group recent --limit 20
+xiaok yzj-cli update
+```
+
+Login requires personal authorization; use `auth login --device` without a browser. Credentials remain separate from `xiaok auth` and `xiaok yzjchannel`.
+
+In Desktop, open Settings → Connectors → Yunzhijia and select Sign in via browser. The default browser opens for QR authorization; Desktop shows waiting, cancel, retry, and verified sign-in states. Main owns the wait independently of ordinary shell timeouts.
+
+Connectors also supports DingTalk, Feishu, and WeCom. Their official CLIs are optional: click Download and install to download into the xiaok user tools directory, then connect through browser QR authorization. Feishu requires app setup on first use; the official WeCom CLI connects as a bot. Installed CLIs are available to subsequent tasks as `dws`, `lark-cli`, and `wecom-cli`.
+
+The managed update command uses xiaok's Node/Electron runtime and the official installer without requiring system npm. `--profile` / `--endpoint` select a business API identity/endpoint; they do not change the software distribution source.
+
+On first startup, xiaok copies the executable to `~/.xiaok/tools/yzj-cli/<platform>-<arch>/` (respecting `XIAOK_CONFIG_DIR`) and adds it to the current process PATH so agent shell commands can use `yzj-cli`. Updates modify this user copy and survive restarts and xiaok upgrades. Continue updating the CLI explicitly with `xiaok yzj-cli update`; the application installation stays read-only.
+
+The official npm install hook downloads the binary from Yunzhijia's CDN, verifies the accompanying checksum when supplied, and installs its official agent skills. If install scripts are disabled or downloading fails, xiaok still starts. Allow the script and run `npm rebuild @yunzhijia/cli` (`npm rebuild -g @yunzhijia/cli` for global installs). Desktop packaging requires the native binary; the installed app never downloads it at startup. Reinstall the full Desktop package if its binary is missing or damaged.
 
 #### Linux sudo / node-pty troubleshooting
 
@@ -293,6 +319,9 @@ xiaok -c                           # Resume the last session, if supported by it
 xiaok --resume <session-id>         # Resume a specific session
 xiaok "review workspace changes"   # Run a task
 xiaok doctor --check-keys           # Diagnose credential resolution
+xiaok config get credential-store  # file (default) or keychain
+xiaok config set credential-store keychain # Opt into the system credential store
+xiaok config set credential-store file     # Use the private credential file
 xiaok update                       # Update the npm CLI
 xiaok daemon status                # Inspect the local daemon
 xiaok plugin search                # Browse plugins

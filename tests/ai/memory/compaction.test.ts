@@ -104,12 +104,15 @@ describe('compaction pipeline', () => {
   });
 
   describe('L2→L3', () => {
+    beforeEach(() => {
+      db.prepare('INSERT INTO memory_l1_extracted (id, summary) VALUES (?, ?)').run('global-source', 'synthetic global fact');
+    });
     it('should extract persona traits from scenarios', async () => {
       db.prepare(
-        `INSERT INTO memory_l2_scenario (id, scenario, key_facts) VALUES (?, ?, ?)`
+        `INSERT INTO memory_l2_scenario (id, scenario, key_facts, source_ids) VALUES (?, ?, ?, '["global-source"]')`
       ).run('sc1', '开发环境偏好', '["偏好TypeScript", "偏好Vitest"]');
       db.prepare(
-        `INSERT INTO memory_l2_scenario (id, scenario, key_facts) VALUES (?, ?, ?)`
+        `INSERT INTO memory_l2_scenario (id, scenario, key_facts, source_ids) VALUES (?, ?, ?, '["global-source"]')`
       ).run('sc2', '代码风格偏好', '["偏好函数式编程", "偏好TypeScript"]');
 
       mockLLM.mockResolvedValueOnce(
@@ -131,10 +134,10 @@ describe('compaction pipeline', () => {
       ).run('p1', 'TypeScript优先', '["evidence1"]', 0.8);
 
       db.prepare(
-        `INSERT INTO memory_l2_scenario (id, scenario, key_facts) VALUES (?, ?, ?)`
+        `INSERT INTO memory_l2_scenario (id, scenario, key_facts, source_ids) VALUES (?, ?, ?, '["global-source"]')`
       ).run('sc1', '开发环境偏好', '["偏好TypeScript"]');
       db.prepare(
-        `INSERT INTO memory_l2_scenario (id, scenario, key_facts) VALUES (?, ?, ?)`
+        `INSERT INTO memory_l2_scenario (id, scenario, key_facts, source_ids) VALUES (?, ?, ?, '["global-source"]')`
       ).run('sc2', '另一个场景', '["其他"]');
 
       mockLLM.mockResolvedValueOnce(

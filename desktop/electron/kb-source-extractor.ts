@@ -4,12 +4,40 @@
  * Extracts text from files: PDF (via pdfjs-dist), txt/md/html, docx, pptx, xlsx.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readOriginalMaterialSourceBytes, retainOriginalMaterialSourceFailure } from './main-material-source.js';
 import { extname } from 'node:path';
+import { types } from 'node:util';
 import { isOfficeDocument, OOXML_FALLBACK_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
 import type { SourceExtractor, SourceExtractionResult } from './kb-store.js';
 import type { OfficeDocumentParser } from './office-document-parser.js';
-
+const extractorGet = WeakMap.prototype.get,
+  extractorSet = WeakMap.prototype.set,
+  extractorApply = Reflect.apply,
+  extractorFreeze = Object.freeze,
+  extractorDescriptor = Object.getOwnPropertyDescriptor;
+const originalExtractors = new WeakMap<
+  object,
+  Readonly<{
+    extract: SourceExtractor['extract'];
+    officeParse: OfficeDocumentParser['parse'] | null;
+  }>
+>();
+const extractorIsProxy = types.isProxy;
+export function readOriginalKnowledgeExtractorBinding(
+  value: unknown,
+): Readonly<{
+  extract: SourceExtractor['extract'];
+  officeParse: OfficeDocumentParser['parse'] | null;
+}> {
+  const row = extractorApply(extractorGet, originalExtractors, [value]) as
+    | Readonly<{
+        extract: SourceExtractor['extract'];
+        officeParse: OfficeDocumentParser['parse'] | null;
+      }>
+    | undefined;
+  if (!row) throw Error('MAIN_MATERIAL_KNOWLEDGE_EXTRACTOR_REQUIRED');
+  return row;
+}
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.html', '.htm', '.svg', '.xml']);
 const MARKUP_EXTENSIONS = new Set(['.html', '.htm', '.svg', '.xml']);
 const UNSUPPORTED_EXTENSIONS = new Set(['.exe', '.dll', '.so', '.dylib', '.bin', '.dmg', '.iso']);
@@ -63,7 +91,9 @@ function safeCodePoint(code: number): string {
 }
 
 export function createSourceExtractor(options: { officeParser?: OfficeDocumentParser } = {}): SourceExtractor {
-  return {
+  const officeReceiver=options.officeParser,officeSlot=officeReceiver?extractorDescriptor(officeReceiver,'parse'):undefined;
+  const officeParse=officeSlot&&Object.hasOwn(officeSlot,'value')&&typeof officeSlot.value==='function'?officeSlot.value as OfficeDocumentParser['parse']:null;
+  const extractor:SourceExtractor = {
     async extract(input: { filePath: string; mimeType: string }): Promise<SourceExtractionResult> {
       const ext = extname(input.filePath).toLowerCase();
 
@@ -72,16 +102,16 @@ export function createSourceExtractor(options: { officeParser?: OfficeDocumentPa
       }
 
       try {
-        const buf = await readFile(input.filePath);
+        const buf = await readOriginalMaterialSourceBytes(input.filePath);
         if (buf.length > MAX_FILE_SIZE) {
           return { ok: false, errorCode: 'resource_limit', error: `File too large: ${buf.length} bytes (max ${MAX_FILE_SIZE})` };
         }
 
-        if (isOfficeDocument(ext) && options.officeParser) {
-          const result = await options.officeParser.parse({
+        if (isOfficeDocument(ext) && officeParse) {
+          const result = await extractorApply(officeParse,officeReceiver,[{
             absolutePath: input.filePath,
             maxOutputChars: MAX_KNOWLEDGE_MARKDOWN_CHARS + 1,
-          });
+          }]);
           if (result.ok) {
             if (result.truncated || result.chars > MAX_KNOWLEDGE_MARKDOWN_CHARS) {
               return {
@@ -144,7 +174,9 @@ export function createSourceExtractor(options: { officeParser?: OfficeDocumentPa
 
         return { ok: false, errorCode: 'unsupported_format', error: `Cannot extract text from ${ext}` };
       } catch (err) {
-        return { ok: false, errorCode: 'io_error', error: (err as Error).message };
+        retainOriginalMaterialSourceFailure(err);
+        const message=err&&typeof err==='object'&&!extractorIsProxy(err)?extractorDescriptor(err,'message'):undefined;
+        return { ok: false, errorCode: 'io_error', error: message&&Object.hasOwn(message,'value')&&typeof message.value==='string'?message.value:'Source extraction failed.' };
       }
     },
 
@@ -167,6 +199,8 @@ export function createSourceExtractor(options: { officeParser?: OfficeDocumentPa
       return { ok: true, text, mimeType: 'text/plain' };
     },
   };
+  extractorApply(extractorSet,originalExtractors,[extractor,extractorFreeze({extract:extractor.extract,officeParse})]);
+  return extractor;
 }
 
 async function extractPdf(buf: Buffer): Promise<string> {

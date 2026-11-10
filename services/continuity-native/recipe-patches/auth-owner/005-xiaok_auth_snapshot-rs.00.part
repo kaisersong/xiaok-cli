@@ -1,0 +1,24 @@
+diff --git a/codex-rs/app-server-protocol/src/xiaok_auth_snapshot.rs b/codex-rs/app-server-protocol/src/xiaok_auth_snapshot.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server-protocol/src/xiaok_auth_snapshot.rs
+@@ -0,0 +1,19 @@
++//! Internal auth-only wire representation. Deliberately no Deserialize/schema/TS.
++#[derive(Clone, serde::Serialize)]
++#[serde(rename_all = "camelCase")]
++#[doc(hidden)]
++pub struct XiaokAuthSnapshotResponse {
++    pub access_token: String,
++    pub account_id: String,
++    pub user_id: String,
++    pub plan: Option<String>,
++    // Decimal strings preserve all u64 generations through JavaScript.
++    pub credential_generation: String,
++    pub owner_generation: String,
++    pub owner_incarnation: String,
++}
++impl std::fmt::Debug for XiaokAuthSnapshotResponse {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.write_str("XiaokAuthSnapshotResponse { <redacted> }")
++    }
++}

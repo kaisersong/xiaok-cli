@@ -10,16 +10,18 @@ import ts from 'typescript';
 
 const physical = vi.hoisted(() => ({ entry: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async original => {
+  const {preserveNativeWorkerGetters}=await import('../support/native-worker-fixture.js');
+
   const actual = await original<typeof import('node:worker_threads')>();
   const fixedSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
-  return { ...actual, Worker: class extends actual.Worker {
+  return { ...actual, Worker: preserveNativeWorkerGetters(actual.Worker,class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === fixedSource;
       if (mapped && !physical.entry) throw Error('fresh fixed protection Worker is required');
       super(mapped ? physical.entry : filename, options);
       if (mapped) { physical.starts++; this.once('exit', () => physical.exits++); }
     }
-  } };
+  }) };
 });
 const cleanup: string[] = [];
 afterAll(() => { for (const root of cleanup) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); });

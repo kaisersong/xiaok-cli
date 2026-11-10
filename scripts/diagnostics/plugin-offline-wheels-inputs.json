@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "productBase": "0bbadfa7633b929e4300f0ddef501209b43d095d",
+  "pluginRepository": "kaisersong/kai-xiaok-plugins",
+  "pluginHead": "210998993f6a95ff0f5fcf0a431edca08676a195",
+  "requirements": "plugins/kai-slide-creator/mcp-servers/slide-renderer/requirements.txt",
+  "wheels": "plugins/kai-slide-creator/bundled-wheels",
+  "tests": [
+    "plugins/kai-slide-creator/mcp-servers/slide-renderer/tests",
+    "plugins/kai-slide-creator/tests"
+  ],
+  "pytest": "8.4.2"
+}

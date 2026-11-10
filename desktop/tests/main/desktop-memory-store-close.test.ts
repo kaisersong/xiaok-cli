@@ -1,11 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-
-vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }));
-
-import { closeDesktopMemoryStore, getDesktopMemoryBackend, getDesktopMemoryStore } from '../../electron/desktop-services.js';
+import { createRequire } from 'node:module';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 type Internals = { db: { open: boolean }; embeddingClient: { embed(text: string): Promise<Float32Array> } };
 
@@ -16,6 +13,14 @@ describe('desktop memory store close (#150)', () => {
   const priorConfig = process.env.XIAOK_CONFIG_DIR;
   const base = mkdtempSync(join(tmpdir(), 'xiaok-desktop-memclose-'));
   process.env.XIAOK_CONFIG_DIR = join(base, 'config');
+  afterAll(() => {
+    if (priorConfig === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = priorConfig;
+    rmSync(base, { recursive: true, force: true });
+  });
+  // Exercise the actual emitted ESM graph: its synchronous optional-memory
+  // loader must resolve the same compiled module, outside Vite's TS resolver.
+  const { closeDesktopMemoryStore, getDesktopMemoryBackend, getDesktopMemoryStore } =
+    createRequire(import.meta.url)('../../dist/main/desktop/electron/desktop-services.js') as typeof import('../../electron/desktop-services.js');
   // Pay the one-time cold start (native SQLite load, migrations, first segmentation) here, not inside
   // the case: on a cold Windows runner it can take seconds and is not what the case measures.
   beforeAll(async () => {
@@ -26,11 +31,9 @@ describe('desktop memory store close (#150)', () => {
     await closeDesktopMemoryStore(warmRoot);
     expect((warm as unknown as Internals).db.open).toBe(false);
   });
-  afterAll(() => {
-    if (priorConfig === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = priorConfig;
-    rmSync(base, { recursive: true, force: true });
-  });
 
+  // Windows: 20 real runs took 3698–4429ms; two fresh store constructions dominated.
+  // Keep every close/retirement assertion and grant only this case more runner time.
   it('closeDesktopMemoryStore resolves only after the retired store has landed its pending write and closed memory.db', async () => {
     const rootA = join(base, 'a');
     const rootB = join(base, 'b');
@@ -55,5 +58,5 @@ describe('desktop memory store close (#150)', () => {
     await closing;
     expect(firstDb.open).toBe(false);
     expect((getDesktopMemoryStore(rootB) as unknown as Internals).db.open).toBe(false);
-  });
+  }, process.platform === 'win32' ? 10_000 : undefined);
 });

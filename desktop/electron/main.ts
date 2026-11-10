@@ -1,9 +1,52 @@
+import {DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
+import {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
+import {bootstrapDesktopAssistantAnalysisProvider,checkDesktopAssistantAnalysisProviderSupport} from './assistant-analysis-provider.js';
+import {prepareAssistantAnalysisResources,restoreAssistantAnalysisResources} from './assistant-analysis-resources.js';
+import {readAssistantModelConfiguration} from '../../src/runtime/assistant/model-identity.js';
+import {createAssistantQualityProduct} from './assistant-quality-product.js';
+import {createAssistantQualityFilePorts} from './assistant-quality-files.js';
+import type {AssistantDesktopSnapshotPorts} from './assistant-desktop-snapshot.js';
+import {AssistantPeriodicRuntime,commitOrdinaryAssistantCheck} from './assistant-periodic-runtime.js';
+import {AssistantPeriodicPolicyService} from './assistant-periodic-policy.js';
+import {AssistantLaunchService} from './assistant-launch-service.js';
+import {AssistantActionService} from './assistant-action-service.js';
+import {readAssistantTaskMetadata} from './assistant-task-source.js';
+import {completeAssistantSource,readAssistantKSwarmProjects} from './assistant-source-ports.js';
+import {readInstalledCurrentOwner} from '../../src/runtime/verification/installed-owner-state.js';
+import {completionConsumerOwner} from '../../src/runtime/verification/completion-consumer-owner.js';
+import {createAssistantRuntimeCollector} from './assistant-runtime-collector.js';
+import {getDecisionModelService} from './decision-model-service.js';
 import { createDesktopServiceReadiness } from './desktop-service-readiness.js';
 import { desktopServiceUrl } from './desktop-service-discovery.js';
+import {AssistantMorningNotificationLedger,createAssistantMorningDelivery} from './assistant-morning-delivery.js';
+import {MemoryCredentialSettingsStore} from './memory-credential-settings.js';
+import {createCredentialInputOwner} from './credential-input-consumers.js';
+import {registerCredentialInputIpc} from './credential-input-ipc.js';
+import {readProtectedJson} from '../../src/utils/protected-json-async.js';
+import { createDesktopAssistantInbox } from './desktop-assistant-inbox.js';
+import {defaultKimDecisionRuntime} from '../../src/ai/kim/runtime.js';
+import {registerKimDecisionIpc} from './kim-decision-typed-ipc.js';
+import { registerAssistantInboxIpc } from './assistant-inbox-ipc.js';
+import { MailAccountStore } from './mail-account-store.js';
+import { MailConnectorService } from './mail-connector-service.js';
+import { registerMailConnectorIpc } from './mail-connector-typed-ipc.js';
+import { EnterpriseCliConnectorService } from './enterprise-cli-service.js';
+import { registerEnterpriseCliIpc } from './enterprise-cli-typed-ipc.js';
+import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-cli-runtime.js';
+import { YzjCliAuthService } from './yzj-cli-auth-service.js';
+import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
+import {bindOriginalMainDshBrokerService} from './broker-protected-service-binding.js';
+import {createDefaultDispatchPreparationNativeSource} from './default-dispatch-preparation-native-source.js';
+import {createDefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
+import {createDefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
+import {createDesktopDispatchLaunchCapsule} from './default-dispatch-native-bootstrap.js';
+import {registerDefaultDispatchIpc} from './default-dispatch-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
+import {createOriginalMobileDisclosureOwner} from './mobile-disclosure-owner.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { createDesktopServiceControl } from './desktop-service-control.js';
@@ -18,6 +61,10 @@ import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
 import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
 import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
+import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
+import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
+import {registerKSwarmWriterControlIpc} from './kswarm-writer-control-typed-ipc.js';
 import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
 import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import {deferLoopArtifactPickerWindowDestroy} from './loop-artifact-save-picker.js';
@@ -34,14 +81,24 @@ import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import {createScheduledTaskDeliveryReconciler} from './scheduled-task-delivery.js';
 import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import { registerHarnessOptimizationIpc } from './harness-optimization-ipc.js';
+import {registerUnavailableDshSettingsIpc,registerDshSettingsIpc} from './dsh-settings-typed-ipc.js';
+import {readOriginalProductionRootResourceQualification} from './root-resource-production-qualification.js';
+import {createOriginalMainDshServiceSources,prepareOriginalMainDshServiceSources,readOriginalMainDshPreparedSources,closeOriginalMainDshStartupSources} from './main-dsh-service-sources.js';
+import {bindOriginalMainDshKSwarmService} from './kswarm-protected-service-binding.js';
+import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOriginalMainDshRuntimePolling,rejectOriginalMainDshRuntimeStartup} from './main-dsh-runtime-composition.js';
+import {createMainDshControlSource} from './main-dsh-control-source.js';
+import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
+import {resolveDesktopServiceScope} from './desktop-service-scope.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
-import { app, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
-import { basename, dirname, join } from 'node:path';
+import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import {
   createDesktopServices,
+  startOriginalMainDshServicesRecovery,
+  startOriginalMainDshServicesRemoteRecovery,
   getDesktopMemoryBackend,
   closeDesktopMemoryStore,
   getDesktopMemoryStore,
@@ -104,6 +161,7 @@ import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js'
 import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
 import { AssistantController, createAssistantCandidatePromotionTargets } from './assistant-controller.js';
+import {createAssistantDerivedMainPorts} from './assistant-derived-main.js';
 import { createAssistantPublicationContextReader } from './assistant-publication-context.js';
 import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
 import { createAssistantRuntime } from './assistant-runtime.js';
@@ -116,11 +174,11 @@ import {
 } from './kswarm-semantic-service.js';
 import { registerSemanticDesktopIpc } from './semantic-ipc.js';
 import { createCollaborationRoomService } from './collaboration-room-service.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
 import { setRoomHistoryBrokerClient } from './room-history-page-tool.js';
 import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
-import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
+import { createCollaborationRoomWakeDispatcher,bindOriginalScopedRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
 import { RoomWorkspaceLocalStore } from './room-workspace-local.js';
 import { createRoomWorkspaceService } from './room-workspace-service.js';
 import { createRoomWorkspaceBrokerClient } from './room-workspace-broker-client.js';
@@ -129,11 +187,12 @@ import { createRoomExecutionRouter } from './room-execution-router.js';
 import { createRoomExternalDiscussionAdapter } from './room-external-discussion-adapter.js';
 import { createRoomWorkspaceRecovery } from './room-workspace-recovery.js';
 import { createRoomWorkspaceProjectAdapter } from './room-workspace-project-adapter.js';
-import { createRoomWorkspaceProjectDispatch } from './room-workspace-project-dispatch.js';
 import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
 import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
+import { attachContextApplicationNavigation } from './context-continuity/application-navigation.js';
+import { registerContextProtocol } from './context-continuity/navigation.js';
 import { buildAutomationOverviewSnapshot } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -428,8 +487,8 @@ function readRecentTaskSnapshots(dataRoot: string, limit = 20): TaskSnapshot[] {
     });
 }
 
-function findMobileArtifactPreview(dataRoot: string, artifactId: string): MobileArtifactPreview | null {
-  for (const snapshot of readRecentTaskSnapshots(dataRoot, 30)) {
+function findMobileArtifactPreview(snapshots: readonly TaskSnapshot[], artifactId: string): MobileArtifactPreview | null {
+  for (const snapshot of snapshots) {
     for (const artifact of snapshot.result?.artifacts ?? []) {
       if (artifact.artifactId !== artifactId) continue;
       return buildArtifactPreview({
@@ -692,6 +751,8 @@ function createInitialWindow(): Promise<BrowserWindow> {
 
 async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
+  configureBundledYzjCli();
+  configureInstalledEnterpriseClis();
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
   const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
@@ -716,6 +777,21 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
+  const assistantCrypto: import('./mail-account-store.js').MailSafeStorage = { isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(), encryptString: value => safeStorage.encryptString(value), decryptString: value => safeStorage.decryptString(value), ...(process.platform === 'linux' ? { getSelectedStorageBackend: () => safeStorage.getSelectedStorageBackend() } : {}) };
+  let assistantInbox: ReturnType<typeof createDesktopAssistantInbox> | undefined;
+  const mailConnectors = new MailConnectorService({store:new MailAccountStore(app.getPath('userData'),assistantCrypto),openExternal:url=>shell.openExternal(url)});
+  registerMailConnectorIpc(shutdownAwareIpc, mailConnectors, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('mail-connectors', async () => { mailConnectors.dispose(); });
+  const yzjCliAuth = new YzjCliAuthService({ openExternal: url => shell.openExternal(url), connectionHistoryPath: join(app.getPath('userData'), 'connectors', 'yzj-cli-connection.json') });
+  const enterpriseClis = {
+    dingtalk: new EnterpriseCliConnectorService('dingtalk', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'dingtalk-connection.json') }),
+    feishu: new EnterpriseCliConnectorService('feishu', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'feishu-connection.json') }),
+    wecom: new EnterpriseCliConnectorService('wecom', { openExternal: url => shell.openExternal(url), historyPath: join(app.getPath('userData'), 'connectors', 'wecom-connection.json') }),
+  };
+  registerEnterpriseCliIpc(shutdownAwareIpc, enterpriseClis, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
+  registerLifetimeDisposerStep('enterprise-cli-connectors', async () => { await Promise.all(Object.values(enterpriseClis).map(service => service.dispose())); });
+  registerLifetimeDisposerStep('yzj-cli-auth', () => yzjCliAuth.dispose());
+  registerYzjCliAuthIpc(shutdownAwareIpc, yzjCliAuth, event => isYzjCliAuthSenderAllowed(event, mainWindow, { rendererFile, devServer }));
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
@@ -762,9 +838,49 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     return meetingRecorderController!.close();
   });
   registerRecorderWindowIpc(shutdownAwareIpc, recorderWindowProducers, { isMainWindowSender, isRecorderWindowSender });
+  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
+  const dataRoot = getConfigDir('desktop');
+  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
+  const serviceScope=resolveDesktopServiceScope({dataRoot});
+  const mainUserControlSource=createMainDshControlSource({windowOwner:applicationWindowOwner,scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  desktopIngressOwners.push(mainUserControlSource.ingress);
+  if(desktopShutdownCoordinator.isQuitting)mainUserControlSource.seal();
+  // Only the original installed profile may enter. There is no env/UI opt-in.
+  const dshQualification=readOriginalProductionRootResourceQualification();
+  const dshSources=dshQualification.qualified?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
+  let dshServicesTransferred=false;
+  if(dshSources){
+    desktopFinalLifetimeSteps.push({name:'main-dsh-startup-sources',async run(){if(!dshServicesTransferred)await closeOriginalMainDshStartupSources(dshSources);}});
+    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,harnessUserActor});}
+    catch(raw){
+      try{await closeOriginalMainDshStartupSources(dshSources,{raw});}catch{/* The original Sources retains cleanup faults and all physical tails. */}
+      throw raw;
+    }
+    if(!desktopShutdownGate.isOpen)return window;
+  }
+  const dshPrepared=dshSources?readOriginalMainDshPreparedSources(dshSources):undefined;
+  const writerScope=()=>({profileId:createHash('sha256').update(resolve(getConfigDir('desktop'))).digest('hex'),workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
+  const preparationNativeSource=createDefaultDispatchPreparationNativeSource({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  const preparationOwner=createDefaultDispatchPreparationOwner(preparationNativeSource);
+  desktopIngressOwners.push(preparationOwner.ingress);
+  desktopFinalLifetimeSteps.push({name:'default-dispatch-preparation-owner',run:()=>preparationOwner.drain()});
+  const defaultDispatchController=createDefaultDispatchBusinessController({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer}),preparationRecipient:preparationOwner});
+  // Register the passive owner before the first capsule can call Native SDKs.
+  desktopIngressOwners.push(defaultDispatchController.ingress);
+  desktopFinalLifetimeSteps.push({name:'default-dispatch-controller',run:()=>defaultDispatchController.drain()});
+  const writerSource=createKSwarmWriterControlSource({getWindow:()=>mainWindow,getScope:writerScope,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, { activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
-  if (!kswarmService) return window;
+  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, {
+    activityOwnerPending: !dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    ...(dshPrepared?{ownedDshAdmission:dshPrepared.businessSource.admission}:{}),
+    desktopProjectScope:writerScope(),ownedControlAdmission:writerSource.admission,ownedBusinessAdmission:defaultDispatchController.businessAdmission,ownedPreparationSource:preparationOwner.transportSource,ownedPreparationAdmission:preparationOwner.transportAdmission,
+  });
+  if (!kswarmService) {writerSource.seal();defaultDispatchController.seal();preparationOwner.seal();return window;}
+  try{preparationOwner.bindService(kswarmService);}catch(error){preparationOwner.seal();console.warn('[default-dispatch-preparation] service binding unavailable',error);}
+  writerSource.bindService(kswarmService);defaultDispatchController.bindService(kswarmService);desktopIngressOwners.push(writerSource.ingress);
+  const defaultDispatchBootstrap={controller:defaultDispatchController,capsule:createDesktopDispatchLaunchCapsule(defaultDispatchController,kswarmService)};
+  const writerControlBootstrap={source:writerSource,capsule:createDesktopWriterControlLaunchCapsule({source:writerSource,service:kswarmService,window})};
+  registerKSwarmWriterControlIpc(shutdownAwareIpc,createKSwarmWriterControlService({source:writerSource,service:kswarmService}));
   let kswarmStartPromise: Promise<void>;
   registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
   const runtimeActions = createDesktopRuntimeActionService({
@@ -796,13 +912,13 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
 
-  const kswarmStreamBridge = new KSwarmStreamBridge(() => `${desktopServiceUrl('kswarm').replace(/^http/, 'ws')}/ws`);
+  const kswarmStreamBridge = new KSwarmStreamBridge(() => dshSources ? 'ws://127.0.0.1:4400/ws' : `${desktopServiceUrl('kswarm').replace(/^http/, 'ws')}/ws`);
   const stopStreamReadiness = startKSwarmStreamWhenReady(kswarmService, kswarmStreamBridge);
   registerLifetimeDisposerStep('kswarm-stream-readiness', async () => stopStreamReadiness());
 
   let dispatchWorkspaceProject: (projectId: string, body?: unknown) => Promise<Record<string, unknown> | null> = async () => { throw new Error('workspace_initializing'); };
   registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService, {
-    dispatchProject: (projectId, body) => dispatchWorkspaceProject(projectId, body),
+    dispatchProject: async () => ({ok:false,code:'default_dispatch_requires_user_action'}),
     authorize: event => {
       const source = event as { sender?: unknown; senderFrame?: unknown };
       return !!mainWindow && !mainWindow.isDestroyed() && source.sender === mainWindow.webContents
@@ -811,8 +927,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
   });
 
-  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
-  const dataRoot = getConfigDir('desktop');
+  await loadConfig();await readProtectedJson(join(dataRoot,'connectors.json'));
+  let credentialInputs:ReturnType<typeof createCredentialInputOwner>|undefined;
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
@@ -821,9 +937,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
     }) : undefined;
   if (!desktopShutdownGate.isOpen) return window;
-  const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
   const services = createDesktopServices({
+    credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
+    mailConnectors,
+    assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
+    onAssistantTaskEvent: input => {assistantInbox?.service.onTask(input.snapshot,'scheduler');if(input.event.type==='task_terminal'&&input.snapshot.prompt.startsWith('[xiaok-assistant-watch:'))void assistantInbox?.service.refresh('scheduler').catch(()=>{});},
+    writerControlBootstrap,defaultDispatchBootstrap,defaultDispatchPreparationOwner:preparationOwner,
     harnessOptimizationUserActor: harnessUserActor,
+    ...(dshSources?{dshServiceSources:dshSources}:{}),
+    modelProbeUserSource:mainUserControlSource,
+    materialUserSource:mainUserControlSource,
     dataRoot,
     kswarmService,
     notifyConversationActivity: async activity => {
@@ -851,7 +974,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
-  // Initialization starts inside the factory. Own its original completion before
+  dshServicesTransferred=!!dshSources;
+  // Ordinary initialization starts inside the factory; DSH uses its private barrier.
+  // Own its original completion before
   // any later await, including renderer load failure or shutdown during loading.
   const taskInitialization = startDesktopTaskRecovery(desktopShutdownGate, async () => {
     debugMain('task-initialization:started');
@@ -862,15 +987,23 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     debugMain('task-initialization:failed');
     console.error('[main] task initialization failed:', error);
   });
-  desktopIngressOwners.push(services.goalShutdown.ingress);
-  desktopDurableStores.push(services.goalShutdown.durable);
-  if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
+  registerDefaultDispatchIpc(shutdownAwareIpc,defaultDispatchController,preparationOwner);
+  desktopIngressOwners.push(services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress);
+  const decisionModelOwner=getDecisionModelService(services.getDataRoot());
+  decisionModelOwner.setPythonCommandResolver(()=>managedPythonCommand);
+  desktopIngressOwners.push({name:'decision-models',stopAccepting:()=>decisionModelOwner.beginShutdown(),abortAllActive:()=>decisionModelOwner.beginShutdown(),drain:async()=>{await decisionModelOwner.dispose();return true;}});
+  if(desktopShutdownCoordinator.isQuitting)decisionModelOwner.beginShutdown();
+  registerLifetimeDisposerStep('decision-models',()=>decisionModelOwner.dispose());
+  desktopDurableStores.push(services.taskShutdown.durable);
+  if(desktopShutdownCoordinator.isQuitting){
+    for(const owner of [services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress]){owner.stopAccepting();owner.abortAllActive('app_shutdown');}
+  }
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
-  kswarmStartPromise = startDesktopKSwarmService(desktopShutdownGate, kswarmService,
-    process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
-    error => {
+  const startMainKSwarm = () => startDesktopKSwarmService(desktopShutdownGate, kswarmService,
+    !dshSources && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+    dshSources?undefined:error => {
       const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
       console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
       activityOwnerNoticeOnce(code);
@@ -879,12 +1012,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     const status = kswarmService.getStatus();
     if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
   }).catch(error => {
+    if (dshSources) throw error;
     const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
     console.error('[main] Service bootstrap refused:', message);
     dialog.showErrorBox('xiaok — 服务启动失败 / Service startup failed', message);
   });
+  if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
-  registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
+  if(!dshSources)registerLifetimeDisposerStep('multi-agent-runtime', async () => { await services.disposeMultiAgent(); });
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
   });
@@ -895,19 +1030,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
   const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
   const mobileMessages: MobileChatMessage[] = [];
+  const mobileDisclosure=createOriginalMobileDisclosureOwner(services);
+  registerLifetimeDisposerStep('mobile-disclosure-read-owner',()=>mobileDisclosure.close());
   const getMobileSnapshot = async () => {
     const activeTask = await services.getActiveTask().catch(() => null);
-    const snapshots = readRecentTaskSnapshots(dataRoot);
-    if (activeTask && !snapshots.some(snapshot => snapshot.taskId === activeTask.taskId)) {
-      const recovered = await services.recoverTask(activeTask.taskId).catch(() => null);
-      if (recovered?.snapshot) snapshots.unshift(recovered.snapshot);
-    }
+    const read=await mobileDisclosure.recentTasks(20);
+    const snapshots=[...read.snapshots];
     const loopDefinitions = loopStoreRef?.listLoopDefinitions() ?? [];
     const loopRunsByLoopId = new Map(loopDefinitions.map(definition => [
       definition.id,
       loopStoreRef?.listLoopRuns(definition.id, 1) ?? [],
     ]));
-    return buildMobileSnapshotFromSources({
+    const value=buildMobileSnapshotFromSources({
       desktopName: 'Xiaok Desktop',
       activeTaskId: activeTask?.taskId ?? null,
       mobileMessages,
@@ -917,8 +1051,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       userLoopTemplates: loopStoreRef?.listUserLoopTemplates() ?? [],
       loopRunsByLoopId,
     });
+    return mobileDisclosure.bind('snapshot',value,read.cut);
   };
   const sendMobileMessage = async (text: string) => {
+    const cut=mobileDisclosure.emptyCut();
     const created = await services.createTask({ prompt: text, materials: [] });
     const sequence = Date.now();
     const userMessage = {
@@ -931,7 +1067,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     };
     mobileMessages.push(userMessage);
     mobileMessages.splice(0, Math.max(0, mobileMessages.length - 30));
-    return [
+    const events = [
       {
         type: 'chat.message_appended' as const,
         sequence,
@@ -948,36 +1084,41 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       },
       { type: 'snapshot.required' as const, sequence: sequence + 2 },
     ];
+    return mobileDisclosure.bind('chat.send',events,cut);
   };
   const respondMobileApproval = async (input: { id: string; decision: MobileApprovalDecision }) => {
     const [taskId, questionId] = input.id.split(':');
     if (!taskId || !questionId) throw new Error('invalid_mobile_approval_id');
-    const recovered = await services.recoverTask(taskId);
-    const event = recovered.snapshot.events.find(candidate => (
+    const read = await mobileDisclosure.task(taskId);
+    const event = read.snapshot.events.find(candidate => (
       candidate.type === 'needs_user' && candidate.question.questionId === questionId
     ));
     if (!event || event.type !== 'needs_user') throw new Error('mobile_approval_not_found');
     const answer = resolveMobileApprovalAnswer(event.question, input.decision);
     if (!answer) throw new Error('mobile_approval_not_resolvable');
+    mobileDisclosure.assertCurrent(read.cut);
     await services.answerQuestion({ taskId, answer });
-    return {
+    mobileDisclosure.assertCurrent(read.cut);
+    return mobileDisclosure.bind('approval.respond',{
       id: input.id,
       title: event.question.prompt.slice(0, 80),
       detail: event.question.choices?.map(choice => choice.label).join(' / ') ?? event.question.kind,
       risk: 'low',
       status: input.decision === 'approve' ? 'approved' : 'rejected',
       createdAt: new Date().toISOString(),
-    };
+    },read.cut);
   };
-  const getMobileArtifactPreview = async (artifactId: string) => (
-    findMobileArtifactPreview(dataRoot, artifactId)
-      ?? await findKSwarmMobileArtifactPreview(kswarmService, artifactId)
-  );
+  const getMobileArtifactPreview = async (artifactId: string) => {
+    const read=await mobileDisclosure.recentTasks(30);
+    const value=findMobileArtifactPreview(read.snapshots,artifactId)??await findKSwarmMobileArtifactPreview(kswarmService,artifactId);
+    return value?mobileDisclosure.bind('artifact.preview',value,read.cut):null;
+  };
   const mobileGateway = createMobileGateway({
     host: process.env.XIAOK_MOBILE_GATEWAY_HOST ?? '0.0.0.0',
     port: Number(process.env.XIAOK_MOBILE_GATEWAY_PORT ?? '47891'),
     desktopName: 'Xiaok Desktop',
     desktopId: mobileIdentity.desktopId,
+    requireDisclosurePolicy:true,assertOutputCurrent:mobileDisclosure.assertOutputCurrent,
     mobileAccessToken: mobileIdentity.mobileAccessToken,
     getSnapshot: getMobileSnapshot,
     sendMessage: sendMobileMessage,
@@ -1048,6 +1189,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mobileRelayBridge = mobileRelayConfig
     ? createMobileRelayBridge({
       identity: mobileIdentity,
+      requireDisclosurePolicy:true,assertOutputCurrent:mobileDisclosure.assertOutputCurrent,
       desktopName: 'Xiaok Desktop',
       relayUrl: mobileRelayConfig.relayUrl,
       relayJwt: mobileRelayConfig.relayJwt,
@@ -1170,11 +1312,15 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
 
 
-  try {
+  const reconcileStartupArtifacts=async()=>{try {
     await services.reconcileArtifactWorkspace();
   } catch (err) {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
-  }
+  }};
+  if(!dshSources)await reconcileStartupArtifacts();
+
+  // Current installed P4 is unavailable; this branch creates no DSH resources.
+  if(!dshSources)registerUnavailableDshSettingsIpc(shutdownAwareIpc);
 
   registerHarnessOptimizationIpc(shutdownAwareIpc, services, event => {
     return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
@@ -1216,10 +1362,12 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   registerUpdaterIpc(shutdownAwareIpc, updaterProducers, isMainWindowSender);
 
+  let assistantPeriodicRuntime:AssistantPeriodicRuntime|undefined;
+  let assistantPeriodicPolicy:AssistantPeriodicPolicyService|undefined;
   let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
   const automationConfigOwner = createAutomationConfigOwner({
     getEnabled: () => globalBackgroundAutoRunEnabled,
-    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled; },
+    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled;assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'}); },
     persist: (enabled, source) => updateGlobalBackgroundAutoRun(enabled, source),
   });
   const automationConfigProducers = new Map<string, IpcHandlerListener>([
@@ -1301,27 +1449,12 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     getWindow: () => mainWindow,
     isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer}),
   }));
-  const assistantContextReader = createAssistantPublicationContextReader({store: loopRuntime.loopStore, evidenceStore: loopRuntime.evidenceStore, publication: loopPublicationService});
-  const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
-    listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
-      .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
-      .map(snapshot => ({
-        id: snapshot.taskId,
-        threadId: snapshot.context?.threadId ?? snapshot.sessionId,
-        title: snapshot.understanding?.goal ?? snapshot.prompt.slice(0, 160),
-        status: snapshot.status,
-        summary: snapshot.result?.summary ?? snapshot.understanding?.nextAction,
-        updatedAt: snapshot.updatedAt,
-        artifacts: (snapshot.result?.artifacts ?? []).map(artifact => ({
-          id: artifact.artifactId,
-          title: artifact.title,
-          summary: artifact.kind,
-          updatedAt: Number.isFinite(Date.parse(artifact.createdAt)) ? Date.parse(artifact.createdAt) : snapshot.updatedAt,
-        })),
-      })),
+  let assistantContextReader=createAssistantPublicationContextReader({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,publication:loopPublicationService});
+  const assistantSnapshotPorts:AssistantDesktopSnapshotPorts = {
+    listTaskSnapshots:query=>readAssistantTaskMetadata(dataRoot,query),
     listKSwarmProjects: async ({ from, to }) => {
-      const projects = await fetchKSwarmProjectsForMobile(kswarmService);
-      return projects.flatMap(project => {
+      const receipt = await readAssistantKSwarmProjects(kswarmService);
+      return {...receipt, items: receipt.items.flatMap(project => {
         const id = typeof project.id === 'string' ? project.id : '';
         const name = typeof project.name === 'string' ? project.name : '';
         const updatedAt = typeof project.updatedAt === 'number'
@@ -1338,9 +1471,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
           summary: typeof project.summary === 'string' ? project.summary : undefined,
           updatedAt,
         }];
-      });
+      }) };
     },
-    listTimedActions: ({ from, to }) => timedActionService.getActions().flatMap(action => {
+    listTimedActions: ({ from, to }) => completeAssistantSource(timedActionService.getActions().flatMap(action => {
       const dueAt = action.lastDueAt ?? action.nextDueAt;
       const occurrenceAt = typeof dueAt === 'number' && dueAt >= from && dueAt <= to ? dueAt : action.updatedAt;
       if (occurrenceAt < from || occurrenceAt > to) return [];
@@ -1352,8 +1485,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         dueAt,
         updatedAt: action.updatedAt,
       }];
-    }),
-    listMeetingMetadata: ({ from, to }) => knowledgeBaseStore.listMeetings()
+    })),
+    listMeetingMetadata: ({ from, to }) => completeAssistantSource(knowledgeBaseStore.listMeetings()
       .filter(meeting => meeting.updatedAt >= from && meeting.updatedAt <= to)
       .map(meeting => ({
         id: meeting.id,
@@ -1361,8 +1494,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         status: meeting.status,
         summary: meeting.failureReason || undefined,
         updatedAt: meeting.updatedAt,
-      })),
-    listKnowledgeSourceMetadata: ({ from, to }) => knowledgeBaseStore.listCollections()
+      }))),
+    listKnowledgeSourceMetadata: ({ from, to }) => completeAssistantSource(knowledgeBaseStore.listCollections()
       .flatMap(collection => knowledgeBaseStore.listSources(collection.id))
       .filter(source => source.updatedAt >= from && source.updatedAt <= to)
       .map(source => ({
@@ -1372,23 +1505,118 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         status: source.parseStatus,
         summary: typeof source.metadata.summary === 'string' ? source.metadata.summary : undefined,
         updatedAt: source.updatedAt,
-      })),
+      }))),
+  };
+  const assistantSnapshotReader=createAssistantDesktopSnapshotReader(assistantSnapshotPorts);
+  const assistantQualitySnapshotReader=createAssistantDesktopSnapshotReader({...assistantSnapshotPorts,listTaskSnapshots:query=>readAssistantTaskMetadata(dataRoot,query,10000)},{limits:{maxItemsPerScope:10000,maxSerializedBytes:3*1024*1024,maxSummaryChars:500}});
+  assistantInbox = createDesktopAssistantInbox({kim:defaultKimDecisionRuntime,calendarStore:loopRuntime.loopStore,
+    dataRoot,credentialWaitingTasks:()=>credentialInputs?.waitingTaskIds()??[],crypto:assistantCrypto,mail:mailConnectors,llm:loopLlmPort,
+    profile:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return {active:profile?.status==='active',locale:profile?.locale??'zh',timeZone:profile?.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone};},
+    search:(query,signal)=>services.searchForAssistant(query,signal),
+    launch:input=>services.createTask({prompt:input.prompt,materials:[],context:{threadId:input.threadId}}),
+    canLaunch:()=>services.assertAssistantExecutor(),
+    reminders:{create:(item,at)=>timedActionService.createReminder(item.title,at,undefined,{requestSource:'user',ownerKind:'user',ownerId:'desktop-user'}).reminderId,cancel:id=>{timedActionService.cancelReminder(id,{requestSource:'user'});}},
+    changed:()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('desktop:assistantInbox:changed');},
+    internal:()=>assistantContextReader.listMorningSuggestions(),
+    facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
   });
+  services.bindAssistantTools(assistantInbox.tools,'user');
+  credentialInputs=createCredentialInputOwner({dataRoot,mail:mailConnectors,refreshConnectors:()=>services.refreshConnectorCredentials(),changed:()=>{mainWindow?.webContents.send('desktop:credentialInput:changed');mainWindow?.webContents.send('desktop:assistantInbox:changed');}});
+  registerCredentialInputIpc(shutdownAwareIpc,credentialInputs,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}),new MemoryCredentialSettingsStore(dataRoot));
+  registerLifetimeDisposerStep('credential-inputs',async()=>{credentialInputs?.dispose();});
+  registerKimDecisionIpc(shutdownAwareIpc,defaultKimDecisionRuntime,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  registerAssistantInboxIpc(shutdownAwareIpc,assistantInbox.service,assistantInbox.outbox,event=>isYzjCliAuthSenderAllowed(event as Electron.IpcMainInvokeEvent,mainWindow,{rendererFile,devServer}));
+  const inboxOwner=assistantInbox;
+  registerLifetimeDisposerStep('assistant-inbox',async()=>{inboxOwner.dispose();await inboxOwner.drain();});
+  const assistantCalendarSource=inboxOwner.calendarSource;if(!assistantCalendarSource)throw Error('assistant_calendar_unavailable');
+  registerLifetimeDisposerStep('assistant-calendar',()=>assistantCalendarSource.close());
+  const assistantDerivedPorts=createAssistantDerivedMainPorts({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,publication:loopPublicationService,calendarSource:assistantCalendarSource,memoryStore:()=>getDesktopMemoryStore(dataRoot),dataRoot,cwd:()=>process.cwd(),projectCwd:id=>projectCwdById.get(id)});
+  assistantContextReader=assistantDerivedPorts.contextReader;
+  desktopDurableStores.push({name:'assistant-inbox',async close(){inboxOwner.close();}});
   const assistantRuntime = createAssistantRuntime({
+    derived:assistantDerivedPorts.derived,
     loopStore: loopRuntime.loopStore,
     evidenceStore: loopRuntime.evidenceStore,
     llmPort: loopLlmPort,
-    collect: async input => {
-      const snapshot = await assistantSnapshotReader.collect(input);
-      if (input.kind === 'evening') return snapshot;
-      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
+    collect:createAssistantRuntimeCollector({inbox:inboxOwner.service,snapshotReader:assistantSnapshotReader,calendarSource:assistantCalendarSource,contextReader:assistantContextReader,threadMetaStore}),
+  });
+    const assistantAnalysisSettings=new AssistantAnalysisSettings({store:loopRuntime.loopStore,
+    models:()=>{const {config}=readAssistantModelConfiguration();return Object.entries(config.models).flatMap(([modelId,model])=>checkDesktopAssistantAnalysisProviderSupport(config,modelId).supported?[{modelId,label:(typeof model.label==='string'?model.label:modelId).slice(0,200)}]:[]);},
+    bootstrap:async(modelId,prepare)=>{
+      const {resolvePythonCommand}=await import('../../src/platform/plugins/install/dependencies.js');
+      const pythonCommand=managedPythonCommand??resolvePythonCommand();
+      const resources=await (prepare?prepareAssistantAnalysisResources:restoreAssistantAnalysisResources)({dataRoot,pythonCommand});
+      return bootstrapDesktopAssistantAnalysisProvider({dataRoot:resources.dataRoot,pythonExecutable:resources.pythonExecutable,modelId});
+    },onInvalidated:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+  });
+  await assistantAnalysisSettings.restore();
+  const qualityFiles=createAssistantQualityFilePorts({
+    chooseSave:async()=>{
+      const zh=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)?.locale==='zh';
+      const picked=await dialog.showSaveDialog({title:zh?'导出真实案例供人工复核（案例ID、摘要与时间；已遮盖已知凭据）':'Export real cases for human review (case IDs, summaries and times; known credentials redacted)',defaultPath:'assistant-quality-review.json',filters:[{name:'JSON',extensions:['json']}]});
+      return picked.canceled||!picked.filePath?null:picked.filePath;
+    },
+    chooseOpen:async()=>{const picked=await dialog.showOpenDialog({properties:['openFile'],filters:[{name:'JSON',extensions:['json']}]});return picked.canceled||picked.filePaths.length!==1?null:picked.filePaths[0];},
+  });
+  registerLifetimeDisposerStep('assistant-quality-files',()=>qualityFiles.close());
+  const assistantQualityProduct=createAssistantQualityProduct({knownSecrets:()=>assistantAnalysisSettings.current()?.knownSecrets?.()??[],store:loopRuntime.loopStore,dataRoot,provider:()=>assistantAnalysisSettings.current(),files:qualityFiles,
+    collect:async profile=>{const now=Date.now();return assistantQualitySnapshotReader.collect({kind:'morning',profile,now,window:{from:now-14*86400000,to:now}});},
+    confirmHumanReview:async kind=>{
+      const zh=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)?.locale==='zh';
+      const text=zh?(kind==='risk_review'?'我确认这些严重风险标签由人工在模型预测前核实，并按冻结的风险规则标注。':'我确认这些行动标签和分歧裁决来自人工复核，没有将模型生成的标签冒充人工标签。'):(kind==='risk_review'?'I confirm these severe-risk labels were reviewed by a human before model predictions, under the frozen risk rules.':'I confirm the action labels and adjudications are human-reviewed; model-generated labels are not represented as human labels.');
+      const picked=await dialog.showMessageBox({type:'question',message:text,buttons:zh?['取消','确认人工复核并导入']:['Cancel','Confirm human review and import'],defaultId:0,cancelId:0});
+      return picked.response===1?{userId:'desktop-user:'+createHash('sha256').update(dataRoot).digest('hex'),text}:false;
+    },onCommitted:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+  });
+  assistantPeriodicPolicy=new AssistantPeriodicPolicyService({store:loopRuntime.loopStore,timeZone:loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)!.timeZone,timedActionService,globalEnabled:()=>globalBackgroundAutoRunEnabled,
+    onCommitted:()=>assistantPeriodicRuntime?.cancelCurrent(),
+    qualification:()=>{const readiness=assistantPeriodicRuntime?.readiness();return readiness?.available?{qualityDigest:readiness.qualityDigest!,analysisContract:readiness.analysisContract!}:undefined;},
+    delivery:services.assistantDigestDelivery,
+  });
+  assistantPeriodicRuntime=new AssistantPeriodicRuntime({store:loopRuntime.loopStore,policy:assistantPeriodicPolicy,globalEnabled:()=>globalBackgroundAutoRunEnabled,
+    analysisPort:()=>assistantAnalysisSettings.current()?.port,quality:()=>assistantQualityProduct.quality(),
+    collect:async({now,signal})=>{
+      const profile=loopRuntime.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID)!;
+      const profileJson=JSON.stringify(profile),snapshot=await assistantSnapshotReader.collect({kind:'morning',profile,now});signal?.throwIfAborted();
+      const structuralRevisions=new Map(timedActionService.getActions().map(action=>[JSON.stringify(['timed_action',action.id]),JSON.stringify(action.nextDueAt??null)]));
+      return {snapshot:{current:snapshot},coverage:snapshot.coverage,structuralRevisions,isCurrent:()=>JSON.stringify(loopRuntime.loopStore.getAssistantProfile(profile.id))===profileJson};
+    },
+    publish:async input=>{
+      commitOrdinaryAssistantCheck({...input,store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore});
+      if(!input.output.recommendations.length)return;
+      const source=await assistantContextReader.readMorningActionSource('scheduler');if(!source||source.runId!==input.runId||!source.isCurrent()||!input.isCurrent())return;
+      const actions=loopRuntime.loopStore.projectAssistantActions(source,Date.now()).filter(proposal=>proposal.decision==='open'&&proposal.originRunId===input.runId);
+      const revisions=actions.map(proposal=>({workItemIdentity:proposal.workItemIdentity,notifiableRevision:createHash('sha256').update(JSON.stringify([proposal.workItemIdentity,proposal.actionKind,proposal.evidenceRefs.map(ref=>input.structuralRevisions?.get(JSON.stringify([ref.kind,ref.id]))??null)])).digest('hex')}));
+      const delivery=assistantPeriodicPolicy!.prepareDigest({runId:input.runId,revisions,isCurrent:()=>source.isCurrent()&&input.isCurrent(),requestSource:'scheduler'});
+      if(delivery.status==='prepared')await assistantPeriodicPolicy!.dispatchDigest(delivery.envelope,{requestSource:'scheduler'});
     },
   });
+  const periodicRunner=assistantPeriodicRuntime.runner();
+  assistantPeriodicPolicy.syncSchedule({requestSource:'scheduler'});
+  desktopIngressOwners.push({name:'assistant-periodic-runtime',stopAccepting:()=>{void assistantPeriodicRuntime!.close().catch(()=>{});},abortAllActive:()=>{void assistantPeriodicRuntime!.close().catch(()=>{});},drain:deadlineMs=>desktopShutdownGate.drain(deadlineMs)});
+  registerLifetimeDisposerStep('assistant-periodic-runtime',()=>assistantPeriodicRuntime!.close());
   const assistantAwareRunner = createLoopExecutionAdapter({
     genericRunner: loopRuntime.runner,
     assistantRuntime,
+    periodicRuntime:periodicRunner,
   });
+
+  const assistantLaunchService=new AssistantLaunchService({store:loopRuntime.loopStore,port:services.assistantTaskAdmission,threadTargets:services.assistantThreadTargets,
+    readSource:()=>assistantContextReader.readMorningActionSource('user'),
+    readFollowUpSource:candidateId=>assistantContextReader.readAcceptedFollowUpSource(candidateId),
+    isSourceLaunchable:source=>process.env.XIAOK_ASSISTANT_LOCAL_LAUNCH_PILOT==='1'&&!loopRuntime.loopStore.getLoopRunPublicationBasis(source.runId)&&readInstalledCurrentOwner(completionConsumerOwner({ownerKind:'loop_run',ownerId:source.runId})).kind==='ordinary',
+  });
+  const unsubscribeAssistantTaskTerminal=services.subscribeAssistantTaskTerminal(taskId=>{
+    if(!desktopShutdownGate.isOpen)return;
+    const writer=acquireAutomationWriter('assistant:terminal-projection');
+    void assistantLaunchService.observeTask({taskId,requestSource:'scheduler'}).catch(()=>{console.warn('[assistant] task projection pending');}).finally(()=>writer.release());
+  });
+  registerLifetimeDisposerStep('assistant-launch-observations',async()=>{unsubscribeAssistantTaskTerminal();await assistantLaunchService.close();});
+  const assistantActionService=new AssistantActionService({store:loopRuntime.loopStore,profileId:DEFAULT_PERSONAL_ASSISTANT_ID,readSource:requestSource=>assistantContextReader.readMorningDisplaySource(requestSource),canStart:()=>assistantLaunchService.available()});
+
   const assistantController = new AssistantController({
+    actionService:assistantActionService,launchService:assistantLaunchService,analysisSettings:assistantAnalysisSettings,qualityReview:assistantQualityProduct,periodicPolicy:assistantPeriodicPolicy,periodicRuntime:assistantPeriodicRuntime,notificationReady:()=>services.assistantDigestDelivery.available(),isGlobalBackgroundEnabled:()=>globalBackgroundAutoRunEnabled,onProfileStatusChanged:()=>{assistantPeriodicRuntime?.cancelCurrent();assistantPeriodicPolicy?.syncSchedule({requestSource:'scheduler'});},
+    calendarSource:assistantCalendarSource,calendarMemory:assistantDerivedPorts.calendarMemory,
     assistantService,
     candidates: loopRuntime.loopStore,
     memoryStore: getDesktopMemoryStore(dataRoot),
@@ -1396,7 +1624,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     kbStore: knowledgeBaseStore,
     resolveProjectCwd: projectId => projectCwdById.get(projectId),
     assistantPublication: loopPublicationService,
-    listMorningSuggestions: () => assistantContextReader.listMorningSuggestions(),
+    readMorningConversation:()=>assistantContextReader.readMorningConversation(loopRuntime.loopStore.getAssistantProfile('default-personal-assistant')?.locale??'zh'),
   });
   const kswarmTeamService = createKSwarmTeamService({
     kswarmService,
@@ -1434,6 +1662,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
   const collaborationRoomBrokerClient = scopedRoomClients.roomClient;
   services.bindConversationProjectRoomClient(collaborationRoomBrokerClient);
+  services.bindRoomConversionBroker(collaborationRoomBrokerClient);
   const roomWorkspaceBroker = scopedRoomClients.workspaceBroker;
   setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const ensureWorkspaceProtocol = () => ensureRoomWorkspaceProtocol({
@@ -1449,15 +1678,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     makeAdapter: options => createRoomExternalDiscussionAdapter(options),
   });
   const roomWorkspaceRuntime = createRoomWorkspaceRuntime({
+    kswarmService,
     store: roomWorkspaceStore, broker: roomWorkspaceBroker, wake: collaborationRoomBrokerClient,
-    execute: (envelope, token, workspace, signal) => services.runCollaborationRoomAgentTask(envelope, token, workspace, signal),
+    execute: services.runCollaborationRoomAgentTask,
     projectAdapter: roomWorkspaceProjectAdapter,
     externalDiscussion: {
-      resolve: logicalAgentId => roomExecutionRouter.resolve(logicalAgentId),
+      resolve: (logicalAgentId,beforeEffects) => roomExecutionRouter.resolve(logicalAgentId,beforeEffects),
       execute: input => roomExecutionRouter.execute(input),
       getHostIdentity: roomId => rawRoomWorkspaceBroker.getHost(roomId),
     },
-    executeProject: input => services.runWorkspaceProjectTask(input),
+    executeProject: services.runWorkspaceProjectTask,
     ensureProtocol: ensureWorkspaceProtocol, notify: emitCollaborationRoomEvent,
     flushOutbox: () => roomWorkspaceService.flushOutbox(),
   });
@@ -1471,7 +1701,6 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       return ('projects' in snapshot ? snapshot.projects : []) ?? [];
     },
   });
-  dispatchWorkspaceProject = createRoomWorkspaceProjectDispatch({ adapter: roomWorkspaceProjectAdapter, runtime: roomWorkspaceRuntime });
   const roomWorkspaceRecovery = createRoomWorkspaceRecovery({
     store: roomWorkspaceStore, broker: roomWorkspaceBroker,
     isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true,
@@ -1483,7 +1712,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
     notify: roomId => emitCollaborationRoomEvent({ type: 'workspace_changed', kind: 'workspace_changed', roomId }),
   });
-  roomWorkspaceRecovery.start();
+  if(!dshSources)roomWorkspaceRecovery.start();
   registerLifetimeDisposerStep('room-workspace', async () => {
     await roomWorkspaceRecovery.stop();
     await roomWorkspaceRuntime.shutdown();
@@ -1502,7 +1731,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       const external = await roomExecutionRouter.resolve(logicalAgentId);
       return external === null || external.supported;
     },
-    execute: (input, claimToken) => services.runCollaborationRoomAgentTask(input, claimToken),
+    execute: services.runCollaborationRoomAgentTask,
     // Wake failures are otherwise invisible (dispatcher settles silently); keep
     // a main-debug trace so stalls like a drifted workspace root stay diagnosable.
     executeTurn: async input => {
@@ -1515,6 +1744,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
     onEvent: emitCollaborationRoomEvent,
   });
+  if(dshSources)bindOriginalScopedRoomWakeDispatcher(collaborationRoomWakeDispatcher,kswarmService);
   const collaborationRoomService = createCollaborationRoomService({
     prepareRoomDefaults: (input,signal) => prepareCollaborationRoomDefaults(input, {signal,llm:loopLlmPort,loadAgents:async()=>{const response=await kswarmService.request('/agents');if(!response.ok)throw Error('room_agents_unavailable');const body=await response.json();return Array.isArray(body.agents)?body.agents:[];}}),
     brokerClient: collaborationRoomBrokerClient,
@@ -1559,12 +1789,67 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       },
     },
   });
+  const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
+  const createMainRuntimeBridge = (brokerUrl = 'http://127.0.0.1:4318') => createKSwarmRuntimeBridge({
+    kswarmService,
+    allowedRoots: kswarmHandoffRoots,
+    runDesktopTask: services.runKSwarmHandoffTask,
+    runWorkspaceTask: input => roomWorkspaceRuntime.runProjectTask(input),
+    runWorkflowNode: services.runKSwarmWorkflowNode,
+    submitResult: (input) => submitKSwarmRuntimeResultToBroker({
+      brokerUrl,
+      participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+      logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+      projectId: input.projectId,
+      taskId: input.taskId,
+      runId: input.runId,
+      result: input.result,
+    }),
+    submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
+      brokerUrl,
+      participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
+      logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
+      handoff: input.handoff,
+      output: input.output,
+      reviewDecision: input.reviewDecision,
+    }),
+    });
+  const dshRuntimeBridge=dshSources?createMainRuntimeBridge():undefined;
+  const materialSourceCreation=createMainMaterialSource({userSource:mainUserControlSource,services});
+  desktopFinalLifetimeSteps.push({name:'main-material-source',async run(){await sealAndDrainMainMaterialSource(await materialSourceCreation);}});
+  const mainMaterialSource=await materialSourceCreation;
+  if(desktopShutdownCoordinator.isQuitting){await sealAndDrainMainMaterialSource(mainMaterialSource);return window;}
+  if(dshSources){
+    const composition=await composeOriginalMainDshRuntime({services,sources:dshSources,roomRuntime:roomWorkspaceRuntime,roomDispatcher:collaborationRoomWakeDispatcher,directBridge:dshRuntimeBridge!,materialSource:mainMaterialSource,brokerClient:rawCollaborationRoomBrokerClient});
+    const original=readOriginalMainDshRuntimeBinding(services,dshSources,composition);
+    await bindOriginalMainDshKSwarmService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    await bindOriginalMainDshBrokerService(services,dshSources).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    desktopIngressOwners.push(original.ingress);
+    if(!desktopShutdownGate.isOpen){original.ingress.stopAccepting();return window;}
+    registerDshSettingsIpc(shutdownAwareIpc,original.controller,mainUserControlSource);
+    await startOriginalMainDshServicesRecovery(services,dshSources,composition);
+    if(!desktopShutdownGate.isOpen)return window;
+    kswarmStartPromise=startMainKSwarm().then(async()=>{
+      if(!desktopShutdownGate.isOpen)return;
+      await startOriginalMainDshServicesRemoteRecovery(services,dshSources,composition);
+      await startOriginalMainDshRuntimePolling(services,dshSources,composition);
+      if(!desktopShutdownGate.isOpen)return;
+      roomWorkspaceRecovery.start();
+    }).catch(raw=>rejectOriginalMainDshRuntimeStartup(services,dshSources,composition,raw));
+    // Retain the rejection before later callers await the same startup.
+    void kswarmStartPromise.catch(()=>undefined);
+    await reconcileStartupArtifacts();
+  }
+
   await registerDesktopIpc(shutdownAwareIpc, window, services, {
+    materialSource:mainMaterialSource,
+    materialUserSource:mainUserControlSource,
+    modelProbeUserSource:mainUserControlSource,
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
     getMainWindow: () => mainWindow,
     registerLifetimeDisposer: dispose => registerLifetimeDisposerStep('desktop-ipc-views', async () => { dispose(); }),
     multiAgentAuthorize: event => {
-      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender.isDestroyed() || event.sender !== mainWindow.webContents
         || event.senderFrame !== mainWindow.webContents.mainFrame
         || !isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })) return null;
       return { actorId: `desktop-user:${services.multiAgent?.profileId ?? 'unavailable'}` };
@@ -1643,32 +1928,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
-      const brokerUrl = desktopServiceUrl('broker');
-      const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
+      const brokerUrl = dshSources ? 'http://127.0.0.1:4318' : desktopServiceUrl('broker');
+      const originalRuntimeBridge=dshRuntimeBridge??createMainRuntimeBridge(brokerUrl);
       const runtimeBridge = {
-        ...createKSwarmRuntimeBridge({
-        allowedRoots: kswarmHandoffRoots,
-        runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
-        runWorkspaceTask: input => roomWorkspaceRuntime.runProjectTask(input),
-        runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
-        submitResult: (input) => submitKSwarmRuntimeResultToBroker({
-          brokerUrl,
-          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
-          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
-          projectId: input.projectId,
-          taskId: input.taskId,
-          runId: input.runId,
-          result: input.result,
-        }),
-        submitWorkflowNodeResult: (input) => submitKSwarmWorkflowNodeResultToBroker({
-          brokerUrl,
-          participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
-          logicalParticipantId: input.targetParticipantId || XIAOK_WORKER_SEED_ID,
-          handoff: input.handoff,
-          output: input.output,
-          reviewDecision: input.reviewDecision,
-        }),
-        }),
+        ...originalRuntimeBridge,
         handleAssignPo: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmAssignPo({ ...input, startAfterPlanning: true }),
         handleReviewSubmission: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmReviewSubmission(input),
         handlePlanApproved: (input: { payload: Record<string, unknown>; targetParticipantId?: string }) => services.runKSwarmPlanApproved(input),
@@ -1676,6 +1939,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       };
       runtimeBridgeClients.push(
         createKSwarmRuntimeBridgeBrokerClient({
+          kswarmService,
           brokerUrl,
           participantId: XIAOK_DESKTOP_HOST_PARTICIPANT_ID,
           participantKind: 'service',
@@ -1693,6 +1957,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
         });
       }
     }).catch(error => {
+      if (dshSources) { debugMain('runtime-bridge:startup-unconfirmed'); return; }
       if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
       console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
     });
@@ -1766,6 +2031,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mcpRegistrationPromise = mcpRegistrationOwner.registered;
   debugMain('createWindow:mcp-registration-started');
 
+  const assistantMorningDelivery=createAssistantMorningDelivery({
+    loopStore:loopRuntime.loopStore,timedStore:timedActionStore,ledger:new AssistantMorningNotificationLedger(inboxOwner.store.db),
+    profile:()=>loopRuntime.loopStore.getAssistantProfile('default-personal-assistant'),
+    readMorningRun:id=>assistantContextReader.readMorningRun(id),notificationPort:createElectronDesktopNotificationPort(),
+    ready:()=>!!mainWindow&&!mainWindow.isDestroyed()&&!mainWindow.webContents.isDestroyed()&&!mainWindow.webContents.isLoadingMainFrame(),
+    isOpen:()=>desktopShutdownGate.isOpen,
+    refresh:()=>mainWindow?.webContents.send('desktop:assistantInbox:changed'),
+    focus:()=>{const window=mainWindow;if(!window||window.isDestroyed())return;if(window.isMinimized())window.restore();window.show();window.focus();window.webContents.send('desktop:assistantInbox:focus');},
+  });
+  desktopIngressOwners.push({name:'assistant-morning-delivery',stopAccepting:()=>assistantMorningDelivery.stopAccepting(),abortAllActive:()=>assistantMorningDelivery.stopAccepting(),drain:async()=>{await assistantMorningDelivery.close();return true;}});
+  registerLifetimeDisposerStep('assistant-morning-delivery',()=>assistantMorningDelivery.close());
+
   const loopTimedCompletion=createLoopTimedCompletionHost({
     timedStore:timedActionStore,loopStore:loopRuntime.loopStore,
     taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
@@ -1800,13 +2077,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     onError: error => debugMain('scheduled:completion-reconcile-failed', String(error)),
   });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
-    reconcileScheduledTasks,
+    reconcileScheduledTasks:async signal=>{await reconcileScheduledTasks(signal);await assistantMorningDelivery.reconcile();},
     loopCompletion:loopTimedCompletion,
     acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
       getMainWindow: () => mainWindow,
       loopRuntime,
       assistantRuntime,
+      periodicRuntime:periodicRunner,
       createTask: (input) => services.createBackgroundTask(input),
       executeRoomTask: createRoomScheduledTaskDispatch({
         getWorkspace: roomId=>roomWorkspaceService.getCollaborationRoomWorkspace({roomId}),
@@ -1821,6 +2099,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       timedActionRunId,
     }),
     onRunComplete: event => {
+      if(event.action.executor.kind==='loop')return assistantMorningDelivery.handle(event);
       if (event.action.executor.kind !== 'agent_task' || event.action.executor.roomTarget || event.status === 'publication_pending') return;
       publishScheduledTaskEvent({
         taskId: event.action.id, runId: event.runId, runtimeTaskId: event.runtimeTaskId,
@@ -2180,6 +2459,21 @@ if (packagedKimiSmokeResultPath) {
   debugMain('single-instance-lock:failed');
   app.quit();
 } else {
+  const contextApplicationNavigation = attachContextApplicationNavigation({
+    argv: process.argv,
+    isReady: () => app.isReady(),
+    isOpen: () => desktopShutdownGate.isOpen,
+    open: async () => {
+      const window = await createWindow();
+      if (!desktopShutdownGate.isOpen || window.isDestroyed()) throw Error('context_navigation_closed');
+      restoreExistingWindow(window);
+      return { getURL: () => window.webContents.getURL(), loadURL: (url: string) => window.loadURL(url) };
+    },
+    isTrusted: url => isTrustedDesktopRendererUrl(url, { rendererFile: join(__dirname, '../../../renderer/index.html'), devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'] }),
+    registerProtocol: () => registerContextProtocol(app, process.platform),
+    subscribeOpenUrl: handler => { app.on('open-url', handler); return () => { app.removeListener('open-url', handler); }; },
+    unavailable: () => debugMain('context-navigation:unavailable'),
+  });
   app.whenReady().then(async () => {
     debugMain('app:whenReady');
     const protocolRegistered = registerIntentBrokerProtocolClient(app, {
@@ -2201,17 +2495,19 @@ if (packagedKimiSmokeResultPath) {
         app.dock.setIcon(nativeImage.createFromPath(iconPath));
       }
     }
-    void createWindow();
+    await createWindow();
+    await contextApplicationNavigation.ready();
   }).catch((error) => {
     console.error('[main] whenReady failed:', error);
   });
   app.on('second-instance', (_event, commandLine) => {
     const protocolUrl = findIntentBrokerProtocolUrl(commandLine);
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
-    restoreOrCreateWindow();
+    if (!contextApplicationNavigation.secondInstance(commandLine)) restoreOrCreateWindow();
   });
   // Quitting state belongs to the coordinator's synchronous phase ①.
   registerLifetimeDisposerStep('window-scoped', async () => {
+    contextApplicationNavigation.dispose();
     meetingRecorderController?.dispose();
     destroyMenuBar();
     debugMain('app:before-quit');

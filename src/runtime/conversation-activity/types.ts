@@ -4,11 +4,13 @@ export type WorkExecutionState = 'accepted' | 'queued' | 'running' | 'blocked' |
 export type ReportingPreference = 'normal' | 'critical_only' | 'quiet';
 export interface ActivityOrigin { profileId: string; threadId: string; workspaceId: string; actorId: string }
 export interface WorkEvent {
-  schemaVersion: 1; eventId: string; source: ActivitySource; logicalSourceId: string;
+  schemaVersion: 1 | 2; eventId: string; source: ActivitySource; logicalSourceId: string;
   sourceDataEpoch: string; transportGeneration: number; workId: string; runId?: string;
   sourceSequence?: number; sourceRevision?: string; kind: WorkKind;
   occurredAt?: number; receivedAt: number; businessOutcome?: 'unknown' | 'success' | 'error' | 'cancelled'; summary?: string; evidenceRefs: string[];
   executionStarted?: boolean;
+  questionId?:string;
+  questionOwner?:import('../task-host/native-approval-owner.js').NativeApprovalOwnerMetadata;
 }
 export interface WorkBinding {
   operationId: string; watchId: string; source: ActivitySource; logicalSourceId: string;
@@ -27,6 +29,15 @@ export interface WorkProjection {
 export interface ConversationActivity {
   activityId: string; localSeq: number; watchId: string; threadId: string;
   kind: WorkKind | 'report' | 'diagnostic'; at: number; projection: WorkProjection;
+}
+export interface ConversationWorkView {
+  watch: WorkWatch;
+  projection: WorkProjection;
+  /** Main's current Native adapter classification; display data, never authority. */
+  questionSourceKind?:'codex_native_approval';
+  /** Optional while reading the original activity protocol. Never authority. */
+  presentation?: import('./attention-projector.js').WorkAttention;
+  attentionState?:{presentationIncarnation:string;dismissed:boolean};
 }
 export interface McpInputForm {
   inputId: string; expectedDigest: string; prompt: string;

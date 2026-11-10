@@ -49,3 +49,15 @@ it('checks actual final admission after accepted work drains and runs SessionEnd
  const runner=createHooksRunner({hooks:[{type:'prompt',prompt:'$ARGUMENTS',events:['SessionStart','SessionEnd']}],promptExecutor:async text=>{const event=JSON.parse(text).hook_event_name;events.push(event);if(event==='SessionStart'){enter();await held;}return '{"ok":true}';},finalHookAdmission:()=>{expect(events).toEqual(['SessionStart']);return {reason:'original-host-finalizer'};}});
  const running=runner.runHooks('SessionStart',{});await ready;const closing=runner.closeAndDrain();expect(runner.closeAndDrain()).toBe(closing);release();await closing;await running;expect(events).toEqual(['SessionStart','SessionEnd']);await runner.closeAndDrain();expect(events).toEqual(['SessionStart','SessionEnd']);
 });
+
+
+it.skipIf(process.platform === 'win32').each(['PermissionRequest', 'PreToolUse'] as const)('actual %s timeout retains its decision but physically drains after child/stdio close and own PGID gone', async event => {
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'hooks-timeout-joined-'))),script=join(root,'hook.cjs');
+ cleanups.push(()=>rmSync(root,{recursive:true,force:true}));
+ writeFileSync(script,"process.stdin.resume();setInterval(()=>{},1000);");
+ const runner=createHooksRunner({hooks:[{command:`exec ${quote(process.execPath)} ${quote(script)}`,events:[event],timeoutMs:500}]});
+ cleanups.push(()=>runner.closeAndDrain());
+ const result=await runner.runHooks(event,{});
+ expect(result.ok).toBe(event==='PermissionRequest');expect(result.decision).toBeUndefined();expect(result.message).toContain('hook timeout after 500ms');
+ await expect(runner.closeAndDrain()).resolves.toBeUndefined();
+});

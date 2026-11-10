@@ -12,7 +12,7 @@ async function fixture(drop = false) {
   const root = mkdtempSync(join(tmpdir(),'activity-wire-input-'));
   const connection = await createMcpClientConnection('input-task',{type:'stdio',command:process.execPath,args:[join(process.cwd(),'tests/support/mcp-tasks-stdio-server.js')],env:{XIAOK_TEST_TASK_DELAY_MS:'20',...(drop ? {XIAOK_TEST_STREAM_DROP:'1'} : {})},protocol:{mode:'modern',version:'2026-07-28'}});
   const store = new ConversationActivityStore(join(root,'activity.sqlite')); let mcp!: ConversationMcpActivities;
-  const service = new ConversationActivityService({store,profileId:'profile',actorId:'user',getThread: threadId=>({threadId,profileId:'profile',workspaceId:'workspace',deleteState:'none'}),canObserveWork:watch=>mcp.canObserve(watch)});
+  const service = new ConversationActivityService({store,profileId:'profile',actorId:'user',getThread: threadId=>({threadId,profileId:'profile',workspaceId:'workspace',deleteState:'none'}),attentionReader:{hasBinding:id=>mcp.hasAttentionReaderBinding(id),collect:(slot,actor)=>mcp.collectAttentionInventory(slot,actor),assertCurrent:(slot,actor)=>mcp.assertAttentionInventoryCurrent(slot,actor)},canObserveWork:watch=>mcp.canObserve(watch)});
   mcp = new ConversationMcpActivities({store,service,actorId:'user',originThread:async()=> 'thread'});mcp.register(connection);
   const observer = await mcp.observer('task','call',connection);
   await callMcpToolWithTasks(connection,{name:'work',arguments:{ask:true}},{observer,detachOnTask:true,timeout:2000});
@@ -20,6 +20,18 @@ async function fixture(drop = false) {
   return {store,service,mcp,connection,async close(){ mcp.dispose();service.dispose();await connection.close();store.close();rmSync(root,{recursive:true,force:true}); },async stats(){const r=await connection.client.callTool({name:'stats',arguments:{}});return JSON.parse((r.content[0] as {text:string}).text);} };
 }
 describe('pending elicitation on the real modern wire',()=>{
+  it('collects the original SDK pending input through a native reader lease and finalizes on the original SQLite owner',async()=>{
+    const f=await fixture();try{
+      const round=await f.service.beginMcpAttentionRead('mcp:call',actor);expect(round.readerSlots).toHaveLength(1);
+      const inventory=await f.mcp.collectAttentionInventory(round.readerSlots[0],actor);
+      const first=await f.service.finalizeMcpAttentionRead({roundId:round.roundId,inventories:[inventory]},actor);
+      expect(first.view.presentation.questions).toHaveLength(1);expect(first.view.presentation.questions[0]).toMatchObject({ownerKind:'mcp',answerApiRef:'mcpAnswer',sourceRevision:1});
+      const repeated=await f.service.beginMcpAttentionRead('mcp:call',actor),current=await f.mcp.collectAttentionInventory(repeated.readerSlots[0],actor);
+      const second=await f.service.finalizeMcpAttentionRead({roundId:repeated.roundId,inventories:[current]},actor);expect(second.view.presentation.projectionVersion).toBe(first.view.presentation.projectionVersion);
+      const view=await f.service.getWork('mcp:call',actor);expect(view.projection.freshness).toBe('fresh');expect(view.presentation?.questions).toHaveLength(1);
+      expect(await f.stats()).toEqual({calls:1,updates:0,cancels:0});
+    }finally{await f.close();}
+  });
   it('never chooses the SDK implicit cancel when waiting, stopping observation or disposing the client',async()=>{
     const f=await fixture();try{
       await new Promise(resolve=>setTimeout(resolve,100));expect(await f.stats()).toEqual({calls:1,updates:0,cancels:0});

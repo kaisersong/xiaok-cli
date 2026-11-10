@@ -76,11 +76,13 @@ async function search(input, limits) {
     },callback);
   };
   // Count before fs.scandir allocates per-entry stat jobs and traversal queues.
-  const boundedReaddir = (path, callback) => {
+  const boundedReaddir = (path, optionsOrCallback, suppliedCallback) => {
+    const callback=typeof optionsOrCallback==='function'?optionsOrCallback:suppliedCallback;
+    const options=typeof optionsOrCallback==='function'?{}:optionsOrCallback;
     if (stopped || ++directories > limits.maxDirectories) {
       callback(new Error('glob_scan_limit')); return;
     }
-    void assertPath(path).then(()=>readdir(path, (error, names) => {
+    void assertPath(path).then(()=>readdir(path, options, (error, names) => {
       if (error) {
         if (input.skipInaccessible && ['EACCES', 'EPERM', 'ENOENT'].includes(error.code ?? '')) callback(null, []);
         else callback(error);
@@ -92,7 +94,7 @@ async function search(input, limits) {
       }
       // A permitted directory may contain denied subtrees or symlinks. Filter
       // before fast-glob schedules metadata or traversal for any child.
-      void authorize(names.map(name=>join(String(path),name))).then(allowed=>{
+      void authorize(names.map(name=>join(String(path),typeof name==='string'?name:Buffer.isBuffer(name)?name.toString():name.name))).then(allowed=>{
         callback(null,names.filter((_,index)=>allowed[index]));
       },callback);
     }),callback);

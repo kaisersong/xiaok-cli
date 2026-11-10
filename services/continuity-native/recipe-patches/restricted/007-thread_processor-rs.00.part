@@ -1,0 +1,11 @@
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -1541,6 +1541,7 @@
+                 });
+             }
+         };
++        crate::xiaok_main_bridge::bind_thread(thread_id.to_string())?;
+         let session_telemetry = thread.session_telemetry();
+         session_telemetry.record_startup_phase(
+             "thread_start_create_thread",

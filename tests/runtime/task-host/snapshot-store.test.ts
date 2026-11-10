@@ -40,8 +40,13 @@ describe('FileTaskSnapshotStore', () => {
     expect(await reloaded.getActiveTasks()).toEqual([]);
     expect(await reloaded.hasThreadHistory('legacy-thread')).toBe(true);
     expect(await reloaded.hasThreadHistory('new-thread')).toBe(false);
-    expect((reloaded as unknown as { cache: Map<string, unknown> }).cache.size).toBe(0);
-    expect(existsSync(join(rootDir, 'snapshots', 'task_history.json'))).toBe(true);
+    const checkpoint=join(rootDir,'snapshots','task_history.json');
+    expect(existsSync(checkpoint)).toBe(true);
+    const fresh=JSON.parse(readFileSync(checkpoint,'utf8'));fresh.prompt='Fresh retained checkpoint';
+    writeFileSync(checkpoint,JSON.stringify(fresh));
+    // A history ownership probe must not seed recoverTask with stale cached
+    // bytes. Observe the original file through the public recovery operation.
+    expect((await reloaded.recoverTask('task_history'))?.prompt).toBe(fresh.prompt);
   });
 
   it('fails closed on corrupt checkpoints instead of treating unreadable history as an unowned thread', async () => {

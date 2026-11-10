@@ -1,8 +1,39 @@
+import {types} from 'node:util';
 import { parentPort, workerData } from 'node:worker_threads';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync as LegacyDatabaseSync } from 'node:sqlite';
+import {createRequire} from 'node:module';
 import { randomUUID, createHash } from 'node:crypto';
+import {initializeHarnessWorkerDatabase} from './harness-dsh-worker-initialize.mjs';
 
 let db;
+let protectedCore,protectedAddon;
+let DatabaseSync=LegacyDatabaseSync;
+if(workerData.originalProtectedBudgetCarrier!==undefined){
+ const requireFixed=createRequire(import.meta.url);
+ protectedAddon=requireFixed('./protected_sqlite.node');
+ protectedCore=protectedAddon.adoptOriginalBudgetWorker(workerData.originalProtectedBudgetCarrier);
+ DatabaseSync=requireFixed('./harness-protected-sqlite.cjs').wrapOriginalProtectedSQLiteNamespace(protectedCore).Database;
+}
+function closeProtectedBorrow(){
+ if(!protectedCore)return;
+ protectedCore.closeOwned();
+ protectedAddon.retireOriginalBudgetWorker(workerData.originalProtectedBudgetCarrier);
+}
+const atomicLoad=Atomics.load,applyAtomic=Reflect.apply,isShared=types.isSharedArrayBuffer;
+const sharedBytes=Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,'byteLength').get;
+const NativeInt32=Int32Array;
+let ordinaryRetired=false,ordinaryLatch;
+function checkOrdinaryRetirement(command){
+ if(protectedCore)return;
+ if(!ordinaryLatch){
+  const buffer=workerData.originalOrdinaryBudgetRetirement;
+  if(!isShared(buffer)||applyAtomic(sharedBytes,buffer,[])!==4)throw new Error('budget_source_private_latch');
+  ordinaryLatch=new NativeInt32(buffer);
+ }
+ if(applyAtomic(atomicLoad,Atomics,[ordinaryLatch,0])!==0)ordinaryRetired=true;
+ if(ordinaryRetired&&command!=='shutdown')throw new Error('budget_source_writer_retired');
+}
+let dshLedger,dshOutcomeUnknown,dshTransaction;
 const fail = code => { throw new Error(code); };
 const one = (sql, ...args) => db.prepare(sql).get(...args);
 const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -22,7 +53,7 @@ function transaction(fn) {
 }
 function observeTime(now) {
   if (!Number.isSafeInteger(now) || now < 0) fail('clock_invalid');
-  return transaction(() => {
+  return (dshLedger?.isSchema2()?dshTransaction:transaction)(() => {
     const previous = number('lastSeenMs');
     if (now < previous - 2000) { put('clockGuard', 1); return false; }
     if (now - previous >= 300000) run('INSERT INTO forward_steps VALUES(?,?,?,?,0)', randomUUID(), previous, now, number('activitySeq'));
@@ -58,61 +89,38 @@ function snapshot() {
 }
 
 function initialize() {
-  db = new DatabaseSync(workerData.dbPath);
-  db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
-  if (one('PRAGMA integrity_check').integrity_check !== 'ok') fail('database_corrupt');
-  const existing = all("SELECT name FROM sqlite_master WHERE type='table'").map(row => row.name);
-  if (existing.length) {
-    if (!existing.includes('metadata') || meta('ownerId') !== workerData.ownerId || meta('initOperationId') !== workerData.initOperationId
-      || meta('canonicalRoot') !== workerData.root || meta('identity') !== workerData.identity || meta('schemaVersion') !== '1') fail('owner_mismatch');
-    if (workerData.initializing) {
-      const activityTables = ['grants', 'runs', 'request_attempts', 'daily_budget', 'formal_trials', 'outbox', 'applied_operations', 'intents', 'forward_steps', 'disabled_bindings'];
-      if (existing.some(table => !['metadata', 'config', ...activityTables].includes(table))) fail('initialization_unknown_schema');
-      for (const table of activityTables) if (!existing.includes(table) || one(`SELECT COUNT(*) AS count FROM ${table}`).count !== 0) fail('initialization_has_activity');
-      const c = config();
-      if (c.enabled || c.mode !== 'none' || c.configRevision !== 0 || number('activitySeq') !== 0) fail('initialization_has_activity');
-    }
-  } else {
-    if (!workerData.initializing) fail('database_missing_schema');
-    transaction(() => {
-      db.exec(`
-        CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-        CREATE TABLE config(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
-        CREATE TABLE intents(id TEXT PRIMARY KEY,manifestId TEXT NOT NULL,hash TEXT NOT NULL,runId TEXT);
-        CREATE TABLE runs(id TEXT PRIMARY KEY,manifest TEXT NOT NULL,manifestHash TEXT NOT NULL,bindingHash TEXT NOT NULL,day TEXT NOT NULL,deadline INTEGER NOT NULL,status TEXT NOT NULL,remainingTokens INTEGER NOT NULL,remainingRequests INTEGER NOT NULL,reason TEXT);
-        CREATE TABLE grants(runId TEXT PRIMARY KEY,state TEXT NOT NULL,epoch INTEGER NOT NULL,generation INTEGER NOT NULL);
-        CREATE TABLE request_attempts(id TEXT PRIMARY KEY,runId TEXT NOT NULL,stepId TEXT NOT NULL,bodyHash TEXT NOT NULL,tokens INTEGER NOT NULL,nonce TEXT NOT NULL,status TEXT NOT NULL,usage TEXT,preSend INTEGER NOT NULL DEFAULT 0,sendStarted INTEGER NOT NULL DEFAULT 0,UNIQUE(runId,stepId));
-        CREATE TABLE daily_budget(day TEXT PRIMARY KEY,usedTokens INTEGER NOT NULL DEFAULT 0,reservedTokens INTEGER NOT NULL DEFAULT 0,usedRequests INTEGER NOT NULL DEFAULT 0,reservedRequests INTEGER NOT NULL DEFAULT 0,guidanceUsed INTEGER NOT NULL DEFAULT 0,guidanceReserved INTEGER NOT NULL DEFAULT 0,CHECK(reservedTokens>=0 AND reservedRequests>=0));
-        CREATE TABLE formal_trials(ownerId TEXT PRIMARY KEY,manifestHash TEXT NOT NULL,spent INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE outbox(id TEXT PRIMARY KEY,body TEXT NOT NULL);
-        CREATE TABLE applied_operations(id TEXT PRIMARY KEY,summary TEXT NOT NULL);
-        CREATE TABLE disabled_bindings(hash TEXT PRIMARY KEY);
-        CREATE TABLE forward_steps(id TEXT PRIMARY KEY,beforeMark INTEGER NOT NULL,afterMark INTEGER NOT NULL,activitySeq INTEGER NOT NULL,consumed INTEGER NOT NULL);
-      `);
-      for (const [key, value] of Object.entries({ ownerId: workerData.ownerId, initOperationId: workerData.initOperationId,
-        canonicalRoot: workerData.root, identity: workerData.identity, schemaVersion: 1, epoch: 0,
-        recoveryGuard: 0, activitySeq: 0, lastSeenMs: workerData.now, clockGuard: 0 })) put(key, value);
-      run('INSERT INTO config VALUES(1,?)', JSON.stringify(workerData.defaultConfig));
-    });
-  }
+  checkOrdinaryRetirement('initialize');
+  db = protectedCore?new DatabaseSync():new DatabaseSync(workerData.dbPath);
+  const initialized=initializeHarnessWorkerDatabase({db,workerData,protectedCore,one,all,run,meta,put,number,config,transaction,fail,onOutcomeUnknown:error=>{dshOutcomeUnknown=error;}});
+  dshTransaction=initialized.dshTransaction;dshLedger=initialized.dshLedger;
   return snapshot();
 }
 
 function execute(command, p) {
+  checkOrdinaryRetirement(command);
+  if(dshOutcomeUnknown){if(command==='shutdown'){db.close();return null;}throw dshOutcomeUnknown;}
+  if(command==='dsh_source_read_migrate'||command==='dsh_source_read_scan'||command==='dsh_source_read_reserve'||command==='dsh_source_read_settle')return {result:dshLedger.executeSourceRead(command.slice(4),p),ownerState:snapshot()};
+  if(command==='dsh_observe_receipt')return {result:dshLedger.observeReceipt(p),ownerState:snapshot()};
+  if(command==='dsh_reserve_draft_attempt_receipt')return {result:dshLedger.reserveDraftAttemptReceipt(p),ownerState:snapshot()};
+  if(command==='dsh_reserve_attempt_receipt')return {result:dshLedger.reserveAttemptReceipt(p),ownerState:snapshot()};
+  const dshCommands={dsh_draft_finalize:'draft_finalize',dsh_work_policy:'work_policy',dsh_work_policy_sync:'work_policy_sync',dsh_work_read:'work_read',dsh_work_reserve:'work_reserve',dsh_work_bind:'work_bind',dsh_work_close:'work_close',dsh_open_account:'open',dsh_reserve_attempt:'reserve',dsh_mark_pre_send:'marker',dsh_mark_sent:'sent',dsh_mark_unknown:'unknown',dsh_settle_attempt:'settle',dsh_settle_conservative:'settle_conservative',dsh_status:'read'};
+  if(Object.hasOwn(dshCommands,command))return {result:dshLedger.execute(dshCommands[command],p),ownerState:snapshot()};
   if (command === 'read') return snapshot();
   if (command === 'observe_time') { observeTime(p.now); return snapshot(); }
-  if (command === 'reset_clock') return transaction(() => {
+  if (command === 'reset_clock') return (dshLedger.isSchema2()?dshTransaction:transaction)(() => {
     const previous = number('lastSeenMs');
     if (p.expectedHighWaterMark !== previous) fail('clock_reset_forbidden');
     if (p.now < previous) {
       const event = one('SELECT * FROM forward_steps WHERE id=? AND consumed=0', p.correctionEventId ?? '');
       if (!event || p.now < event.beforeMark || p.now >= event.afterMark || event.activitySeq !== number('activitySeq')
-        || one("SELECT 1 FROM runs WHERE status='active'") || one("SELECT 1 FROM request_attempts WHERE status IN ('pre_send','sent','unknown')")) fail('clock_reset_forbidden');
+        || one("SELECT 1 FROM runs WHERE status='active'") || one("SELECT 1 FROM request_attempts WHERE status IN ('pre_send','sent','unknown')")
+        || dshLedger.isSchema2()&&one("SELECT 1 FROM dsh_budget_attempts WHERE state IN ('prepared','pre_send','sent','unknown')")) fail('clock_reset_forbidden');
       put('lastSeenMs', Math.max(p.now, event.beforeMark)); run('UPDATE forward_steps SET consumed=1 WHERE id=?', event.id);
     } else put('lastSeenMs', p.now);
     put('clockGuard', 0); return snapshot();
   });
-  if (command === 'activate') return transaction(() => {
+  if (command === 'activate') return (dshLedger.isSchema2()?dshTransaction:transaction)(() => {
+    dshLedger.recover();
     put('epoch', number('epoch') + 1);
     if (p.dirty) put('recoveryGuard', 1);
     for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'owner_restarted');
@@ -231,15 +239,15 @@ function execute(command, p) {
     buckets: all('SELECT * FROM daily_budget'), attempts: all('SELECT * FROM request_attempts'), runs: all('SELECT id,status,reason FROM runs'), trials: all('SELECT * FROM formal_trials'), ...snapshot(),
   };
   if (command === 'shutdown') {
-    transaction(() => { for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'app_shutdown'); });
+    (dshLedger.isSchema2()?dshTransaction:transaction)(() => { dshLedger.recover();for (const r of all("SELECT id FROM runs WHERE status='active'")) stopRun(r.id, 'app_shutdown'); });
     db.close(); return null;
   }
   fail('command_forbidden');
 }
 
-try { parentPort.postMessage({ ready: initialize() }); }
-catch { try { db?.close(); } catch {} parentPort.postMessage({ bootError: 'optimization_store_unavailable' }); }
+try {const ready=initialize();if(protectedCore)protectedAddon.commitOriginalBudgetWorkerNamespace(workerData.originalProtectedBudgetCarrier);parentPort.postMessage({ ready });}
+catch { try { db?.close();closeProtectedBorrow(); } catch {} parentPort.postMessage({ bootError: 'optimization_store_unavailable' });if(protectedCore)parentPort.close(); }
 parentPort.on('message', message => {
-  try { parentPort.postMessage({ id: message.id, value: execute(message.command, message.payload) }); }
-  catch (error) { parentPort.postMessage({ id: message.id, error: /^[a-z_]+$/.test(error.message) ? error.message : 'optimization_store_failure' }); }
+  try { parentPort.postMessage({ id: message.id, value: execute(message.command, message.payload) });if(message.command==='shutdown'&&protectedCore){closeProtectedBorrow();parentPort.close();} }
+  catch (error) { parentPort.postMessage({ id: message.id, error: /^[a-z_]+$/.test(error.message) ? error.message : 'optimization_store_failure',...(error.outcomeUnknown?{outcomeUnknown:true,stage:error.stage,primaryPresent:error.primaryPresent,rollbackErrorPresent:error.rollbackErrorPresent}:{}) }); }
 });

@@ -28,6 +28,21 @@ const retainedFreshStarts=new Set<object>();
 vi.mock('../../src/runtime/verification/installed-controller-lifetime.js',()=>({createInstalledControllerLifetime:()=>boundary.next.lifetime,assertInstalledControllerLifetime(value:any){if(!boundary.lifetimes.has(value))throw Error('fixture lifetime identity');value.assertCurrent();}}));
 vi.mock('../../src/runtime/verification/installed-identity.js',async original=>{const actual=await original<any>();return {...actual,assertRootProtectedFile(){},assertRootProtectedExecutable(path:string){if(boundary.next?.logicalOS)return boundary.next.logicalOS.assertExecutable(path);return actual.assertRootProtectedExecutable(path);},assertInstalledControllerIdentity(){}};});
 vi.mock('../../src/runtime/verification/migration-markers.js',async original=>({...await original<any>(),assertServiceProtectedMarkerPath(){}}));
+// The installed controller now constructs this journal eagerly. Keep its real
+// implementation and authorization function; only its fixed OS location joins
+// the same private lifetime/database already used by the original fixture.
+vi.mock('../../src/runtime/verification/installed-migration-publisher.js',async original=>{
+ const actual=await original<typeof import('../../src/runtime/verification/installed-migration-publisher.js')>();
+ const {createMigrationMarkerJournal}=await import('../../src/runtime/verification/migration-marker-journal.js');
+ return {...actual,createInstalledMigrationMarkerPublisher(input:Parameters<typeof actual.createInstalledMigrationMarkerPublisher>[0]){
+  const lifetime=boundary.next?.lifetime;
+  const assertCurrent=()=>{if(!lifetime||input.database!==lifetime.database)throw Error('fixture_migration_journal_identity');lifetime.assertCurrent();};
+  assertCurrent();
+  // Actual composition.close -> family.close -> closeMainRootFamily retains the
+  // original journal SDK custody before the installed lifetime closes its DB.
+  return createMigrationMarkerJournal({root:join(lifetime.base,'migrations'),database:input.database,authorityId:lifetime.manifest.authorityId,assertCurrent,assertAuthorized:input.assertAuthorized});
+ }};
+});
 vi.mock('../../src/runtime/verification/root-broker-client.js',()=>({createInstalledRootBrokerClient:()=>boundary.next.broker,assertInstalledRootBrokerClient(value:object,lifetime:object){if(boundary.brokers.get(value)!==lifetime)throw Error('fixture broker identity');}}));
 vi.mock('../../src/runtime/verification/installed-engine.js',()=>({initializeInstalledMacEngine:async()=>boundary.next.engine,assertInstalledMacEngineHandle(value:object){const f=boundary.engines.get(value);if(!f)throw Error('fixture engine identity');f.current();},assertInstalledEngineDatabase(value:object,db:object){const f=boundary.engines.get(value);if(!f||f.database!==db)throw Error('fixture engine database');f.current();}}));
 // This legacy fake qualification never issues a probe cleanup command. Reject

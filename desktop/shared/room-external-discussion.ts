@@ -36,6 +36,8 @@ export interface RoomExternalDiscussionNotSpawned extends Omit<RoomExternalDiscu
   noSpawnVerified: true;
 }
 export interface RoomExternalDiscussionExecuteInput {
+  /** Main-only synchronous narrowing of the original project start. Never serialized. */
+  beforeEffects?:()=>void;
   operationId: string;
   runtime: RoomExternalDiscussionRuntime;
   prompt: string;
@@ -47,6 +49,6 @@ export interface RoomExternalDiscussionExecuteInput {
 }
 export interface RoomExternalDiscussionResult { text: string; resourcesReleased: true }
 export interface RoomExternalDiscussionAdapter {
-  probe(runtime: RoomExternalDiscussionRuntime): Promise<RoomExternalDiscussionCapability>;
+  probe(runtime: RoomExternalDiscussionRuntime,beforeEffects?:()=>void): Promise<RoomExternalDiscussionCapability>;
   execute(input: RoomExternalDiscussionExecuteInput): Promise<RoomExternalDiscussionResult>;
 }

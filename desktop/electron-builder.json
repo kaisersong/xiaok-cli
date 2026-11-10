@@ -8,6 +8,12 @@
       "schemes": [
         "intent-broker"
       ]
+    },
+    {
+      "name": "xiaok context references",
+      "schemes": [
+        "xiaok"
+      ]
     }
   ],
   "directories": {
@@ -19,6 +25,7 @@
     "package.json"
   ],
   "asarUnpack": [
+    "**/node_modules/@yunzhijia/cli/**",
     "**/node_modules/nodejieba/**",
     "dist/main/desktop/electron/office-parser-worker.mjs",
     "**/node_modules/@firecrawl/anydoc/**",
@@ -26,6 +33,30 @@
     "dist/main/src/runtime/verification/native/**"
   ],
   "extraResources": [
+    {
+      "from": "../data/yzj-cli",
+      "to": "yzj-cli"
+    },
+    {
+      "from": "../data/skills/yzj-cli",
+      "to": "skills/yzj-cli"
+    },
+    {
+      "from": "../data/skills/xiaok-assistant",
+      "to": "skills/xiaok-assistant"
+    },
+    {
+      "from": "../data/skills/dingtalk-cli",
+      "to": "skills/dingtalk-cli"
+    },
+    {
+      "from": "../data/skills/feishu-cli",
+      "to": "skills/feishu-cli"
+    },
+    {
+      "from": "../data/skills/wecom-cli",
+      "to": "skills/wecom-cli"
+    },
     {
       "from": "resources/room-workspace-protocol.json",
       "to": "room-workspace-protocol.json"
@@ -164,6 +195,61 @@
     {
       "from": "THIRD_PARTY_NOTICES.md",
       "to": "THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "from": "../native/broker-authority-source/build/Release",
+      "to": "services/intent-broker/runtime",
+      "filter": [
+        "xiaok-source-runtime.cjs",
+        "source-runtime-manifest.json"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/src",
+      "to": "services/continuity-sync/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/package.json",
+      "to": "services/continuity-sync/package.json"
+    },
+    {
+      "from": "../services/continuity-device/src",
+      "to": "services/continuity-device/src",
+      "filter": [
+        "**/*.mjs"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/package.json",
+      "to": "services/continuity-device/package.json"
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium",
+      "to": "services/continuity-sync/node_modules/libsodium",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-sync/node_modules/libsodium-wrappers",
+      "to": "services/continuity-sync/node_modules/libsodium-wrappers",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-device/node_modules/@napi-rs/keyring",
+      "to": "services/continuity-device/node_modules/@napi-rs/keyring",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../services/continuity-native/auth-owner.json",
+      "to": "continuity-native/auth-owner.json"
     }
   ],
   "publish": {
@@ -185,7 +271,41 @@
     "notarize": true,
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Xiaok uses the microphone to record meetings locally for transcription and summaries."
-    }
+    },
+    "extraResources": [
+      {
+        "from": "../native/kswarm-authority-source/build/Release",
+        "to": "services/kswarm/runtime",
+        "filter": [
+          "protected_sqlite.node",
+          "index.cjs",
+          "original-authority-sqlite.cjs",
+          "xiaok-source-runtime.cjs",
+          "node_modules/**"
+        ]
+      },
+      {
+        "from": "../native/kswarm-authority-source/build/Release/kswarm-child-launcher",
+        "to": "native/kswarm-child-launcher"
+      },
+      {
+        "from": "../native/broker-authority-source/build/Release",
+        "to": "services/intent-broker/runtime",
+        "filter": [
+          "protected_sqlite.node",
+          "index.cjs",
+          "original-authority-sqlite.cjs",
+          "artifact-manifest.json"
+        ]
+      },
+      {
+        "from": "../native/broker-authority-source/build/Release/broker-child-launcher",
+        "to": "native/broker-child-launcher"
+      }
+    ],
+    "signIgnore": [
+      "Contents/Resources/services/intent-broker/runtime/darwin-arm64/node$"
+    ]
   },
   "win": {
     "target": [

@@ -1,0 +1,369 @@
+diff --git a/codex-rs/login/src/server.rs b/codex-rs/login/src/server.rs
+--- a/codex-rs/login/src/server.rs
++++ b/codex-rs/login/src/server.rs
+@@ -86,6 +86,8 @@
+ /// Options for launching the local login callback server.
+ #[derive(Debug, Clone)]
+ pub struct ServerOptions {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub xiaok_operation: Option<crate::XiaokAuthOperation>,
+     pub codex_home: PathBuf,
+     pub client_id: String,
+     pub issuer: String,
+@@ -101,6 +103,13 @@
+ }
+ 
+ impl ServerOptions {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) fn xiaok_check_operation(&self) -> io::Result<()> {
++        self.xiaok_operation
++            .as_ref()
++            .ok_or_else(crate::auth::xiaok_vault::unavailable)?
++            .check_root(&self.codex_home)
++    }
+     /// Creates a server configuration with the default issuer and port.
+     pub fn new(
+         codex_home: PathBuf,
+@@ -111,6 +120,8 @@
+         auth_route_config: AuthRouteConfig,
+     ) -> Self {
+         Self {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_operation: None,
+             codex_home,
+             client_id,
+             issuer: DEFAULT_ISSUER.to_string(),
+@@ -176,6 +187,8 @@
+ 
+ /// Starts a local callback server and returns the browser auth URL.
+ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    opts.xiaok_check_operation()?;
+     let pkce = generate_pkce();
+     let state = opts.force_state.clone().unwrap_or_else(generate_state);
+ 
+@@ -353,7 +366,11 @@
+     let parsed_url = match url::Url::parse(&format!("http://localhost{url_raw}")) {
+         Ok(u) => u,
+         Err(e) => {
+-            eprintln!("URL parse error: {e}");
++            if crate::XIAOK_AUTH_OWNER_ONLY {
++                eprintln!("Login callback URL invalid");
++            } else {
++                eprintln!("URL parse error: {e}");
++            }
+             return HandledRequest::Response(
+                 Response::from_string("Bad Request").with_status_code(400),
+             );
+@@ -392,13 +409,22 @@
+                     description: error_description,
+                 }) => {
+                     let message = oauth_callback_error_message(error_code, error_description);
+-                    eprintln!("OAuth callback error: {message}");
+-                    warn!(
+-                        error_code,
+-                        has_error_description =
+-                            error_description.is_some_and(|s| !s.trim().is_empty()),
+-                        "oauth callback returned error"
+-                    );
++                    if crate::XIAOK_AUTH_OWNER_ONLY {
++                        eprintln!("OAuth callback failed");
++                    } else {
++                        eprintln!("OAuth callback error: {message}");
++                    }
++                    if crate::XIAOK_AUTH_OWNER_ONLY {
++                        warn!("oauth callback returned error");
++                    } else {
++                        warn!(
++                            error_code,
++                            has_error_description =
++                                error_description.is_some_and(|s| !s.trim().is_empty()),
++                            "oauth callback returned error"
++                        );
++                    }
++
+                     return login_error_response(
+                         &message,
+                         io::ErrorKind::PermissionDenied,
+@@ -416,6 +442,15 @@
+                 }
+             };
+ 
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            if opts.xiaok_check_operation().is_err() {
++                return login_error_response(
++                    "xiaok_auth_unavailable",
++                    io::ErrorKind::PermissionDenied,
++                    None,
++                    None,
++                );
++            }
+             match exchange_code_for_tokens(
+                 &opts.issuer,
+                 &opts.client_id,
+@@ -427,11 +462,24 @@
+             .await
+             {
+                 Ok((tokens, client)) => {
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    if opts.xiaok_check_operation().is_err() {
++                        return login_error_response(
++                            "xiaok_auth_unavailable",
++                            io::ErrorKind::PermissionDenied,
++                            None,
++                            None,
++                        );
++                    }
+                     if let Err(message) = ensure_workspace_allowed(
+                         opts.forced_chatgpt_workspace_id.as_deref(),
+                         &tokens.id_token,
+                     ) {
+-                        eprintln!("Workspace restriction error: {message}");
++                        if crate::XIAOK_AUTH_OWNER_ONLY {
++                            eprintln!("Workspace restriction failed");
++                        } else {
++                            eprintln!("Workspace restriction error: {message}");
++                        }
+                         return login_error_response(
+                             &message,
+                             io::ErrorKind::PermissionDenied,
+@@ -440,10 +488,13 @@
+                         );
+                     }
+                     // Obtain API key via token-exchange and persist
+-                    let api_key =
++                    let api_key = if crate::XIAOK_AUTH_OWNER_ONLY {
++                        None
++                    } else {
+                         obtain_api_key(&client, &opts.issuer, &opts.client_id, &tokens.id_token)
+                             .await
+-                            .ok();
++                            .ok()
++                    };
+                     if let Err(err) = persist_tokens_async(
+                         &opts.codex_home,
+                         api_key.clone(),
+@@ -452,10 +503,16 @@
+                         tokens.refresh_token.clone(),
+                         opts.cli_auth_credentials_store_mode,
+                         opts.auth_keyring_backend_kind,
++                        #[cfg(feature = "xiaok-auth-owner-only")]
++                        opts.xiaok_operation.clone(),
+                     )
+                     .await
+                     {
+-                        eprintln!("Persist error: {err}");
++                        if crate::XIAOK_AUTH_OWNER_ONLY {
++                            eprintln!("Credential persistence failed");
++                        } else {
++                            eprintln!("Persist error: {err}");
++                        }
+                         return login_error_response(
+                             "Sign-in completed but credentials could not be saved locally.",
+                             io::ErrorKind::Other,
+@@ -464,6 +521,24 @@
+                         );
+                     }
+ 
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    if !opts
++                        .xiaok_operation
++                        .as_ref()
++                        .is_some_and(|op| op.completion_current())
++                    {
++                        return login_error_response(
++                            "xiaok_auth_unavailable",
++                            io::ErrorKind::PermissionDenied,
++                            None,
++                            None,
++                        );
++                    }
++                    #[cfg(feature = "xiaok-auth-owner-only")]
++                    let redirect = LoginSuccessRedirect::Local(format!(
++                        "http://127.0.0.1:{actual_port}/success"
++                    ));
++                    #[cfg(not(feature = "xiaok-auth-owner-only"))]
+                     let redirect = compose_success_url(
+                         actual_port,
+                         &opts.issuer,
+@@ -495,7 +570,11 @@
+                     }
+                 }
+                 Err(err) => {
+-                    eprintln!("Token exchange error: {err}");
++                    if crate::XIAOK_AUTH_OWNER_ONLY {
++                        eprintln!("Token exchange failed");
++                    } else {
++                        eprintln!("Token exchange error: {err}");
++                    }
+                     error!("login callback token exchange failed");
+                     login_error_response(
+                         &format!("Token exchange failed: {err}"),
+@@ -507,10 +586,25 @@
+             }
+         }
+         "/success" => {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            if !opts
++                .xiaok_operation
++                .as_ref()
++                .is_some_and(|op| op.completion_current())
++            {
++                return login_error_response(
++                    "xiaok_auth_unavailable",
++                    io::ErrorKind::PermissionDenied,
++                    None,
++                    None,
++                );
++            }
+             let use_streamlined_success = parsed_url
+                 .query_pairs()
+                 .any(|(key, value)| key == "codex_streamlined_login" && value == "true");
+-            let body = if use_streamlined_success {
++            let body = if crate::XIAOK_AUTH_OWNER_ONLY {
++                "<!doctype html><html><head><meta charset=\"utf-8\"><title>xiaok Desktop</title></head><body><h1>Signed in</h1><p>You can return to xiaok Desktop.</p></body></html>"
++            } else if use_streamlined_success {
+                 include_str!("assets/success.html")
+             } else {
+                 include_str!("assets/success_legacy.html")
+@@ -660,7 +754,11 @@
+                     if !cancel_attempted && !using_fallback_port {
+                         cancel_attempted = true;
+                         if let Err(cancel_err) = send_cancel_request(port) {
+-                            eprintln!("Failed to cancel previous login server: {cancel_err}");
++                            if crate::XIAOK_AUTH_OWNER_ONLY {
++                                eprintln!("Previous login cancellation failed");
++                            } else {
++                                eprintln!("Failed to cancel previous login server: {cancel_err}");
++                            }
+                         }
+                     }
+ 
+@@ -773,21 +871,35 @@
+             if let Some(error) = rejection.body_read_error {
+                 return Err(io::Error::other(error));
+             }
+-            warn!(
+-                status = %rejection.status,
+-                detail = ?rejection.detail,
+-                "oauth token exchange returned non-success status"
+-            );
++            if crate::XIAOK_AUTH_OWNER_ONLY {
++                warn!(status = %rejection.status, "oauth token exchange failed");
++            } else {
++                warn!(
++                    status = %rejection.status,
++                    detail = ?rejection.detail,
++                    "oauth token exchange returned non-success status"
++                );
++            }
++
+             Err(io::Error::other(rejection.to_string()))
+         }
+         Err(OAuthError::Transport(error)) => {
+-            error!(
+-                is_timeout = error.is_timeout(),
+-                is_connect = error.is_connect(),
+-                is_request = error.is_request(),
+-                %error,
+-                "oauth token exchange transport failure"
+-            );
++            if crate::XIAOK_AUTH_OWNER_ONLY {
++                error!(
++                    is_timeout = error.is_timeout(),
++                    is_connect = error.is_connect(),
++                    "oauth token transport failed"
++                );
++            } else {
++                error!(
++                    is_timeout = error.is_timeout(),
++                    is_connect = error.is_connect(),
++                    is_request = error.is_request(),
++                    %error,
++                    "oauth token exchange transport failure"
++                );
++            }
++
+             Err(io::Error::other(error))
+         }
+         Err(error @ OAuthError::InvalidResponse) => Err(io::Error::other(error)),
+@@ -838,7 +950,17 @@
+     refresh_token: String,
+     auth_credentials_store_mode: AuthCredentialsStoreMode,
+     keyring_backend_kind: AuthKeyringBackendKind,
++    #[cfg(feature = "xiaok-auth-owner-only")] operation: Option<crate::XiaokAuthOperation>,
+ ) -> io::Result<()> {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    let operation = {
++        let op = operation.ok_or_else(crate::auth::xiaok_vault::unavailable)?;
++        if auth_credentials_store_mode != AuthCredentialsStoreMode::File || api_key.is_some() {
++            return Err(crate::auth::xiaok_vault::unavailable());
++        }
++        op.check_root(codex_home)?;
++        op
++    };
+     // Reuse existing synchronous logic but run it off the async runtime.
+     let codex_home = codex_home.to_path_buf();
+     // Blocking tasks don't inherit task-local context.
+@@ -847,8 +969,16 @@
+ 
+     let persist_task = tokio::task::spawn_blocking(move || {
+         originator.sync_scope(|| {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            operation.check_root(&codex_home)?;
+             let mut tokens = TokenData {
+-                id_token: parse_chatgpt_jwt_claims(&id_token).map_err(io::Error::other)?,
++                id_token: parse_chatgpt_jwt_claims(&id_token).map_err(|err| {
++                    if crate::XIAOK_AUTH_OWNER_ONLY {
++                        io::Error::other("xiaok_auth_unavailable")
++                    } else {
++                        io::Error::other(err)
++                    }
++                })?,
+                 access_token,
+                 refresh_token,
+                 account_id: None,
+@@ -869,6 +999,10 @@
+                 bedrock_api_key: None,
+                 bedrock_access_keys: None,
+             };
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            {
++                return operation.save(&auth);
++            }
+             save_auth(
+                 &codex_home,
+                 &auth,
+@@ -878,9 +1012,13 @@
+         })
+     });
+ 
+-    persist_task
+-        .await
+-        .map_err(|e| io::Error::other(format!("persist task failed: {e}")))?
++    persist_task.await.map_err(|e| {
++        if crate::XIAOK_AUTH_OWNER_ONLY {
++            io::Error::other("xiaok_auth_unavailable")
++        } else {
++            io::Error::other(format!("persist task failed: {e}"))
++        }
++    })?
+ }
+ 
+ /// Validates the ID token against an optional workspace restriction.
+@@ -928,6 +1066,15 @@
+     error_code: Option<&str>,
+     error_description: Option<&str>,
+ ) -> HandledRequest {
++    let (message, error_code, error_description) = if crate::XIAOK_AUTH_OWNER_ONLY {
++        (
++            "Sign-in could not be completed.",
++            Some("xiaok_auth_login_failed"),
++            None,
++        )
++    } else {
++        (message, error_code, error_description)
++    };
+     let mut headers = Vec::new();
+     if let Ok(header) = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]) {
+         headers.push(header);

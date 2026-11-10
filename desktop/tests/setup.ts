@@ -14,6 +14,13 @@ vi.mock('../../src/runtime/verification/ordinary-source-writer-observation.js', 
   observeOrdinaryDirectoryWriter: () => {},
 }))
 
+// Routine Main units do not publish discovery observations. The dedicated
+// actual Loop runtime/registry tests explicitly unmock this producer helper.
+vi.mock('../electron/loop-database-source-observation.js', async load => ({
+  ...await load<typeof import('../electron/loop-database-source-observation.js')>(),
+  registerLoopDatabaseSourceObservation: () => {},
+}))
+
 // Windows holds transient locks on just-written files / just-closed SQLite
 // handles, so recursive temp-dir cleanup in test teardown frequently throws
 // EPERM/EBUSY *after* the assertions have already passed. That used to surface

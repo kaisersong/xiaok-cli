@@ -1,9 +1,22 @@
 import {it,expect,vi} from 'vitest';
-import {mkdtempSync,realpathSync} from 'node:fs';
+import {mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createRoomWorkspaceProjectAdapter} from '../../electron/room-workspace-project-adapter.js';
 import {workspaceDigest} from '../../electron/room-workspace-local.js';
+
+it('rechecks the private start after actual mapping authorization returns before the dispatch POST',async()=>{
+  const cwd=realpathSync(mkdtempSync(join(tmpdir(),'project-dispatch-fence-'))),sentinel=Error('original_project_dispatch_revoked');let allowed=true;const posts:string[]=[];
+  const mapping={projectId:'p',roomId:'r',workspaceId:'w',originHostId:'h',bindingId:'b',generation:1,mappingRevision:2,state:'active',workFolder:cwd,artifactsDir:cwd};
+  const adapter=createRoomWorkspaceProjectAdapter({kswarmRequest:async(path,init)=>{
+    if(init?.method==='POST'){posts.push(path);return Response.json({ok:true});}
+    const response=Response.json({ok:true,mapping,project:{id:'p',primaryRoomId:'r',requiredProtocol:'room_workspace_v1'},tasks:[{id:'p__t',assignedAgent:'a'}]});
+    const json=response.json.bind(response);response.json=async()=>{const body=await json();allowed=false;return body;};return response;
+  },broker:{request:vi.fn()},journal:{getRecord:()=>undefined,saveRecord:()=>{}}});
+  const context:any={roomId:'r',workspaceId:'w',originHostId:'h',bindingId:'b',generation:1,mappingRevision:2,logicalAgentId:'a',effectiveCwd:cwd,taskId:'p__t',contextScope:{kind:'project',projectId:'p'}};
+  try{let failure:unknown;try{await Reflect.apply(adapter.dispatch,adapter,[context,'p__t',undefined,()=>{if(!allowed)throw sentinel;}]);}catch(error){failure=error;}expect(posts).toEqual([]);expect(failure).toBe(sentinel);}
+  finally{rmSync(cwd,{recursive:true,force:true});}
+});
 
 it('recovers a signed ticket after lost ACK and cancellation without minting a new grant or reauthorizing',async()=>{
   const records=new Map<string,any>();

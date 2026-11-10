@@ -1,3 +1,5 @@
+import type {SecureCredentialsLabels} from './secure-credentials';
+import type {AttentionReason} from '../../../shared/conversation-activity-types';
 import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
 import type { RoomWorkspaceLabels } from './room-workspace';
 import { zh } from "./zh";
@@ -7,14 +9,25 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  localDecisionModels: import('./local-decision-models').LocalDecisionModelsLabels;
+  kimDecision: import('./kim-decision').KimDecisionLabels;
+  secureCredentials:SecureCredentialsLabels;
+  assistantInbox: import('./assistant-inbox').AssistantInboxLabels;
+  mailConnectors: import('./mail-connectors').MailConnectorLabels;
+  dshSourceSettings: import('./dsh-source-settings').DshSourceSettingsLabels;
   loopPublication: import('./loop-publication').LoopPublicationLabels;
-  observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
+  observation: {menuTitle:string;refresh:string;commandHint:string;dismiss:string;pending:string;disabled:string;running:string;enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
     compoundExperiment:string;compoundStep:Record<'not_started'|'pending'|'denied'|'succeeded'|'failed'|'cancelled'|'unknown',string>;compoundEdit:(status:string)=>string;compoundValidation:(status:string)=>string;compoundUnknown:(count:number)=>string;
     semanticState:Record<'waiting'|'compacted'|'skipped'|'failed',string>;semanticReason:Record<'economics'|'changed'|'no-gain'|'budget'|'unavailable',string>;
     semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>string;semanticExperiment:string};
+  cliArchive:{open:string;close:string;notice:string;loading:string;failed:string;retry:string;empty:string;unavailable:string;more:string;preview:(count:number)=>string;claim:string;imported:(count:number)=>string};
+  historySearch: { keepGrant:string; keepNotice:string; saving:string; open:string; close:string; query:string; submit:string; searching:string; coverage:string; consent:string; consentNotice:string; consentFailed:string; failed:string; empty:string; reference:string };
+  contextContinuity: {
+    queueAuthorizationChanged: string; queuePreparationFailed: string; queueInputUnavailable: string; queueUnknown: string; effectUnsettled: string; mcpResetPort: string; mcpConnect: string; mcpNotice: string; mcpListening: string; mcpDisabled: string; mcpUnavailable: string; mcpIssue: string; mcpConfig: string; mcpOneTime: string; mcpCopy: string; mcpCopied: string; mcpStart: string; mcpStop: string; mcpRevoke: string; navigationNotice: string; legacyTitle: string; legacyNotice: (count: number) => string; archiveUnknown: string; legacyUnavailable: string; claimArchive: string; inspectLegacy: string; legacyMustClaim: string; copyConversation: string; copyMessage: string; copied: string; copyFailed: string; reference: string; expand: string; more: string; attach: string; revoke: string; unavailable: string; openSource: string; snapshot: (revision: number) => string };
   diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
+  nativeContinuityUnavailable:string;
   executionHealth: Record<'running' | 'waiting' | 'recovering' | 'cleanup_pending', string>;
   multiAgent: {
     approvals: { title: string; pending: (count: number) => string; approve: string; approveForTask: string; taskScope: string; details: string; deny: string; query: string;
@@ -196,6 +209,7 @@ export interface LocaleStrings {
     appearance: string;
     settings: string;
     tools: string;
+    connectors: string;
     skills: string;
     credits: string;
     models: string;
@@ -1245,6 +1259,20 @@ export interface LocaleStrings {
     langEnSub: string;
     // general pane - service status
     serviceStatusTitle: string;
+    writerControlTitle:string;
+    writerControlDescription:string;
+    writerControlRead:string;
+    writerControlPrepare:string;
+    writerControlPreparing:string;
+    writerControlChecking:string;
+    writerControlReadError:string;
+    writerControlUnknown:string;
+    writerControlPrepared:string;
+    writerControlUnprepared:string;
+    writerControlExistingData:string;
+    writerControlReconciliation:string;
+    writerControlUnavailable:string;
+    writerControlMigrationUnavailable:string;
     serviceStatusChecking: string;
     serviceStatusReadRetry: string;
     serviceRestartUnknown: string;
@@ -1282,6 +1310,11 @@ export interface LocaleStrings {
     memoryPaneTitle: string;
     memoryContentTab: string;
     memoryConfigurationTab: string;
+    conversationModelsTab: string;
+    decisionModelsTab: string;
+    decisionModelsDesc: string;
+    memoryDecisionModelsMoved: string;
+    openDecisionModelSettings: string;
     memoryEmbeddingCurrent: string;
     memoryModelConfigFailed: string;
 
@@ -1500,6 +1533,40 @@ export interface LocaleStrings {
     memoryLocalTitle: string;
     memoryCompact: string;
     memoryCompactDone: string;
+    embeddingModelDelete: string;
+    embeddingModelDeleteActive: string;
+    embeddingModelDeleteConfirm: (name: string) => string;
+    embeddingModelDeleteFailed: string;
+    embeddingModelDeleting: string;
+    embeddingModelDownloadGuide: string;
+    embeddingModelHelpTitle: string;
+    embeddingModelManualGuideFor: (name: string) => string;
+    memoryCompactCancel: string;
+    memoryCompactCancelRequested: string;
+    memoryCompactionCapabilityHelp: string;
+    memoryCompactionCapabilityReason: (reason: string) => string;
+    memoryCompactionCapabilitySource: (source: string) => string;
+    memoryCompactionConfigWarning: string;
+    memoryCompactionContext: (limit: number | null) => string;
+    memoryCompactionEligible: string;
+    memoryCompactionHelpTitle: string;
+    memoryCompactionModelDesc: string;
+    memoryCompactionQualityNote: string;
+    memoryCompactionSelectionGuide: string;
+    modelConfigCancel: string;
+    modelConfigChange: string;
+    modelConfigChangeFor: (name: string) => string;
+    modelConfigConfirm: string;
+    modelConfigCurrent: string;
+    modelConfigDownloadAndUse: string;
+    modelConfigError: string;
+    modelConfigInstalled: string;
+    modelConfigMore: (name: string) => string;
+    modelConfigNotInstalled: string;
+    modelConfigRetry: string;
+    modelConfigUse: string;
+    modelInfoClose: string;
+    memoryCompactionConfirm: (model: string) => string;
     memoryCompactFailed: string;
     memoryClear: string;
     memoryClearConfirmTitle: string;
@@ -1948,6 +2015,54 @@ export interface LocaleStrings {
     connectorRefreshData: string;
     connectorStatusDecryptFailed: string;
     connectorLoadFailed: string;
+    enterpriseCli: {
+      organization: string;
+      onDemand: string;
+      failedRead: string;
+      install: string;
+      setup: string;
+      cancel: string;
+      identityType: string;
+      botIdentity: string;
+      userIdentity: string;
+      version: (version: string) => string;
+      providers: Record<'dingtalk' | 'feishu' | 'wecom', { title: string; description: string }>;
+      phases: Record<'notInstalled' | 'installing' | 'ready' | 'checking' | 'needsSetup' | 'opening' | 'waiting' | 'connected' | 'signedOut' | 'failed' | 'timedOut' | 'cancelling' | 'stopPending' | 'cancelled' | 'unsupported', string>;
+    };
+    appConnectorsDesc: string;
+    yzjCliAuth: {
+      account: string;
+      department: string;
+      accountId: string;
+      orgId: string;
+      connectedAt: string;
+      expiresAt: string;
+      tokenStatus: string;
+      checkedAt: string;
+      notProvided: string;
+      notRecorded: string;
+      timeNote: string;
+      tokenStates: { valid: string; needs_refresh: string; expired: string };
+      title: string;
+      description: string;
+      login: string;
+      refresh: string;
+      cancel: string;
+      idle: string;
+      checking: string;
+      signedOut: string;
+      opening: string;
+      waiting: string;
+      authenticated: string;
+      verificationFailed: string;
+      failed: string;
+      timedOut: string;
+      cancelling: string;
+      stopPending: string;
+      cancelled: string;
+      unavailable: string;
+      transportFailed: string;
+    };
     networkTools: string;
     networkToolsDesc: string;
     searchProviderTitle: string;
@@ -2709,7 +2824,23 @@ export interface LocaleStrings {
     openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) => string;
   };
 
+  assistantCalendar:{memoryOptIn:string;memoryNotice:string;memoryUnavailable:string;title:string;loading:string;unavailable:string;partial:string;disabled:string;connect:string;disconnect:string;refresh:string;count:(value:number)=>string};
   assistant: {
+    conversation: { loading: string; loadFailed: string; continueHint: string; expand: string; collapse: string; };
+    workspace: {
+      settings: string;
+      prepare: string; prepareSuggestion: (title: string) => string;
+      subtitle: string; watchesTitle: string; watchesDescription: string; recentTitle: string; schedulesTitle: string;
+      manageSchedules: string; reviewCandidates: string; historyUnavailable: string; schedulesUnavailable: string;
+      automationUnavailable: string; noHistory: string; noSchedules: string; backgroundEnabled: string; backgroundPaused: string;
+      scheduleNotice: string; runtimeNotice: string; sourcesNotice: string; nextRun: (time: string) => string;
+      scheduleActive: string; schedulePaused: string; noNextRun: string; openRun: (title: string) => string;
+      openSchedule: (title: string) => string; setupWatch: (title: string) => string; openSource: string;
+      readFailed: string; historyLimit: string; dispatched: string; needsRevalidation: string;
+      states: Record<'running' | 'success' | 'failed' | 'blocked' | 'skipped' | 'publication_pending', string>;
+    };
+    watches: Record<'ai_news' | 'yzj_messages' | 'yzj_calendar' | 'important_email', { title: string; description: string; cadence: string; requirement: string }>;
+
     operationUnknown: string;
     refreshStatus: string;
     title: string;
@@ -2751,7 +2882,105 @@ export interface LocaleStrings {
     selectKnowledgeCollection: string;
     noKnowledgeCollections: string;
     knowledgeCollectionLabel: (title: string) => string;
-  };
+
+launchGoalHeading:string;
+launchGoalCompletion:string;
+launchGoalBudget:(turnsRemaining:number,tokensRemaining:number|null)=>string;
+launchGoalWallClock:(ms:number|null)=>string;
+launchGoalConsent:(objective:string)=>string;
+analysisModelTitle:string;
+analysisModelExplanation:string;
+analysisModelSelect:string;
+analysisModelChoose:string;
+analysisModelNone:string;
+analysisModelPrepare:string;
+analysisModelState:(state:'not_configured'|'preparing'|'ready'|'unavailable')=>string;
+analysisModelReason:(reason:'unsupported_model'|'resources_unavailable'|'config_changed'|'platform_unavailable')=>string;
+launchTargetTitle:string;
+launchTargetExplanation:string;
+launchTargetsUnavailable:string;
+launchTargetSelect:string;
+launchTargetNew:string;
+launchTargetsMore:string;
+launchTargetContinue:string;
+qualityTitle:string;
+qualityExplanation:string;
+qualityState:(state:'not_evaluated'|'review_required'|'passed'|'failed'|'stale'|'unavailable')=>string;
+qualityReason:(reason:'source_unavailable'|'insufficient_cases'|'provider_unavailable'|'labels_required'|'binding_changed'|'quality_failed')=>string;
+qualityCounts:(population:number,sample:number,needs:number)=>string;
+qualityMetrics:(precision:number,recall:number,severe:number)=>string;
+qualityExport:string;
+qualityExportReport:string;
+qualityAttestation:string;
+qualityImport:string;
+qualityRevoke:string;
+qualityDiscard:string;
+periodicTitle:(enabled:boolean)=>string;
+periodicWindow:string;
+periodicBudget:string;
+periodicReason:(reason:'quality_unverified'|'budget_unavailable'|'assistant_paused'|'background_disabled')=>string;
+periodicEnable:string;
+periodicInterval:string;
+periodicEveryMinutes:(minutes:number)=>string;
+periodicNotifications:string;
+periodicNotificationsUnavailable:string;
+periodicQuietHours:string;
+periodicQuietStart:string;
+periodicQuietEnd:string;
+periodicSave:string;
+periodicCheck:string;
+periodicResult:(result:'success'|'blocked'|'skipped'|'outcome_unknown')=>string;
+periodicScheduleName:string;
+launchCancel:string;
+launchReconfirm:string;
+launchUnavailable:string;
+launchTitle:string;
+launchStart:string;
+launchConsent:string;
+launchInstruction:string;
+launchWorkspace:string;
+launchConfirm:string;
+launchClose:string;
+launchLookup:string;
+launchUnknown:string;
+launchHistoryTitle:string;
+launchOpen:string;
+launchResolve:string;
+launchState:(state:'stopping'|'needs_input'|'failed'|'cancelled'|'resolved'|'ready_for_review'|'unknown'|'blocked'|'working'|'preparing')=>string;
+calendarMemoryConsent:string;
+calendarMemoryDescription:string;
+calendarTitle:string;
+calendarReadOnly:string;
+calendarConnect:string;
+calendarDisconnect:string;
+calendarPartial:string;
+calendarUnavailable:string;
+calendarDisabled:string;
+calendarEvents:(count:number)=>string;
+calendarError:string;
+proposalTime:(time:string)=>string;
+proposalNextStep:(step:string)=>string;
+proposalDetails:string;
+loadMoreCandidates:string;
+prepareDraft:string;
+dismissAction:string;
+snoozeAction:string;
+draftInputOccupied:string;
+draftPreparedNotice:string;
+actionConflict:string;
+coverageUnknown: string;
+coverageIncomplete: string;
+coverageComplete: string;
+coverageDetails: string;
+coverageAnalysisFailed: string;
+coverageAnalysisPending: string;
+coverageStale: string;
+coverageSource: (id:'task_snapshots'|'kswarm_projects'|'timed_actions'|'meeting_metadata'|'knowledge_source_metadata') => string;
+coverageStatus: (status:'checked'|'partial'|'unavailable'|'disabled'|'not_checked') => string;
+coverageCount: (included:number,records:number) => string;
+coverageTime: (time:string) => string;
+followUpAcceptedDraft:string;
+};
 
   projectSmartTeam: {
     title: string;
@@ -3087,7 +3316,9 @@ export interface LocaleStrings {
 
   // chatView
   conversationActivity: {
+    dismissReminder: string; reminderDismissed: string; attentionUnavailable: string; readyForAcceptance:string; attentionReasons: Record<AttentionReason, string>;
     expand: string; collapse: string; summaryDetails: string; workCount: (count: number) => string;
+    nativeApprove:string;nativeDeny:string;nativeSubmitting:string;nativeAnswered:string;nativeAnswerUnconfirmed:string;nativeRefresh:string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
     frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
@@ -3119,6 +3350,8 @@ export interface LocaleStrings {
     enableComputerUse: string;
     cuDismiss: string;
     taskFailed: string;
+    interruptedContinue: string;
+    interruptedChoices: string;
     scrollToBottom: string;
     conversationIndexLabel: string;
     conversationIndexItem: (index: number, preview: string) => string;
@@ -3182,6 +3415,7 @@ export interface LocaleStrings {
     statusComplete: string;
     statusCancelled: string;
     statusDisarmed: string;
+    detailsUnavailable: string;
     budgetExhausted: string;
     showDetails: string;
     hideDetails: string;
@@ -3215,6 +3449,7 @@ export interface LocaleStrings {
 
   // chatShell
   chatShell: {
+    threadLoadFailed: string; threadLoadHelp: string; reloadThread: string; backToTasks: string; threadLoading: string; answerFailed: string; dismissError: string;
     attachmentLabel: string;
     cuUnavailable: string;
     historyUnavailable: (taskIds: string) => string;
@@ -3222,13 +3457,19 @@ export interface LocaleStrings {
     historyLoadEarlier: (remaining: number) => string;
     historyLoading: string;
     taskCreateFailed: string;
+    submissionConflict: string;
+    submissionNotPrepared: string;
+    submissionReconciliationRequired: string;
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
+    taskInterrupted: string;
+    taskExecutionInterrupted: string;
     modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;
     modelConnectionFailed: string;
+    regenerateReply: string;
     modelTextRepetition: string;
     modelUsageLimitReached: (resetAt?: string) => string;
     cuProcessing: string;
@@ -3425,6 +3666,9 @@ export interface LocaleStrings {
   // a2ui
   a2uiLoadFailed: string;
   a2uiLoading: string;
+  a2uiTableFilter: string;
+  a2uiExportCsv: string;
+  a2uiNoRows: string;
   a2uiRenderError: string;
 
   // sub-agent
@@ -3680,6 +3924,9 @@ export interface LocaleStrings {
   projectsDetailDispatchFailed: string;
   projectsDetailDispatchWorkflowStarted: string;
   projectsDetailDispatchTasksDispatched: (count: number) => string;
+  projectsDetailDispatchIntentStored:(count:number)=>string;
+  projectsDetailDispatchObservationSummary:(present:number,missing:number,unavailable:number)=>string;
+  projectsDetailDispatchObservationUnavailable:string;
   projectsDetailDispatchNone: string;
   projectsDetailExecModeSwitched: (label: string) => string;
   projectsDetailExecModeFailed: string;

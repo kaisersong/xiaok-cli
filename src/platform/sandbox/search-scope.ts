@@ -1,3 +1,4 @@
+import {getSearchScope,withSearchScope} from '../../ai/tools/search-scope-context.js';
 import type {ToolExecutionContext} from '../../types.js';
 import {inheritNativeReadonlyExecutionContext, isNativeReadonlyExecutionContext} from '../../ai/tools/native-readonly-context.js';
 import {isReadonlySandboxEnforcer, type createSandboxEnforcer} from './enforcer.js';
@@ -9,8 +10,10 @@ const scopes = new WeakMap<object, SearchPathGuard>();
  * cannot install a search policy or bypass an existing one. */
 export function withSandboxSearchScope(context:ToolExecutionContext|undefined,
   enforcer:ReturnType<typeof createSandboxEnforcer>):ToolExecutionContext {
-  const derived:ToolExecutionContext = context
+  let derived:ToolExecutionContext = context
     ? Object.create(Object.getPrototypeOf(context),Object.getOwnPropertyDescriptors(context)) : {};
+  const originalScope=getSearchScope(context);
+  if(originalScope)derived=withSearchScope(derived,originalScope);
   inheritNativeReadonlyExecutionContext(context,derived);
   const readonly = isNativeReadonlyExecutionContext(context);
   scopes.set(derived,path=>{

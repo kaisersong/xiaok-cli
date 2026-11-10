@@ -1,3 +1,4 @@
+import {withOriginalNestedSubagentResource} from '../../runtime/task-host/task-runtime-host.js';
 import { createTransportAuthorizationError } from '../../runtime/sol-pi/transport-lease.js';
 import { consumeDelegatedObservationExecutionPlan, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner, type DelegatedObservationExecutionPlan } from '../../runtime/sol-pi/delegated-session-owner.js';
 import { type ObservationSessionOwner } from '../../runtime/sol-pi/observation-session-owner.js';
@@ -175,6 +176,7 @@ export async function createNamedSubAgentSession(
 
     return {
       async run(prompt, signal, context) {
+        return withOriginalNestedSubagentResource(async()=>{
         if (disposePromise) throw new Error(`subagent session is disposed: ${options.runtimeAgentId ?? options.agentDef.name}`);
         if (deactivated) throw new Error(`subagent session is deactivated: ${options.runtimeAgentId ?? options.agentDef.name}`);
         if (running) throw new Error('subagent session already has an active run');
@@ -293,6 +295,7 @@ export async function createNamedSubAgentSession(
         if (settledBodyFailure)
             throw settledBodyFailure.error;
         return settledBodyResult;
+        });
       },
       async suspend() {
         if(running)throw Error('cannot suspend an active subagent run');

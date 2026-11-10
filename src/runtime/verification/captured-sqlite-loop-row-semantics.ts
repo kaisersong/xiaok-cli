@@ -1,3 +1,5 @@
+import {ASSISTANT_DERIVED_LINEAGE_SCHEMA} from '../assistant/derived-lineage-contract.js';
+import {ASSISTANT_CALENDAR_SNAPSHOT_SCHEMA} from '../assistant/calendar-source-contract.js';
 import { capturedFields, capturedIdentity, capturedInteger } from './captured-source-json.js';
 import type { CapturedLoopRow, CapturedLoopSourceReader } from './captured-sqlite-loop-reader.js';
 import type { MetadataSessionRelationId } from './metadata-session-relation-manifest.js';
@@ -23,6 +25,24 @@ export function validateCapturedLoopOrdinaryRow(reader:CapturedLoopSourceReader,
   loopChoice(row.owner_kind,ownerKinds);capturedIdentity(row.owner_id);capturedIdentity(row.id);ref(String(row.owner_kind),row.owner_id,table+'.owner');
  }
  switch(table){
+ case 'assistant_calendar_memory_settings':
+  capturedIdentity(row.owner_id);capturedIdentity(row.profile_id);loopChoice(row.enabled,[0,1]);capturedInteger(row.revision);break;
+ case 'assistant_derived_run_markers':case 'assistant_derived_lineage':{
+  capturedIdentity(row.run_id);capturedIdentity(row.profile_id);const run=one('loop:run',row.run_id)!;
+  loopChoice(run.loop_id,['personal-assistant-evening-reflection','personal-assistant-morning-briefing']);ref('loop-run',row.run_id,table+'.run');
+  if(table==='assistant_derived_lineage'){const lineage=ASSISTANT_DERIVED_LINEAGE_SCHEMA.parse(json.lineage_json);if(lineage.profileId!==row.profile_id)loopSemanticFailure('derived_profile');}
+  break;
+ }
+ case 'assistant_calendar_connection':
+  if(row.id!==1)loopSemanticFailure('calendar_connection');capturedInteger(row.epoch);loopChoice(row.enabled,[0,1]);
+  if(row.enabled===0&&(row.binary_path!==''||row.account_hash!==''))loopSemanticFailure('calendar_connection');
+  // Historical picked-binary rows remain bytes/inventory, never executable authority.
+  if(row.enabled===1&&(typeof row.binary_path!=='string'||!row.binary_path||typeof row.account_hash!=='string'||!row.account_hash))loopSemanticFailure('calendar_connection');break;
+ case 'assistant_calendar_generations':{
+  capturedInteger(row.id,1);capturedInteger(row.epoch);capturedInteger(row.collected_at);
+  const value=ASSISTANT_CALENDAR_SNAPSHOT_SCHEMA.parse(json.snapshot_json);
+  if(value.epoch!==row.epoch||(value.collectedAt??0)!==row.collected_at)loopSemanticFailure('calendar_generation');break;
+ }
  case 'completion_expectations':
   if(row.schema_version!==1)loopSemanticFailure('version');loopIds(json.expected_kinds_json).forEach(kind=>loopChoice(kind,evidenceKinds));
   loopChoice(row.source,['task_spec','tool_schema','scheduler_executor_contract','loop_stage_contract','kswarm_deliverable_type','goal_criterion','legacy_classifier']);loopChoice(row.confidence,['explicit','inferred','legacy']);loopObject(json.metadata_json);break;

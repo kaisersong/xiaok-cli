@@ -4,7 +4,8 @@ import type {IsolatedExecutionPort,HostIssuedMountPlan,ExecutionCommand} from '.
 import type {CompoundOperationRecord,CompoundAdvance} from './compound-operation.js';
 import type {ToolExecutionContext} from '../../types.js';
 import {beginToolObservation} from './collector-port.js';
-import {truncateText} from '../../ai/tools/truncation.js';
+import {validateBashLimits} from '../../ai/tools/bash-limits.js';
+import {BoundedShellOutput,renderShellOutput} from '../../ai/tools/bash-output.js';
 
 /** Host deployment port, never model arguments. Staging grants and the qualified
  * engine are issued by the protected product factory, not by this consumer. */
@@ -44,7 +45,7 @@ export async function executeDirectIsolatedCommand(input:{backend:CompoundValida
 }
 async function executeIsolatedConsumer(input:ConsumerInput):Promise<string>{
  const {backend,actual,context,assertCurrent,identity}=input;
- if(!Number.isFinite(actual.timeoutMs)||actual.timeoutMs<=0||!Number.isFinite(actual.maxChars)||actual.maxChars<=0)throw Error('compound_validation_limits_invalid');
+ if(validateBashLimits(actual.timeoutMs,actual.maxChars))throw Error('compound_validation_limits_invalid');
  assertCurrent();context?.signal?.throwIfAborted();
  const staged=input.preparedInput;
  assertCurrent();context?.signal?.throwIfAborted();
@@ -57,15 +58,15 @@ async function executeIsolatedConsumer(input:ConsumerInput):Promise<string>{
  if(expected.sessionIdentity!==identity.sessionIdentity||expected.compoundOperationId!==identity.operationId||expected.validationInvocationId!==identity.validationInvocationId||expected.scopeDigest!==staged.scopeDigest||expected.executionIdentity!==reserved.executionIdentity)throw Error('compound_validation_reservation_mismatch');
  await input.start(expected);
  const abort=new AbortController();const signal=context?.signal?AbortSignal.any([context.signal,abort.signal]):abort.signal;
- let timedOut=false,truncated=false,totalBytes=0,stdout='',stderr='';
+ let timedOut=false,truncated=false,totalBytes=0;
+ const stdout=new BoundedShellOutput(Math.min(actual.maxChars,65536)),stderr=new BoundedShellOutput(Math.min(actual.maxChars,65536));
  const timer=setTimeout(()=>{timedOut=true;abort.abort(new DOMException('Validation timeout','TimeoutError'));},actual.timeoutMs);
  const observation=beginToolObservation(context?.observationCollector,{toolName:'bash',source:{command:actual.command,workdir:actual.workdir}});
  const append=(stream:'stdout'|'stderr',chunk:string)=>{
   if(typeof chunk!=='string')throw Error('compound_validation_output_invalid');
   const bytes=Buffer.from(chunk),remaining=Math.max(0,1024*1024-totalBytes);totalBytes+=bytes.length;
   if(bytes.length>remaining){truncated=true;abort.abort(Error('compound_validation_output_limit'));}
-  const kept=bytes.subarray(0,remaining).toString('utf8');observation.append(kept);
-  if(stream==='stdout')stdout+=kept;else stderr+=kept;
+  const kept=(stream==='stdout'?stdout:stderr).write(bytes.subarray(0,remaining));observation.append(kept);
   context?.executionProgress?.progress();
  };
  try{
@@ -75,11 +76,13 @@ async function executeIsolatedConsumer(input:ConsumerInput):Promise<string>{
   const result=await backend.execution.dispatchExecution(expected,{signal,onStdout:chunk=>append('stdout',chunk),onStderr:chunk=>append('stderr',chunk)});
   if(result.termination!=='terminal'||!result.receipt)throw Error('compound_validation_quiescence_unknown');
   backend.execution.assertQuiescent(result.receipt,expected);
-  const outcome=context?.signal?.aborted?'cancelled':timedOut?'timeout':result.exitCode===0?'success':'error';
+  observation.append(stdout.end());observation.append(stderr.end());
+  const outcome=context?.signal?.aborted?'cancelled':timedOut?'timeout':truncated||result.outputTruncated?'error':result.exitCode===0?'success':'error';
   observation.finalize({executionState:'terminal',outcome,...(truncated||result.outputTruncated?{incompleteReason:'collector_limit'}:outcome==='cancelled'?{incompleteReason:'cancelled'}:outcome==='timeout'?{incompleteReason:'timeout'}:{})});
   await input.settle(outcome,result.exitCode);
-  context?.runtimeFactSink?.emit({invocationId:identity.validationInvocationId,toolName:'bash',factKind:'command_result',exitCode:result.exitCode});
-  return truncateText(`${outcome==='success'?'':'Error: '}[validation ${outcome}; exitCode=${result.exitCode}]\n${stdout}${stderr?'\n'+stderr:''}`,actual.maxChars).text;
+  context?.runtimeFactSink?.emit({invocationId:identity.validationInvocationId,toolName:'bash',factKind:'command_result',exitCode:outcome==='success'?0:result.exitCode===0?null:result.exitCode});
+  const status=`${outcome==='success'?'':'Error: '}[validation ${outcome}; exitCode=${result.exitCode}${truncated||result.outputTruncated?'; output_limit':''}]`;
+  return `${status}\n${renderShellOutput(stdout,stderr,actual.maxChars-status.length-1)}`;
  }catch(error){
   observation.finalize({executionState:'termination_pending',incompleteReason:'termination_unconfirmed'});
   await input.unknown();

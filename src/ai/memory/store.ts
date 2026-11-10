@@ -48,7 +48,10 @@ export interface MemoryStore {
   getStats?(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
   getPersonaTraits?(): { trait: string; confidence: number }[];
   clearAll?(): void;
-  setLLMFn?(fn: (prompt: string) => Promise<string>): void;
+  setLLMFn?(fn: (prompt: string, signal?: AbortSignal) => Promise<string>): void;
+  cancelCompaction?(request: { requestSource: 'user' | 'agent' | 'scheduler' }): boolean;
+  configureEmbedding?(config: import('./embedding.js').EmbeddingConfig, request: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void>;
+  getEmbeddingModelId?(): string;
   delete?(id: string, layer?: number): Promise<boolean>;
   listLayer?(layer: number, limit?: number, offset?: number): LayerEntry[];
 }

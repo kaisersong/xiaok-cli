@@ -23,18 +23,14 @@ it.each([undefined, 'agent', 'scheduler'])('rejects %s before touching the actua
 it.each([undefined, null, 1, 'false', {}])('rejects invalid scalar %s without writing', value => {
   expect(() => update()(value, 'user')).toThrow('automation_config_input_invalid'); expect(existsSync(join(root, 'config.json'))).toBe(false);
 });
-it('keeps the original malformed JSON backup and default normalization behavior', async () => {
-  writeFileSync(join(root, 'config.json'), '{bad'); update()(false, 'user'); expect(readFileSync(join(root, 'config.json.bak'), 'utf8')).toBe('{bad'); expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(false);
-});
+it('preserves malformed credential config instead of resetting it during a public toggle',()=>{const file=join(root,'config.json');writeFileSync(file,'{bad');expect(()=>update()(false,'user')).toThrow('credential_config_corrupt');expect(readFileSync(file,'utf8')).toBe('{bad');expect(existsSync(file+'.bak')).toBe(false);});
+
 it('performs two real semantic edits in order with a fresh config each time', async () => {
   update()(false, 'user'); expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(false);
   update()(true, 'user'); expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(true);
 });
-it('records the remaining actual stale whole-config writer debt without claiming a global transaction', async () => {
-  await configModule.saveConfig(structuredClone(DEFAULT_CONFIG)); const oldWholeConfig = await configModule.loadConfig();
-  update()(false, 'user'); expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(false);
-  await configModule.saveConfig(oldWholeConfig); expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(true);
-});
+it('rejects a stale whole-config writer instead of undoing a newer semantic edit',async()=>{await configModule.saveConfig(structuredClone(DEFAULT_CONFIG));const old=await configModule.loadConfig();update()(false,'user');await expect(configModule.saveConfig(old)).rejects.toThrow('credential_config_changed');expect((await configModule.loadConfig()).automations?.globalBackgroundAutoRunEnabled).toBe(false);});
+
 it('keeps filesystem failure a rejection in the original async save export', async () => {
   mkdirSync(join(root, 'config.json')); let returned: unknown; expect(() => { returned = configModule.saveConfig(structuredClone(DEFAULT_CONFIG)); }).not.toThrow(); expect(returned).toBeInstanceOf(Promise); await expect(returned).rejects.toThrow();
 });

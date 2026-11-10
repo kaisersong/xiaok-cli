@@ -1,0 +1,12 @@
+[
+  {
+    "status": 0,
+    "stdout": "HTTP/1.1 200 OK\nConnection: keep-alive\r\nContent-Type: application/json\r\nDate: Sun, 08 Nov 2026 20:54:13 GMT\r\nKeep-Alive: timeout=5\r\n\r\n{\"tag_name\":\"desktop-v1.6.3\",\"draft\":true,\"prerelease\":false}",
+    "stderr": ""
+  },
+  {
+    "status": 1,
+    "stdout": "HTTP/1.1 404 Not Found\nConnection: keep-alive\r\nContent-Type: application/json\r\nDate: Sun, 08 Nov 2026 20:54:13 GMT\r\nKeep-Alive: timeout=5\r\n\r\n{\"message\":\"fixture not found\"}",
+    "stderr": "gh: fixture not found (HTTP 404)\n"
+  }
+]

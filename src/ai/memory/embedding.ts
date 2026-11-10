@@ -9,7 +9,48 @@ export interface EmbeddingConfig {
   dimensions: number;
 }
 
+const liveClients = new Set<EmbeddingClient>();
+const heldModelSets = new WeakMap<EmbeddingClient, Set<string>>();
+/** Includes retiring and failed-close clients; only a settled physical close retires a local model. */
+export function getLiveEmbeddingModelIds(): readonly string[] {
+  return [...new Set([...liveClients].flatMap(client => [...(heldModelSets.get(client) ?? [])]))];
+}
+
 export class EmbeddingClient {
+  private readonly operations = new Set<Promise<unknown>>();
+  private state: 'open' | 'changing' | 'closed' | 'unknown' = 'open';
+  private closing?: Promise<void>;
+  private readonly heldModels = new Set<string>();
+  getModelId(): string { return this.config.model; }
+  private admit<T>(start: () => Promise<T>): Promise<T> {
+    if (this.state !== 'open') return Promise.reject(new Error('embedding_configuration_changed'));
+    const pending = start(); this.operations.add(pending);
+    const done = () => { this.operations.delete(pending); };
+    pending.then(done, done); return pending;
+  }
+  private async drain(): Promise<void> { await Promise.allSettled([...this.operations]); }
+  async configure(config: EmbeddingConfig): Promise<void> {
+    if ((this.state !== 'open' && this.state !== 'unknown') || this.closing) throw new Error('embedding_configuration_changed');
+    this.state = 'changing';
+    // Reserve the admitted target before any suspension; deletion must also protect in-flight choices.
+    if (config.provider === 'local') this.heldModels.add(config.model);
+    try {
+      // This constructor only resolves model paths; inference initialization stays lazy.
+      const nextEngine = config.provider === 'local' ? new OnnxEmbeddingEngine(config.model) : null;
+      await this.drain();
+      // A prior failed release is retried here. No admission reopens until it really settles.
+      await this.onnxEngine?.close();
+      this.db.prepare('DELETE FROM memory_embeddings').run();
+      this.cache.clear();
+      this.config = { ...config };
+      this.onnxEngine = nextEngine;
+      this.onnxStatus = null; this.onnxUnavailableWarned = false;
+      this.heldModels.clear();
+      if (config.provider === 'local') this.heldModels.add(config.model);
+      this.state = 'open';
+    } catch (error) { this.state = 'unknown'; throw error; }
+  }
+
   private db: Database.Database;
   private config: EmbeddingConfig;
   private cache: Map<string, Float32Array> = new Map();
@@ -19,7 +60,10 @@ export class EmbeddingClient {
 
   constructor(db: Database.Database, config: EmbeddingConfig) {
     this.db = db;
-    this.config = config;
+    this.config = { ...config };
+    heldModelSets.set(this,this.heldModels);
+    liveClients.add(this);
+    if (config.provider === 'local') this.heldModels.add(config.model);
     if (config.provider === 'local') {
       this.onnxEngine = new OnnxEmbeddingEngine(config.model);
     }
@@ -29,7 +73,8 @@ export class EmbeddingClient {
     return 'cache:' + crypto.createHash('sha256').update(text).digest('hex');
   }
 
-  async embed(text: string): Promise<Float32Array> {
+  embed(text: string): Promise<Float32Array> { return this.admit(() => this.embedRaw(text)); }
+  private async embedRaw(text: string): Promise<Float32Array> {
     const key = this.cacheKey(text);
 
     if (this.cache.has(key)) {
@@ -61,7 +106,8 @@ export class EmbeddingClient {
     ).run(key, buf);
   }
 
-  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+  embedBatch(texts: string[]): Promise<Float32Array[]> { return this.admit(() => this.embedBatchRaw(texts)); }
+  private async embedBatchRaw(texts: string[]): Promise<Float32Array[]> {
     const results: (Float32Array | null)[] = new Array(texts.length).fill(null);
     const toFetch: { index: number; text: string; key: string }[] = [];
 
@@ -95,8 +141,11 @@ export class EmbeddingClient {
     return results as Float32Array[];
   }
 
-  async embedAndStore(memoryId: string, layer: number, text: string): Promise<Float32Array> {
-    const embedding = await this.embed(text);
+  embedAndStore(memoryId: string, layer: number, text: string): Promise<Float32Array> {
+    return this.admit(() => this.embedAndStoreRaw(memoryId, layer, text));
+  }
+  private async embedAndStoreRaw(memoryId: string, layer: number, text: string): Promise<Float32Array> {
+    const embedding = await this.embedRaw(text);
     const buf = Buffer.from(embedding.buffer);
 
     this.db.prepare(
@@ -108,6 +157,7 @@ export class EmbeddingClient {
   }
 
   getStoredEmbedding(memoryId: string, layer: number): Float32Array | null {
+    if (this.state !== 'open') throw new Error('embedding_configuration_changed');
     const row = this.db.prepare(
       'SELECT embedding FROM memory_embeddings WHERE memory_id = ? AND layer = ?'
     ).get(memoryId, layer) as { embedding: Buffer } | undefined;
@@ -157,9 +207,18 @@ export class EmbeddingClient {
     return data.data.map(d => new Float32Array(d.embedding));
   }
 
-  async close(): Promise<void> {
-    if (this.onnxEngine) {
-      await this.onnxEngine.close();
-    }
+  close(): Promise<void> {
+    if (this.state === 'closed') return Promise.resolve();
+    if (this.closing) return this.closing;
+    if (this.state === 'changing') return Promise.reject(new Error('embedding_configuration_changed'));
+    this.state = 'unknown';
+    const closing = (async () => {
+      await this.drain();
+      await this.onnxEngine?.close();
+      this.heldModels.clear(); liveClients.delete(this); this.state = 'closed';
+    })();
+    this.closing = closing;
+    const done = () => { if (this.closing === closing) this.closing = undefined; };
+    closing.then(done, done); return closing;
   }
 }

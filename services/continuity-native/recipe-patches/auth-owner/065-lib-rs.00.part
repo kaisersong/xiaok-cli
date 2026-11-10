@@ -1,0 +1,16 @@
+diff --git a/codex-rs/login/src/lib.rs b/codex-rs/login/src/lib.rs
+--- a/codex-rs/login/src/lib.rs
++++ b/codex-rs/login/src/lib.rs
+@@ -1,3 +1,12 @@
++// Fixed at build time; ordinary login SDK compatibility is unchanged.
++pub const XIAOK_AUTH_OWNER_ONLY: bool = cfg!(feature = "xiaok-auth-owner-only");
++#[cfg(all(
++    feature = "xiaok-auth-owner-only",
++    not(all(target_os = "macos", target_arch = "aarch64"))
++))]
++compile_error!("xiaok-auth-owner-only is qualified only for macOS arm64");
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub use auth::{XiaokAuthOperation, initialize_xiaok_auth_vault};
+ pub mod auth;
+ pub mod auth_env_telemetry;
+ pub mod test_support;

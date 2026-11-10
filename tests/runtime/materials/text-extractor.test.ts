@@ -17,6 +17,24 @@ describe('extractMaterialText', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
+  it('preserves the first dynamically created guard error raised inside the host PDF boundary',async()=>{
+    const file=join(rootDir,'guard.pdf');writeFileSync(file,'%PDF-1.7 host fixture');let allowed=true,first:unknown;
+    const guard=()=>{if(!allowed){const error=new Error('fresh_pdf_error');first??=error;throw error;}};
+    let failure:unknown;
+    try{await extractMaterialText({workspacePath:file,mimeType:'application/pdf',beforeEffects:guard,pdfToText:async(_bytes:Uint8Array,inner?:()=>void)=>{allowed=false;(inner??guard)();return 'must not return';}} as any);}catch(error){failure=error;}
+    expect(first).toBeDefined();expect(failure).toBe(first);
+  });
+
+  it('preserves the original guard cause after real file read and office return instead of caching a parse failure',async()=>{
+    const filePath=join(rootDir,'revoked.doc');writeFileSync(filePath,'office bytes');
+    let allowed=true,officeCalls=0;const sentinel={code:'original_source_expired'};
+    const guard=()=>{if(!allowed)throw sentinel;};
+    const result=extractMaterialText({workspacePath:filePath,mimeType:'application/msword',beforeEffects:guard,
+      officeToMarkdown:async()=>{officeCalls++;allowed=false;return{ok:true,markdown:'# Physical parser output',format:'doc',engine:'anydoc',engineVersion:'fixture',chars:24,truncated:false};},
+    } as any);
+    await expect(result).rejects.toBe(sentinel);expect(officeCalls).toBe(1);
+  });
+
   it('reads direct text-like materials without helper scripts', async () => {
     const filePath = join(rootDir, 'brief.md');
     writeFileSync(filePath, '# A客户\n需要降本增效。', 'utf8');

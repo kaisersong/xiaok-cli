@@ -22,6 +22,7 @@ export type AssistantCandidateKindView = 'memory' | 'knowledge' | 'follow_up';
 export type AssistantCandidateStatusView = 'staged' | 'pending' | 'accepting' | 'accepted' | 'rejected' | 'superseded' | 'accept_failed';
 
 export interface AssistantCandidateView {
+  acceptedTargetRef?:string;
   id: string;
   kind: AssistantCandidateKindView;
   status: AssistantCandidateStatusView;

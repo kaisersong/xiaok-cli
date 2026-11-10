@@ -60,7 +60,7 @@ export class RuntimeFacade {
         throw buildError;
       }
       const normalized = normalizeRuntimeError(buildError);
-      throw new Error(`${normalized.code}: ${normalized.message}`);
+      throw new Error(`${normalized.code}: ${normalized.message}`, { cause: buildError });
     }
 
     try {
@@ -101,7 +101,7 @@ export class RuntimeFacade {
         throw runError;
       }
       const normalized = normalizeRuntimeError(runError);
-      throw new Error(`${normalized.code}: ${normalized.message}`);
+      throw new Error(`${normalized.code}: ${normalized.message}`, { cause: runError });
     }
   }
 

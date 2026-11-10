@@ -1,5 +1,37 @@
+import type { MemorySettingsSnapshot } from '../shared/memory-settings-types.js';
+export function sanitizeAssistantPeriodicInput(input:{enabled?:unknown;notificationsEnabled?:unknown;intervalMinutes?:unknown;quietHours?:unknown;expectedRevision?:unknown}){
+ return Object.fromEntries(Object.entries({enabled:input?.enabled,notificationsEnabled:input?.notificationsEnabled,intervalMinutes:input?.intervalMinutes,quietHours:input?.quietHours,expectedRevision:input?.expectedRevision}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantLaunchInput(input:{proposalId?:unknown;expectedRevision?:unknown;draftId?:unknown;instruction?:unknown;expectedResultDigest?:unknown;existingThreadId?:unknown;goalConsentChecked?:unknown}){
+  return Object.fromEntries(Object.entries({proposalId:input?.proposalId,expectedRevision:input?.expectedRevision,draftId:input?.draftId,instruction:input?.instruction,expectedResultDigest:input?.expectedResultDigest,existingThreadId:input?.existingThreadId,goalConsentChecked:input?.goalConsentChecked}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantActionInput(input:{proposalId?:unknown;expectedRevision?:unknown;snoozeUntil?:unknown}){
+  return pickDefined({proposalId:typeof input?.proposalId==='string'?input.proposalId:'',expectedRevision:input?.expectedRevision,
+    snoozeUntil:input?.snoozeUntil});
+}
+import type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantThreadTargetPage} from '../shared/assistant-launch-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
+import type {AssistantPeriodicStatus,AssistantPeriodicSettings,AssistantPeriodicCheck} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchDraft,AssistantLaunchOperation} from '../shared/assistant-launch-contract.js';
+import type {AssistantActionDecisionResultDto} from '../shared/assistant-action-contract.js';
+import type {AssistantCandidatePageDto,AssistantActionOverviewDto} from '../shared/assistant-ipc-contract.js';
+import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
+import type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../shared/decision-model-types.js';
+import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
+import type {KimConfigPatch,KimConfigView} from '../shared/kim-decision-ipc-contract.js';
+import type {KimHealthView} from '../shared/kim-decision-ipc-contract.js';
+import type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../shared/mail-connectors-ipc-contract.js';
+import type { EnterpriseCliState, EnterpriseCliAction, EnterpriseCliProvider } from '../shared/enterprise-cli-ipc-contract.js';
+import type { YzjCliAuthState, YzjCliAuthAction } from '../shared/yzj-cli-auth-ipc-contract.js';
+import type {DefaultDispatchInput,DefaultDispatchResult} from '../shared/default-dispatch-ipc-contract.js';
+import type {NativeActivityQuestionForm,NativeActivityAnswer} from '../shared/native-activity-question-contract.js';
+import type {WriterControlResult} from '../shared/kswarm-writer-control-ipc-contract.js';
+import type {RoomConversionCaptureInput,RoomConversionCaptureOutput,RoomConversionCaptureReference,RoomConversionObserveInput} from '../shared/room-conversion-input-contract.js';
+import type {UserTaskSubmissionInput,UserTaskSubmissionOutput} from '../shared/user-task-submission-contract.js';
 import type {ScheduledTaskDueEvent} from '../shared/scheduled-task-due-event.js';
 import type { HarnessOptimizationConfig, HarnessOptimizationState } from '../shared/harness-optimization-contract.js';
+import type { ProjectPlanningInput, ProjectPlanningOutput } from '../shared/project-planning-ipc-contract.js';
 import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
 import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
@@ -37,8 +69,9 @@ import type {LoopPublicationActionDto,LoopPublicationActionResultDto,LoopPublica
 import type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
 export type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
 import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
-import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
+import type { ConversationActivity, WorkWatch, ConversationWorkView, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
+import type { TaskHistoryRead } from '../shared/task-history.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -91,10 +124,23 @@ export type {
 };
 
 export const PRELOAD_API_KEYS = [
+  'getAuthOwnerStatus',
+  'startAuthOwnerLogin',
+  'cancelAuthOwnerLogin',
+  'logoutAuthOwner',
+  'getContextMcpStatus',
+  'setContextMcpEnabled',
+  'resetContextMcpPort',
+  'issueContextMcpConfig',
+  'listExternalContextReaders',
+  'revokeExternalContextReader',
   'getModelConfig',
   'saveModelConfig',
   'updateModelRuntimeOptions',
   'getSystemOneConfig',
+  'getKimDecisionConfig',
+  'saveKimDecisionConfig',
+  'testKimDecisionConnection',
   'saveSystemOneConfig',
   'createManagedXiaokAgent',
   'testProviderConnection',
@@ -114,8 +160,32 @@ export const PRELOAD_API_KEYS = [
   'stopObservationTask',
   'revokeObservationTask',
   'getObservationTaskStatus',
+  'submitUserTask',
+  'captureRoomConversion',
+  'observeRoomConversion',
   'createTask',
   'createTaskWithFiles',
+  'inspectContextConversations',
+  'getContextGrant',
+  'importLegacyThreadMetadata',
+  'getLegacyThreadMetadata',
+  'previewLegacyContext',
+  'claimLegacyContext',
+  'listCliArchives',
+  'previewCliArchive',
+  'claimCliArchive',
+  'createContextConversation',
+  'getContextConversation',
+  'listContextConversations',
+  'updateContextConversation',
+  'createContextReference',
+  'resolveContextReference',
+  'enqueueConversationInput','listConversationInputs','cancelConversationInput','onConversationInputsChanged',
+  'searchContextHistory',
+  'getHistorySearchConsent',
+  'setHistorySearchConsent',
+  'attachContextReference',
+  'revokeContextGrant',
   'subscribeTask',
   'getConversationActivities',
   'getConversationActivityUnread',
@@ -123,6 +193,9 @@ export const PRELOAD_API_KEYS = [
   'subscribeConversationActivityOverview',
   'subscribeConversationActivities',
   'getWorkActivity',
+  'dismissWorkAttention',
+  'getNativeActivityQuestions',
+  'answerNativeActivityQuestion',
   'getMcpTaskInputs',
   'answerMcpTaskInput',
   'cancelMcpWork',
@@ -173,6 +246,7 @@ export const PRELOAD_API_KEYS = [
   'cancelTask',
   'getActiveTask',
   'recoverTask',
+  'readTaskHistory',
   'openArtifact',
   'openFileInSystemApp',
   'readFileContent',
@@ -238,6 +312,10 @@ export const PRELOAD_API_KEYS = [
   'saveKswarmConfig',
   'getSkillStats',
   'getServiceStatus',
+  'inspectWriterConfiguration',
+  'prepareWriterConfiguration',
+  'migrateWriterConfiguration',
+  'captureDefaultDispatchOperation',
   'restartRelatedService',
   'kswarmGetStatus',
   'kswarmStart',
@@ -245,7 +323,29 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getPrivateMemorySettings',
+  'savePrivateMemorySettings',
+  'listCredentialInputs',
+  'submitCredentialInput',
+  'cancelCredentialInput',
+  'getAssistantState',
+  'testAssistantMessage',
+  'ensureAssistantToday',
+  'refreshAssistantSources',
+  'actOnAssistantItem',
+  'startAssistantItem',
+  'approveAssistantSend',
+  'refuseAssistantSend',
+  'onCredentialInputsChanged',
+  'onAssistantInboxChanged',
+  'onAssistantInboxFocus',
   'getAssistantOverview',
+  'getAssistantCalendarMemorySettings','configureAssistantCalendarMemory',
+  'getAssistantCalendarStatus',
+  'connectAssistantCalendar',
+  'disconnectAssistantCalendar',
+  'refreshAssistantCalendar',
+
   'activateAssistant',
   'pauseAssistant',
   'resumeAssistant',
@@ -313,15 +413,40 @@ export const PRELOAD_API_KEYS = [
   'importMemories',
   'memoryStats',
   'memoryCompact',
+  'memoryGetSettings',
+  'memoryCancelCompaction',
+  'deleteEmbeddingModel',
   'memoryPersonaTraits',
   'memoryListLayer',
   'memoryDeleteEntry',
   'memoryClearAll',
+  'decisionModelsList',
+  'decisionModelsDownload',
+  'decisionModelsCancel',
+  'decisionModelsRemove',
+  'decisionModelsStart',
+  'decisionModelsStop',
+  'decisionModelsUse',
+  'onDecisionModelsChanged',
   'memoryGetModelId',
   'memorySetModelId',
   'getEmbeddingModels',
   'downloadEmbeddingModel',
   'setEmbeddingModel',
+  'getEnterpriseCliConnectors',
+  'controlEnterpriseCliConnector',
+  'getMailAccounts',
+  'connectMailAccount',
+  'disconnectMailAccount',
+  'setMailAccountAccess',
+  'testMailAccount',
+  'searchMailMessages',
+  'readMailMessage',
+  'getMailOAuthState',
+  'startMailOAuth',
+  'cancelMailOAuth',
+  'getYzjCliAuthState',
+  'controlYzjCliAuth',
   'getConnectorsConfig',
   'getHarnessOptimizationConfig',
   'saveHarnessOptimizationConfig',
@@ -371,7 +496,29 @@ export const PRELOAD_API_KEYS = [
   , 'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
   'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
   'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
-  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands'
+  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands',
+
+'getAssistantCandidatePage',
+'dismissAssistantAction',
+'snoozeAssistantAction',
+'getAssistantActionOverview',
+'getAssistantAnalysisProvider',
+'configureAssistantAnalysisProvider',
+'getAssistantLaunchTargets',
+'getAssistantQualityStatus',
+'exportAssistantQualityReview',
+'importAssistantQualityReview',
+'revokeAssistantQualityReview',
+'getAssistantPeriodicStatus',
+'configureAssistantPeriodic',
+'checkAssistantPeriodic',
+'cancelAssistantLaunch',
+'prepareAssistantReconfirmation',
+'prepareAssistantFollowUpLaunch',
+'prepareAssistantLaunch',
+'confirmAssistantLaunch',
+'getAssistantLaunch',
+'resolveAssistantLaunch',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -392,6 +539,7 @@ export const KSWARM_PROXY_KEYS = [
 ] as const;
 
 export const EXTRA_KEYS = [
+  'dsh',
   'showSaveDialog',
   'saveFile',
   'listPrinciples',
@@ -426,6 +574,7 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // `desktop:subscribeTask` to register the subscription on main side; we still
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
+  'onConversationInputsChanged',
   'subscribeConversationActivityOverview',
   'subscribeConversationActivities',
   'subscribeTask',
@@ -438,7 +587,11 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onUpdateStatus',
   'onSkillsChanged',
   'onReminder',
+  'onDecisionModelsChanged',
   'onScheduledTaskDue',
+  'onCredentialInputsChanged',
+  'onAssistantInboxChanged',
+  'onAssistantInboxFocus',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
   'onMobileRelayStatus',
@@ -456,12 +609,20 @@ export const LOCAL_CONSTANT_KEYS = [
   'systemUsername',
 ] as const;
 
+/** Nested semantic APIs have their own method/channel contract. */
+export const NAMESPACE_API_KEYS = ['dsh'] as const;
+export const DSH_CHANNEL_BY_METHOD = {
+  getState:'desktop:dsh:getState',setMode:'desktop:dsh:setMode',configureSetup:'desktop:dsh:configureSetup',
+  connect:'desktop:dsh:connect',disconnect:'desktop:dsh:disconnect',reconcile:'desktop:dsh:reconcile',configureBudget:'desktop:dsh:configureBudget',publishMandate:'desktop:dsh:publishMandate',publishEgressPolicy:'desktop:dsh:publishEgressPolicy',
+} as const;
+
 // `INVOKE_API_KEYS` are the strict subset of preload keys that map 1:1 to a
 // `ipcMain.handle()` channel and use `ipcRenderer.invoke()` from renderer.
 // Computed at module load by removing event/local categories from the full
 // surface so it remains in sync with the canonical lists above.
 export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
   (key) => !EVENT_SUBSCRIPTION_KEYS.includes(key as typeof EVENT_SUBSCRIPTION_KEYS[number])
+    && !NAMESPACE_API_KEYS.includes(key as typeof NAMESPACE_API_KEYS[number])
     && !LOCAL_CONSTANT_KEYS.includes(key as typeof LOCAL_CONSTANT_KEYS[number]),
 );
 
@@ -469,10 +630,15 @@ export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
 // name. Tests cross-check this against the live preload implementation and the
 // main-process handler registry to catch drift.
 export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
+  ...CONTINUITY_CHANNELS,
+  enqueueConversationInput:'desktop:inputs:enqueue',listConversationInputs:'desktop:inputs:list',cancelConversationInput:'desktop:inputs:cancel',
   getConversationActivities: 'desktop:activity:list',
   getConversationActivityUnread: 'desktop:activity:unread',
   markConversationActivitiesRead: 'desktop:activity:read',
   getWorkActivity: 'desktop:activity:work',
+  dismissWorkAttention: 'desktop:activity:attention:dismiss',
+  getNativeActivityQuestions: 'desktop:activity:nativeQuestions',
+  answerNativeActivityQuestion: 'desktop:activity:nativeAnswer',
   getMcpTaskInputs: 'desktop:activity:mcpInputs',
   answerMcpTaskInput: 'desktop:activity:mcpAnswer',
   cancelMcpWork: 'desktop:activity:mcpCancel',
@@ -505,6 +671,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveModelConfig: 'desktop:saveModelConfig',
   updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
   getSystemOneConfig: 'desktop:getSystemOneConfig',
+  getKimDecisionConfig: 'desktop:getKimDecisionConfig',
+  saveKimDecisionConfig: 'desktop:saveKimDecisionConfig',
+  testKimDecisionConnection: 'desktop:testKimDecisionConnection',
   saveSystemOneConfig: 'desktop:saveSystemOneConfig',
   createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
   testProviderConnection: 'desktop:testProviderConnection',
@@ -524,6 +693,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   stopObservationTask: 'desktop:stopObservationTask',
   revokeObservationTask: 'desktop:revokeObservationTask',
   getObservationTaskStatus: 'desktop:getObservationTaskStatus',
+  submitUserTask: 'desktop:submitUserTask',
+  captureRoomConversion:'desktop:roomConversion:capture',
+  observeRoomConversion:'desktop:roomConversion:observe',
   createTask: 'desktop:createTask',
   createTaskWithFiles: 'desktop:createTaskWithFiles',
   getGoal: 'desktop:goal:get',
@@ -544,6 +716,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   cancelTask: 'desktop:cancelTask',
   getActiveTask: 'desktop:getActiveTask',
   recoverTask: 'desktop:recoverTask',
+  readTaskHistory: 'desktop:readTaskHistory',
   openArtifact: 'desktop:openArtifact',
   openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
@@ -605,6 +778,10 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   saveKswarmConfig: 'desktop:saveKswarmConfig',
   getSkillStats: 'desktop:getSkillStats',
   getServiceStatus: 'desktop:services:getStatus',
+  inspectWriterConfiguration:'desktop:kswarm:writer:inspect',
+  prepareWriterConfiguration:'desktop:kswarm:writer:prepare',
+  migrateWriterConfiguration:'desktop:kswarm:writer:migrate',
+  captureDefaultDispatchOperation:'desktop:kswarm:default-dispatch:capture',
   restartRelatedService: 'desktop:services:restart',
   kswarmGetStatus: 'desktop:kswarm:getStatus',
   kswarmStart: 'desktop:kswarm:start',
@@ -612,7 +789,26 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getPrivateMemorySettings:'desktop:credentialInput:memoryGet',
+  savePrivateMemorySettings:'desktop:credentialInput:memorySave',
+  listCredentialInputs: 'desktop:credentialInput:list',
+  submitCredentialInput: 'desktop:credentialInput:submit',
+  cancelCredentialInput: 'desktop:credentialInput:cancel',
+  getAssistantState: 'desktop:assistantInbox:state',
+  testAssistantMessage: 'desktop:assistantInbox:testMessage',
+  ensureAssistantToday: 'desktop:assistantInbox:today',
+  refreshAssistantSources: 'desktop:assistantInbox:refresh',
+  actOnAssistantItem: 'desktop:assistantInbox:act',
+  startAssistantItem: 'desktop:assistantInbox:start',
+  approveAssistantSend: 'desktop:assistantInbox:approve',
+  refuseAssistantSend: 'desktop:assistantInbox:refuse',
   getAssistantOverview: 'desktop:assistant:getOverview',
+  getAssistantCalendarMemorySettings:'desktop:assistant:getCalendarMemorySettings',configureAssistantCalendarMemory:'desktop:assistant:configureCalendarMemory',
+  getAssistantCalendarStatus: 'desktop:assistant:getCalendarStatus',
+  connectAssistantCalendar: 'desktop:assistant:connectCalendar',
+  disconnectAssistantCalendar: 'desktop:assistant:disconnectCalendar',
+  refreshAssistantCalendar: 'desktop:assistant:refreshCalendar',
+
   activateAssistant: 'desktop:assistant:activate',
   pauseAssistant: 'desktop:assistant:pause',
   resumeAssistant: 'desktop:assistant:resume',
@@ -676,15 +872,39 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   importMemories: 'desktop:importMemories',
   memoryStats: 'desktop:memoryStats',
   memoryCompact: 'desktop:memoryCompact',
+  memoryGetSettings: 'desktop:memoryGetSettings',
+  memoryCancelCompaction: 'desktop:memoryCancelCompaction',
+  deleteEmbeddingModel: 'desktop:deleteEmbeddingModel',
   memoryPersonaTraits: 'desktop:memoryPersonaTraits',
   memoryListLayer: 'desktop:memoryListLayer',
   memoryDeleteEntry: 'desktop:memoryDeleteEntry',
   memoryClearAll: 'desktop:memoryClearAll',
+  decisionModelsList: 'desktop:decisionModelsList',
+  decisionModelsDownload: 'desktop:decisionModelsDownload',
+  decisionModelsCancel: 'desktop:decisionModelsCancel',
+  decisionModelsRemove: 'desktop:decisionModelsRemove',
+  decisionModelsStart: 'desktop:decisionModelsStart',
+  decisionModelsStop: 'desktop:decisionModelsStop',
+  decisionModelsUse: 'desktop:decisionModelsUse',
   memoryGetModelId: 'desktop:memoryGetModelId',
   memorySetModelId: 'desktop:memorySetModelId',
   getEmbeddingModels: 'desktop:getEmbeddingModels',
   downloadEmbeddingModel: 'desktop:downloadEmbeddingModel',
   setEmbeddingModel: 'desktop:setEmbeddingModel',
+  getEnterpriseCliConnectors: 'desktop:getEnterpriseCliConnectors',
+  controlEnterpriseCliConnector: 'desktop:controlEnterpriseCliConnector',
+  getMailAccounts: 'desktop:mail:list',
+  connectMailAccount: 'desktop:mail:connect',
+  disconnectMailAccount: 'desktop:mail:disconnect',
+  setMailAccountAccess: 'desktop:mail:access',
+  testMailAccount: 'desktop:mail:test',
+  searchMailMessages: 'desktop:mail:search',
+  readMailMessage: 'desktop:mail:read',
+  getMailOAuthState: 'desktop:mail:oauthState',
+  startMailOAuth: 'desktop:mail:oauthStart',
+  cancelMailOAuth: 'desktop:mail:oauthCancel',
+  getYzjCliAuthState: 'desktop:getYzjCliAuthState',
+  controlYzjCliAuth: 'desktop:controlYzjCliAuth',
   getConnectorsConfig: 'desktop:getConnectorsConfig',
   getHarnessOptimizationConfig: 'desktop:getHarnessOptimizationConfig',
   saveHarnessOptimizationConfig: 'desktop:saveHarnessOptimizationConfig',
@@ -777,6 +997,28 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getAppFlag: 'desktop:getAppFlag',
   setAppFlag: 'desktop:setAppFlag',
   migrateLegacyThreadMeta: 'desktop:migrateLegacyThreadMeta',
+
+getAssistantCandidatePage:'desktop:assistant:getActionCandidatesPage',
+dismissAssistantAction:'desktop:assistant:dismissAction',
+snoozeAssistantAction:'desktop:assistant:snoozeAction',
+getAssistantAnalysisProvider:'desktop:assistant:getAnalysisProvider',
+configureAssistantAnalysisProvider:'desktop:assistant:configureAnalysisProvider',
+getAssistantLaunchTargets:'desktop:assistant:listLaunchTargets',
+getAssistantQualityStatus:'desktop:assistant:getQualityStatus',
+exportAssistantQualityReview:'desktop:assistant:exportQualityReview',
+importAssistantQualityReview:'desktop:assistant:importQualityReview',
+revokeAssistantQualityReview:'desktop:assistant:revokeQualityReview',
+getAssistantPeriodicStatus:'desktop:assistant:getPeriodicStatus',
+configureAssistantPeriodic:'desktop:assistant:configurePeriodic',
+checkAssistantPeriodic:'desktop:assistant:checkPeriodic',
+cancelAssistantLaunch:'desktop:assistant:cancelLaunch',
+prepareAssistantReconfirmation:'desktop:assistant:prepareReconfirmation',
+prepareAssistantFollowUpLaunch:'desktop:assistant:prepareFollowUpLaunch',
+prepareAssistantLaunch:'desktop:assistant:prepareLaunch',
+confirmAssistantLaunch:'desktop:assistant:confirmLaunch',
+getAssistantLaunch:'desktop:assistant:getActionLaunch',
+resolveAssistantLaunch:'desktop:assistant:resolveActionLaunch',
+getAssistantActionOverview: 'desktop:assistant:getActionOverview',
 };
 
 // Channels that are intentionally registered on main but not exposed via the
@@ -802,7 +1044,7 @@ export const KNOWN_UNROUTED_HANDLERS: readonly string[] = [
 
 export type DesktopModelProviderView = ModelProviderDTO.ModelProviderView;
 
-export type DesktopModelEntryView = ModelProviderDTO.ModelEntryView;
+export type DesktopModelEntryView = ModelProviderDTO.ModelEntryView & { unavailableReason?: 'native_execution_gate_unavailable' };
 
 export type DesktopProviderProfileView = ModelProviderDTO.ModelProviderProfileView;
 
@@ -1161,6 +1403,8 @@ export type ProjectTeamOperationView = ProjectTeamOperationDto;
 export type CreateKSwarmProjectSemanticInput = KSwarmProjectCreateDto;
 export type KSwarmAgentSemanticInput = KSwarmAgentCreateDto;
 
+export type DesktopGoalControlReceipt = import('../shared/goal-control.js').GoalControlReceipt;
+
 export interface DesktopGoalProjection {
   currentCompletion?: GoalCompletionObservation;
   state: GoalState;
@@ -1188,11 +1432,15 @@ export interface DesktopGoalChangedEvent {
   goal: DesktopGoalProjection;
 }
 
-export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
+export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, ContinuityDesktopApi {
+  dsh: import('../../src/shared/dsh-desktop.js').DshDesktopApi;
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
   getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot>;
+  getKimDecisionConfig(): Promise<KimConfigView>;
+  saveKimDecisionConfig(input:KimConfigPatch): Promise<KimConfigView>;
+  testKimDecisionConnection(): Promise<KimHealthView>;
   saveSystemOneConfig(input?: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
   createManagedXiaokAgent(input: ModelProviderDTO.ManagedAgentInput): Promise<ModelProviderDTO.ManagedAgentResult>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
@@ -1215,6 +1463,9 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   stopObservationTask(taskId:string): Promise<{mode:string}>;
   revokeObservationTask(taskId:string): Promise<{mode:string}>;
   getObservationTaskStatus(taskId:string): Promise<{mode:string;semantic?:SemanticCompactionStatus;compound?:CompoundExecutionStatus}>;
+  submitUserTask(input:UserTaskSubmissionInput):Promise<UserTaskSubmissionOutput>;
+  captureRoomConversion(input:RoomConversionCaptureInput):Promise<RoomConversionCaptureOutput>;
+  observeRoomConversion(input:RoomConversionObserveInput):Promise<RoomConversionCaptureReference>;
   createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -1231,11 +1482,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   continueGoalNativeMutation(input: { threadId: string } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   cancelGoalNativeMutation(input: { threadId: string }): Promise<DesktopGoalNativeMutationProjection>;
   createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
-  pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
+  pauseGoal(threadId: string): Promise<DesktopGoalControlReceipt>;
   resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   recoverGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
   continueGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
-  cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
+  cancelGoal(threadId: string): Promise<DesktopGoalControlReceipt>;
   replaceGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
@@ -1246,17 +1497,21 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   subscribeConversationActivityOverview(handler: (change: { threadId: string; watchId?: string }) => void): () => void;
   getConversationActivities(input: { threadId: string; afterLocalSeq?: number; limit?: number }): Promise<ConversationActivity[]>;
   subscribeConversationActivities(threadId: string, handler: (change: { threadId: string; watchId?: string }) => void): () => void;
-  getWorkActivity(watchId: string): Promise<{ watch: WorkWatch; projection: WorkProjection }>;
+  getWorkActivity(watchId: string): Promise<ConversationWorkView>;
+  dismissWorkAttention(input: { watchId: string; expectedProjectionVersion: number; expectedPresentationIncarnation: string }): Promise<ConversationWorkView>;
+  getNativeActivityQuestions(watchId:string):Promise<NativeActivityQuestionForm[]>;
+  answerNativeActivityQuestion(input:{watchId:string}&NativeActivityAnswer):Promise<void>;
   getMcpTaskInputs(watchId: string): Promise<McpInputForm[]>;
   answerMcpTaskInput(input: { watchId: string; inputId: string; expectedDigest: string; action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }): Promise<void>;
   cancelMcpWork(watchId: string): Promise<{ requested: true }>;
   updateWorkReporting(input: { watchId: string; preference: ReportingPreference; expectedPolicyRevision: number }): Promise<WorkWatch>;
   stopWorkWatch(input: { watchId: string; expectedPolicyRevision: number }): Promise<WorkWatch>;
-  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void, sinceIndex?: number): () => void;
+  subscribeTask(taskId: string, handler: (event: DesktopTaskEvent, source?: TaskEventCoordinate) => void, sinceIndex?: number): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }>;
+  readTaskHistory(taskId: string): Promise<TaskHistoryRead>;
   openArtifact(artifactId: string): Promise<void>;
   openFileInSystemApp(filePath: string): Promise<OpenFileResult>;
   readFileContent(filePath: string): Promise<ReadFileResult>;
@@ -1323,14 +1578,41 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   saveKswarmConfig(input: { maxConcurrentTasks: number }): Promise<{ maxConcurrentTasks: number }>;
   getSkillStats(): Promise<DesktopSkillStats[]>;
   getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
+  inspectWriterConfiguration():Promise<WriterControlResult>;
+  prepareWriterConfiguration():Promise<WriterControlResult>;
+  migrateWriterConfiguration():Promise<WriterControlResult>;
+  captureDefaultDispatchOperation(input:DefaultDispatchInput):Promise<DefaultDispatchResult>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   kswarmGetStatus(): Promise<KswarmReadonlyStatus>;
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
-  kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  kswarmStartProjectPlanning(input: ProjectPlanningInput): Promise<ProjectPlanningOutput>;
+  getPrivateMemorySettings(legacy?:Record<string,unknown>):Promise<Record<string,unknown>>;
+  savePrivateMemorySettings(input:Record<string,unknown>):Promise<Record<string,unknown>>;
+  listCredentialInputs():Promise<import('../shared/credential-input-contract.js').CredentialRequest[]>;
+  submitCredentialInput(input:import('../shared/credential-input-contract.js').CredentialSubmit):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  cancelCredentialInput(input:{id:string;expectedRevision:number}):Promise<import('../shared/credential-input-contract.js').CredentialResult>;
+  onCredentialInputsChanged(handler:()=>void):()=>void;
+  getAssistantState(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  testAssistantMessage(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  ensureAssistantToday(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  refreshAssistantSources(): Promise<import('../shared/assistant-inbox-contract.js').AssistantState>;
+  actOnAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionAction): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  startAssistantItem(input: import('../shared/assistant-inbox-contract.js').AttentionStart): Promise<import('../shared/assistant-inbox-contract.js').AttentionItem>;
+  approveAssistantSend(input: import('../shared/assistant-inbox-contract.js').OutboxApproval): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  refuseAssistantSend(input: {id:string;expectedRevision:number}): Promise<import('../shared/assistant-inbox-contract.js').OutboxDraft>;
+  onAssistantInboxChanged(handler:()=>void): ()=>void;
+  onAssistantInboxFocus(handler:()=>void): ()=>void;
   getAssistantOverview(): Promise<AssistantOverviewView>;
+  getAssistantCalendarMemorySettings():Promise<AssistantCalendarMemorySettingsDto>;
+  configureAssistantCalendarMemory(input:AssistantCalendarMemoryInput):Promise<AssistantCalendarMemorySettingsDto>;
+  getAssistantCalendarStatus():Promise<AssistantCalendarStatus>;
+  connectAssistantCalendar():Promise<AssistantCalendarStatus>;
+  disconnectAssistantCalendar():Promise<AssistantCalendarStatus>;
+  refreshAssistantCalendar():Promise<AssistantCalendarStatus>;
+
   activateAssistant(): Promise<AssistantProfileDto>;
   pauseAssistant(): Promise<AssistantProfileDto>;
   resumeAssistant(): Promise<AssistantProfileDto>;
@@ -1396,16 +1678,41 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   deleteMemory(id: string): Promise<boolean>;
   importMemories(raw: string): Promise<MemoryImportIpcResult>;
   memoryStats(): Promise<MemoryStatsIpcSnapshot | null>;
-  memoryCompact(): Promise<MemoryCompactionResult>;
+  memoryCompact(input?:{expectedModelId:string}): Promise<MemoryCompactionResult>;
+  memoryGetSettings(): Promise<MemorySettingsSnapshot>;
+  memoryCancelCompaction(): Promise<boolean>;
+  deleteEmbeddingModel(modelId:string): Promise<void>;
   memoryPersonaTraits(): Promise<MemoryPersonaIpcTrait[]>;
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
   memoryClearAll(): Promise<boolean>;
+  decisionModelsList():Promise<DecisionModelView[]>;
+  decisionModelsDownload(id:string):Promise<void>;
+  decisionModelsCancel(id:string):Promise<void>;
+  decisionModelsRemove(id:string):Promise<void>;
+  decisionModelsStart(input:DecisionModelAction):Promise<void>;
+  decisionModelsStop(id:string):Promise<void>;
+  decisionModelsUse(id:string):Promise<DecisionModelSelection>;
+  onDecisionModelsChanged(handler:(views:DecisionModelView[])=>void):()=>void;
   memoryGetModelId(): Promise<string | null>;
   memorySetModelId(modelId: string | null): Promise<boolean>;
   getEmbeddingModels(): Promise<EmbeddingModelIpcEntry[]>;
   downloadEmbeddingModel(modelId: string): Promise<void>;
   setEmbeddingModel(modelId: string): Promise<void>;
+  getEnterpriseCliConnectors(): Promise<EnterpriseCliState[]>;
+  controlEnterpriseCliConnector(provider: EnterpriseCliProvider, action: EnterpriseCliAction): Promise<EnterpriseCliState>;
+  getMailAccounts(): Promise<MailAccountDto[]>;
+  connectMailAccount(input: MailConnectInput): Promise<MailAccountDto>;
+  disconnectMailAccount(input: { id: string; expectedRevision: number }): Promise<{ ok: true }>;
+  setMailAccountAccess(input: { id: string; expectedRevision: number; allowSend: boolean; smtpHost?: string; smtpPort?: number }): Promise<MailAccountDto>;
+  testMailAccount(input: { id: string; expectedRevision: number }): Promise<MailAccountDto>;
+  searchMailMessages(input: MailSearchInput): Promise<MailSearchResult>;
+  readMailMessage(input: MailReadInput): Promise<MailReadResult>;
+  getMailOAuthState(): Promise<MailOAuthState>;
+  startMailOAuth(input: MailOAuthInput): Promise<MailOAuthState>;
+  cancelMailOAuth(operationId?: string): Promise<MailOAuthState>;
+  getYzjCliAuthState(): Promise<YzjCliAuthState>;
+  controlYzjCliAuth(action: YzjCliAuthAction): Promise<YzjCliAuthState>;
   getConnectorsConfig(): Promise<ConnectorsConfigSnapshot>;
   getHarnessOptimizationConfig(): Promise<HarnessOptimizationState>;
   saveHarnessOptimizationConfig(input: Partial<Omit<HarnessOptimizationConfig, 'schemaVersion' | 'enabled' | 'configRevision' | 'publicGeneration' | 'researchGeneration'>>): Promise<HarnessOptimizationState>;
@@ -1474,6 +1781,27 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getAppFlag(key: AppFlagKey): Promise<string | null>;
   setAppFlag(key: AppFlagKey, value: string): Promise<ThreadMetaWriteResult>;
   migrateLegacyThreadMeta(data: ThreadMetaSnapshot): Promise<ThreadMetadataMigrationResultDto>;
+getAssistantCandidatePage(input:{cursor:string}):Promise<AssistantCandidatePageDto>;
+dismissAssistantAction(input:{proposalId:string;expectedRevision:number}):Promise<AssistantActionDecisionResultDto>;
+snoozeAssistantAction(input:{proposalId:string;expectedRevision:number;snoozeUntil:number}):Promise<AssistantActionDecisionResultDto>;
+getAssistantAnalysisProvider():Promise<AssistantAnalysisStatus>;
+configureAssistantAnalysisProvider(input:AssistantAnalysisSettingsInput):Promise<AssistantAnalysisStatus>;
+getAssistantLaunchTargets(input:{cursor?:string}):Promise<AssistantThreadTargetPage>;
+getAssistantQualityStatus():Promise<AssistantQualityStatus>;
+exportAssistantQualityReview():Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+importAssistantQualityReview(input:{attestHumanReview:true}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+revokeAssistantQualityReview():Promise<AssistantQualityStatus>;
+getAssistantPeriodicStatus():Promise<AssistantPeriodicStatus>;
+configureAssistantPeriodic(input:AssistantPeriodicSettings):Promise<AssistantPeriodicStatus>;
+checkAssistantPeriodic():Promise<AssistantPeriodicCheck>;
+cancelAssistantLaunch(input:{draftId:string}):Promise<AssistantLaunchOperation>;
+prepareAssistantReconfirmation(input:{draftId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+prepareAssistantFollowUpLaunch(input:{candidateId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+prepareAssistantLaunch(input:{proposalId:string;expectedRevision:number;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+confirmAssistantLaunch(input:{draftId:string;instruction:string;goalConsentChecked?:boolean}):Promise<AssistantLaunchOperation>;
+getAssistantLaunch(input:{draftId:string}):Promise<{draft:AssistantLaunchDraft;operation:AssistantLaunchOperation|null}>;
+resolveAssistantLaunch(input:{draftId:string;expectedResultDigest:string}):Promise<AssistantLaunchOperation>;
+getAssistantActionOverview(): Promise<AssistantActionOverviewDto>;
 }
 
 export type AppFlagKey = 'gtd-enabled';
@@ -1571,10 +1899,24 @@ interface IpcRendererLike {
 
 export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = ''): FullDesktopApi {
   return {
+    dsh: {
+      getState: () => ipcRenderer.invoke('desktop:dsh:getState') as ReturnType<DesktopApi['dsh']['getState']>,
+      setMode: input => ipcRenderer.invoke('desktop:dsh:setMode', input) as ReturnType<DesktopApi['dsh']['setMode']>,
+      configureSetup: input => ipcRenderer.invoke('desktop:dsh:configureSetup', input) as ReturnType<DesktopApi['dsh']['configureSetup']>,
+      connect: input => ipcRenderer.invoke('desktop:dsh:connect', input) as ReturnType<DesktopApi['dsh']['connect']>,
+      disconnect: input => ipcRenderer.invoke('desktop:dsh:disconnect', input) as ReturnType<DesktopApi['dsh']['disconnect']>,
+      reconcile: input => ipcRenderer.invoke('desktop:dsh:reconcile', input) as ReturnType<DesktopApi['dsh']['reconcile']>,
+      configureBudget: input => ipcRenderer.invoke('desktop:dsh:configureBudget', input) as ReturnType<DesktopApi['dsh']['configureBudget']>,
+      publishMandate: input => ipcRenderer.invoke('desktop:dsh:publishMandate', input) as ReturnType<DesktopApi['dsh']['publishMandate']>,
+      publishEgressPolicy: input => ipcRenderer.invoke('desktop:dsh:publishEgressPolicy', input) as ReturnType<DesktopApi['dsh']['publishEgressPolicy']>,
+    },
     ...createMultiAgentPreload(ipcRenderer),
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
     updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,
+    getKimDecisionConfig: () => ipcRenderer.invoke('desktop:getKimDecisionConfig') as ReturnType<DesktopApi['getKimDecisionConfig']>,
+    saveKimDecisionConfig: (input) => ipcRenderer.invoke('desktop:saveKimDecisionConfig',input) as ReturnType<DesktopApi['saveKimDecisionConfig']>,
+    testKimDecisionConnection: () => ipcRenderer.invoke('desktop:testKimDecisionConnection') as ReturnType<DesktopApi['testKimDecisionConnection']>,
     getSystemOneConfig: () => ipcRenderer.invoke('desktop:getSystemOneConfig') as ReturnType<DesktopApi['getSystemOneConfig']>,
     saveSystemOneConfig: (input) => ipcRenderer.invoke('desktop:saveSystemOneConfig', input) as ReturnType<DesktopApi['saveSystemOneConfig']>,
     createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,
@@ -1605,8 +1947,45 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     stopObservationTask: taskId => ipcRenderer.invoke('desktop:stopObservationTask',{taskId}) as ReturnType<DesktopApi['stopObservationTask']>,
     revokeObservationTask: taskId => ipcRenderer.invoke('desktop:revokeObservationTask',{taskId}) as ReturnType<DesktopApi['revokeObservationTask']>,
     getObservationTaskStatus: taskId => ipcRenderer.invoke('desktop:getObservationTaskStatus',{taskId}) as ReturnType<DesktopApi['getObservationTaskStatus']>,
+    submitUserTask: input => ipcRenderer.invoke('desktop:submitUserTask',input) as ReturnType<DesktopApi['submitUserTask']>,
+    captureRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:capture',input) as ReturnType<DesktopApi['captureRoomConversion']>,
+    observeRoomConversion:input=>ipcRenderer.invoke('desktop:roomConversion:observe',input) as ReturnType<DesktopApi['observeRoomConversion']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
+    enqueueConversationInput:input=>ipcRenderer.invoke('desktop:inputs:enqueue',input) as ReturnType<DesktopApi['enqueueConversationInput']>,
+    listConversationInputs:input=>ipcRenderer.invoke('desktop:inputs:list',input) as ReturnType<DesktopApi['listConversationInputs']>,
+    cancelConversationInput:input=>ipcRenderer.invoke('desktop:inputs:cancel',input) as ReturnType<DesktopApi['cancelConversationInput']>,
+    onConversationInputsChanged(handler){const listener=(_event:unknown,payload:unknown)=>{const value=payload as {conversationId?:unknown};if(typeof value?.conversationId==='string')handler({conversationId:value.conversationId});};ipcRenderer.on('desktop:inputs:changed',listener);return ()=>ipcRenderer.off('desktop:inputs:changed',listener);},
+    getAuthOwnerStatus: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.getAuthOwnerStatus) as ReturnType<DesktopApi['getAuthOwnerStatus']>,
+    startAuthOwnerLogin: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.startAuthOwnerLogin) as ReturnType<DesktopApi['startAuthOwnerLogin']>,
+    cancelAuthOwnerLogin: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.cancelAuthOwnerLogin) as ReturnType<DesktopApi['cancelAuthOwnerLogin']>,
+    logoutAuthOwner: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.logoutAuthOwner) as ReturnType<DesktopApi['logoutAuthOwner']>,
+    getContextMcpStatus: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextMcpStatus) as ReturnType<DesktopApi['getContextMcpStatus']>,
+    setContextMcpEnabled: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.setContextMcpEnabled,input) as ReturnType<DesktopApi['setContextMcpEnabled']>,
+    resetContextMcpPort: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.resetContextMcpPort) as ReturnType<DesktopApi['resetContextMcpPort']>,
+    issueContextMcpConfig: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.issueContextMcpConfig,input) as ReturnType<DesktopApi['issueContextMcpConfig']>,
+    listExternalContextReaders: () => ipcRenderer.invoke(CONTINUITY_CHANNELS.listExternalContextReaders) as ReturnType<DesktopApi['listExternalContextReaders']>,
+    revokeExternalContextReader: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.revokeExternalContextReader,input) as ReturnType<DesktopApi['revokeExternalContextReader']>,
+    inspectContextConversations: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.inspectContextConversations, input) as ReturnType<DesktopApi['inspectContextConversations']>,
+    getContextGrant: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextGrant, input) as ReturnType<DesktopApi['getContextGrant']>,
+    importLegacyThreadMetadata: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.importLegacyThreadMetadata, input) as ReturnType<DesktopApi['importLegacyThreadMetadata']>,
+    getLegacyThreadMetadata: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getLegacyThreadMetadata, input) as ReturnType<DesktopApi['getLegacyThreadMetadata']>,
+    previewLegacyContext: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.previewLegacyContext, input) as ReturnType<DesktopApi['previewLegacyContext']>,
+    claimLegacyContext: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.claimLegacyContext, input) as ReturnType<DesktopApi['claimLegacyContext']>,
+    listCliArchives: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.listCliArchives,input) as ReturnType<DesktopApi['listCliArchives']>,
+    previewCliArchive: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.previewCliArchive,input) as ReturnType<DesktopApi['previewCliArchive']>,
+    claimCliArchive: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.claimCliArchive,input) as ReturnType<DesktopApi['claimCliArchive']>,
+    createContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.createContextConversation, input) as ReturnType<DesktopApi['createContextConversation']>,
+    getContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getContextConversation, input) as ReturnType<DesktopApi['getContextConversation']>,
+    listContextConversations: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.listContextConversations, input) as ReturnType<DesktopApi['listContextConversations']>,
+    updateContextConversation: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.updateContextConversation, input) as ReturnType<DesktopApi['updateContextConversation']>,
+    createContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.createContextReference, input) as ReturnType<DesktopApi['createContextReference']>,
+    resolveContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.resolveContextReference, input) as ReturnType<DesktopApi['resolveContextReference']>,
+    searchContextHistory: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.searchContextHistory,input) as ReturnType<DesktopApi['searchContextHistory']>,
+    getHistorySearchConsent: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.getHistorySearchConsent,input) as ReturnType<DesktopApi['getHistorySearchConsent']>,
+    setHistorySearchConsent: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.setHistorySearchConsent,input) as ReturnType<DesktopApi['setHistorySearchConsent']>,
+    attachContextReference: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.attachContextReference, input) as ReturnType<DesktopApi['attachContextReference']>,
+    revokeContextGrant: input => ipcRenderer.invoke(CONTINUITY_CHANNELS.revokeContextGrant, input) as ReturnType<DesktopApi['revokeContextGrant']>,
     getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
     getGoalNativeMutation: (threadId) => ipcRenderer.invoke('desktop:goal:getNativeMutation', { threadId }) as ReturnType<DesktopApi['getGoalNativeMutation']>,
     recoverGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:recoverNativeMutation', input) as ReturnType<DesktopApi['recoverGoalNativeMutation']>,
@@ -1641,7 +2020,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       return () => { ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
     },
     getConversationActivities: input => ipcRenderer.invoke('desktop:activity:list', input) as Promise<ConversationActivity[]>,
-    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }) as Promise<{ watch: WorkWatch; projection: WorkProjection }>,
+    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }) as Promise<ConversationWorkView>,
+    dismissWorkAttention: input => ipcRenderer.invoke('desktop:activity:attention:dismiss', input) as Promise<ConversationWorkView>,
+    getNativeActivityQuestions: watchId => ipcRenderer.invoke('desktop:activity:nativeQuestions', {watchId}) as Promise<NativeActivityQuestionForm[]>,
+    answerNativeActivityQuestion: input => ipcRenderer.invoke('desktop:activity:nativeAnswer', input) as Promise<void>,
     getMcpTaskInputs: watchId => ipcRenderer.invoke('desktop:activity:mcpInputs', { watchId }) as Promise<McpInputForm[]>,
     answerMcpTaskInput: input => ipcRenderer.invoke('desktop:activity:mcpAnswer', input) as Promise<void>,
     cancelMcpWork: watchId => ipcRenderer.invoke('desktop:activity:mcpCancel', { watchId }) as Promise<{ requested: true }>,
@@ -1659,7 +2041,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       const subscriptionId = `task-${Date.now()}-${Math.random()}`;
       const channel = `desktop:taskEvent:${taskId}`;
       const listener = (_event: unknown, payload: unknown) => {
-        handler(payload as DesktopTaskEvent);
+        const record = payload as { taskId?: unknown; eventIndex?: unknown; sourceDataEpoch?: unknown; event?: DesktopTaskEvent };
+        if (record && typeof record === 'object' && 'event' in record) {
+          if (record.taskId !== taskId || !Number.isSafeInteger(record.eventIndex) || (record.eventIndex as number) < 0 || typeof record.sourceDataEpoch !== 'string' || !record.event?.type) return;
+          handler(record.event, { taskId, eventIndex: record.eventIndex as number, sourceDataEpoch: record.sourceDataEpoch });
+        } else handler(payload as DesktopTaskEvent);
       };
       ipcRenderer.on(channel, listener);
       const registration = ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex, subscriptionId } : { taskId, subscriptionId }).catch(() => undefined);
@@ -1672,6 +2058,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     cancelTask: (taskId) => ipcRenderer.invoke('desktop:cancelTask', { taskId }) as Promise<void>,
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt }) as ReturnType<DesktopApi['recoverTask']>,
+    readTaskHistory: taskId => ipcRenderer.invoke('desktop:readTaskHistory', { taskId }) as ReturnType<DesktopApi['readTaskHistory']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<OpenFileResult>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<ReadFileResult>,
@@ -1825,14 +2212,41 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     saveKswarmConfig: (input) => ipcRenderer.invoke('desktop:saveKswarmConfig', input) as Promise<{ maxConcurrentTasks: number }>,
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
     getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
+    inspectWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:inspect') as Promise<WriterControlResult>,
+    prepareWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:prepare') as Promise<WriterControlResult>,
+    migrateWriterConfiguration:()=>ipcRenderer.invoke('desktop:kswarm:writer:migrate') as Promise<WriterControlResult>,
+    captureDefaultDispatchOperation:input=>ipcRenderer.invoke('desktop:kswarm:default-dispatch:capture',input) as Promise<DefaultDispatchResult>,
     restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
     kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KswarmReadonlyStatus>,
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
-    kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<ProjectPlanningOutput>,
+    getPrivateMemorySettings:legacy=>ipcRenderer.invoke('desktop:credentialInput:memoryGet',legacy) as ReturnType<DesktopApi['getPrivateMemorySettings']>,
+    savePrivateMemorySettings:input=>ipcRenderer.invoke('desktop:credentialInput:memorySave',input) as ReturnType<DesktopApi['savePrivateMemorySettings']>,
+    listCredentialInputs:()=>ipcRenderer.invoke('desktop:credentialInput:list') as ReturnType<DesktopApi['listCredentialInputs']>,
+    submitCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:submit',input) as ReturnType<DesktopApi['submitCredentialInput']>,
+    cancelCredentialInput:input=>ipcRenderer.invoke('desktop:credentialInput:cancel',input) as ReturnType<DesktopApi['cancelCredentialInput']>,
+    onCredentialInputsChanged(handler) {const listener=()=>handler();ipcRenderer.on('desktop:credentialInput:changed',listener);return ()=>ipcRenderer.off('desktop:credentialInput:changed',listener);},
+    getAssistantState: () => ipcRenderer.invoke('desktop:assistantInbox:state') as ReturnType<DesktopApi['getAssistantState']>,
+    testAssistantMessage: () => ipcRenderer.invoke('desktop:assistantInbox:testMessage') as ReturnType<DesktopApi['testAssistantMessage']>,
+    ensureAssistantToday: () => ipcRenderer.invoke('desktop:assistantInbox:today') as ReturnType<DesktopApi['ensureAssistantToday']>,
+    refreshAssistantSources: () => ipcRenderer.invoke('desktop:assistantInbox:refresh') as ReturnType<DesktopApi['refreshAssistantSources']>,
+    actOnAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:act', input) as ReturnType<DesktopApi['actOnAssistantItem']>,
+    startAssistantItem: (input) => ipcRenderer.invoke('desktop:assistantInbox:start', input) as ReturnType<DesktopApi['startAssistantItem']>,
+    approveAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:approve', input) as ReturnType<DesktopApi['approveAssistantSend']>,
+    refuseAssistantSend: (input) => ipcRenderer.invoke('desktop:assistantInbox:refuse', input) as ReturnType<DesktopApi['refuseAssistantSend']>,
+    onAssistantInboxChanged(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:changed', listener); return () => ipcRenderer.off('desktop:assistantInbox:changed', listener); },
+    onAssistantInboxFocus(handler) { const listener = () => handler(); ipcRenderer.on('desktop:assistantInbox:focus', listener); return () => ipcRenderer.off('desktop:assistantInbox:focus', listener); },
     getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
+    getAssistantCalendarMemorySettings:()=>ipcRenderer.invoke('desktop:assistant:getCalendarMemorySettings') as ReturnType<DesktopApi['getAssistantCalendarMemorySettings']>,
+    configureAssistantCalendarMemory:input=>ipcRenderer.invoke('desktop:assistant:configureCalendarMemory',input) as ReturnType<DesktopApi['configureAssistantCalendarMemory']>,
+    getAssistantCalendarStatus:()=>ipcRenderer.invoke('desktop:assistant:getCalendarStatus') as ReturnType<DesktopApi['getAssistantCalendarStatus']>,
+    connectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:connectCalendar') as ReturnType<DesktopApi['connectAssistantCalendar']>,
+    disconnectAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:disconnectCalendar') as ReturnType<DesktopApi['disconnectAssistantCalendar']>,
+    refreshAssistantCalendar:()=>ipcRenderer.invoke('desktop:assistant:refreshCalendar') as ReturnType<DesktopApi['refreshAssistantCalendar']>,
+
     activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate') as ReturnType<DesktopApi['activateAssistant']>,
     pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause') as ReturnType<DesktopApi['pauseAssistant']>,
     resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume') as ReturnType<DesktopApi['resumeAssistant']>,
@@ -1961,16 +2375,45 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<boolean>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<MemoryImportIpcResult>,
     memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<MemoryStatsIpcSnapshot | null>,
-    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
+    memoryCompact: (input?:{expectedModelId:string}) => (input === undefined ? ipcRenderer.invoke('desktop:memoryCompact') : ipcRenderer.invoke('desktop:memoryCompact',input)) as Promise<MemoryCompactionResult>,
+    memoryGetSettings: () => ipcRenderer.invoke('desktop:memoryGetSettings') as Promise<MemorySettingsSnapshot>,
+    memoryCancelCompaction: () => ipcRenderer.invoke('desktop:memoryCancelCompaction') as Promise<boolean>,
+    deleteEmbeddingModel: (modelId:string) => ipcRenderer.invoke('desktop:deleteEmbeddingModel', modelId) as Promise<void>,
     memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<MemoryPersonaIpcTrait[]>,
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,
     memoryClearAll: () => ipcRenderer.invoke('desktop:memoryClearAll') as Promise<boolean>,
+    decisionModelsList:()=>ipcRenderer.invoke('desktop:decisionModelsList') as Promise<DecisionModelView[]>,
+    decisionModelsDownload:id=>ipcRenderer.invoke('desktop:decisionModelsDownload',id) as Promise<void>,
+    decisionModelsCancel:id=>ipcRenderer.invoke('desktop:decisionModelsCancel',id) as Promise<void>,
+    decisionModelsRemove:id=>ipcRenderer.invoke('desktop:decisionModelsRemove',id) as Promise<void>,
+    decisionModelsStart:input=>ipcRenderer.invoke('desktop:decisionModelsStart',input) as Promise<void>,
+    decisionModelsStop:id=>ipcRenderer.invoke('desktop:decisionModelsStop',id) as Promise<void>,
+    decisionModelsUse:id=>ipcRenderer.invoke('desktop:decisionModelsUse',id) as Promise<DecisionModelSelection>,
+    onDecisionModelsChanged(handler){
+      const channel='desktop:decisionModelsChanged';
+      const listener=(_event:unknown,views:unknown)=>handler(views as DecisionModelView[]);
+      ipcRenderer.on(channel,listener);return()=>{ipcRenderer.off(channel,listener);};
+    },
     memoryGetModelId: () => ipcRenderer.invoke('desktop:memoryGetModelId') as Promise<string | null>,
     memorySetModelId: (modelId: string | null) => ipcRenderer.invoke('desktop:memorySetModelId', modelId) as Promise<boolean>,
     getEmbeddingModels: () => ipcRenderer.invoke('desktop:getEmbeddingModels') as ReturnType<DesktopApi['getEmbeddingModels']>,
     downloadEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:downloadEmbeddingModel', modelId) as Promise<void>,
     setEmbeddingModel: (modelId: string) => ipcRenderer.invoke('desktop:setEmbeddingModel', modelId) as Promise<void>,
+    getEnterpriseCliConnectors: () => ipcRenderer.invoke('desktop:getEnterpriseCliConnectors') as Promise<EnterpriseCliState[]>,
+    controlEnterpriseCliConnector: (provider, action) => ipcRenderer.invoke('desktop:controlEnterpriseCliConnector', provider, action) as Promise<EnterpriseCliState>,
+    getMailAccounts: () => ipcRenderer.invoke('desktop:mail:list') as Promise<MailAccountDto[]>,
+    connectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:connect', input) as Promise<MailAccountDto>,
+    disconnectMailAccount: (input) => ipcRenderer.invoke('desktop:mail:disconnect', input) as Promise<{ ok: true }>,
+    setMailAccountAccess: (input) => ipcRenderer.invoke('desktop:mail:access', input) as Promise<MailAccountDto>,
+    testMailAccount: (input) => ipcRenderer.invoke('desktop:mail:test', input) as Promise<MailAccountDto>,
+    searchMailMessages: (input) => ipcRenderer.invoke('desktop:mail:search', input) as Promise<MailSearchResult>,
+    readMailMessage: (input) => ipcRenderer.invoke('desktop:mail:read', input) as Promise<MailReadResult>,
+    getMailOAuthState: () => ipcRenderer.invoke('desktop:mail:oauthState') as Promise<MailOAuthState>,
+    startMailOAuth: (input) => ipcRenderer.invoke('desktop:mail:oauthStart', input) as Promise<MailOAuthState>,
+    cancelMailOAuth: (operationId) => ipcRenderer.invoke('desktop:mail:oauthCancel', operationId) as Promise<MailOAuthState>,
+    getYzjCliAuthState: () => ipcRenderer.invoke('desktop:getYzjCliAuthState') as Promise<YzjCliAuthState>,
+    controlYzjCliAuth: action => ipcRenderer.invoke('desktop:controlYzjCliAuth', action) as Promise<YzjCliAuthState>,
     getConnectorsConfig: () => ipcRenderer.invoke('desktop:getConnectorsConfig') as Promise<ConnectorsConfigSnapshot>,
     getHarnessOptimizationConfig: () => ipcRenderer.invoke('desktop:getHarnessOptimizationConfig') as ReturnType<DesktopApi['getHarnessOptimizationConfig']>,
     saveHarnessOptimizationConfig: input => ipcRenderer.invoke('desktop:saveHarnessOptimizationConfig', input) as ReturnType<DesktopApi['saveHarnessOptimizationConfig']>,
@@ -2106,7 +2549,30 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url) as Promise<ProxyHealthResult>,
     connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url) as Promise<ProxyHealthResult>,
     systemUsername,
-  };
+
+getAssistantCandidatePage:input=>ipcRenderer.invoke('desktop:assistant:getActionCandidatesPage',{cursor:input.cursor}) as ReturnType<DesktopApi['getAssistantCandidatePage']>,
+dismissAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:dismissAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['dismissAssistantAction']>,
+snoozeAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:snoozeAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['snoozeAssistantAction']>,
+getAssistantAnalysisProvider:()=>ipcRenderer.invoke('desktop:assistant:getAnalysisProvider') as ReturnType<DesktopApi['getAssistantAnalysisProvider']>,
+configureAssistantAnalysisProvider:input=>ipcRenderer.invoke('desktop:assistant:configureAnalysisProvider',{modelId:input?.modelId,expectedRevision:input?.expectedRevision}) as ReturnType<DesktopApi['configureAssistantAnalysisProvider']>,
+getAssistantLaunchTargets:input=>ipcRenderer.invoke('desktop:assistant:listLaunchTargets',pickDefined({cursor:input?.cursor})) as ReturnType<DesktopApi['getAssistantLaunchTargets']>,
+getAssistantQualityStatus:()=>ipcRenderer.invoke('desktop:assistant:getQualityStatus') as ReturnType<DesktopApi['getAssistantQualityStatus']>,
+exportAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:exportQualityReview') as ReturnType<DesktopApi['exportAssistantQualityReview']>,
+importAssistantQualityReview:input=>ipcRenderer.invoke('desktop:assistant:importQualityReview',{attestHumanReview:input?.attestHumanReview===true}) as ReturnType<DesktopApi['importAssistantQualityReview']>,
+revokeAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:revokeQualityReview') as ReturnType<DesktopApi['revokeAssistantQualityReview']>,
+getAssistantPeriodicStatus:()=>ipcRenderer.invoke('desktop:assistant:getPeriodicStatus') as ReturnType<DesktopApi['getAssistantPeriodicStatus']>,
+configureAssistantPeriodic:input=>ipcRenderer.invoke('desktop:assistant:configurePeriodic',sanitizeAssistantPeriodicInput(input)) as ReturnType<DesktopApi['configureAssistantPeriodic']>,
+checkAssistantPeriodic:()=>ipcRenderer.invoke('desktop:assistant:checkPeriodic') as ReturnType<DesktopApi['checkAssistantPeriodic']>,
+cancelAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:cancelLaunch',{draftId:input.draftId}) as ReturnType<DesktopApi['cancelAssistantLaunch']>,
+prepareAssistantReconfirmation:input=>ipcRenderer.invoke('desktop:assistant:prepareReconfirmation',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantReconfirmation']>,
+prepareAssistantFollowUpLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareFollowUpLaunch',pickDefined({candidateId:input.candidateId,existingThreadId:input.existingThreadId})) as ReturnType<DesktopApi['prepareAssistantFollowUpLaunch']>,
+prepareAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantLaunch']>,
+confirmAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:confirmLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['confirmAssistantLaunch']>,
+getAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:getActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['getAssistantLaunch']>,
+resolveAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:resolveActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['resolveAssistantLaunch']>,
+getAssistantActionOverview: () => ipcRenderer.invoke('desktop:assistant:getActionOverview') as ReturnType<DesktopApi['getAssistantActionOverview']>,
+};
 }
 
 export type { IpcRenderer };
+import { CONTINUITY_CHANNELS, type TaskEventCoordinate, type ContinuityDesktopApi } from '../shared/context-continuity-types.js';

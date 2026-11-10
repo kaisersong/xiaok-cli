@@ -1,3 +1,7 @@
+export type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../../../shared/decision-model-types.js';
+export type { MailAccountDto, MailConnectInput, MailOAuthInput, MailOAuthState, MailSearchInput, MailSearchResult, MailReadInput, MailReadResult } from '../../../shared/mail-connectors-ipc-contract.js';
+export type {DefaultDispatchInput,DefaultDispatchResult,DefaultDispatchPreparationObservationView} from '../../../shared/default-dispatch-ipc-contract.js';
+export type {NativeActivityQuestionForm,NativeActivityAnswer} from '../../../shared/native-activity-question-contract.js';
 import type {ScheduledActionDto,ScheduledBindingDto,ScheduledLoopCreateDto} from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { ScheduledTaskDto, ScheduledCreateDto, ScheduledUpdateDto, ScheduledUpdateResultDto, ScheduledActionDto, ScheduledRunDto, ScheduledBindingDto, ScheduledLoopCreateDto, ScheduledReminderDto, ScheduledReminderStatusDto } from '../../../shared/scheduled-timed-action-ipc-contract.js';
 export type { KnowledgeCollectionDto, KnowledgeSourceDto, KnowledgeCreateCollectionInput, KnowledgeAddSourceInput, KnowledgeCollectionStateDto, KnowledgeSourceContentInput, KnowledgeSourceContentDto, KnowledgeSearchInput, KnowledgeSearchResultDto } from '../../../shared/knowledge-ipc-contract.js';
@@ -8,6 +12,7 @@ export type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared
 import type {LoopCompletionObservation} from '../../../shared/loop-current-view-types';
 export type {LoopPublicationActionDto as LoopPublicationAction,LoopPublicationActionResultDto as LoopPublicationActionResult,LoopPublicationStateDto as LoopPublicationStateView,StoredLoopPublicationConfigurationDto as StoredLoopPublicationConfiguration} from '../../../shared/loop-publication-ipc-contract.js';
 export type { GoalAttachmentRequest, GoalAttachmentSource } from '../../../shared/goal-attachment';
+export type { TaskHistoryRead, TaskPublicPresentation } from '../../../shared/task-history';
 export type {
   ArtifactWorkspaceEventName,
   ArtifactWorkspaceFeatureAccess,
@@ -58,6 +63,9 @@ export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
 export interface ThreadRecord {
+  coverage?: 'complete' | 'partial' | 'unclaimed';
+  /** Display/import candidates only; never execution ownership or model history. */
+  legacyTaskIds?: string[];
   /** Local association reservation only; main owns execution/deletion status. */
   deletionPending?: boolean;
   id: string;
@@ -276,3 +284,7 @@ export type { KSwarmProjectFactDto, KSwarmProjectModeResultDto, KSwarmProjectDel
 export type { ProxyJsonResult, ProxyTextResult, ProxyDeleteResult, ProxyHttpBody, ProxyStreamResult, ProxyStatusResult, ProxyHealthResult } from '../../../shared/kswarm-proxy-ipc-contract';
 
 export type { ModelConfigResult, SaveModelConfigInput, UpdateModelRuntimeInput, SystemOneConfigResult, SystemOneConfigPatch, ManagedAgentInput, ManagedAgentResult, ProviderConnectionInput, ProviderConnectionResult, AvailableModelResult } from '../../../shared/model-provider-ipc-contract.js';
+export type {WriterControlResult} from '../../../shared/kswarm-writer-control-ipc-contract.js';
+export type {DshDesktopApi,DshDesktopState,DshDesktopMode,DshDesktopSetModeInput,DshDesktopConfigureSetupInput,DshDesktopConnectInput,DshDesktopDisconnectInput,DshDesktopReconcileInput,DshDesktopConfigureBudgetInput,DshDesktopPublishMandateInput,DshDesktopPublishEgressPolicyInput} from '../../../shared/dsh-desktop';
+
+export type {AssistantCalendarStatus,AssistantCalendarSnapshot} from '../../../shared/assistant-calendar-observation-contract.js';

@@ -1,18 +1,9 @@
 name: CLI Startup
 
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'src/platform/runtime/**'
-      - 'src/utils/atomic-file.ts'
-      - 'dist/platform/runtime/**'
-      - 'tests/platform/runtime/**'
-      - 'tests/utils/atomic-file.test.ts'
-      - 'scripts/apply-health-cache-hotfix.mjs'
-      - 'tests/scripts/health-cache-hotfix.test.mjs'
-      - 'data/hotfixes/windows-health-cache-1.5.7/**'
-      - '.github/workflows/cli-startup.yml'
   pull_request:
     paths:
       - 'src/platform/runtime/**'
@@ -21,7 +12,18 @@ on:
       - 'scripts/apply-health-cache-hotfix.mjs'
       - 'tests/scripts/health-cache-hotfix.test.mjs'
       - '.github/workflows/cli-startup.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   startup:
@@ -43,6 +45,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build:release
       - run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Stage recorded MCP catalogs for compiled tests
         run: >
           node --input-type=module -e "import { cpSync } from 'node:fs'; import { join } from 'node:path'; cpSync(join('tests', 'fixtures'), join('.test-dist', 'tests', 'fixtures'), { recursive: true });"

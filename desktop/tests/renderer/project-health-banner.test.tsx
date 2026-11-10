@@ -430,6 +430,18 @@ describe('project plan retry feedback', () => {
 });
 
 describe('project manual dispatch', () => {
+  it('can record pending intent despite an empty legacy dispatch plan', async () => {
+    const detail = retryableDetail();
+    detail.project.status = 'active';
+    detail.tasks = [{ id: 'pending-task', title: 'Pending task', status: 'pending' } as any];
+    detail.dispatchPlan = { dispatchedTasks: [], dispatchable: [] };
+    mockDispatchTasks.mockResolvedValue({ ok: true, operation: { children: [{ taskId: 'pending-task', state: 'intent_pending' }] } });
+    renderProjectDetail(detail);
+    fireEvent.click(await screen.findByRole('button', { name: '分发任务' }));
+    await waitFor(() => expect(mockDispatchTasks).toHaveBeenCalledWith(detail.project.id));
+    expect(await screen.findByRole('status')).toHaveTextContent('已记录 1 个任务的执行请求，尚未开始执行。');
+  });
+
   it('shows dispatch when the backend marks a blocked rework task dispatchable', async () => {
     const detail = retryableDetail();
     detail.project.status = 'active';
@@ -454,14 +466,14 @@ describe('project manual dispatch', () => {
       skipped: [],
       projectGate: null,
     };
-    mockDispatchTasks.mockResolvedValue({ dispatched: ['proj-story__item-2.1'] });
+    mockDispatchTasks.mockResolvedValue({ ok: true, operation: { children: [{ taskId: 'proj-story__item-2.1', state: 'intent_pending' }] } });
     renderProjectDetail(detail);
 
     const dispatchButton = await screen.findByRole('button', { name: '分发任务' });
     fireEvent.click(dispatchButton);
 
     await waitFor(() => {
-      expect(mockDispatchTasks).toHaveBeenCalledWith(detail.project.id, detail.project.poAgent);
+      expect(mockDispatchTasks).toHaveBeenCalledWith(detail.project.id);
     });
   });
 });

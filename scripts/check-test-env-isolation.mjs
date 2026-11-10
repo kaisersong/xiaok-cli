@@ -77,7 +77,10 @@ function vitestBin(runDir, { own = false } = {}) {
 
 function run(label, runDir, bin, flags, args, extraEnv, expectFailure) {
   const result = spawnSync(process.execPath, [...flags, bin, 'run', ...args], { cwd: runDir, env: { ...process.env, ...LEAK, ...extraEnv }, encoding: 'utf8', timeout: 600_000 });
-  const good = expectFailure ? result.status !== 0 : result.status === 0;
+  const good = expectFailure
+    ? Number.isInteger(result.status) && result.status !== 0 && !result.signal && !result.error
+      && `${result.stdout ?? ''}${result.stderr ?? ''}`.includes('test_env_leak:')
+    : result.status === 0;
   log(`${good ? 'ok  ' : 'FAIL'} ${label} (exit ${result.status}${expectFailure ? ', failure expected' : ''})`);
   if (!good) log(`${(result.stdout ?? '').slice(-2500)}\n${(result.stderr ?? '').slice(-1200)}`);
   return good;
@@ -92,7 +95,7 @@ function checkCanary({ config, runDir, canary, sandbox, desktop }) {
   // The wrapper widens `include` to the canary only, so configs that list a single test file can be exercised too.
   const configDir = dirOf(config);
   const wrapper = join(configDir, `.env-check-${process.pid}-${Date.now()}.config.mjs`);
-  writeFileSync(wrapper, `import { mergeConfig } from 'vitest/config';\nimport base from './${config.split(sep).pop()}';\nexport default mergeConfig(base, { test: { include: [${JSON.stringify(relative(runDir, canaryFile).split(sep).join('/'))}] } });\n`);
+  writeFileSync(wrapper, `import { mergeConfig } from 'vitest/config';\nimport base from './${config.split(sep).pop()}';\nexport default mergeConfig(base, { test: { include: [${JSON.stringify(relative(runDir, canaryFile).split(sep).join('/'))}], testNamePattern: /./, passWithNoTests: false } });\n`);
   const flags = sandbox ? SANDBOX_FLAGS : [];
   const args = [...(sandbox ? SANDBOX_ARGS : []), '--config', wrapper, relative(runDir, canaryFile).split(sep).join('/')];
   const name = relative(root, config) || config;

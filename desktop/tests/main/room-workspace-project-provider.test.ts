@@ -7,6 +7,8 @@ import {join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {it,expect,vi} from 'vitest';
 import {createDesktopServices} from '../../electron/desktop-services.js';
+import {createKSwarmService,sealAndDrainKSwarmServiceInstance} from '../../electron/kswarm-service.js';
+import {createHash} from 'node:crypto';
 import {RoomWorkspaceLocalStore} from '../../electron/room-workspace-local.js';
 import {createRoomWorkspaceService} from '../../electron/room-workspace-service.js';
 import {createRoomWorkspaceBrokerClient} from '../../electron/room-workspace-broker-client.js';
@@ -21,7 +23,7 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
  const root=mkdtempSync(join(tmpdir(),'project-provider-')),cwd=join(root,'selected-root'),projectCwd=join(cwd,'chosen-project'),stateRoot=join(root,'kswarm');
  mkdirSync(projectCwd,{recursive:true});mkdirSync(stateRoot);
  mkdirSync(join(cwd,'separate-project'));
- const previous=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');mkdirSync(process.env.XIAOK_CONFIG_DIR);
+ const previous={config:process.env.XIAOK_CONFIG_DIR,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,entry:process.env.KSWARM_SERVER_PATH,brokerEntry:process.env.BROKER_SERVER_PATH,fetch:globalThis.fetch};process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';process.env.XIAOK_CONFIG_DIR=join(root,'config');mkdirSync(process.env.XIAOK_CONFIG_DIR);
  const requests:any[]=[];let serial=0,discussionObserved=false;
  const model=createServer(async(req,res)=>{
   let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);requests.push(body);
@@ -52,12 +54,16 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
  const {createBrokerService}=await nodeImport(pathToFileURL(join(siblings,'intent-broker/src/broker/service.js')).href);
  const {createServer:createBrokerServer}=await nodeImport(pathToFileURL(join(siblings,'intent-broker/src/http/server.js')).href);
  const {createHub}=await nodeImport(pathToFileURL(join(siblings,'kswarm/src/core/hub.js')).href);
+ const dataRoot=join(root,'data'),scope={profileId:createHash('sha256').update(dataRoot).digest('hex'),workspaceId:createHash('sha256').update(cwd).digest('hex')};
+ process.env.KSWARM_SERVER_PATH=join(siblings,'kswarm','src','server','index.js');process.env.BROKER_SERVER_PATH=join(siblings,'intent-broker','src','cli.js');
+ const manager=createKSwarmService({desktopProjectScope:scope,spawnProcess:(()=>{throw Error('fixture_unowned_spawn_denied');}) as never,findPortOwner:async()=>null,killStalePortOwner:async()=>{throw Error('fixture_unowned_kill_denied');}});
+ const roomToken=manager.getIntentBrokerRoomToken();
  const broker=createBrokerService({dbPath:join(root,'broker.sqlite')}),store=new RoomWorkspaceLocalStore(join(root,'local.sqlite'));
- const brokerServer=createBrokerServer({broker,roomService:broker.room,roomDesktopToken:'desktop-test',roomKSwarmToken:'kswarm-test'});
+ const brokerServer=createBrokerServer({broker,roomService:broker.room,roomDesktopToken:roomToken,roomKSwarmToken:'kswarm-test'});
  broker.attachWebSocket(brokerServer.raw());
  await brokerServer.listen(0,'127.0.0.1');const baseUrl=`http://127.0.0.1:${brokerServer.address().port}`;
- const client=createRoomWorkspaceBrokerClient({token:'desktop-test',baseUrl,isMutationOwner:()=>true});
- const roomClient=createCollaborationRoomBrokerClient({token:'desktop-test',fetchImpl:(input,init)=>fetch(`${baseUrl}${new URL(String(input)).pathname}${new URL(String(input)).search}`,init)});
+ const client=createRoomWorkspaceBrokerClient({token:roomToken,baseUrl,isMutationOwner:()=>true});
+ const roomClient=createCollaborationRoomBrokerClient({token:roomToken,fetchImpl:(input,init)=>fetch(`${baseUrl}${new URL(String(input)).pathname}${new URL(String(input)).search}`,init)});
  const created=await roomClient.createRoom({title:'Project chain',memberAgentIds:['xiaok-worker']});expect(created.ok).toBe(true);const roomId=(created.room as any).roomId;
  const seed=createHub({silent:true,dataDir:{backend:'sqlite',filePath:join(stateRoot,'state.sqlite')},projectStorageRoot:join(stateRoot,'projects')});
  const project=seed.createProject({id:'p',name:'Project',goal:'PROJECT_ROOT_FLOW',poAgent:'xiaok-po',members:['xiaok-worker']});
@@ -72,10 +78,14 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
  seed.createProject({id:'legacy',name:'Legacy standalone',goal:'Preserve compatibility',poAgent:'xiaok-po',members:['xiaok-worker']});
  seed.persistState();seed.closePersistence();
  const reservation=createServer();await new Promise<void>(done=>reservation.listen(0,'127.0.0.1',done));const port=(reservation.address() as any).port;await new Promise<void>(done=>reservation.close(()=>done()));
- let serverLog='';const child=spawn(process.execPath,[join(siblings,'kswarm/src/server/index.js')],{cwd:join(siblings,'kswarm'),env:{...process.env,KSWARM_DATA_ROOT:stateRoot,KSWARM_PORT:String(port),BROKER_URL:baseUrl,KSWARM_DESKTOP_MUTATION_TOKEN:'desktop-mutation',INTENT_BROKER_KSWARM_TOKEN:'kswarm-test'},stdio:['ignore','pipe','pipe']});
+ let serverLog='';const child=spawn(process.execPath,[join(siblings,'kswarm/src/server/index.js')],{cwd:join(siblings,'kswarm'),env:{...process.env,KSWARM_DATA_ROOT:stateRoot,KSWARM_PORT:String(port),BROKER_URL:baseUrl,KSWARM_DESKTOP_MUTATION_TOKEN:manager.getDesktopMutationToken(),KSWARM_DESKTOP_PROFILE_ID:scope.profileId,KSWARM_DESKTOP_WORKSPACE_ID:scope.workspaceId,INTENT_BROKER_KSWARM_TOKEN:'kswarm-test'},stdio:['ignore','pipe','pipe']});
  child.stdout.on('data',c=>serverLog+=String(c));child.stderr.on('data',c=>serverLog+=String(c));
- const kswarmRequest=(path:string,init:RequestInit={})=>fetch(`http://127.0.0.1:${port}${path}`,{...init,headers:{...Object.fromEntries(new Headers(init.headers)),'x-kswarm-mutation-token':'desktop-mutation'}});
- let host:ReturnType<typeof createKSwarmRuntimeBridgeBrokerClient>|undefined;
+ const childClosed=new Promise<void>(done=>child.once('close',(code,signal)=>{console.log(JSON.stringify({test:'room-project-owned-backend-close',pid:child.pid,code,signal,reaped:true}));done();}));
+ globalThis.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if((url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.port==='4400')return previous.fetch(`http://127.0.0.1:${port}`+url.pathname+url.search,init);if((url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.port==='4318')return previous.fetch(baseUrl+url.pathname+url.search,init);return previous.fetch(input,init);};
+ const mappingResponses:unknown[]=[];
+ const kswarmRequest=async(path:string,init:RequestInit={})=>{const response=await manager.request(path,{...init,headers:{...Object.fromEntries(new Headers(init.headers)),'x-kswarm-mutation-token':manager.getDesktopMutationToken()}});if(path.endsWith('/workspace-mapping'))mappingResponses.push({path,status:response.status,body:await response.clone().json()});return response;};
+ const currentProjectRevision=async(id:string)=>{const response=await kswarmRequest('/projects');const body=await response.json() as any;expect(response.ok,JSON.stringify(body)).toBe(true);const current=body.projects.find((p:any)=>p.id===id);expect(current).toBeTruthy();return current.projectRevision as number;};
+ let host:ReturnType<typeof createKSwarmRuntimeBridgeBrokerClient>|undefined,services:ReturnType<typeof createDesktopServices>|undefined,runtime:ReturnType<typeof createRoomWorkspaceRuntime>|undefined;
  try{
   await vi.waitFor(async()=>{expect(child.exitCode,serverLog).toBeNull();expect((await(await kswarmRequest('/health')).json()).brokerConnected,serverLog).toBe(true);},{timeout:10000,interval:100});
   await vi.waitFor(()=>expect(serverLog).toContain('"reason":"workspace_mapping_required"'),{timeout:11000,interval:100});
@@ -88,30 +98,30 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
   const preview=await workspaceService.previewCollaborationRoomWorkspace({roomId,mode:'existing',selectedPath:cwd,expectedRevision:0,templateEntries:[],instructionsText:'FROZEN_PROJECT_RULES'});expect(preview.ok,JSON.stringify(preview)).toBe(true);
   const bound=await workspaceService.commitCollaborationRoomWorkspace({roomId,previewId:preview.previewId!,expectedRevision:0,idempotencyKey:'bind',confirmOverlap:true,confirmSharedReadGrant:true});expect(bound.ok,JSON.stringify(bound)).toBe(true);
   const state=await client.get(roomId);
-  const mapped=await workspaceService.mapCollaborationRoomWorkspaceProject({roomId,projectId:'p',expectedRevision:(state.config as any).revision,expectedProjectRevision:project.projectRevision,workFolderRelativePath:'chosen-project',artifactsRelativePath:'chosen-project',idempotencyKey:'map'});
+  const mapped=await workspaceService.mapCollaborationRoomWorkspaceProject({roomId,projectId:'p',expectedRevision:(state.config as any).revision,expectedProjectRevision:await currentProjectRevision('p'),workFolderRelativePath:'chosen-project',artifactsRelativePath:'chosen-project',idempotencyKey:'map'});
   expect(mapped.ok).toBe(false);expect(mappingSendFailed).toBe(true);
   const pendingMapping=store.listRecords<any>('pending-mapping')[0];expect(pendingMapping.ticketId).toBeTruthy();expect(pendingMapping.applied).toBe(false);
   // Reconstruct the service with only its durable SQLite journal. Recovery owns
   // the historical ticket; it must not require the original in-memory closure.
   workspaceService=createRoomWorkspaceService({store,broker:client,kswarmRequest,isMutationOwner:()=>true,ensureProtocol:async()=>{}});
   await workspaceService.recoverMappings();
-  expect(store.listRecords<any>('pending-mapping')[0].applied).toBe(true);
+  expect(store.listRecords<any>('pending-mapping')[0].applied,JSON.stringify(mappingResponses)).toBe(true);
   for(const peer of peers){
     const current=await client.get(roomId),directory=peer.id==='shared'?'chosen-project':'separate-project';
-    const mappedPeer=await workspaceService.mapCollaborationRoomWorkspaceProject({roomId,projectId:peer.id,expectedRevision:(current.config as any).revision,expectedProjectRevision:peer.projectRevision,workFolderRelativePath:directory,artifactsRelativePath:directory,idempotencyKey:`map-${peer.id}`});
+    const mappedPeer=await workspaceService.mapCollaborationRoomWorkspaceProject({roomId,projectId:peer.id,expectedRevision:(current.config as any).revision,expectedProjectRevision:await currentProjectRevision(peer.id),workFolderRelativePath:directory,artifactsRelativePath:directory,idempotencyKey:`map-${peer.id}`});
     expect(mappedPeer.ok,JSON.stringify(mappedPeer)).toBe(true);
   }
   const adapter=createRoomWorkspaceProjectAdapter({kswarmRequest,broker:client,journal:store});
   expect(await adapter.listDispatchCandidates('legacy')).toBeNull();
-  const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:{request:kswarmRequest,getDesktopMutationToken:()=> 'desktop-mutation'} as any});
+  services=createDesktopServices({dataRoot,workspaceRoot:cwd,kswarmService:manager});
   const guarded=createRoomProjectScopeGuard({roomClient,workspaceBroker:client,kswarmRequest});
-  const runtime=createRoomWorkspaceRuntime({store,broker:guarded.workspaceBroker,wake:guarded.roomClient,execute:services.runCollaborationRoomAgentTask,executeProject:services.runWorkspaceProjectTask,projectAdapter:adapter,ensureProtocol:async()=>{},flushOutbox:workspaceService.flushOutbox});
+  runtime=createRoomWorkspaceRuntime({kswarmService:manager,store,broker:guarded.workspaceBroker,wake:guarded.roomClient,execute:services.runCollaborationRoomAgentTask,executeProject:services.runWorkspaceProjectTask,projectAdapter:adapter,ensureProtocol:async()=>{},flushOutbox:workspaceService.flushOutbox});
   const discussion=await roomClient.sendRoomMessage({roomId,text:'UNMAPPED_PROJECT_DISCUSSION',contextScope:{kind:'project',projectId:'unmapped'},idempotencyKey:'discussion',responsePolicy:'mentioned',mentions:[{kind:'agent',logicalAgentId:'xiaok-worker'}]});expect(discussion.ok,JSON.stringify(discussion)).toBe(true);
   const source=discussion.message as any;
   expect(await runtime.run({roomId,roomTitle:'Project discussion',roomRevision:1,roomMessageId:source.messageId,logicalAgentId:'xiaok-worker',contextScope:{kind:'project',projectId:'unmapped'},attachmentPaths:[],messages:[source],contextWindow:{fromSequence:source.roomSequence,toSequence:source.roomSequence,totalMessages:1,isComplete:true,snapshotAt:new Date().toISOString()}})).toEqual({ok:true});expect(discussionObserved).toBe(true);
   const runWorkspaceTask=vi.fn(runtime.runProjectTask);
-  const bridge=createKSwarmRuntimeBridge({allowedRoots:[join(stateRoot,'projects')],runWorkspaceTask,runDesktopTask:async()=>{throw new Error('legacy_runner_bypass');},submitResult:async()=>{throw new Error('duplicate_result_owner');}});
-  host=createKSwarmRuntimeBridgeBrokerClient({brokerUrl:baseUrl,participantId:'xiaok-desktop',participantKind:'service',roles:['desktop_runtime_host'],capabilities:['research','analysis','coding','testing','planning','reporting'],bridge});await host.start();
+  const bridge=createKSwarmRuntimeBridge({kswarmService:manager,allowedRoots:[join(stateRoot,'projects')],runWorkspaceTask,runDesktopTask:async()=>{throw new Error('legacy_runner_bypass');},submitResult:async()=>{throw new Error('duplicate_result_owner');}});
+  host=createKSwarmRuntimeBridgeBrokerClient({kswarmService:manager,brokerUrl:baseUrl,participantId:'xiaok-desktop',participantKind:'service',roles:['desktop_runtime_host'],capabilities:['research','analysis','coding','testing','planning','reporting'],bridge});await host.start();
   const dispatch=createRoomWorkspaceProjectDispatch({adapter,runtime});
   const dispatched=await dispatch('p');expect(dispatched,serverLog).toMatchObject({ok:true,dispatched:['p__t']});
   await vi.waitFor(()=>{const records=store.listRecords<any>('project-execution');expect(records.some(r=>r.status==='completed'),JSON.stringify(records)+'\n'+serverLog).toBe(true);},{timeout:20000,interval:100});
@@ -141,9 +151,11 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
   await client.request(roomId,'release',{...probeClaim,cleanupOutcome:'released',terminationEvidence:{kind:'resources-disposed',executorInstanceId:probeClaim.executorInstanceId,verified:true}});
   await runtime.shutdown();
  }finally{
-  host?.stop();child.kill('SIGTERM');await new Promise<void>(done=>child.exitCode!==null?done():child.once('exit',()=>done()));
+  await host?.stop();await runtime?.shutdown();await services?.closeTaskSourceWritersForMigration();await services?.disposeMultiAgent();await sealAndDrainKSwarmServiceInstance(manager);
+  if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');await childClosed;
+  const disconnectDeadline=Date.now()+2000;for(;;){await new Promise<void>(done=>setImmediate(done));if(!broker.getWebSocketNotifier().listConnections().length)break;if(Date.now()>disconnectDeadline)throw Error('room_project_fixture_disconnect_unconfirmed');}
   writeFileSync(join(root,'server.log'),serverLog);
   await brokerServer.close();broker.close();store.close();model.closeAllConnections();await new Promise<void>(done=>model.close(()=>done()));
-  if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;
+  globalThis.fetch=previous.fetch;for(const [key,value]of [['XIAOK_CONFIG_DIR',previous.config],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins],['KSWARM_SERVER_PATH',previous.entry],['BROKER_SERVER_PATH',previous.brokerEntry]]as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}
  }
 },40000);

@@ -1,3 +1,4 @@
+import type {LoopRunner} from './loop-executor.js';
 import type { BrowserWindow } from 'electron';
 import type { AssistantRuntime } from './assistant-runtime.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
@@ -36,6 +37,7 @@ export interface AgentTaskExecutorOptions {
 export interface DesktopTimedActionExecutorsOptions extends NotifyExecutorOptions, AgentTaskExecutorOptions {
   loopRuntime: Pick<DesktopLoopRuntime, 'executor'>;
   assistantRuntime?: AssistantRuntime;
+  periodicRuntime?:LoopRunner;
 }
 
 export function createDesktopTimedActionExecutors(
@@ -52,6 +54,7 @@ export function createDesktopTimedActionExecutors(
       ? createAssistantAwareLoopTimedActionExecutor({
         genericExecutor: options.loopRuntime.executor,
         assistantRuntime: options.assistantRuntime,
+        periodicRuntime:options.periodicRuntime,
       })
       : options.loopRuntime.executor,
     agent_task: createAgentTaskExecutor({

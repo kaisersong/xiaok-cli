@@ -2,7 +2,7 @@
 import type { IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import type { createDesktopServices } from './desktop-services.js';
-import type { DesktopGoalProjection } from './desktop-goal-coordinator.js';
+import type {GoalControlReceipt} from '../shared/goal-control.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { registerIpcHandler } from './ipc-runtime.js';
@@ -16,7 +16,7 @@ export function registerGoalPauseCancelIpc(
   authorize: (event: IpcMainInvokeEvent) => void,
 ): void {
   for (const [method, producer] of [['pause', pause], ['cancel', cancel]] as const) {
-    registerIpcHandler<[{threadId: string}], DesktopGoalProjection>({
+    registerIpcHandler<[{threadId: string}], GoalControlReceipt>({
       registrar: ipc, channel: `desktop:goal:${method}`, payloadMode: 'tuple', rolloutRound: 37,
       sourceFile: 'desktop/electron/goal-pause-cancel-typed-ipc.ts', riskTags: ['fs-read', 'fs-write', 'exec'],
       beforeInput: event => { authorize(event); return undefined; },

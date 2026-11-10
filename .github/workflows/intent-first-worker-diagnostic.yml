@@ -1,7 +1,6 @@
 name: Offline saved process-table replay
 on:
   pull_request:
-    types: [opened]
     paths:
       - '.github/workflows/intent-first-worker-diagnostic.yml'
       - 'scripts/diagnostics/intent-first-worker-cpu.py'
@@ -10,8 +9,19 @@ on:
       - 'scripts/diagnostics/tests/fixtures/linux-family.txt'
       - 'scripts/diagnostics/tests/fixtures/linux-terminal.txt'
       - 'scripts/diagnostics/tests/fixtures/provenance.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   offline-replay:
     if: github.event.pull_request.head.repo.full_name == github.repository

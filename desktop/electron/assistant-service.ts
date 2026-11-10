@@ -65,7 +65,7 @@ export class AssistantService {
 
   private projectStatus(status: AssistantStatus, now: number): void {
     const loopStatus = status === 'active' ? 'active' : 'paused';
-    this.options.loopStore.setLoopStatus(ASSISTANT_EVENING_LOOP_ID, loopStatus, now);
-    this.options.loopStore.setLoopStatus(ASSISTANT_MORNING_LOOP_ID, loopStatus, now);
+    if(this.options.loopStore.getLoopDefinition(ASSISTANT_EVENING_LOOP_ID)?.status!==loopStatus)this.options.loopStore.setLoopStatus(ASSISTANT_EVENING_LOOP_ID, loopStatus, now);
+    if(this.options.loopStore.getLoopDefinition(ASSISTANT_MORNING_LOOP_ID)?.status!==loopStatus)this.options.loopStore.setLoopStatus(ASSISTANT_MORNING_LOOP_ID, loopStatus, now);
   }
 }

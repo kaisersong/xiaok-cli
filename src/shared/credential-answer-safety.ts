@@ -1,0 +1,3 @@
+const obvious=/(?:\bsk[-_][A-Za-z0-9_-]{12,}|\b(?:tvly|xox[baprs])-[A-Za-z0-9_-]{12,}|\bgh[pousr]_[A-Za-z0-9]{12,}|\bAIza[A-Za-z0-9_-]{30,}|-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._-]{16,}|(?:password|api[\s_-]*key|授权码|密钥)\s*[:=：]\s*\S+)/i;
+/** Bounded mistake detection, not a promise to identify arbitrary passwords in free text. */
+export function assertOrdinaryAnswerHasNoCredential(text:string,known:readonly string[]=[]):void {const publicHeader=new Set(['application/json','application/xml','text/plain','application/json; charset=utf-8']);if(obvious.test(text)||/^[A-Za-z0-9]{16,128}$/.test(text.trim())||known.some(value=>value.length>=8&&!publicHeader.has(value)&&text.includes(value)))throw Error('credential_secure_input_required');}

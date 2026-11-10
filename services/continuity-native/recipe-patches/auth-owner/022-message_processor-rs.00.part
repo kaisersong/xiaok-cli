@@ -1,0 +1,345 @@
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -170,6 +170,10 @@
+     turn_processor: TurnRequestProcessor,
+     windows_sandbox_processor: WindowsSandboxRequestProcessor,
+     request_serialization_queues: RequestSerializationQueues,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    xiaok_auth_manager: Arc<AuthManager>,
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    xiaok_auth_connection: Arc<crate::xiaok_auth_owner::AuthOwnerConnection>,
+ }
+ 
+ #[derive(Debug)]
+@@ -247,6 +251,8 @@
+ }
+ 
+ pub(crate) struct MessageProcessorArgs {
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    pub(crate) xiaok_auth_connection: Arc<crate::xiaok_auth_owner::AuthOwnerConnection>,
+     pub(crate) outgoing: Arc<OutgoingMessageSender>,
+     pub(crate) analytics_events_client: AnalyticsEventsClient,
+     pub(crate) arg0_paths: Arg0DispatchPaths,
+@@ -273,6 +279,8 @@
+     /// `Sender` so handlers can enqueue messages to be written to stdout.
+     pub(crate) fn new(args: MessageProcessorArgs) -> Self {
+         let MessageProcessorArgs {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_auth_connection,
+             outgoing,
+             analytics_events_client,
+             arg0_paths,
+@@ -528,6 +536,8 @@
+             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
+             config_warnings,
+         );
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        let xiaok_auth_manager = Arc::clone(&auth_manager);
+         let turn_processor = TurnRequestProcessor::new(
+             auth_manager,
+             Arc::clone(&thread_manager),
+@@ -616,6 +626,10 @@
+             turn_processor,
+             windows_sandbox_processor,
+             request_serialization_queues,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_auth_manager,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_auth_connection,
+         }
+     }
+ 
+@@ -634,17 +648,18 @@
+         session: Arc<ConnectionSessionState>,
+     ) {
+         let request_method = request.method.as_str();
+-        tracing::trace!(
+-            ?connection_id,
+-            request_id = ?request.id,
+-            "app-server request: {request_method}"
+-        );
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::trace!(?connection_id, request_id = ?request.id, "app-server request: {request_method}");
++        }
+         let request_id = ConnectionRequestId {
+             connection_id,
+             request_id: request.id.clone(),
+         };
+-        let request_span =
+-            crate::app_server_tracing::request_span(&request, transport, connection_id, &session);
++        let request_span = if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::Span::none()
++        } else {
++            crate::app_server_tracing::request_span(&request, transport, connection_id, &session)
++        };
+         let request_trace = request.trace.as_ref().map(|trace| W3cTraceContext {
+             traceparent: trace.traceparent.clone(),
+             tracestate: trace.tracestate.clone(),
+@@ -658,8 +673,47 @@
+         Self::run_request_with_context(
+             Arc::clone(&self.outgoing),
+             request_context.clone(),
++            &session,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            &self.xiaok_auth_manager,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            &self.xiaok_auth_connection,
+             async {
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                {
++                    if !matches!(transport, AppServerTransport::Stdio)
++                        || session.origin != crate::transport::ConnectionOrigin::Stdio
++                    {
++                        self.outgoing
++                            .send_error(request_id.clone(), crate::xiaok_auth_owner::forbidden())
++                            .await;
++                        return;
++                    }
++                    if request.method == "xiaok/auth/snapshot" {
++                        if let Err(error) = self
++                            .dispatch_xiaok_auth_snapshot(
++                                request_id.clone(),
++                                request.params,
++                                Arc::clone(&session),
++                                request_context.clone(),
++                            )
++                            .await
++                        {
++                            self.outgoing.send_error(request_id.clone(), error).await;
++                        }
++                        return;
++                    }
++                    if let Err(error) = crate::xiaok_auth_owner::validate_public_wire(
++                        &request.method,
++                        request.params.as_ref(),
++                    ) {
++                        self.outgoing.send_error(request_id.clone(), error).await;
++                        return;
++                    }
++                }
+                 let codex_request = deserialize_client_request(request);
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                let codex_request = codex_request.map_err(|_| crate::xiaok_auth_owner::forbidden());
+                 let result = match codex_request {
+                     Ok(codex_request) => {
+                         // Websocket callers finalize outbound readiness in lib.rs after mirroring
+@@ -701,8 +755,11 @@
+             connection_id,
+             request_id: request.id().clone(),
+         };
+-        let request_span =
+-            crate::app_server_tracing::typed_request_span(&request, connection_id, &session);
++        let request_span = if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::Span::none()
++        } else {
++            crate::app_server_tracing::typed_request_span(&request, connection_id, &session)
++        };
+         let mut request_context = RequestContext::new(
+             request_id.clone(),
+             request.method_name(),
+@@ -710,14 +767,17 @@
+             /*parent_trace*/ None,
+         );
+         request_context.cancellation = cancellation;
+-        tracing::trace!(
+-            ?connection_id,
+-            request_id = ?request_id.request_id,
+-            "app-server typed request"
+-        );
++        if !codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            tracing::trace!(?connection_id, request_id = ?request_id.request_id, "app-server typed request");
++        }
+         Self::run_request_with_context(
+             Arc::clone(&self.outgoing),
+             request_context.clone(),
++            &session,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            &self.xiaok_auth_manager,
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            &self.xiaok_auth_connection,
+             async {
+                 // In-process clients do not have the websocket transport loop that performs
+                 // post-initialize bookkeeping, so they still finalize outbound readiness in
+@@ -740,6 +800,9 @@
+     }
+ 
+     pub(crate) async fn process_notification(&self, notification: JSONRPCNotification) {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         // Currently, we do not expect to receive any notifications from the
+         // client, so we just log them.
+         tracing::info!("<- notification: {:?}", notification);
+@@ -747,6 +810,9 @@
+ 
+     /// Handles typed notifications from in-process clients.
+     pub(crate) async fn process_client_notification(&self, notification: ClientNotification) {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         // Currently, we do not expect to receive any typed notifications from
+         // in-process clients, so we just log them.
+         tracing::info!("<- typed notification: {:?}", notification);
+@@ -755,13 +821,36 @@
+     async fn run_request_with_context<F>(
+         outgoing: Arc<OutgoingMessageSender>,
+         request_context: RequestContext,
++        session: &ConnectionSessionState,
++        #[cfg(feature = "xiaok-auth-owner-only")] auth_manager: &AuthManager,
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        owner: &crate::xiaok_auth_owner::AuthOwnerConnection,
+         request_fut: F,
+     ) where
+         F: Future<Output = ()>,
+     {
+-        outgoing
+-            .register_request_context(request_context.clone())
+-            .await;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            if !outgoing
++                .try_register_xiaok_request_context(request_context.clone())
++                .await
++            {
++                owner.revoke_exports();
++                let _ = auth_manager.xiaok_invalidate_auth_operations();
++                session.rpc_gate.close().await;
++                outgoing
++                    .send_xiaok_duplicate_error(request_context.request_id().clone())
++                    .await;
++                return;
++            }
++        }
++        #[cfg(not(feature = "xiaok-auth-owner-only"))]
++        {
++            let _ = session;
++            outgoing
++                .register_request_context(request_context.clone())
++                .await;
++        }
+         request_fut.instrument(request_context.span()).await;
+     }
+ 
+@@ -870,7 +959,14 @@
+         connection_id: ConnectionId,
+         session_state: &ConnectionSessionState,
+     ) {
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            self.xiaok_auth_connection.close_physical();
++            let _ = self.xiaok_auth_manager.xiaok_invalidate_auth_operations();
++        }
+         session_state.rpc_gate.close().await;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        self.account_processor.cancel_active_login().await;
+         self.account_processor
+             .gateway_connection_closed(connection_id);
+         self.request_serialization_queues.discard_closed().await;
+@@ -939,6 +1035,17 @@
+     ) -> Result<(), JSONRPCErrorError> {
+         crate::xiaok_main_bridge::validate_request(&codex_request)?;
+         let connection_id = connection_request_id.connection_id;
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        {
++            if session.origin != crate::transport::ConnectionOrigin::Stdio
++                || session.rpc_gate.is_closed()
++            {
++                return Err(crate::xiaok_auth_owner::forbidden());
++            }
++            if !matches!(&codex_request, ClientRequest::Initialize { .. }) {
++                self.xiaok_auth_connection.check(connection_id, &session)?;
++            }
++        }
+         if let ClientRequest::Initialize { request_id, params } = codex_request {
+             let connection_initialized = self
+                 .initialize_processor
+@@ -950,6 +1057,8 @@
+                     outbound_initialized,
+                 )
+                 .await?;
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            self.xiaok_auth_connection.bind(connection_id, &session)?;
+             if connection_initialized {
+                 self.connection_initialized(connection_id, session.request_attestation())
+                     .await;
+@@ -964,6 +1073,79 @@
+             request_context,
+         )
+         .await
++    }
++
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    async fn dispatch_xiaok_auth_snapshot(
++        self: &Arc<Self>,
++        request_id: ConnectionRequestId,
++        params: Option<serde_json::Value>,
++        session: Arc<ConnectionSessionState>,
++        context: RequestContext,
++    ) -> Result<(), JSONRPCErrorError> {
++        self.xiaok_auth_connection
++            .check(request_id.connection_id, &session)?;
++        let params = crate::xiaok_auth_owner::SnapshotParams::parse(params)?;
++        let processor = Arc::clone(self);
++        let span = context.span();
++        let request = QueuedInitializedRequest::new(
++            Arc::clone(&session.rpc_gate),
++            async move {
++                let originator = AuthStorageOriginator::from_client_name(
++                    session.app_server_client_name().unwrap_or("none"),
++                );
++                let result = originator
++                    .scope(async {
++                        processor
++                            .xiaok_auth_connection
++                            .check(request_id.connection_id, &session)?;
++                        if context.cancellation.is_cancelled() {
++                            return Err(crate::xiaok_auth_owner::unavailable());
++                        }
++                        if params.refresh {
++                            // Reject missing/nonmanaged/policy-failed auth before any refresh IO.
++                            processor
++                                .xiaok_auth_manager
++                                .xiaok_managed_auth_snapshot()
++                                .map_err(|_| crate::xiaok_auth_owner::unavailable())?;
++                            processor
++                                .xiaok_auth_manager
++                                .refresh_token()
++                                .await
++                                .map_err(|_| crate::xiaok_auth_owner::unavailable())?;
++                        }
++                        let snapshot = processor
++                            .xiaok_auth_manager
++                            .xiaok_managed_auth_snapshot()
++                            .map_err(|_| crate::xiaok_auth_owner::unavailable())?;
++                        processor
++                            .outgoing
++                            .send_xiaok_auth_snapshot_checked(
++                                request_id.clone(),
++                                &context,
++                                snapshot,
++                                &processor.xiaok_auth_manager,
++                                &processor.xiaok_auth_connection,
++                                &session,
++                            )
++                            .await;
++                        Ok::<(), JSONRPCErrorError>(())
++                    })
++                    .await;
++                if let Err(error) = result {
++                    processor.outgoing.send_error(request_id, error).await;
++                }
++            }
++            .instrument(span),
++        );
++        self.request_serialization_queues
++            .enqueue(
++                RequestSerializationQueueKey::Global("account-auth"),
++                crate::request_serialization::RequestSerializationAccess::Exclusive,
++                request,
++            )
++            .await;
++        Ok(())
+     }
+ 
+     async fn dispatch_initialized_client_request(

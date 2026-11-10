@@ -1,3 +1,5 @@
+import {LEGACY_PUBLICATION_PAGE_BYTES,MAX_PUBLICATION_PAGE_BYTES} from './publication-page-size.js';
+import {ownDataWeakMapPrototypeGet,ownDataWeakMapPrototypeSet,ownDataObjectHasOwn} from './application-native-intrinsics.js';
 import {captureApplicationData} from './application-value-data.js';
 import {METADATA_CAPACITY_METHODS,type AuthenticatedMetadataCapacityTransport} from './metadata-capacity-protocol.js';
 import {parseMaterialPrepareRequest,parseMaterialRequestQuery,parseMaterialRequestObservation,parseMaterialPrepareResult} from './material-request.js';
@@ -19,6 +21,14 @@ import { WORKER_POLICY_SHA256 } from '../isolated-execution/docker-request.js';
 import type { ValidationMaterialAuthorizationClient, PreparedValidationMaterials, PrivateMaterialHandle } from './product-material-authorization.js';
 import type { HostIssuedMountPlan, IsolatedExecutionPort, IsolatedExecutionResult } from '../isolated-execution/execution-port.js';
 import type { PhysicalQuiescenceReceipt, QuiescenceExpectation } from '../isolated-execution/physical-quiescence.js';
+
+type PublicationPageSize={maximum:number};
+const publicationPageSizes=new WeakMap<object,PublicationPageSize>();
+const publicationOwnDescriptor=Reflect.getOwnPropertyDescriptor,PublicationPageError=Error;
+/** Fixed actual-transport metadata reader. A page limit is never a read grant. */
+export function readPublicationPageBytes(transport:object):number{
+  return ownDataWeakMapPrototypeGet(publicationPageSizes,transport)?.maximum??LEGACY_PUBLICATION_PAGE_BYTES;
+}
 
 export interface QualifiedExecutionFacts {
   authorityId: string; serviceEpoch: string; qualificationId: string;
@@ -65,6 +75,7 @@ export function createAuthenticatedControllerClient(options: {
   const roundTrip = options.roundTrip, roundTripSync = options.roundTripSync;
   let serviceEpoch: string | undefined, invalidated = false;
   const lifetime = new AbortController();
+  const publicationPageSize:PublicationPageSize={maximum:LEGACY_PUBLICATION_PAGE_BYTES};
   const prepared = new Map<string, PreparedValidationMaterials>();
   const executions = new Map<string, PrivateMaterialHandle>();
   const plans = new WeakMap<object, PreparedValidationMaterials>();
@@ -87,12 +98,20 @@ export function createAuthenticatedControllerClient(options: {
     if (payload.result && typeof payload.result === 'object' && Object.hasOwn(payload.result, 'error')) throw Error('controller_operation_rejected');
     return snapshot(payload.result);
   }
-  async function call(method: string, payload: unknown, signal?: AbortSignal) {
+  async function call(method: string, payload: unknown, signal?: AbortSignal, pageSize?:PublicationPageSize) {
     const active = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
     active.throwIfAborted();
     const hello = request('controller.identity', {});
     const identity = response(await roundTrip(hello.bytes, active), hello.body); active.throwIfAborted();
     if (typeof identity.requestTicket !== 'string' || !/^[a-f0-9]{64}$/.test(identity.requestTicket)) throw Error('controller_identity_ticket');
+    if(pageSize){
+      const advertised=publicationOwnDescriptor(identity,'publicationReadPageBytes');
+      if(advertised===undefined)pageSize.maximum=LEGACY_PUBLICATION_PAGE_BYTES;
+      else{
+        if(!ownDataObjectHasOwn(advertised,'value')||(advertised.value!==LEGACY_PUBLICATION_PAGE_BYTES&&advertised.value!==MAX_PUBLICATION_PAGE_BYTES))throw new PublicationPageError('controller_publication_page_limit');
+        pageSize.maximum=advertised.value;
+      }
+    }
     const outgoing = request(method, payload, identity.requestTicket);
     const reply = await roundTrip(outgoing.bytes, active); active.throwIfAborted();
     return response(reply, outgoing.body);
@@ -190,7 +209,8 @@ export function createAuthenticatedControllerClient(options: {
     }
     if(method!=='verification.prepare'&&method!=='verification.dispatch')throw Error('controller_verification_method');return call(method,payload,signal);
   }});
-  const publicationTransport=Object.freeze({call(method:'publication.prepareRequest' | 'publication.lookupRequest' | 'publication.recoverRequest' | 'publication.recoverUnapproved' | 'publication.prepare'|'publication.approve'|'publication.reconcile'|'publication.recoverExpired'|'publication.observeIntentCompletion' | 'publication.observeIntentDependencies' | 'publication.observeLoopSet' | 'publication.observeOwner'|'publication.readOwnerPayload',payload:unknown,signal?:AbortSignal):Promise<unknown>{if(!['publication.prepareRequest','publication.lookupRequest','publication.recoverRequest','publication.recoverUnapproved','publication.prepare','publication.approve','publication.reconcile','publication.recoverExpired','publication.observeIntentCompletion','publication.observeIntentDependencies','publication.observeLoopSet','publication.observeOwner','publication.readOwnerPayload'].includes(method))return Promise.reject(Error('controller_publication_method'));return call(method,payload,signal);}});
+  const publicationTransport=Object.freeze({call(method:'publication.prepareRequest' | 'publication.lookupRequest' | 'publication.recoverRequest' | 'publication.recoverUnapproved' | 'publication.prepare'|'publication.approve'|'publication.reconcile'|'publication.recoverExpired'|'publication.observeIntentCompletion' | 'publication.observeIntentDependencies' | 'publication.observeLoopSet' | 'publication.observeOwner'|'publication.readOwnerPayload',payload:unknown,signal?:AbortSignal):Promise<unknown>{if(!['publication.prepareRequest','publication.lookupRequest','publication.recoverRequest','publication.recoverUnapproved','publication.prepare','publication.approve','publication.reconcile','publication.recoverExpired','publication.observeIntentCompletion','publication.observeIntentDependencies','publication.observeLoopSet','publication.observeOwner','publication.readOwnerPayload'].includes(method))return Promise.reject(Error('controller_publication_method'));return call(method,payload,signal,publicationPageSize);}});
+  ownDataWeakMapPrototypeSet(publicationPageSizes,publicationTransport,publicationPageSize);
   const metadataCapacityTransport=Object.freeze<AuthenticatedMetadataCapacityTransport>({call(method,payload,signal){if(!METADATA_CAPACITY_METHODS.includes(method))return Promise.reject(Error('controller_metadata_method'));return call(method,payload,signal);},callSync(method,payload){if(!METADATA_CAPACITY_METHODS.includes(method))throw Error('controller_metadata_method');return callSync(method,payload);}});
   const applicationTransport=Object.freeze<AuthenticatedApplicationTransport>({call(method,payload,signal){if(!APPLICATION_METHODS.includes(method))return Promise.reject(Error('controller_application_method'));if(signal?.aborted)return Promise.reject(signal.reason);if(lifetime.signal.aborted)return Promise.reject(lifetime.signal.reason);let original:unknown;try{original=captureApplicationData(payload,{maximumBytes:1048576,maximumNodes:1048576,invalid:'controller_application_data',limit:'controller_request_limit'});}catch(error){return Promise.reject(error);}return call(method,original,signal);}});
   const maintenanceTransport=Object.freeze({call(method:'maintenance.diagnose',payload:unknown,signal?:AbortSignal):Promise<unknown>{if(method!=='maintenance.diagnose')return Promise.reject(Error('controller_maintenance_method'));return call(method,payload,signal);}});

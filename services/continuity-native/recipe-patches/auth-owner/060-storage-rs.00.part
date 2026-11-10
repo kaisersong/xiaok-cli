@@ -1,0 +1,135 @@
+diff --git a/codex-rs/login/src/auth/storage.rs b/codex-rs/login/src/auth/storage.rs
+--- a/codex-rs/login/src/auth/storage.rs
++++ b/codex-rs/login/src/auth/storage.rs
+@@ -163,6 +163,7 @@
+     codex_home.join("auth.json")
+ }
+ 
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> {
+     let auth_file = get_auth_file(codex_home);
+     match std::fs::remove_file(&auth_file) {
+@@ -178,11 +179,13 @@
+     fn delete(&self) -> std::io::Result<bool>;
+ }
+ 
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ #[derive(Clone, Debug)]
+ pub(super) struct FileAuthStorage {
+     codex_home: PathBuf,
+ }
+ 
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ impl FileAuthStorage {
+     pub(super) fn new(codex_home: PathBuf) -> Self {
+         Self { codex_home }
+@@ -200,6 +203,7 @@
+     }
+ }
+ 
++#[cfg(not(feature = "xiaok-auth-owner-only"))]
+ impl AuthStorageBackend for FileAuthStorage {
+     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+         let auth_file = get_auth_file(&self.codex_home);
+@@ -232,6 +236,37 @@
+ 
+     fn delete(&self) -> std::io::Result<bool> {
+         delete_file_if_exists(&self.codex_home)
++    }
++}
++
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub(super) fn delete_file_if_exists(_: &Path) -> std::io::Result<bool> {
++    Err(super::xiaok_vault::unavailable())
++}
++// Legacy path constructors have no file IO in the fixed role. Only the private
++// bound backend in xiaok_vault can read a genuine claimed File store.
++#[cfg(feature = "xiaok-auth-owner-only")]
++#[derive(Clone, Debug)]
++pub(super) struct FileAuthStorage;
++#[cfg(feature = "xiaok-auth-owner-only")]
++impl FileAuthStorage {
++    pub(super) fn new(_: PathBuf) -> Self {
++        Self
++    }
++    pub(super) fn try_read_auth_json(&self, _: &Path) -> std::io::Result<AuthDotJson> {
++        Err(super::xiaok_vault::unavailable())
++    }
++}
++#[cfg(feature = "xiaok-auth-owner-only")]
++impl AuthStorageBackend for FileAuthStorage {
++    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
++        Err(super::xiaok_vault::unavailable())
++    }
++    fn save(&self, _: &AuthDotJson) -> std::io::Result<()> {
++        Err(super::xiaok_vault::unavailable())
++    }
++    fn delete(&self) -> std::io::Result<bool> {
++        Err(super::xiaok_vault::unavailable())
+     }
+ }
+ 
+@@ -588,8 +623,18 @@
+     mode: AuthCredentialsStoreMode,
+     keyring_backend_kind: AuthKeyringBackendKind,
+ ) -> Arc<dyn AuthStorageBackend> {
+-    let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
+-    create_auth_storage_with_store(codex_home, mode, keyring_store, keyring_backend_kind)
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    {
++        return match mode {
++            AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
++            _ => super::xiaok_vault::file_backend(&codex_home, mode),
++        };
++    }
++    #[cfg(not(feature = "xiaok-auth-owner-only"))]
++    {
++        let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
++        create_auth_storage_with_store(codex_home, mode, keyring_store, keyring_backend_kind)
++    }
+ }
+ 
+ fn create_auth_storage_with_store(
+@@ -598,19 +643,29 @@
+     keyring_store: Arc<dyn KeyringStore>,
+     keyring_backend_kind: AuthKeyringBackendKind,
+ ) -> Arc<dyn AuthStorageBackend> {
+-    let storage: Arc<dyn AuthStorageBackend> = match mode {
+-        AuthCredentialsStoreMode::File => Arc::new(FileAuthStorage::new(codex_home)),
+-        AuthCredentialsStoreMode::Keyring => {
+-            create_keyring_auth_storage(codex_home, keyring_store, keyring_backend_kind, mode)
+-        }
+-        AuthCredentialsStoreMode::Auto => Arc::new(AutoAuthStorage::new(
+-            codex_home,
+-            keyring_store,
+-            keyring_backend_kind,
+-        )),
+-        AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
+-    };
+-    storage_telemetry::observe(storage, mode, keyring_backend_kind)
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    {
++        return match mode {
++            AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
++            _ => super::xiaok_vault::file_backend(&codex_home, mode),
++        };
++    }
++    #[cfg(not(feature = "xiaok-auth-owner-only"))]
++    {
++        let storage: Arc<dyn AuthStorageBackend> = match mode {
++            AuthCredentialsStoreMode::File => Arc::new(FileAuthStorage::new(codex_home)),
++            AuthCredentialsStoreMode::Keyring => {
++                create_keyring_auth_storage(codex_home, keyring_store, keyring_backend_kind, mode)
++            }
++            AuthCredentialsStoreMode::Auto => Arc::new(AutoAuthStorage::new(
++                codex_home,
++                keyring_store,
++                keyring_backend_kind,
++            )),
++            AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
++        };
++        storage_telemetry::observe(storage, mode, keyring_backend_kind)
++    }
+ }
+ 
+ fn create_keyring_auth_storage(

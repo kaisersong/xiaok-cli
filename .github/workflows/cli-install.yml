@@ -1,21 +1,25 @@
 name: CLI Published Install
 on:
+  merge_group: {}
   workflow_dispatch: {}
   push:
     branches: [master, fix/cli-deprecated-install]
-    paths:
-      - 'package.json'
-      - 'package-lock.json'
-      - 'scripts/pack-cli.mjs'
-      - 'scripts/prepare-cli-native.mjs'
-      - 'scripts/verify-cli-install.mjs'
-      - 'tests/package/cli-source-bundle.test.mjs'
-      - '.github/workflows/cli-install.yml'
   pull_request:
     paths:
       - 'scripts/pack-cli.mjs'
       - 'scripts/prepare-cli-native.mjs'
       - '.github/workflows/cli-install.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   consumer:
     strategy:

@@ -1,0 +1,28 @@
+diff --git a/codex-rs/app-server-transport/src/xiaok_auth_ingress_tests.rs b/codex-rs/app-server-transport/src/xiaok_auth_ingress_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/codex-rs/app-server-transport/src/xiaok_auth_ingress_tests.rs
+@@ -0,0 +1,23 @@
++use super::*;
++use codex_app_server_protocol::JSONRPCMessage;
++use tokio::sync::mpsc;
++
++#[tokio::test]
++async fn xiaok_auth_ingress_full_queue_keeps_the_original_request_for_the_original_registry() {
++    let (events, mut incoming) = mpsc::channel(1);
++    let (writer, mut outgoing) = mpsc::channel(1);
++    let id = ConnectionId(77);
++    events.send(TransportEvent::ConnectionClosed { connection_id: id }).await.unwrap();
++    let payload = r#"{"id":1,"method":"xiaok/auth/snapshot","params":{}}"#;
++    let forward = forward_incoming_message(&events, &writer, id, payload);
++    tokio::pin!(forward);
++    assert!(futures::poll!(forward.as_mut()).is_pending(), "fixed role must await its original event queue, never replace an unexamined duplicate with a direct-writer overload reply");
++    assert!(outgoing.try_recv().is_err());
++    incoming.recv().await.unwrap();
++    assert!(forward.await);
++    let Some(TransportEvent::IncomingMessage { connection_id, message: JSONRPCMessage::Request(request) }) = incoming.recv().await else { panic!("original request must reach the only registry unchanged"); };
++    assert_eq!(connection_id, id);
++    assert_eq!(request.id, codex_app_server_protocol::RequestId::Integer(1));
++    assert_eq!(request.method, "xiaok/auth/snapshot");
++    assert!(outgoing.try_recv().is_err());
++}

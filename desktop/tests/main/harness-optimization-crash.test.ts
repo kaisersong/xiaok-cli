@@ -23,9 +23,20 @@ afterEach(async () => {
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 5 });
 });
-async function crash(phase: string) {
+async function collectFixture(child: ChildProcess): Promise<void> {
+  await new Promise<void>((resolveGc, reject) => {
+    let text = '';
+    const cleanup = () => { clearTimeout(timer); child.stdout!.off('data', onData); child.off('exit', onExit); };
+    const onData = (data: Buffer) => { text += data.toString(); if (text.includes('{"fixtureGcComplete":true}\n')) { cleanup(); resolveGc(); } };
+    const onExit = () => { cleanup(); reject(new Error('fixture_gc_child_exited')); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('fixture_gc_ack_timeout')); }, 10_000);
+    child.stdout!.on('data', onData); child.once('exit', onExit);
+    child.stdin!.write('fixture-gc\n');
+  });
+}
+async function crash(phase: string, forceGc = false, graceful = false) {
   const root = mkdtempSync(join(tmpdir(), 'harness-crash-')); roots.push(root);
-  const child = spawn(process.execPath, ['--expose-gc', resolve('tests/fixtures/harness-optimization-child.mjs'), root, phase], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--expose-gc', ...(forceGc ? ['--import', resolve('tests/fixtures/harness-gc-preload.mjs')] : []), resolve('tests/fixtures/harness-optimization-child.mjs'), root, phase], { stdio: ['pipe', 'pipe', 'pipe'] });
   const audit = { pid: child.pid, phase, closed: false }; childAudit.push(audit);
   const closed = once(child, 'close').then(value => { audit.closed = true; return value; }); children.push({ process: child, closed });
   writeFileSync(join(root, 'owned-child-pid.json'), JSON.stringify({ pid: child.pid, phase }));
@@ -39,10 +50,14 @@ async function crash(phase: string) {
     });
     child.once('exit', () => { clearTimeout(timer); reject(Error(`child_early_exit: ${stderr}`)); });
   });
+  if (forceGc) await collectFixture(child);
   // A second actual process cannot acquire the same live root OS lock.
   const contender = await createHarnessOptimizationRuntime({ dataRoot: root, profileId: 'profile', workspaceId: 'workspace', authorizeUser: () => false, manifestLookup: () => undefined });
-  expect((await contender.api.read()).status).toBe('unavailable'); await contender.dispose();
-  child.kill('SIGKILL'); await closed;
+  try { expect((await contender.api.read()).status).toBe('unavailable'); } finally { await contender.dispose(); }
+  if (graceful) child.stdin!.end();
+  else child.kill('SIGKILL');
+  const termination = await closed;
+  if (graceful) expect(termination).toEqual([0, null]);
   const host = await createHarnessOptimizationRuntime({ dataRoot: root, profileId: 'profile', workspaceId: 'workspace',
     authorizeUser: () => false, manifestLookup: () => undefined, now: () => Date.UTC(2026, 9, 20, 12) });
   return { value, host };
@@ -53,6 +68,16 @@ it('keeps unqualified Windows/Linux factories closed', () => {
   expect(harnessOwnerPlatformQualified('linux')).toBe(false);
 });
 describe.skipIf(process.platform !== 'darwin')('real process crash and OS lock recovery', () => {
+  it('keeps a live initialization locked through a real forced collection', async () => {
+    const { value, host } = await crash('initializing', true);
+    try { expect(await host.api.read()).toMatchObject({ status: 'ready', ownerId: value.ownerId }); }
+    finally { await host.dispose(); }
+  });
+  it('releases the retained initialization lock on real stdin EOF', async () => {
+    const { value, host } = await crash('initializing', true, true);
+    try { expect(await host.api.read()).toMatchObject({ status: 'ready', ownerId: value.ownerId }); }
+    finally { await host.dispose(); }
+  });
   it('resumes the same never-admitted initialization after witness-only crash', async () => {
     const { value, host } = await crash('initializing');
     try {

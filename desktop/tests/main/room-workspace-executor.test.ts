@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, lstatSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, lstatSync, realpathSync,rmSync } from 'node:fs';
 import { createSkillTool } from '../../../src/ai/skills/tool.js';
 import { loadSkills } from '../../../src/ai/skills/loader.js';
 import { join } from 'node:path';
@@ -10,6 +10,16 @@ import type { ToolExecutionContext } from '../../../src/types.js';
 const context = (cwd: string): RoomWorkspaceExecutionContext => { const canonicalRoot=realpathSync(cwd),s=lstatSync(canonicalRoot,{bigint:true});return { roomId: 'r', logicalAgentId: 'a', runId: 'run', claimId: 'claim', executorInstanceId: 'ex', workspaceId: 'w', bindingId: 'b', generation: 1, instructionsRevision: 2, effectiveCwd: cwd, workspaceRoot:{canonicalRoot,identity:{dev:String(s.dev),ino:String(s.ino),birthtimeNs:String(s.birthtimeNs)}}, publishedInstructions: '已发布规则', contextScope: { kind: 'room_only' } }; };
 const port = (): WorkspaceExecutionPort => ({ authorize: vi.fn(async () => { }), acquireChild: vi.fn(async ({ parent, turn, agentId }) => ({ ...parent, runId: `${agentId}-${turn}`, claimId: `claim-${agentId}-${turn}`, executorInstanceId: agentId })), release: vi.fn(async () => { }), submitManifest: vi.fn(async () => { }) });
 describe('room runner physical execution and scoped tools', () => {
+    it.each(['authorize_return','runner_factory'] as const)('checks the private start guard at %s before the actual Room runner',async frame=>{
+        const cwd=mkdtempSync(join(tmpdir(),'room-start-frame-')),p=port();let allowed=true;const sentinel=Error('original_room_model_revoked'),runner=vi.fn(async()=>{});
+        if(frame==='authorize_return')p.authorize=async()=>{allowed=false;};
+        const createRunner=vi.fn(()=>{if(frame==='runner_factory')allowed=false;return ()=>runner();});let failure:unknown;
+        try{
+            try{await runRoomWorkspaceExecutor({context:context(cwd),port:p,prompt:'Read state',beforeEffects:()=>{if(!allowed)throw sentinel;},createRunner} as any);}catch(error){failure=error;}
+            expect(runner).not.toHaveBeenCalled();expect(failure).toBe(sentinel);
+            if(frame==='authorize_return')expect(createRunner).not.toHaveBeenCalled();
+        }finally{rmSync(cwd,{recursive:true,force:true});}
+    });
     it.skipIf(process.platform==='win32')('only an explicitly enabled binding exposes commands and revocation denies launch',async()=>{
         const cwd=mkdtempSync(join(tmpdir(),'room-enabled-command-')),p=port();
         const r=createRoomToolRegistry({mode:'workspace',tools:buildToolList(undefined,{cwd}),context:{...context(cwd),localCommandsAllowed:true},port:p});
@@ -98,7 +108,7 @@ describe('room runner physical execution and scoped tools', () => {
         let finish!: () => void;
         const deferred = new Promise<void>(resolve => { finish = resolve; });
         const runner = vi.fn(async () => deferred);
-        const running = runRoomWorkspaceExecutor({ context: context(cwd), port: p, prompt: 'work', signal: abort.signal, createRunner: () => runner });
+        const running = runRoomWorkspaceExecutor({ context: context(cwd), port: p, prompt: 'work', signal: abort.signal, createRunner: () => ()=>runner() });
         await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(1));
         abort.abort();
         await new Promise(resolve => setTimeout(resolve, 10));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { referenceEscapesSkillRoot, createSkillBundleRefsTool } from '../../electron/skill-runtime.js'
-import { mkdtempSync, writeFileSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, symlinkSync, lstatSync, realpathSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SkillCatalog } from '../../../src/ai/skills/loader.js'
@@ -12,11 +12,16 @@ const ROOT = process.platform === 'win32' ? 'C:\\Users\\song\\.xiaok\\skills\\de
 describe('referenceEscapesSkillRoot', () => {
   it('real bundle tool refuses symlink references outside the installed skill root', async () => {
     const root=mkdtempSync(join(tmpdir(),'skill-root-')),outside=mkdtempSync(join(tmpdir(),'skill-secret-'));
+    try{
     writeFileSync(join(root,'safe.md'),'safe reference');writeFileSync(join(outside,'private.md'),'PRIVATE_OUTSIDE');
-    symlinkSync(outside,join(root,'escape'),'dir');
+    symlinkSync(outside,join(root,'escape'),process.platform==='win32'?'junction':'dir');
+    expect(lstatSync(join(root,'escape')).isSymbolicLink()).toBe(true);
+    expect(realpathSync(join(root,'escape'))).toBe(realpathSync(outside));
     const tool=createSkillBundleRefsTool({list:()=>[{name:'fixture',rootDir:root}]} as unknown as SkillCatalog);
     expect(await tool.execute({skillName:'fixture',paths:['safe.md']})).toContain('safe reference');
     expect(await tool.execute({skillName:'fixture',paths:['escape/private.md']})).not.toContain('PRIVATE_OUTSIDE');
+    expect(readFileSync(join(outside,'private.md'),'utf8')).toBe('PRIVATE_OUTSIDE');
+    }finally{rmSync(root,{recursive:true,force:true,maxRetries:3});rmSync(outside,{recursive:true,force:true,maxRetries:3});}
   })
   it('allows ordinary relative references inside the skill root', () => {
     expect(referenceEscapesSkillRoot(ROOT, 'SKILL.md')).toBe(false)

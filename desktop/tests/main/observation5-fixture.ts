@@ -11,7 +11,7 @@ import {EventEmitter} from 'node:events';
 import ts from 'typescript';
 const nativeSurrogate=vi.hoisted(()=>({picker:vi.fn(),confirm:vi.fn(),pickerProducer:undefined as undefined|((...args:any[])=>unknown)}));
 export function getNativeSurrogate() { return nativeSurrogate; }
-vi.mock('electron',()=>({app:{getPath:()=>'/tmp',getLocale:()=> 'en'},BrowserWindow:{getAllWindows:()=>[],fromWebContents:(sender:any)=>({webContents:sender,isDestroyed:():boolean=>false})},clipboard:{read:vi.fn()},dialog:{showOpenDialog:(...args:any[])=>Reflect.apply(nativeSurrogate.pickerProducer??nativeSurrogate.picker,undefined,args),showMessageBox:nativeSurrogate.confirm},shell:{}}));
+vi.mock('electron',()=>({webContents:undefined,app:{getPath:()=>'/tmp',getLocale:()=> 'en'},BrowserWindow:{getAllWindows:()=>[],fromWebContents:(sender:any)=>({webContents:sender,isDestroyed:():boolean=>false})},clipboard:{read:vi.fn()},dialog:{showOpenDialog:(...args:any[])=>Reflect.apply(nativeSurrogate.pickerProducer??nativeSurrogate.picker,undefined,args),showMessageBox:nativeSurrogate.confirm},shell:{}}));
 import {registerDesktopIpc} from '../../electron/ipc.js';
 import {createDesktopServices} from '../../electron/desktop-services.js';
 import {consumeDesktopObservationApproval,createDesktopObservationApprovals} from '../../electron/desktop-observation-approval.js';

@@ -1,3 +1,7 @@
+import { DecisionModelSettings } from './settings/DecisionModelSettings';
+import {KimDecisionSection} from './KimDecisionSection';
+import {SecretInput} from './security/SecretInput';
+import { AppConnectorsSettings } from './settings/AppConnectorsSettings';
 import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
 import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
@@ -11,6 +15,7 @@ import {LoopArtifactList} from './loops/LoopArtifactList';
 import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../lib/loop-run-observation';
 import {LoopPublicationPanel} from './loops/LoopPublicationPanel';
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import {DshSourceSettings} from './DshSourceSettings';
 import * as QRCode from 'qrcode';
 import {
   ChevronLeft,
@@ -91,6 +96,7 @@ import type {
   UserLoopTemplateView,
 } from '../api/types';
 import { useLocale } from '../contexts/LocaleContext';
+import {WriterControlSection} from './WriterControlSection';
 import type { LocaleStrings } from '../locales/index';
 import { useToast } from '../shared';
 import { resolveUserLoopStarterTemplates, type UserLoopStarterTemplate } from './loops/userLoopStarterTemplates';
@@ -101,7 +107,8 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'connectors' | 'mcp' | 'tools' | 'general' | 'dsh' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type ModelSettingsTab = 'conversation' | 'decision';
 type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
@@ -229,10 +236,12 @@ interface NavItem {
 function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
   return [
     { key: 'general', icon: SlidersHorizontal, label: t.desktopSettings.navGeneral },
+    { key: 'dsh', icon: Zap, label: t.dshSourceSettings.title },
     { key: 'mobile', icon: Smartphone, label: t.desktopSettings.navMobile },
     { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
+    { key: 'connectors', icon: Plug, label: t.nav.connectors },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
     { key: 'mcp', icon: Plug, label: t.desktopSettings.navMcp },
     { key: 'tools', icon: Wrench, label: t.desktopSettings.navTools },
@@ -249,6 +258,7 @@ interface Props {
 
 export function DesktopSettings({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [modelTab, setModelTab] = useState<ModelSettingsTab>('conversation');
   const { t } = useLocale();
   const navItems = getNavItems(t);
 
@@ -294,18 +304,20 @@ export function DesktopSettings({ onClose }: Props) {
 
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="px-8 py-6 max-w-[700px]">
-          {activeTab === 'model' && <ModelPane />}
+        <div className={`px-8 py-6 ${activeTab === 'connectors' ? 'w-full max-w-[1100px]' : 'max-w-[700px]'}`}>
+          {activeTab === 'model' && <ModelSettingsPane activeTab={modelTab} onSelect={setModelTab} />}
           {activeTab === 'skills' && <SkillsPane />}
           {activeTab === 'channels' && <ChannelsPane />}
           {activeTab === 'mcp' && <McpPane />}
+          {activeTab === 'connectors' && <AppConnectorsSettings />}
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'dsh' && <DshSourceSettings />}
           {activeTab === 'mobile' && <MobilePane />}
           {activeTab === 'voice' && <VoicePane />}
           {activeTab === 'appearance' && <DesktopAppearanceSettings />}
           {activeTab === 'data' && <DataPane />}
-          {activeTab === 'memory' && <MemoryPane />}
+          {activeTab === 'memory' && <MemoryPane onOpenDecisionModels={() => { setModelTab('decision'); setActiveTab('model'); }} />}
           {activeTab === 'about' && <AboutPane />}
         </div>
       </div>
@@ -754,8 +766,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAppKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAppKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
@@ -765,8 +776,7 @@ function VoicePane() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.volcAccessKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, volcAccessKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
@@ -803,8 +813,7 @@ function VoicePane() {
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="block">
                   <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
-                  <input
-                    type="password"
+                  <SecretInput
                     value={asrDraft.aliyunApiKey}
                     onChange={event => setAsrDraft(prev => ({ ...prev, aliyunApiKey: event.target.value }))}
                     aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
@@ -1129,7 +1138,52 @@ interface SkillItem {
   tier: string;
 }
 
-function ModelPane() {
+function ModelSettingsPane({ activeTab, onSelect }: { activeTab: ModelSettingsTab; onSelect: (tab: ModelSettingsTab) => void }) {
+  const { t } = useLocale();
+  const ds = t.desktopSettings;
+  const [visited, setVisited] = useState<ModelSettingsTab[]>(() => [activeTab]);
+  const initialTab = useRef(activeTab);
+  const buttons = useRef<Partial<Record<ModelSettingsTab, HTMLButtonElement | null>>>({});
+  const tabs = ['conversation', 'decision'] as const;
+  useEffect(() => {
+    if (initialTab.current === 'decision') buttons.current.decision?.focus();
+  }, []);
+  const select = (tab: ModelSettingsTab) => {
+    setVisited(current => current.includes(tab) ? current : [...current, tab]);
+    onSelect(tab);
+  };
+  return <>
+    <div role="tablist" aria-label={ds.navModel} className="mb-5 flex flex-wrap gap-4 border-b border-[var(--c-border-subtle)]">
+      {tabs.map((tab, index) => <button key={tab} type="button" role="tab" id={`model-tab-${tab}`}
+        ref={node => { buttons.current[tab] = node; }}
+        aria-selected={activeTab === tab} aria-controls={`model-panel-${tab}`} tabIndex={activeTab === tab ? 0 : -1}
+        onClick={() => select(tab)}
+        onKeyDown={event => {
+          const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[1]
+            : event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+            : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length] : undefined;
+          if (!next) return;
+          event.preventDefault(); select(next); buttons.current[next]?.focus();
+        }}
+        className={`border-b-2 px-1 py-2 text-sm ${activeTab === tab ? 'border-[var(--c-accent)] text-[var(--c-text-heading)]' : 'border-transparent text-[var(--c-text-muted)]'}`}>
+        {tab === 'conversation' ? ds.conversationModelsTab : ds.decisionModelsTab}
+      </button>)}
+    </div>
+    <div role="tabpanel" id="model-panel-conversation" aria-labelledby="model-tab-conversation" hidden={activeTab !== 'conversation'}>
+      {(visited.includes('conversation') || activeTab === 'conversation') && <ConversationModelPane />}
+    </div>
+    <div role="tabpanel" id="model-panel-decision" aria-labelledby="model-tab-decision" hidden={activeTab !== 'decision'}>
+      {(visited.includes('decision') || activeTab === 'decision') && <>
+        <p className="mb-5 text-xs text-[var(--c-text-secondary)]">{ds.decisionModelsDesc}</p>
+        <SystemOneSection />
+        <KimDecisionSection />
+        <DecisionModelSettings />
+      </>}
+    </div>
+  </>;
+}
+
+function ConversationModelPane() {
   const { t } = useLocale();
   const [config, setConfig] = useState<DesktopModelConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1499,8 +1553,8 @@ function ModelPane() {
                     {selectedProvider === provider.id && (
                       <div className="mt-2 flex items-center gap-2">
                         <div className="relative flex-1">
-                          <input aria-label="sk-..."
-                            type={showKey ? 'text' : 'password'}
+                          <SecretInput aria-label="sk-..."
+                            revealed={showKey}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                             placeholder="sk-..."
@@ -4192,6 +4246,10 @@ function GeneralPane() {
       </Section>
 
       <Section>
+        <WriterControlSection />
+      </Section>
+
+      <Section>
         <SectionHeader icon={Cpu}>{t.desktopSettings.taskConcurrencyTitle}</SectionHeader>
         <Card>
           <p className="text-xs text-[var(--c-text-secondary)] mb-4">
@@ -4349,7 +4407,7 @@ function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus, t:
 
 // ---- Memory ----
 
-function MemoryPane() {
+function MemoryPane({ onOpenDecisionModels }: { onOpenDecisionModels: () => void }) {
   const { t } = useLocale();
   const [memoryTab, setMemoryTab] = useState<'content' | 'configuration'>('content');
   const ds = t.desktopSettings;
@@ -4361,7 +4419,15 @@ function MemoryPane() {
         {(['content', 'configuration'] as const).map(tab => (
           <button type="button" role="tab" key={tab} id={`memory-tab-${tab}`}
             aria-selected={memoryTab === tab} aria-controls={`memory-panel-${tab}`}
+            tabIndex={memoryTab === tab ? 0 : -1}
             onClick={() => setMemoryTab(tab)}
+            onKeyDown={event => {
+              if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 'content' : event.key === 'End' ? 'configuration' : memoryTab === 'content' ? 'configuration' : 'content';
+              setMemoryTab(next);
+              document.getElementById(`memory-tab-${next}`)?.focus();
+            }}
             className={`border-b-2 px-1 py-2 text-sm ${memoryTab === tab ? 'border-[var(--c-accent)] text-[var(--c-text-heading)]' : 'border-transparent text-[var(--c-text-muted)]'}`}>
             {tab === 'content' ? ds.memoryContentTab : ds.memoryConfigurationTab}
           </button>
@@ -4373,7 +4439,10 @@ function MemoryPane() {
       {memoryTab === 'configuration' && <div role="tabpanel" id="memory-panel-configuration" aria-labelledby="memory-tab-configuration" className="space-y-6">
         <MemoryCompactionModelSettings />
         <MemoryModelSettings />
-        <SystemOneSection />
+        <div className="rounded-xl border border-[var(--c-border)] p-4">
+          <p className="mb-3 text-xs text-[var(--c-text-secondary)]">{ds.memoryDecisionModelsMoved}</p>
+          <button type="button" className={btnSecondary} onClick={onOpenDecisionModels}>{ds.openDecisionModelSettings}</button>
+        </div>
       </div>}
     </Section>
   );
@@ -4751,8 +4820,7 @@ function ApiKeyInput({ ariaLabel, placeholder, storedValue, onChange, ds }: ApiK
 
   return (
     <div className="mt-2 flex items-center gap-2">
-      <input
-        type="password"
+      <SecretInput
         aria-label={ariaLabel}
         placeholder={placeholder}
         className={`flex-1 ${inputCls}`}

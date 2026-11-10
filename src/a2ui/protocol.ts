@@ -1,10 +1,11 @@
 export const A2UI_MIME_TYPE = 'application/vnd.xiaok.a2ui+json';
 export const SAFE_A2UI_CATALOG_ID = 'xiaok-safe';
-export const A2UI_PROTOCOL_VERSION = 1;
+export const A2UI_PROTOCOL_VERSION = '1.0';
+export const A2UI_V1_CATALOG_ID = 'xiaok-safe/1.0';
 
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
 
-export const RENDER_UI_SECTION_KINDS = ['heading', 'text', 'metric', 'table', 'list', 'divider'] as const;
+export const RENDER_UI_SECTION_KINDS = ['heading', 'text', 'metric', 'table', 'list', 'divider', 'chart'] as const;
 export type RenderUISectionKind = typeof RENDER_UI_SECTION_KINDS[number];
 
 export interface RenderUIInput {
@@ -21,13 +22,14 @@ export type RenderUISection =
   | { kind: 'metric'; label: string; value: string | number; change?: string }
   | { kind: 'table'; columns: string[]; rows: unknown[][] }
   | { kind: 'list'; items: string[] }
-  | { kind: 'divider' };
+  | { kind: 'divider' }
+  | { kind: 'chart'; title: string; chartType: 'bar' | 'line'; points: Array<{ label: string; value: number }> };
 
 export type A2UIDynamicValue = { path: string };
 
 export interface A2UIComponent {
   id: string;
-  component: 'Text' | 'Row' | 'Column' | 'Card' | 'Divider' | 'List' | 'Table' | 'MetricCard';
+  component: 'Text' | 'Row' | 'Column' | 'Card' | 'Divider' | 'List' | 'Table' | 'MetricCard' | 'Chart';
   children?: string[];
   text?: string;
   variant?: 'h1' | 'h2' | 'h3' | 'body';
@@ -37,13 +39,16 @@ export interface A2UIComponent {
   columns?: string[];
   rows?: unknown[][] | A2UIDynamicValue;
   items?: string[];
+  title?: string;
+  chartType?: 'bar' | 'line';
+  points?: Array<{ label: string; value: number }>;
   distribution?: 'start' | 'center' | 'end' | 'between';
   alignment?: 'start' | 'center' | 'end' | 'stretch';
 }
 
 export type A2UIMessage =
   | {
-      version: typeof A2UI_PROTOCOL_VERSION;
+      version: 1;
       createSurface: {
         surfaceId: string;
         catalogId: typeof SAFE_A2UI_CATALOG_ID;
@@ -51,14 +56,14 @@ export type A2UIMessage =
       };
     }
   | {
-      version: typeof A2UI_PROTOCOL_VERSION;
+      version: 1;
       updateComponents: {
         surfaceId: string;
         components: A2UIComponent[];
       };
     }
   | {
-      version: typeof A2UI_PROTOCOL_VERSION;
+      version: 1;
       updateDataModel: {
         surfaceId: string;
         path: '';
@@ -69,7 +74,7 @@ export type A2UIMessage =
 export interface CompiledA2UIArtifact {
   surfaceId: string;
   mimeType: typeof A2UI_MIME_TYPE;
-  messages: A2UIMessage[];
+  messages: A2UIV1Message[];
   componentCount: number;
   payloadBytes: number;
 }
@@ -131,3 +136,13 @@ export function summarizeRenderUiInput(input: unknown): {
     summary: `[A2UI] ${title} - ${sectionCount} ${sectionLabel}, ${formatA2UIBytes(payloadBytes)}`,
   };
 }
+
+export interface A2UIV1Component extends Omit<A2UIComponent, 'value' | 'rows'> {
+  value?: string | number | { '@path': string };
+  rows?: unknown[][] | { '@path': string };
+}
+export type A2UIV1Message =
+  | { version: '1.0'; createSurface: { surfaceId: string; catalogId: string; components?: A2UIV1Component[]; dataModel?: Record<string, unknown> } }
+  | { version: '1.0'; updateComponents: { surfaceId: string; components: A2UIV1Component[] } }
+  | { version: '1.0'; updateDataModel: { surfaceId: string; path?: string; value: unknown } }
+  | { version: '1.0'; deleteSurface: { surfaceId: string } };

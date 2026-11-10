@@ -1,0 +1,13 @@
+diff --git a/codex-rs/app-server/src/otel_reloader.rs b/codex-rs/app-server/src/otel_reloader.rs
+--- a/codex-rs/app-server/src/otel_reloader.rs
++++ b/codex-rs/app-server/src/otel_reloader.rs
+@@ -55,6 +55,9 @@
+     let mut auth_changes = auth_manager.auth_change_receiver();
+ 
+     tokio::spawn(async move {
++        if codex_extension_api::XIAOK_AUTH_OWNER_ONLY {
++            return;
++        }
+         loop {
+             tokio::select! {
+                 _ = shutdown_token.cancelled() => break,

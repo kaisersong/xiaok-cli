@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 2,
+  "executionClass": "room_discussion",
+  "subjectFields": [
+    "kind",
+    "roomId",
+    "messageId",
+    "logicalAgentId",
+    "turnId"
+  ],
+  "sourceKey": "original same-addon/env/Main-session RoomDiscussion once-class key; not TS business proof",
+  "primitiveArguments": [
+    "profileId",
+    "workspaceId",
+    "principalId",
+    "hostId",
+    "roomId",
+    "messageId",
+    "logicalAgentId",
+    "turnId",
+    "payloadCanonical",
+    "authorizationRef"
+  ],
+  "executionKey": "nr2: + SHA256(UTF8(JSON([root-execution-key-v2,{hostId,scope:{principalId,profileId,workspaceId},subject:{kind:room_turn,logicalAgentId,messageId,roomId,turnId}}]))) with displayed key order",
+  "payloadHash": "SHA256 exact UTF8 payloadCanonical; no normalization",
+  "strings": "Original NAPI primitive strings, identities 1..256 UTF16 units; reject NUL/controls/lone surrogates, no normalization; payload 1..1048576 UTF8 bytes with well-formed UTF16",
+  "priority": "background only; no human assertion",
+  "authorization": "Native role/session/key AND later genuine fixed TS accepted owner reader; neither raw metadata nor key proves business authorization",
+  "productionQualified": false,
+  "additionalFamilies": {
+    "dsh_draft": {
+      "sourceKey": "Original DshDraft same Main session once key; not A/B business permission",
+      "primitiveArguments": [
+        "profileId",
+        "workspaceId",
+        "principalId",
+        "hostId",
+        "ownerWorkId",
+        "draftInvocationId",
+        "draftCommitKey",
+        "payloadCanonical",
+        "authorizationRef"
+      ],
+      "subjectFields": [
+        "draftCommitKey",
+        "draftInvocationId",
+        "kind",
+        "ownerWorkId"
+      ],
+      "class": "dsh_draft",
+      "effect": "Candidate only until actual B draft-send permission AND Native reservation consumption"
+    },
+    "kswarm_direct": {
+      "sourceKey": "Original same-session once kswarm_direct key; not TS accepted business authority",
+      "primitiveArguments": [
+        "profileId",
+        "workspaceId",
+        "principalId",
+        "hostId",
+        "projectId",
+        "taskId",
+        "runId",
+        "payloadCanonical",
+        "authorizationRef"
+      ],
+      "subjectFields": [
+        "kind",
+        "projectId",
+        "runId",
+        "taskId"
+      ],
+      "class": "kswarm_direct",
+      "effect": "Candidate only until fixed original accepted owner action-current AND actual Native reservation consume"
+    },
+    "room_project": {
+      "sourceKey": "Original same-session once room_project key; not TS accepted business authority",
+      "primitiveArguments": [
+        "profileId",
+        "workspaceId",
+        "principalId",
+        "hostId",
+        "roomId",
+        "projectId",
+        "taskId",
+        "runId",
+        "claimId",
+        "payloadCanonical",
+        "authorizationRef"
+      ],
+      "subjectFields": [
+        "claimId",
+        "kind",
+        "projectId",
+        "roomId",
+        "runId",
+        "taskId"
+      ],
+      "class": "room_project",
+      "effect": "Candidate only until fixed original accepted owner action-current AND actual Native reservation consume"
+    },
+    "workflow_root": {
+      "sourceKey": "Original same-session once workflow_root key; not TS accepted business authority",
+      "primitiveArguments": [
+        "profileId",
+        "workspaceId",
+        "principalId",
+        "hostId",
+        "workflowId",
+        "rootJobId",
+        "runId",
+        "scriptHash",
+        "payloadCanonical",
+        "authorizationRef"
+      ],
+      "subjectFields": [
+        "kind",
+        "rootJobId",
+        "runId",
+        "scriptHash",
+        "workflowId"
+      ],
+      "class": "workflow_root",
+      "effect": "Candidate only until fixed original accepted owner action-current AND actual Native reservation consume"
+    }
+  }
+}

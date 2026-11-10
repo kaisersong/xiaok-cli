@@ -133,11 +133,14 @@ describe('BDD W9/AP10: production SQLite legacy authorization/presentation migra
     if (mutation === 'wrong-index') db.exec('CREATE INDEX operations_approval_requests ON operations(group_id,operation_id)');
     if (mutation === 'wrong-check') {
       // Deliberately corrupt schema input, not an alternative migration.
-      db.enableDefensive(false);
+      // Node 22.14 predates this API and has no enabled defensive mode. The
+      // same real schema-corruption assertion still runs on that minimum.
+      const defensive=(db as DatabaseSync & {enableDefensive?:(enabled:boolean)=>void}).enableDefensive;
+      defensive?.call(db,false);
       try {
         db.exec('PRAGMA writable_schema=ON');
         db.prepare("UPDATE sqlite_master SET sql=replace(sql,'9007199254740991','9007199254740000') WHERE name=?").run(table);
-      } finally { db.exec('PRAGMA writable_schema=OFF'); db.enableDefensive(true); }
+      } finally { db.exec('PRAGMA writable_schema=OFF'); defensive?.call(db,true); }
     }
     const schema = db.prepare('SELECT name,sql FROM sqlite_master ORDER BY name').all(), beforeRows=rows(db);
     expect(() => store(file)).toThrow();
@@ -146,9 +149,9 @@ describe('BDD W9/AP10: production SQLite legacy authorization/presentation migra
   });
 
   it('Given an unknown higher version, Then the real store refuses it without dropping the file contents', () => {
-    const file = path(); const db = legacy(file); db.exec('PRAGMA user_version=5');
+    const file = path(); const db = legacy(file); db.exec('PRAGMA user_version=6');
     expect(() => store(file)).toThrow(/unsupported/);
-    expect(version(db)).toBe(5);
+    expect(version(db)).toBe(6);
     expect(db.prepare('SELECT thread_id FROM thread_bindings').get()).toMatchObject({ thread_id: 'old-thread' });
   });
 });

@@ -1,3 +1,4 @@
+import {assertBeforeEffects} from '../verification/before-effects.js';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
@@ -29,13 +30,15 @@ export interface MaterialTextExtractionInput {
    * PDF text extraction is a host capability, not a built-in: Desktop ships
    * pdfjs, the CLI does not. Hosts that omit it keep the unsupported contract.
    */
-  pdfToText?: (bytes: Uint8Array) => Promise<string>;
+  pdfToText?: (bytes: Uint8Array,beforeEffects?:()=>void) => Promise<string>;
   officeToMarkdown?: (input: {
     absolutePath: string;
     maxOutputChars: number;
     signal?: AbortSignal;
+    beforeEffects?:()=>void;
   }) => Promise<OfficeTextExtractionResult>;
   signal?: AbortSignal;
+  beforeEffects?:()=>void;
 }
 
 export interface MaterialTextExtractionResult {
@@ -63,6 +66,9 @@ const DEFAULT_MAX_CHARS = 50_000;
 export const MATERIAL_EXTRACTOR_VERSION = 3;
 
 export async function extractMaterialText(input: MaterialTextExtractionInput): Promise<MaterialTextExtractionResult> {
+  let guardFailure:{error:unknown}|undefined;
+  const fresh=()=>{try{assertBeforeEffects(input.beforeEffects);}catch(error){guardFailure={error};throw error;}};
+  fresh();
   const extension = extname(input.workspacePath).toLowerCase();
   const mimeType = input.mimeType.toLowerCase();
   const maxChars = input.maxChars ?? DEFAULT_MAX_CHARS;
@@ -75,13 +81,15 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
   }
 
   try {
-    const buffer = await readFile(input.workspacePath);
+    fresh();const buffer = await readFile(input.workspacePath);fresh();
     if (isOfficeDocument(extension) && input.officeToMarkdown) {
       const office = await input.officeToMarkdown({
         absolutePath: input.workspacePath,
         maxOutputChars: maxChars,
         signal: input.signal,
+        beforeEffects: fresh,
       });
+      fresh();
       if (office.ok) {
         const normalized = normalizeExtractedText(office.markdown);
         if (!normalized) {
@@ -132,7 +140,7 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
       stoppedAtBudget = extracted.stoppedAtBudget;
       engine = 'lightweight-ooxml';
     } else if (canExtractPdf(extension, mimeType, input.pdfToText)) {
-      text = await input.pdfToText!(new Uint8Array(buffer));
+      fresh();text = await input.pdfToText!(new Uint8Array(buffer),fresh);fresh();
       engine = 'pdf';
     } else {
       return {
@@ -157,6 +165,7 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
       truncated: truncated.length < normalized.length || stoppedAtBudget,
     };
   } catch (error) {
+    if(guardFailure&&Object.is(error,guardFailure.error))throw error;
     return {
       parseStatus: 'failed',
       errorMessage: error instanceof Error ? error.message : String(error),

@@ -82,6 +82,7 @@ export interface NeedsUserQuestion {
   choices?: Array<{ id: string; label: string }>;
   expectedAttachments?: MaterialRole[];
   staleAfterEventId?: string;
+  owner?:import('./native-approval-owner.js').NativeApprovalOwnerMetadata;
 }
 
 export type UserAnswer =
@@ -129,6 +130,7 @@ export interface TaskEventRecord {
 }
 
 export type DesktopTaskEvent =
+  | { type: 'ui_preview'; turnId: string; toolUseId: string; preview: {title:string;content:string} | null }
   | { type: 'execution_health'; state: import('../execution-health.js').ExecutionHealthState }
   | { type: 'task_started'; taskId: string }
   | { type: 'task_execution_started'; taskId: string }
@@ -138,12 +140,12 @@ export type DesktopTaskEvent =
   | { type: 'progress'; message: string; stage?: string; eventId: string }
   | { type: 'assistant_delta'; delta: string; eventId: string }
   | { type: 'needs_user'; question: NeedsUserQuestion }
-  | { type: 'question_resolved'; questionId: string }
+  | { type: 'question_resolved'; questionId: string; answerText?: string }
   | { type: 'task_cancelled'; taskId: string; reason: string; partialText?: string }
   | { type: 'result'; result: TaskResult }
   | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string; mimeType?: string }
   | { type: 'salvage'; salvage: SalvageSummary }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; retryable?: boolean; code?: 'MODEL_TEXT_REPETITION_DETECTED' }
   // Canvas events (appended, do not replace existing progress events)
   | { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number; displayInputSummary?: string }
   | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string; ts?: number }
@@ -234,6 +236,9 @@ export interface TaskMultiAgentPreparation {
 }
 
 export interface TaskSnapshot {
+  inputPreparation?: {inputId:string;inputRevision:string};
+  /** Original durable prepare fact; never an execution/launch capability. */
+  originalChildPreparation?: import('./default-dispatch-preparation.js').OriginalChildPreparation;
   /** Fresh read observation only; omitted for ordinary tasks, never persisted or used as a write grant. */
   readonly currentCompletion?: Exclude<InstalledCompletionObservation,{kind:'ordinary'}>;
   /** Sticky host CAS marker; recovery requires explicit execution reauthorization even before an archive exists. */

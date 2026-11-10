@@ -1,30 +1,8 @@
 name: Harness2 preflight and local D0
 on:
+  merge_group: {}
   push:
     branches: [master]
-    paths:
-      - 'scripts/evals/harness2-static/**'
-      - 'desktop/electron/harness-*'
-      - 'desktop/shared/harness-*'
-      - 'desktop/tests/**/harness-*'
-      - 'desktop/renderer/src/components/settings/Harness*'
-      - 'native/harness-optimization-owner-lock/**'
-      - 'scripts/copy-harness-runtime.mjs'
-      - 'desktop/package*.json'
-      - 'tests/evals/harness2-static.test.mjs'
-      - 'src/runtime/diagnostics/**'
-      - 'src/runtime/harness-memory/**'
-      - 'src/ai/prompts/**'
-      - 'src/ai/memory/compaction.ts'
-      - 'src/ai/memory/layered-store.ts'
-      - 'desktop/electron/desktop-services.ts'
-      - 'desktop/electron/desktop-system-prompt.ts'
-      - 'desktop/electron/loop-evaluator.ts'
-      - 'desktop/electron/completion-evidence-store.ts'
-      - 'src/runtime/guards/completion-evidence.ts'
-      - 'scripts/evals/xiaok-product/scorers/**'
-      - 'package*.json'
-      - '.github/workflows/harness2-static.yml'
   pull_request:
     paths:
       - 'scripts/evals/harness2-static/**'
@@ -49,9 +27,27 @@ on:
       - 'scripts/evals/xiaok-product/scorers/**'
       - 'package*.json'
       - '.github/workflows/harness2-static.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest*.config.*'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+      - '.github/ci/**'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'desktop/vitest*.config.*'
+      - 'desktop/tsconfig*.json'
+      - 'desktop/tests/setup.ts'
+      - 'desktop/tests/setup-host-env.ts'
+      - 'desktop/tests/profile-account.setup.mjs'
   workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   static-preflight:
     strategy:
@@ -116,6 +112,9 @@ jobs:
             xiaok-cli/desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm ci --ignore-scripts --prefix desktop
+      - name: Install the locked Electron runtime for real module imports
+        working-directory: xiaok-cli/desktop
+        run: node node_modules/electron/install.js
       - run: npm ci --ignore-scripts --omit=dev --prefix ../kswarm
       - run: npm ci --ignore-scripts --omit=dev --prefix ../intent-broker
       - run: npm run build:harness-owner-lock

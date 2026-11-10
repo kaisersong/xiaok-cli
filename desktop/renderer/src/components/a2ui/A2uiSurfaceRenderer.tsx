@@ -1,152 +1,134 @@
-import React from 'react';
-import type { A2UIComponent, A2UIMessage } from '../../../../../src/a2ui/index.js';
+import React, { useMemo } from 'react';
+import { defineCatalog, type Spec } from '@json-render/core';
+import { defineRegistry, Renderer, JSONUIProvider } from '@json-render/react';
+import { schema } from '@json-render/react/schema';
+import { z } from 'zod4';
+import { normalizeA2uiMessages, type A2UIComponent } from '../../../../shared/a2ui';
+import { AnalysisTable } from './analysis-table';
+import { AnalysisChart } from './analysis-chart';
 
-type SurfaceModel = {
-  rootId: string;
-  components: Map<string, A2UIComponent>;
-  dataModel: Record<string, unknown>;
-};
-
-export function buildA2uiSurfaceModel(messages: A2UIMessage[]): SurfaceModel {
+const container = { props: z.object({}).strict(), slots: ['default'] };
+const catalog = defineCatalog(schema, {
+  components: {
+    Column: container,
+    Row: container,
+    Card: container,
+    Text: {
+      props: z
+        .object({ text: z.string(), variant: z.enum(['h1', 'h2', 'h3', 'body']).optional() })
+        .strict(),
+    },
+    MetricCard: {
+      props: z
+        .object({
+          label: z.string(),
+          value: z.union([z.string(), z.number()]),
+          change: z.string().optional(),
+        })
+        .strict(),
+    },
+    Table: {
+      props: z
+        .object({
+          columns: z.array(z.string()),
+          rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+        })
+        .strict(),
+    },
+    List: { props: z.object({ items: z.array(z.string()) }).strict() },
+    Divider: { props: z.object({}).strict() },
+    Chart: {
+      props: z
+        .object({
+          title: z.string(),
+          chartType: z.enum(['bar', 'line']),
+          points: z.array(z.object({ label: z.string(), value: z.number() })),
+        })
+        .strict(),
+    },
+  },
+  actions: {},
+});
+const { registry } = defineRegistry(catalog, {
+  components: {
+    Column: ({ children }) => <div style={styles.column}>{children}</div>,
+    Row: ({ children }) => <div style={styles.row}>{children}</div>,
+    Card: ({ children }) => <section style={styles.card}>{children}</section>,
+    Text: ({ props }) => {
+      const Tag = props.variant && props.variant !== 'body' ? props.variant : 'p';
+      return <Tag style={styles[props.variant ?? 'text'] ?? styles.text}>{props.text}</Tag>;
+    },
+    MetricCard: ({ props }) => (
+      <section style={styles.metricCard}>
+        <div style={styles.metricLabel}>{props.label}</div>
+        <div style={styles.metricValue}>{props.value}</div>
+        {props.change ? <div style={styles.metricChange}>{props.change}</div> : null}
+      </section>
+    ),
+    Table: ({ props }) => <AnalysisTable columns={props.columns} rows={props.rows} />,
+    List: ({ props }) => (
+      <ul style={styles.list}>
+        {props.items.map((item, i) => (
+          <li key={i}>{item}</li>
+        ))}
+      </ul>
+    ),
+    Divider: () => <hr style={styles.divider} />,
+    Chart: ({ props }) => <AnalysisChart {...props} />,
+  },
+});
+export function buildA2uiSurfaceModel(input: unknown) {
+  const messages = normalizeA2uiMessages(input);
   let rootId = '';
   const components = new Map<string, A2UIComponent>();
   let dataModel: Record<string, unknown> = {};
-
   for (const message of messages) {
-    if ('createSurface' in message) {
-      rootId = message.createSurface.root;
-      continue;
-    }
-    if ('updateComponents' in message) {
+    if ('createSurface' in message) rootId = message.createSurface.root;
+    else if ('updateComponents' in message) {
       components.clear();
-      for (const component of message.updateComponents.components) {
-        components.set(component.id, component);
-      }
-      continue;
-    }
-    if ('updateDataModel' in message) {
-      dataModel = message.updateDataModel.value;
-    }
+      for (const c of message.updateComponents.components) components.set(c.id, c);
+    } else if ('updateDataModel' in message) dataModel = message.updateDataModel.value;
   }
-
   return { rootId, components, dataModel };
 }
-
-export function A2uiSurfaceRenderer({ messages }: { messages: A2UIMessage[] }) {
-  const model = buildA2uiSurfaceModel(messages);
-  const root = model.components.get(model.rootId);
-  if (!root) {
-    throw new Error('A2UI root component missing');
+export function buildA2uiSpec(input: unknown): Spec | null {
+  const model = buildA2uiSurfaceModel(input);
+  if (!model.rootId) return null;
+  const elements: Spec['elements'] = {};
+  for (const [id, component] of model.components) {
+    const { id: _id, component: type, children, ...rest } = component;
+    const props: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(rest)) {
+      if (['alignment', 'distribution'].includes(key)) continue;
+      if (value && typeof value === 'object' && !Array.isArray(value) && 'path' in value) {
+        let current: unknown = model.dataModel;
+        for (const part of String(value.path).split('.'))
+          current =
+            current && typeof current === 'object' && Object.hasOwn(current, part)
+              ? (current as Record<string, unknown>)[part]
+              : undefined;
+        props[key] = current;
+      } else props[key] = value;
+    }
+    // Decoder restricts props to scalars and arrays of scalars/plain chart points.
+    // No model-produced json-render directives, actions or visibility enter this Spec.
+    elements[id] = { type, props, children: children ?? [] };
   }
-
+  const spec = { root: model.rootId, elements };
+  const validation = catalog.validate(spec);
+  if (!validation.success) throw Error('Invalid analysis catalog spec');
+  return spec;
+}
+export function A2uiSurfaceRenderer({ messages }: { messages: unknown }) {
+  const spec = useMemo(() => buildA2uiSpec(messages), [messages]);
+  if (!spec) return null;
   return (
     <div className="xiaok-a2ui" style={styles.surface}>
-      <A2uiComponentView component={root} model={model} />
+      <JSONUIProvider registry={registry} handlers={{}}>
+        <Renderer spec={spec} registry={registry} />
+      </JSONUIProvider>
     </div>
   );
-}
-
-function A2uiComponentView({ component, model }: { component: A2UIComponent; model: SurfaceModel }) {
-  switch (component.component) {
-    case 'Column':
-      return (
-        <div style={styles.column}>
-          {(component.children ?? []).map((childId) => {
-            const child = model.components.get(childId);
-            return child ? <A2uiComponentView key={childId} component={child} model={model} /> : null;
-          })}
-        </div>
-      );
-    case 'Row':
-      return (
-        <div style={styles.row}>
-          {(component.children ?? []).map((childId) => {
-            const child = model.components.get(childId);
-            return child ? <A2uiComponentView key={childId} component={child} model={model} /> : null;
-          })}
-        </div>
-      );
-    case 'Card':
-      return (
-        <section style={styles.card}>
-          {(component.children ?? []).map((childId) => {
-            const child = model.components.get(childId);
-            return child ? <A2uiComponentView key={childId} component={child} model={model} /> : null;
-          })}
-        </section>
-      );
-    case 'Text':
-      return renderText(component);
-    case 'MetricCard':
-      return (
-        <section style={styles.metricCard}>
-          <div style={styles.metricLabel}>{component.label}</div>
-          <div style={styles.metricValue}>{String(resolveA2uiValue(component.value, model.dataModel) ?? '')}</div>
-          {component.change ? <div style={styles.metricChange}>{component.change}</div> : null}
-        </section>
-      );
-    case 'Table':
-      return <A2uiTable component={component} model={model} />;
-    case 'List':
-      return (
-        <ul style={styles.list}>
-          {(component.items ?? []).map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
-        </ul>
-      );
-    case 'Divider':
-      return <hr style={styles.divider} />;
-    default:
-      return null;
-  }
-}
-
-function renderText(component: A2UIComponent) {
-  const text = component.text ?? '';
-  if (component.variant === 'h1') return <h1 style={styles.h1}>{text}</h1>;
-  if (component.variant === 'h2') return <h2 style={styles.h2}>{text}</h2>;
-  if (component.variant === 'h3') return <h3 style={styles.h3}>{text}</h3>;
-  return <p style={styles.text}>{text}</p>;
-}
-
-function A2uiTable({ component, model }: { component: A2UIComponent; model: SurfaceModel }) {
-  const rows = resolveA2uiValue(component.rows, model.dataModel);
-  const normalizedRows = Array.isArray(rows) ? rows : [];
-  return (
-    <div style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {(component.columns ?? []).map((column) => <th key={column} style={styles.th}>{column}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {normalizedRows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {Array.isArray(row) ? row.map((cell, cellIndex) => (
-                <td key={`${rowIndex}:${cellIndex}`} style={styles.td}>{String(cell ?? '')}</td>
-              )) : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function resolveA2uiValue(value: unknown, dataModel: Record<string, unknown>): unknown {
-  if (value && typeof value === 'object' && !Array.isArray(value) && typeof (value as { path?: unknown }).path === 'string') {
-    return readDotPath(dataModel, (value as { path: string }).path);
-  }
-  return value;
-}
-
-function readDotPath(model: Record<string, unknown>, path: string): unknown {
-  let current: unknown = model;
-  for (const part of path.split('.')) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -165,6 +147,7 @@ const styles: Record<string, React.CSSProperties> = {
   row: {
     display: 'flex',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
     alignItems: 'stretch',
   },

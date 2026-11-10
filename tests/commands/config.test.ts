@@ -207,9 +207,11 @@ describe('config commands', () => {
 
     it('copies DeepSeek Vision Exp catalog metadata for an explicit deepseek/model value', async () => {
       const profile = getProviderProfile('deepseek');
-      const variant = profile?.availableModels?.find(
+      expect(profile).toBeDefined();
+      expect(profile?.availableModels?.some(
         (candidate) => candidate.modelId === 'deepseek-v4-flash-vision-exp',
-      );
+      )).toBe(false);
+      const variant = profile!.defaultModel;
 
       await freshProgram().parseAsync([
         'node', 'xiaok', 'config', 'set', 'model', 'deepseek/deepseek-v4-flash-vision-exp',
@@ -222,12 +224,14 @@ describe('config commands', () => {
       expect(entry).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-flash-vision-exp',
-        label: 'DeepSeek V4 Flash Vision Exp',
+        label: 'DeepSeek V4.1 Flash (1017)',
         capabilities: ['tools', 'thinking', 'image_in'],
         runtimeOptions: { contextLimit: 1_000_000 },
       });
-      expect(entry.capabilities).not.toBe(variant?.capabilities);
-      expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
+      expect(entry.capabilities).toEqual(variant.capabilities);
+      expect(entry.runtimeOptions).toEqual(variant.runtimeOptions);
+      expect(entry.capabilities).not.toBe(variant.capabilities);
+      expect(entry.runtimeOptions).not.toBe(variant.runtimeOptions);
     });
 
     it.each(['kimi', 'kimi/k3'])(

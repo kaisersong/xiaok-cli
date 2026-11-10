@@ -1,0 +1,12 @@
+diff --git a/codex-rs/config/src/config_toml.rs b/codex-rs/config/src/config_toml.rs
+--- a/codex-rs/config/src/config_toml.rs
++++ b/codex-rs/config/src/config_toml.rs
+@@ -891,7 +891,7 @@
+             && let Some(constraint) = permission_profile_constraint
+             && let Err(err) = constraint.can_set(&permission_profile)
+         {
+-            tracing::warn!(
++            crate::config_diagnostic!(warn,
+                 error = %err,
+                 "default sandbox policy is disallowed by requirements; falling back to required default"
+             );

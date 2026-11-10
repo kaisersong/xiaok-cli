@@ -1,0 +1,18 @@
+diff --git a/codex-rs/app-server-transport/src/lib.rs b/codex-rs/app-server-transport/src/lib.rs
+--- a/codex-rs/app-server-transport/src/lib.rs
++++ b/codex-rs/app-server-transport/src/lib.rs
+@@ -41,3 +41,14 @@
+ pub use transport::start_stdio_connection;
+ pub use transport::start_websocket_acceptor;
+ pub use transport::take_remote_control_disabled_env;
++
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub use outgoing_message::PrivateAuthPayload;
++#[cfg(feature = "xiaok-auth-owner-only")]
++pub use transport::{
++    forward_incoming_message, next_connection_id, serialize_outgoing_message,
++    stdio_initialize_client_name,
++};
++
++#[cfg(all(test, feature = "xiaok-auth-owner-only"))]
++mod xiaok_auth_ingress_tests;

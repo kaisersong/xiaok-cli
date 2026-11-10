@@ -1,0 +1,13 @@
+diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -10,6 +10,9 @@
+ 
+ [lints]
+ workspace = true
++
++[features]
++xiaok-main-bridge-only = ["codex-extension-api/xiaok-main-bridge-only"]
+ 
+ [dependencies]
+ codex-utils-process = { workspace = true }

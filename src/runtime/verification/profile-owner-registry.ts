@@ -1,3 +1,4 @@
+import {types as profileTypes} from 'node:util';
 import {assertNativeSqliteProducerTableKinds,assertNativeSqliteStoredProducerColumns} from './native-sqlite-census.js';
 import {captureKSwarmEnrollmentData} from './kswarm-enrollment-data.js';
 import {parseKSwarmHostSubject,kswarmHostSubjectOwner,isKSwarmOwnerIdentity,type KSwarmHostSubject} from './kswarm-host-subject.js';
@@ -20,6 +21,23 @@ export interface ProfileCapacityOwnerFacts {readonly authorityId:string;readonly
 const capacityBindings=new WeakMap<object,{database:Database;facts:Readonly<ProfileCapacityOwnerFacts>;assertCurrent():void}>();
 export function readProfileCapacityOwnerBinding(binding:object,database:Database):Readonly<ProfileCapacityOwnerFacts>{const entry=capacityBindings.get(binding);if(!entry||entry.database!==database)throw Error('profile_capacity_binding');entry.assertCurrent();return entry.facts;}
 interface ProfileRow {uid:number;account_id:string;profile_id:string;state:string}
+/** Original profile allocation only. No publication, writer fence, business
+ * owner or resource grant is created by reserving this metadata in the caller's
+ * existing owner transaction. The controller supplies its authenticated data. */
+export function reservePendingVerificationProfile(db:Database,principal:Readonly<ProfilePrincipal>):Readonly<ProfileRow>{
+ if(!db.inTransaction)throw Error('profile_registry_transaction_required');
+ if(!principal||typeof principal!=='object'||profileTypes.isProxy(principal)||![Object.prototype,null].includes(Object.getPrototypeOf(principal)))throw Error('profile_registry_identity');
+ const names=Reflect.ownKeys(principal);if(names.length!==2||!names.includes('uid')||!names.includes('accountId'))throw Error('profile_registry_identity');
+ const uid=Object.getOwnPropertyDescriptor(principal,'uid'),account=Object.getOwnPropertyDescriptor(principal,'accountId');
+ if(!uid||!account||!Object.hasOwn(uid,'value')||!Object.hasOwn(account,'value')||!Number.isSafeInteger(uid.value)||uid.value<1||uid.value>0xfffffffe||typeof account.value!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(account.value))throw Error('profile_registry_identity');
+ assertNativeSqliteProducerTableKinds(db);assertNativeSqliteStoredProducerColumns(db,'verification_profiles');
+ const old=db.prepare('SELECT * FROM main.verification_profiles WHERE uid=?').get(uid.value) as ProfileRow|undefined;
+ if(old){if(old.account_id!==account.value)throw Error('profile_registry_identity_changed');return Object.freeze({...old});}
+ assertVerificationDatabaseBudget(db,{additionalBytes:16384});
+ if((db.prepare('SELECT COUNT(*) n FROM main.verification_profiles').get() as {n:number}).n>=64)throw Error('profile_registry_capacity');
+ const record:ProfileRow={uid:uid.value,account_id:account.value,profile_id:randomUUID(),state:'pending'};
+ db.prepare('INSERT INTO main.verification_profiles VALUES(?,?,?,?)').run(record.uid,record.account_id,record.profile_id,record.state);return Object.freeze(record);
+}
 const identifier=(x:unknown)=>typeof x==='string'&&x.length>0&&Buffer.byteLength(x)<=160&&!/[\x00-\x1f\x7f]/.test(x);
 function clone<T>(raw:T):T{const text=json(raw);if(Buffer.byteLength(text)>1024**2)throw Error('profile_registry_limit');return JSON.parse(text);}
 function shape(raw:unknown,fields:string[]):asserts raw is Record<string,any>{if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!==fields.sort().join(','))throw Error('profile_registry_shape');}
@@ -67,7 +85,7 @@ export function createProfileOwnerRegistry(options:{database:Database;authorityI
     const owner=runVerificationTransaction(db,()=>{
      check();let r=profile(principal);
      assertVerificationDatabaseBudget(db,{additionalBytes:Buffer.byteLength(json(frozen))+16384});
-     if(!r){if((db.prepare('SELECT COUNT(*) n FROM main.verification_profiles').get() as {n:number}).n>=64)throw Error('profile_registry_capacity');r={uid:principal.uid,account_id:principal.accountId,profile_id:randomUUID(),state:'pending'};db.prepare('INSERT INTO main.verification_profiles VALUES(?,?,?,?)').run(r.uid,r.account_id,r.profile_id,r.state);}
+     if(!r)r=reservePendingVerificationProfile(db,principal);
      const owner=Object.freeze({profileId:r.profile_id,ownerKind:proposal.ownerKind,ownerId:proposal.ownerId}),key=json(owner);
      const prior=db.prepare('SELECT uid FROM main.verification_registered_owners WHERE owner_key=?').get(key) as {uid:number}|undefined;
      if(prior&&prior.uid!==peer.uid)throw Error('profile_registry_owner_binding');

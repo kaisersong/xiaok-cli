@@ -37,6 +37,8 @@ export type StreamChunk =
       signature?: import('./ai/runtime/blocks.js').ReasoningSource;
       reasoningProvenance?: import('./ai/runtime/blocks.js').ReasoningBlockProvenance;
     }
+  /** Transient render_ui arguments; only the main preview parser may consume this snapshot. */
+  | { type: 'ui_preview'; id: string; input: string; invalid?: boolean }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown>; googleThoughtSignature?: import('./ai/runtime/blocks.js').GoogleThoughtSignature }
   /** Transport activity only; buffered tool arguments are not executable yet. */
   | { type: 'tool_input_progress' }
@@ -59,6 +61,9 @@ export interface ToolDefinition {
 }
 
 export interface ToolExecutionContext {
+  /** Main-only extra denial and unknown-effect record; never a provider/model field. */
+  assertContextAdmission?:()=>void;
+  recordUnprovenEffect?:(toolName:string)=>void;
   observationCollector?: import('./runtime/sol-pi/collector-port.js').ObservationCollectorPort;
   /** Host-only native-body projection, before observers and independently sourced hook text. */
   projectObservationResult?: (nativeResult: string) => Promise<string>;
@@ -214,7 +219,10 @@ export interface Config {
   memory?: {
     type?: 'file' | 'layered';
     dbPath?: string;
-    modelId?: string; // references config.models[id] for compaction; defaults to main model
+    modelId?: string; // legacy; normalized into an explicit embedding or compaction selection
+    legacyModelId?: string;
+    legacyModelUnresolved?: boolean;
+    settingsVersion?: 1;
     embedding?: {
       provider?: 'local' | 'api';
       apiUrl?: string;
@@ -222,6 +230,7 @@ export interface Config {
       dimensions?: number;
     };
     compaction?: {
+      modelId?: string | null;
       l0MinMessages?: number;
       autoCompact?: boolean;
       compactIntervalMs?: number;
@@ -236,6 +245,8 @@ export interface Config {
   };
   /** TypeSafe System One（Jev）辅助决策模型配置。 */
   systemOne?: SystemOneConfig;
+  /** Dedicated local K-IM judgment service; separate from chat providers. */
+  kimDecision?: { enabled?: boolean; baseUrl?: string; attentionThreshold?: number; revision?: string };
   meeting?: {
     asr?: {
       defaultProvider?: 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
@@ -324,6 +335,13 @@ export type PermissionChoice =
 
 export interface MemoryCompactionRequest {
   requestSource: 'user' | 'scheduler' | 'agent';
+  signal?: AbortSignal;
+  /** Main supplies the current actor fence; never accepted from renderer payloads. */
+  assertCurrent?: () => void;
+  /** Runs inside the existing owner job, so preparation is cancellable and counted as busy. */
+  prepare?: (signal: AbortSignal) => Promise<void>;
+  /** Per-job Main selection fence; automatic compaction keeps its current-config resolver. */
+  llm?: (prompt: string, signal?: AbortSignal) => Promise<string>;
   force?: boolean;
 }
 export interface MemoryCompactionResult {

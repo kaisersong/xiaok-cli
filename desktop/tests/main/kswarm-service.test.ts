@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,7 +33,35 @@ import {
   uniqueServiceUrls,
 } from '../../electron/kswarm-service.js';
 
+
+// This file models lifecycle/ABI with fake children and fully intercepted fetch.
+// Logical endpoint metadata never binds a user port or grants Native authority.
+// Real port selection remains exercised by the unmocked B4 runtime-owner tests.
+vi.mock('../../electron/desktop-service-discovery.js',async importOriginal=>{
+  const actual=await importOriginal<typeof import('../../electron/desktop-service-discovery.js')>();
+  return {...actual,async prepareDesktopServicePorts(file=actual.desktopServiceDiscoveryFile(),env:NodeJS.ProcessEnv=process.env){
+    const ports=actual.configuredDesktopServicePorts(env);
+    actual.writeDesktopServicePorts(file,ports);
+    return ports;
+  }};
+});
+
+// Each lifecycle case supplies its own explicit sidecar paths when needed.
+// A developer's unrelated canonical sibling is outside this logical fixture.
+vi.mock('../../electron/kswarm-service-paths.js',async importOriginal=>{
+  const actual=await importOriginal<typeof import('../../electron/kswarm-service-paths.js')>();
+  return {...actual,getDevelopmentBrokerLaunchSpec:()=>null};
+});
+
 const spawnMock = vi.hoisted(() => vi.fn());
+
+// The production source hash walks dirname(dirname(entry)). Keep that real
+// walk inside this case's private tree instead of scanning the shared TMPDIR.
+function fixtureKSwarmEntry(root: string, name = 'server.js'): string {
+  const directory = join(root, 'server');
+  mkdirSync(directory);
+  return join(directory, name);
+}
 
 class FakeKSwarmChild extends EventEmitter {
   pid: number;
@@ -49,6 +77,7 @@ class FakeKSwarmChild extends EventEmitter {
       queueMicrotask(() => {
         this.alive = false;
         this.emit('exit', 0, signal ?? null);
+        this.emit('close', 0, signal ?? null);
       });
       return true;
     });
@@ -756,7 +785,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('wires exit 78 and repeated exit 75 into stable service-level recovery gates', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-service-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -849,7 +878,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('reaps the owned child before restarting after repeated health failures', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-health-restart-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -900,7 +929,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('reclaims an unhealthy orphan port owner before spawning a new server', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-orphan-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -935,7 +964,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('cancels a pending backoff restart when start already spawned a replacement', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-backoff-race-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -978,7 +1007,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('shares one spawn when start races a backoff callback before child assignment', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-spawn-race-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1036,7 +1065,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('does not spawn after stop wins while startup health probing is in flight', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-race-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1072,7 +1101,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('reaps a child that misses the startup deadline and schedules a fresh recovery', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-startup-timeout-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1117,7 +1146,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('restart waits for an in-flight start to stop and then launches a fresh server', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-join-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1168,7 +1197,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('start waits for an in-flight stop before launching a fresh server', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-start-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1225,7 +1254,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('joins an owned startup before checking request availability', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-request-startup-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1263,7 +1292,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('authenticates seed mutations without adding credentials to read requests', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-seed-auth-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1317,7 +1346,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('does not publish an adopted service after stop wins seed reconciliation', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-stop-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1375,7 +1404,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('does not bootstrap a broker after stop wins external-service adoption', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-broker-stop-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1436,7 +1465,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('does not publish ready after stop wins an in-flight health probe', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-ready-stop-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1490,7 +1519,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
 
   it('contains backoff spawn failures and keeps the service recoverable', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-error-'));
-    const serverPath = join(serviceRoot, 'server.js');
+    const serverPath = fixtureKSwarmEntry(serviceRoot);
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
@@ -1579,7 +1608,7 @@ describe('activity-owner delegated manager boundaries', () => {
   it('adopts a healthy managed legacy-workflow source before any Desktop replacement path', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kswarm-managed-contract-'));
     vi.stubEnv('XIAOK_CONFIG_DIR', root);
-    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    const entry = fixtureKSwarmEntry(root); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       return new Response(JSON.stringify(url.includes(':4400/health')
@@ -1601,7 +1630,7 @@ describe('activity-owner delegated manager boundaries', () => {
   it('reports a managed base capability mismatch without repeated replacement or killing', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kswarm-managed-missing-contract-'));
     vi.stubEnv('XIAOK_CONFIG_DIR', root);
-    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    const entry = fixtureKSwarmEntry(root); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, features: [], service: { entryPath: entry } }), { status: 200 })));
     const request = vi.fn<(method: string, payload?: unknown) => Promise<void>>(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
     const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: findOwner, killStalePortOwner: killer });
@@ -1625,7 +1654,7 @@ describe('activity-owner delegated manager boundaries', () => {
   });
   it('releases delegation after a failed owner attach: start() no longer waits for the owner, adopts a healthy source and never kills a listener', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kswarm-released-adopt-')); vi.stubEnv('XIAOK_CONFIG_DIR', root);
-    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    const entry = fixtureKSwarmEntry(root); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(String(input).includes(':4400/health')
       ? { ok: true, features: ['dynamic_workflows'], service: { entryPath: entry } } : { ok: true, agents: [] }), { status: 200 })));
     const killer = vi.fn(), findOwner = vi.fn(async () => 12345);
@@ -1640,7 +1669,7 @@ describe('activity-owner delegated manager boundaries', () => {
   });
   it('after a failed owner attach refuses to kill an unhealthy listener it cannot attribute (it may belong to a live owner)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kswarm-released-refuse-')); vi.stubEnv('XIAOK_CONFIG_DIR', root);
-    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    const entry = fixtureKSwarmEntry(root); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })));
     const killer = vi.fn(async () => true);
     const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: async () => 4242, killStalePortOwner: killer });
@@ -1666,7 +1695,7 @@ describe('activity-owner delegated manager boundaries', () => {
   });
   it('asks the supervisor to recover an unavailable bound source and never falls through to Desktop spawning', async () => {
     const root=mkdtempSync(join(tmpdir(),'kswarm-delegated-recover-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
-    const entry=join(root,'server.js'); writeFileSync(entry,'// owned test entry'); vi.stubEnv('KSWARM_SERVER_PATH',entry);
+    const entry=fixtureKSwarmEntry(root); writeFileSync(entry,'// owned test entry'); vi.stubEnv('KSWARM_SERVER_PATH',entry);
     let healthy=false; vi.stubGlobal('fetch',vi.fn(async(input:string|URL|Request)=>new Response(JSON.stringify({ ok:true, features:['dynamic_workflows'], service:{entryPath:entry} }),{status:String(input).includes(':4318/')||healthy?200:503})));
     const request=vi.fn(async(method:string)=>{if(method==='sourceEnsure') healthy=true;});
     const service=createKSwarmService({activityOwnerPending:true,spawnProcess:spawnMock as never,findPortOwner:async()=>null});
@@ -1676,10 +1705,148 @@ describe('activity-owner delegated manager boundaries', () => {
   });
 });
 
+describe('Intent Broker delegated recovery', () => {
+  function fixture(bindOwner = true) {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-broker-recovery-'));
+    vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const entry = fixtureKSwarmEntry(root);
+    writeFileSync(entry, '// owned fixture');
+    vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    const state = { healthy: true };
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      return new Response(JSON.stringify(url.includes(':4400/health')
+        ? { ok: true, features: ['dynamic_workflows'], service: { entryPath: entry } }
+        : { ok: true, agents: [] }), { status: url.includes(':4318/health') && !state.healthy ? 503 : 200 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const request = vi.fn(async (_method: string, _params: unknown) => { state.healthy = true; });
+    const killer = vi.fn();
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, killStalePortOwner: killer });
+    if (bindOwner) service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
+    return { service, state, request, killer, fetch, async close() {
+      await service.stop();
+      expect(spawnMock).not.toHaveBeenCalled();
+      expect(killer).not.toHaveBeenCalled();
+      rmSync(root, { recursive: true, force: true });
+    } };
+  }
+
+  it.each(['darwin', 'win32'] as const)('routes a healthy Broker restart through its owner on %s', async platform => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    const f = fixture();
+    Object.defineProperty(process, 'platform', { ...descriptor, value: platform });
+    try {
+      await f.service.restartRelatedService('intent-broker');
+      expect(f.request).toHaveBeenCalledExactlyOnceWith('sourceRestart', { name: 'broker', ownerEpoch: 'owner' });
+    } finally { Object.defineProperty(process, 'platform', descriptor); await f.close(); }
+  });
+
+  it('ensures an absent Broker without first stopping its external receipt', async () => {
+    const f = fixture(); f.state.healthy = false;
+    try {
+      await f.service.restartRelatedService('intent-broker');
+      expect(f.request).toHaveBeenCalledExactlyOnceWith('sourceEnsure', { name: 'broker', ownerEpoch: 'owner' });
+      expect((await f.service.getServiceStatus()).services.find(s => s.id === 'intent-broker')?.reachable).toBe(true);
+    } finally { await f.close(); }
+  });
+
+  it('rejects an unbound owner without invoking a local restart', async () => {
+    const f = fixture(false);
+    try { await expect(f.service.restartRelatedService('intent-broker')).rejects.toThrow('activity_owner_initializing'); }
+    finally { await f.close(); }
+  });
+
+  it('preserves the owner refusal for a healthy external Broker and never retries the mutation', async () => {
+    const f = fixture();
+    f.request.mockRejectedValue(new Error('activity_source_stop_unconfirmed'));
+    try {
+      await expect(f.service.restartRelatedService('intent-broker')).rejects.toThrow('activity_source_stop_unconfirmed');
+      expect(f.request).toHaveBeenCalledTimes(1);
+    } finally { await f.close(); }
+  });
+
+  it('requires fresh health after an owner acknowledgement', async () => {
+    const f = fixture(); f.state.healthy = false;
+    f.request.mockImplementation(async () => {});
+    try { await expect(f.service.restartRelatedService('intent-broker')).rejects.toThrow('intent_broker_restart_failed'); }
+    finally { await f.close(); }
+  });
+
+  it('coalesces concurrent clicks and health recovery while the owner result is pending', async () => {
+    const f = fixture(); vi.useFakeTimers(); await f.service.start(); f.state.healthy = false; f.request.mockClear();
+    let release!: () => void;
+    f.request.mockImplementation(() => new Promise<void>(resolve => { release = () => { f.state.healthy = true; resolve(); }; }));
+    const first = f.service.restartRelatedService('intent-broker');
+    const second = f.service.restartRelatedService('intent-broker');
+    void first.catch(() => {}); void second.catch(() => {});
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(f.request).toHaveBeenCalledTimes(1);
+      release(); await Promise.all([first, second]);
+    } finally { release?.(); await Promise.allSettled([first, second]); await f.close(); }
+  });
+
+  it('recovers only Broker after three failed health ticks with KSwarm still healthy', async () => {
+    const f = fixture(); vi.useFakeTimers(); await f.service.start(); f.state.healthy = false; f.request.mockClear();
+    try {
+      await vi.advanceTimersByTimeAsync(20_000); expect(f.request).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(f.request).toHaveBeenCalledExactlyOnceWith('sourceEnsure', { name: 'broker', ownerEpoch: 'owner' });
+      expect(f.service.getStatus().running).toBe(true);
+      await vi.advanceTimersByTimeAsync(30_000); expect(f.request).toHaveBeenCalledTimes(1);
+    } finally { await f.close(); }
+  });
+
+  it('bounds unsuccessful automatic recovery and allows a later explicit retry', async () => {
+    const f = fixture(); vi.useFakeTimers(); await f.service.start(); f.state.healthy = false; f.request.mockClear();
+    f.request.mockRejectedValue(new Error('activity_source_start_failed'));
+    try {
+      await vi.advanceTimersByTimeAsync(600_000); expect(f.request).toHaveBeenCalledTimes(10);
+      f.request.mockImplementation(async () => { f.state.healthy = true; });
+      await f.service.restartRelatedService('intent-broker'); expect(f.request).toHaveBeenCalledTimes(11);
+      expect(f.service.getStatus().lastError).toBeNull();
+    } finally { await f.close(); }
+  });
+
+  it('resets consecutive failures across a healthy tick and clears a recovered Broker error', async () => {
+    const f = fixture(); vi.useFakeTimers(); await f.service.start(); f.state.healthy = false; f.request.mockClear();
+    try {
+      await vi.advanceTimersByTimeAsync(20_000);
+      f.state.healthy = true; await vi.advanceTimersByTimeAsync(10_000);
+      f.state.healthy = false; await vi.advanceTimersByTimeAsync(20_000);
+      expect(f.request).not.toHaveBeenCalled();
+      f.request.mockRejectedValue(new Error('activity_source_start_failed'));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(f.service.getStatus().lastError).toContain('intent-broker recovery failed');
+      f.state.healthy = true; await vi.advanceTimersByTimeAsync(10_000);
+      expect(f.service.getStatus().lastError).toBeNull();
+      expect(f.request).toHaveBeenCalledTimes(1);
+    } finally { await f.close(); }
+  });
+
+  it('does not launch a recovery after stopping during an in-flight health probe', async () => {
+    const f = fixture();
+    let release!: () => void;
+    const original = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async input => {
+      if (String(input).includes(':4318/health')) await new Promise<void>(resolve => { release = resolve; });
+      return original(input);
+    });
+    const pending = f.service.restartRelatedService('intent-broker');
+    void pending.catch(() => {});
+    try {
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      await f.service.stop(); release();
+      await expect(pending).rejects.toThrow(); expect(f.request).not.toHaveBeenCalled();
+    } finally { release?.(); await pending.catch(() => {}); await f.close(); }
+  });
+});
+
 describe('sidecar environment launch boundaries', () => {
   it('filters both direct spawns and passes complete owner environments', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sidecar-env-'));
-    const broker = join(root, 'broker.js'), ks = join(root, 'ks.js');
+    const broker = join(root, 'broker.js'), ks = fixtureKSwarmEntry(root, 'ks.js');
     writeFileSync(broker, '// broker'); writeFileSync(ks, '// kswarm');
     for (const [key, value] of Object.entries({ XIAOK_CONFIG_DIR: root, BROKER_SERVER_PATH: broker, KSWARM_SERVER_PATH: ks,
       XIAOK_CONVERSATION_ACTIVITY: '0', GH_TOKEN: 'fake-gh', ANTHROPIC_API_KEY: 'fake-key',
@@ -1693,13 +1860,16 @@ describe('sidecar environment launch boundaries', () => {
       return new Response(JSON.stringify({ ok: true, features: ['dynamic_workflows'], agents: [], service: { entryPath: name === 'broker' ? broker : ks } }),
         { status: url.pathname === '/health' && !launched.has(name) ? 503 : 200 });
     }));
-    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null });
+    const projectScope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)};
+    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null, desktopProjectScope:projectScope });
+    projectScope.workspaceId='c'.repeat(64);
     const check = (env: NodeJS.ProcessEnv, name: string) => {
       expect(env).toMatchObject({ KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh', ELECTRON_RUN_AS_NODE: '1' });
       for (const key of ['GH_TOKEN', 'ANTHROPIC_API_KEY', 'BROKER_SERVER_PATH']) expect(env).not.toHaveProperty(key);
       expect(env.INTENT_BROKER_KSWARM_TOKEN).toEqual(expect.any(String));
       if (name === 'broker') { expect(env.PORT).toBe('4318'); expect(env.INTENT_BROKER_DESKTOP_TOKEN).toBe(service.getIntentBrokerRoomToken()); }
-      else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken()); }
+      else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken());
+        expect(env.KSWARM_DESKTOP_PROFILE_ID).toBe('a'.repeat(64));expect(env.KSWARM_DESKTOP_WORKSPACE_ID).toBe('b'.repeat(64)); }
     };
     try {
       await service.start(); expect(spawnMock).toHaveBeenCalledTimes(2);

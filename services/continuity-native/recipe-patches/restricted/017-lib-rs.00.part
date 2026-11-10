@@ -1,0 +1,14 @@
+diff --git a/codex-rs/ext/extension-api/src/lib.rs b/codex-rs/ext/extension-api/src/lib.rs
+--- a/codex-rs/ext/extension-api/src/lib.rs
++++ b/codex-rs/ext/extension-api/src/lib.rs
+@@ -4,6 +4,10 @@
+ mod session_isolation;
+ mod state;
+ mod tool_policy;
++
++/// Dedicated binary ceiling, fixed at build time and never relaxed by config/RPC.
++pub const XIAOK_MAIN_BRIDGE_ONLY: bool = cfg!(feature = "xiaok-main-bridge-only");
++pub const XIAOK_RESTRICTION_VERSION: &str = "xiaok-main-bridge-v1";
+ mod turn_admission;
+ mod user_instructions;
+ 

@@ -1,28 +1,19 @@
+import {ASSISTANT_PRODUCT_SESSION_QUERIES} from './metadata-session-assistant-product-queries.js';
+import {GROUP_METADATA_SESSION_QUERIES} from './metadata-session-group-queries.js';
 /** Fixed projections inventoried from actual production constructors. This is
  * neither a complete layout declaration nor source/session authority. */
 const definitions = {
-  "groups:activity_runs": {"table":"activity_runs","columns":["run_id","group_id","data_json","logical_bytes"]},
-  "groups:activity_members": {"table":"activity_members","columns":["run_id","member_id","group_id","data_json","logical_bytes"]},
-  "groups:thread_bindings-v1-0": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision"]},
-  "groups:thread_bindings-v1-1": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision","delete_state"]},
-  "groups:thread_bindings-v1-2": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision","delete_state","delete_json"]},
-
-  "groups:agents": {"table":"agents","columns":["group_id","agent_id","parent_id","created_at","data_json","logical_bytes"]},
-  "groups:boot_owners": {"table":"boot_owners","columns":["boot_id","owner_pid","state"]},
-  "groups:contents": {"table":"contents","columns":["content_id","group_id","agent_id","data_json","logical_bytes"]},
-  "groups:events": {"table":"events","columns":["group_id","seq","event_id","agent_id","data_json","logical_bytes"]},
-  "groups:groups": {"table":"groups","columns":["group_id","thread_id","boot_id","historical_only","created_at","byte_usage","data_json","logical_bytes"]},
-  "groups:managed_resources": {"table":"managed_resources","columns":["resource_id","group_id","agent_id","data_json","logical_bytes"]},
-  "groups:messages": {"table":"messages","columns":["message_id","group_id","sender_kind","sender_agent_id","sender_actor_id","receiver_id","delivery_state","claim_id","turn_id","created_at","data_json","logical_bytes"]},
-  "groups:operations": {"table":"operations","columns":["group_id","operation_id","data_json","logical_bytes"]},
-  "groups:root_turns": {"table":"root_turns","columns":["source_task_id","group_id","preparation_id","boot_id","data_json","logical_bytes"]},
-  "groups:thread_bindings": {"table":"thread_bindings","columns":["thread_id","profile_id","workspace_id","cwd","active_group_id","thread_revision","delete_state","delete_json","pending_approval_count"]},
-  "groups:workspace_execution_authorizations": {"table":"workspace_execution_authorizations","columns":["profile_id","workspace_id","permission_revision","execution_allowed","updated_at","actor_id","last_receipt_json"]},
-
+ ...ASSISTANT_PRODUCT_SESSION_QUERIES,
+  ...GROUP_METADATA_SESSION_QUERIES,
   "codex-native:codex_native_sessions": {"table":"codex_native_sessions","columns":["id","owner","native_id","snapshot"]},
   "codex-routes:settings": {"table":"settings","columns":["key","value"]},
   "codex-routes:threads": {"table":"threads","columns":["id","native_id"]},
   "codex-routes:routes": {"table":"routes","columns":["task_id","thread_id"]},
+  "loop:assistant_calendar_memory_settings":{"table":"assistant_calendar_memory_settings","columns":["owner_id","profile_id","enabled","revision"]},
+  "loop:assistant_derived_run_markers":{"table":"assistant_derived_run_markers","columns":["run_id","profile_id"]},
+  "loop:assistant_derived_lineage":{"table":"assistant_derived_lineage","columns":["run_id","profile_id","lineage_json"]},
+  "loop:assistant_calendar_connection":{"table":"assistant_calendar_connection","columns":["id","epoch","enabled","binary_path","account_hash"]},
+  "loop:assistant_calendar_generations":{"table":"assistant_calendar_generations","columns":["id","epoch","collected_at","snapshot_json"]},
   "loop:sqlite_sequence": {"table":"sqlite_sequence","columns":["name","seq"]},
   "loop:assistant_candidates": {
     "table": "assistant_candidates",

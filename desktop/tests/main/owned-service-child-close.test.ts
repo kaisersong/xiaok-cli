@@ -12,6 +12,13 @@ class ControlledChild extends EventEmitter {
 afterEach(() => vi.useRealTimers());
 
 describe('owned service direct child close observation', () => {
+  it('does not lose an actual signal failure when Array.push is changed before close',async()=>{
+    const child=new ControlledChild(),cause=Error('original TERM failed');child.kill.mockImplementationOnce(()=>{throw cause;});
+    const tracker=createOwnedServiceChildCloseTracker();tracker.track(child.asChild(),5000);const push=Array.prototype.push;
+    Array.prototype.push=function(...values:unknown[]){if(values[0]===cause)return this.length;return Reflect.apply(push,this,values);};
+    let caught:unknown;try{const closing=tracker.closeAll();const observed=closing.catch(error=>{caught=error;});await Promise.resolve();child.emit('close',0,null);await observed;}finally{Array.prototype.push=push;}
+    expect(caught).toBeInstanceOf(AggregateError);const inner=(caught as AggregateError).errors[0] as AggregateError;expect(inner.errors).toContain(cause);
+  });
   it.each([5_000, 3_000])('waits actual close beyond exit and signal with grace %i', async (grace) => {
     vi.useFakeTimers();
     const child = new ControlledChild();

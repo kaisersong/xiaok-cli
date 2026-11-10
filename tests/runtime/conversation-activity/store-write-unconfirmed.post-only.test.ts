@@ -2,7 +2,8 @@
 // Proposed copy path: tests/runtime/conversation-activity/store-write-unconfirmed.post-only.test.ts
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { activityReadonlyNeedsSnapshot } from '../../../src/runtime/conversation-activity/readonly-snapshot.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -239,6 +240,7 @@ it.each(['data','owner'] as const)('POST ONLY: failed constructor %s close prese
 });
 it('POST ONLY: readonly constructor native prepare+close failure preserves the real prepare error', () => {
   const f = fixture(); const bootstrap = new DatabaseSync(f.file); bootstrap.exec('PRAGMA user_version=0'); bootstrap.close();
+  const owner = new DatabaseSync(f.file + '.owner.sqlite'); owner.close();
   const primary = new Error('readonly_prepare_fault'); f.faults.prepare = primary; f.faults.dataClose = new Error('readonly_close_fault');
   expectSameThrow(() => new ConversationActivityStore(f.file, { readOnly: true }), primary);
   expect(f.data).toBeDefined(); expect(f.closeCalls).toContain(f.data);
@@ -271,4 +273,20 @@ it('POST ONLY: owner setup and close faults retain the existing owner-held mappi
   expect(observed.error.cause).toBe(setup);
   expect(f.data).toBeUndefined(); expect(f.owner).toBeDefined();
   expect(f.closeCalls).toEqual([f.owner]);
+});
+
+it('readonly URI-capable Node preserves the original unowned-source contract while old Node refuses it', () => {
+  const f = fixture(), bootstrap = new DatabaseSync(f.file);
+  bootstrap.exec('PRAGMA user_version=4'); bootstrap.close();
+  const bytes = readFileSync(f.file), mtime = statSync(f.file, { bigint: true }).mtimeNs;
+  expect(existsSync(f.file + '.owner.sqlite')).toBe(false);
+  if (activityReadonlyNeedsSnapshot) {
+    expect(() => new ConversationActivityStore(f.file, { readOnly: true })).toThrow('conversation_activity_readonly_owner_unproved');
+  } else {
+    f.store = new ConversationActivityStore(f.file, { readOnly: true });
+    expect(f.data).toBeDefined(); f.store.close();
+  }
+  expect(existsSync(f.file + '.owner.sqlite')).toBe(false);
+  expect(readFileSync(f.file)).toEqual(bytes);
+  expect(statSync(f.file, { bigint: true }).mtimeNs).toBe(mtime);
 });

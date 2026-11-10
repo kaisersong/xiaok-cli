@@ -1,0 +1,22 @@
+diff --git a/codex-rs/app-server/src/account_notifications.rs b/codex-rs/app-server/src/account_notifications.rs
+--- a/codex-rs/app-server/src/account_notifications.rs
++++ b/codex-rs/app-server/src/account_notifications.rs
+@@ -31,6 +31,9 @@
+                     payload.success = false;
+                     payload.error = Some("account changed before sign-in completed".into());
+                 }
++                if codex_extension_api::XIAOK_AUTH_OWNER_ONLY && !payload.success {
++                    payload.error = Some("xiaok_auth_login_failed".to_owned());
++                }
+                 ServerNotification::AccountLoginCompleted(payload)
+             }
+             AccountNotification::Updated(payload) => {
+@@ -45,6 +48,8 @@
+             Some(connection_id) => OutgoingEnvelope::ToConnection {
+                 connection_id,
+                 message,
++                #[cfg(feature = "xiaok-auth-owner-only")]
++                private_auth: None,
+                 write_complete_tx: None,
+             },
+             None => OutgoingEnvelope::Broadcast { message },

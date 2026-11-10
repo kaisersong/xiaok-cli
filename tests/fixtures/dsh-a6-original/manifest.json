@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "original_main_a6_sqlite_history_fixture",
+  "databaseSha256": "dccd621dca7b962802cbfdc02c600943491a546d9ad0bceb6adc9477fbb41f4c",
+  "compressedSha256": "a937cc9b553d5cbaa0ef68eaf6753feb2515efd54c3179688afdfb0bb95aea91",
+  "sourceRun": "d23-original-main-draft-full-close-native-metadata.run.json",
+  "sourceRunSha256": "9f1a766d8e1015128895e34f32abdf746145be8a9c0e19db3a1cea286229c824",
+  "sourceLogSha256": "8f2df497f88a393a1685747316688a20d055c53c3abf50e7d0ca3510359ce9bd",
+  "origin": "actual isolated Electron Main original Source, Store, budget, GitHub TLS, assessment and draft HTTPS, original B work/slot/commit; original budget work close and Native N finish",
+  "qualification": "history bytes only; actual controlled fixture passed both model SDKs; not installed product or Native production grant",
+  "rewriteAllowed": false,
+  "firstRedFixtureHistory": "d23-a6-first-red-origin-manifest.json and d23-a6-first-red-groups.sqlite.gz retained in execution evidence directory"
+}

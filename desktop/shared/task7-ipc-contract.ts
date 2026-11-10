@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {nativeApprovalOwnerSchema,parseNativeApprovalOwner,type NativeApprovalOwnerMetadata} from '../../src/runtime/task-host/native-approval-owner.js';
 export const TASK7_METHODS = ['createTask', 'createTaskWithFiles', 'cancelTask', 'recoverTask', 'answerQuestion', 'getActiveTask', 'subscribeTask'] as const;
 export type Task7Method = typeof TASK7_METHODS[number];
 const id = z.string().min(1), text = z.string(), time = z.number().finite();
@@ -7,27 +8,32 @@ const role = z.enum(['customer_material', 'product_material', 'template_material
 const parseStatus = z.enum(['pending', 'parsed', 'unsupported', 'failed']);
 const status = z.enum(['understanding', 'running', 'waiting_user', 'completed', 'failed', 'cancelled']);
 const terminal = z.enum(['completed', 'failed', 'cancelled']);
+// Keep the shared contract's Zod type local; validation uses the same fixed core
+// parser without expanding two dependency trees through the entire IPC union.
+const nativeOwner=z.custom<NativeApprovalOwnerMetadata>(value=>nativeApprovalOwnerSchema.safeParse(value).success).transform(parseNativeApprovalOwner);
 const step = z.object({ id, label: text, status: z.enum(['planned', 'running', 'completed', 'blocked', 'failed']) }).strict();
 export const TASK7_UNDERSTANDING = z.object({ goal: text, deliverable: text, taskType: z.enum(['sales_deck', 'unknown']), audience: text,
   inputs: z.array(z.object({ materialId: id, name: text, role, parseStatus, parseSummary: text.optional() }).strict()),
   missingInfo: z.array(text), assumptions: z.array(text), riskLevel: z.enum(['low', 'medium', 'high']),
   suggestedPlan: z.array(step), nextAction: text }).strict();
 const question = z.object({ questionId: id, taskId: id, kind: z.enum(['confirm_understanding', 'missing_material', 'material_role_correction', 'assumption_approval', 'freeform']),
-  prompt: text, choices: z.array(z.object({ id, label: text }).strict()).optional(), expectedAttachments: z.array(role).optional(), staleAfterEventId: id.optional() }).strict();
+  prompt: text, choices: z.array(z.object({ id, label: text }).strict()).optional(), expectedAttachments: z.array(role).optional(), staleAfterEventId: id.optional(),owner:nativeOwner.optional() }).strict()
+  .refine(value=>!value.owner||value.owner.approvalToken===value.questionId);
 const artifact = z.object({ artifactId: id, sourceTaskId: id.optional(), kind: z.enum(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']),
   title: text, createdAt: text, previewAvailable: z.boolean(), filePath: text.optional(), mimeType: text.optional(), sizeBytes: count.optional(), sourceMaterialIds: z.array(id).optional(), creator: text.optional() }).strict();
 const result = z.object({ summary: text, artifacts: z.array(artifact), structuredOutput: z.record(z.string(), z.unknown()).optional(), assumptions: z.array(text).optional(), nextSteps: z.array(text).optional(), degraded: z.boolean().optional() }).strict();
 const salvage = z.object({ summary: z.array(text), reason: text.optional() }).strict();
 const event = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.object({ type: z.literal(type), ...shape }).strict();
 export const TASK7_EVENT = z.discriminatedUnion('type', [
+  event('ui_preview', {turnId:id,toolUseId:id,preview:z.object({title:text.max(10000),content:text.max(1000000)}).strict().nullable()}),
   event('execution_health', { state: z.enum(['running', 'waiting', 'recovering', 'cleanup_pending']) }),
   event('task_started', { taskId: id }), event('task_execution_started', { taskId: id }), event('task_terminal', { status: terminal }),
   event('understanding_updated', { understanding: TASK7_UNDERSTANDING }), event('plan_updated', { plan: z.array(step) }),
   event('progress', { message: text, stage: text.optional(), eventId: id }), event('assistant_delta', { delta: text, eventId: id }),
-  event('needs_user', { question }), event('question_resolved', { questionId: id }),
+  event('needs_user', { question }), event('question_resolved', { questionId: id, answerText: z.string().max(12000).optional() }),
   event('task_cancelled', { taskId: id, reason: text, partialText: text.optional() }), event('result', { result }),
   event('artifact_recorded', { artifactId: id, kind: text, label: text, filePath: text, previewAvailable: z.boolean(), turnId: id, creator: text.optional(), mimeType: text.optional() }),
-  event('salvage', { salvage }), event('error', { message: text }),
+  event('salvage', { salvage }), event('error', { message: text, retryable: z.boolean().optional(), code: z.literal('MODEL_TEXT_REPETITION_DETECTED').optional() }),
   event('canvas_tool_call', { toolName: text, input: z.unknown(), toolUseId: id, eventId: id, ts: time.optional(), displayInputSummary: text.optional() }),
   event('canvas_tool_result', { toolName: text, toolUseId: id, ok: z.boolean(), response: text, eventId: id, ts: time.optional() }),
   event('canvas_file_changed', { filePath: text, change: z.enum(['add', 'change', 'unlink']), eventId: id }),
@@ -46,9 +52,10 @@ export const TASK7_ANSWER = z.discriminatedUnion('type', [
   z.object({ questionId: id, type: z.literal('materials'), materialIds: z.array(id) }).strict(),
   z.object({ questionId: id, type: z.literal('role_update'), materialId: id, role }).strict(),
 ]);
+const legacySubmission = (input:Record<string,unknown>) => !Object.hasOwn(input,'gestureId') && !Object.hasOwn(input,'submissionId');
 export const TASK7_INPUTS = {
-  createTask: z.tuple([z.object({ prompt: text, materials: z.array(materialInput), context: context.optional() }).passthrough()]),
-  createTaskWithFiles: z.tuple([z.object({ prompt: text, filePaths: z.array(text), context: context.optional() }).passthrough()]),
+  createTask: z.tuple([z.object({ prompt: text, materials: z.array(materialInput), context: context.optional() }).passthrough().refine(legacySubmission)]),
+  createTaskWithFiles: z.tuple([z.object({ prompt: text, filePaths: z.array(text), context: context.optional() }).passthrough().refine(legacySubmission)]),
   cancelTask: z.tuple([z.object({ taskId: id }).strict()]),
   recoverTask: z.tuple([z.object({ taskId: id, legacyPrompt: text.optional() }).strict()]),
   answerQuestion: z.tuple([z.object({ taskId: id, answer: TASK7_ANSWER }).strict()]),
@@ -77,7 +84,7 @@ export const TASK7_SNAPSHOT = z.object({ taskId: id, sessionId: id, status, prom
   materials: z.array(z.object({ materialId: id, originalName: text, role, parseStatus, parseSummary: text.optional() }).strict()),
   events: z.array(TASK7_EVENT), understanding: TASK7_UNDERSTANDING.optional(), result: result.optional(), salvage: salvage.optional(),
   context: z.object({ threadId: id.optional(), taskIds: z.array(id), loadedTaskIds: z.array(id), skipped: z.array(z.object({ taskId: id, reason: z.enum(['missing', 'invalid', 'non_terminal', 'self', 'too_old']) }).strict()) }).strict().optional(),
-  executionScope: scope.optional(), multiAgentPreparation: preparation.optional(), hostDelivery: delivery.optional(),
+  executionScope: scope.optional(), multiAgentPreparation: preparation.optional(), inputPreparation:z.object({inputId:id,inputRevision:id}).strict().optional(), hostDelivery: delivery.optional(),
   usage: z.object({ inputTokens: count, outputTokens: count, known: z.boolean() }).strict().optional(),
   executionProtected: z.literal(true).optional(), protectedObservationClosure: closure.optional(), currentCompletion: completion.optional(), createdAt: time, updatedAt: time }).strict();
 const created = z.object({ taskId: id, understanding: TASK7_UNDERSTANDING.optional() }).strict();

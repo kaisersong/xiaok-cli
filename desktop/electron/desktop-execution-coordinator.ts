@@ -1,3 +1,4 @@
+import type {RootResourceJournal,RootResourceContext,RootResourceRecord} from './desktop-root-resource-store.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 export type ExecutionLane = 'foreground' | 'background' | 'project_control' | 'project_worker';
@@ -59,10 +60,12 @@ export class DesktopExecutionCoordinator {
   private readonly laneCapacity: Record<ExecutionLane, number>;
   private readonly laneActive: Record<ExecutionLane, number> = { foreground: 0, background: 0, project_control: 0, project_worker: 0 };
   private readonly multiAgentLeaseMs?: number;
+  private readonly rootResources?:RootResourceJournal;
 
-  constructor(options: { capacity?: number; backgroundCapacity?: number; projectControlCapacity?: number; projectWorkerCapacity?: number; multiAgentLeaseMs?: number } = {}) {
+  constructor(options: { rootResources?:RootResourceJournal; capacity?: number; backgroundCapacity?: number; projectControlCapacity?: number; projectWorkerCapacity?: number; multiAgentLeaseMs?: number } = {}) {
     if (options.multiAgentLeaseMs !== undefined && (!Number.isSafeInteger(options.multiAgentLeaseMs) || options.multiAgentLeaseMs <= 0)) throw new Error('Invalid explicit lease duration');
     this.multiAgentLeaseMs = options.multiAgentLeaseMs;
+    this.rootResources=options.rootResources;
     const capacity = options.capacity ?? 1;
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
       throw new Error('Desktop execution capacity must be a positive integer');
@@ -76,6 +79,17 @@ export class DesktopExecutionCoordinator {
     this.laneCapacity = { foreground: capacity, background, project_control: control, project_worker: worker };
     this.capacity = capacity + background + control + worker;
   }
+
+  private rootJournal():RootResourceJournal {if(!this.rootResources)throw Error('runtime_admission_unavailable');return this.rootResources;}
+  enqueueRoot(proof:object,ctx:RootResourceContext){return this.rootJournal().enqueueRoot(proof,ctx);}
+  claimNextRoot(ctx:RootResourceContext){return this.rootJournal().claimNext(ctx);}
+  consumeRootLaunch(input:RootResourceRecord,ctx:RootResourceContext){return this.rootJournal().consumeLaunch(input,ctx);}
+  ackRootStarted(input:RootResourceRecord,ctx:RootResourceContext){return this.rootJournal().ackStarted(input,ctx);}
+  markLaunchUnknownRoot(input:unknown,ctx:RootResourceContext){return this.rootJournal().markLaunchUnknown(input,ctx);}
+  requestRootCancel(key:string,ctx:RootResourceContext){return this.rootJournal().requestCancel(key,ctx);}
+  finishRoot(proof:object,ctx:RootResourceContext){return this.rootJournal().finish(proof,ctx);}
+  readRootReservation(key:string,ctx:RootResourceContext){return this.rootJournal().readReservation(key,ctx);}
+  setRootResourcePolicy(input:{capacity:number;queueLimit:number},ctx:RootResourceContext){return this.rootJournal().setPolicy(input,ctx);}
 
   async run<T>(signal: AbortSignal | undefined, action: () => Promise<T>, lane?: ExecutionLane): Promise<T> {
     const member = await this.acquireLease({ policy: 'ordinary', signal, lane });
@@ -113,6 +127,7 @@ export class DesktopExecutionCoordinator {
     policy: ExecutionLeasePolicy;
     signal?: AbortSignal;
   }): ExecutionLeaseRequest {
+    if(this.rootResources)throw Error('root_legacy_lane_unavailable');
     if (options.policy === 'multiAgent' && !options.groupId) {
       return this.rejected(new Error('multi-agent lease requires groupId'));
     }
@@ -124,6 +139,7 @@ export class DesktopExecutionCoordinator {
 
   /** A future turn explicitly requires a new epoch, even if its group is live. */
   enqueueGroupTurn(groupId: string, signal?: AbortSignal, lane?: ExecutionLane): ExecutionLeaseRequest {
+    if(this.rootResources)throw Error('root_legacy_lane_unavailable');
     if (!groupId) return this.rejected(new Error('multi-agent lease requires groupId'));
     return this.enqueue({ groupId, policy: 'multiAgent', signal, lane });
   }
@@ -134,6 +150,7 @@ export class DesktopExecutionCoordinator {
     memberKind: ExecutionMemberKind,
     signal?: AbortSignal,
   ): ExecutionLeaseRequest {
+    if(this.rootResources)throw Error('root_legacy_lane_unavailable');
     if (this.blockedReason) return this.rejected(new Error(this.blockedReason));
     if (signal?.aborted) return this.rejected(abortReason(signal));
     const lease = this.groups.get(groupId);
@@ -156,6 +173,7 @@ export class DesktopExecutionCoordinator {
   }
 
   private enqueue(options: { groupId?: string; policy: ExecutionLeasePolicy; signal?: AbortSignal; lane?: ExecutionLane }): ExecutionLeaseRequest {
+    if(this.rootResources)throw Error('root_legacy_lane_unavailable');
     if (this.blockedReason) return this.rejected(new Error(this.blockedReason));
     const { signal } = options;
     if (signal?.aborted) return this.rejected(abortReason(signal));

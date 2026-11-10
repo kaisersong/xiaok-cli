@@ -8,7 +8,7 @@ import type { PlatformRuntimeContext } from '../../../src/platform/runtime/conte
 
 describe('CLI activity presentation boundaries', () => {
   const owners: CliConversationActivities[] = [], roots: string[] = [];
-  afterEach(() => { for (const owner of owners) owner.dispose(); for (const root of roots) rmSync(root, { recursive: true, force: true }); owners.length = 0; roots.length = 0; });
+  afterEach(async () => { for (const owner of owners) await owner.close(); for (const root of roots) rmSync(root, { recursive: true, force: true }); owners.length = 0; roots.length = 0; });
   function fixture(root = mkdtempSync(join(tmpdir(), 'xiaok-cli-activity-'))) {
     if (!roots.includes(root)) roots.push(root);
     const connection = { client: {}, tasks: { endpointId: 'endpoint', capabilities: { execution: false }, task: () => ({ snapshot: async () => ({ status: 'completed', taskId: 'task', raw: { taskId: 'task', status: 'completed' }, extensions: {} }) }) } };
@@ -32,8 +32,13 @@ describe('CLI activity presentation boundaries', () => {
     expect(await owner.service.unreadThreads({ requestSource: 'user', actorId: 'cli-user' })).toHaveLength(1);
     owner.flush(true, write); expect(write).toHaveBeenCalledOnce();
   });
+  it('waits an original pending CLI refresh before releasing its store and writer ownership',async()=>{
+    const {owner}=fixture();await owner.refresh();let release!:(rows:never[])=>void;
+    vi.spyOn(owner.service,'listActivities').mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+    const refresh=owner.refresh();await vi.waitFor(()=>expect(release).toBeTypeOf('function'));let closed=false;const close=owner.close().then(()=>{closed=true;});await Promise.resolve();await Promise.resolve();expect(closed).toBe(false);expect(owner.store.listWatches()).toEqual([]);release([]);await refresh;await close;expect(closed).toBe(true);
+  });
   it('resumes its presentation cursor without repeating a painted notice or invoking the tool again', async () => {
-    const first = fixture(); await complete(first.owner); first.owner.flush(true, () => {}); first.owner.dispose();
+    const first = fixture(); await complete(first.owner); first.owner.flush(true, () => {}); await first.owner.close();
     const reopened = fixture(first.root); await reopened.owner.refresh();
     const write = vi.fn(); reopened.owner.flush(true, write); expect(write).not.toHaveBeenCalled();
     expect(reopened.owner.store.getMcpReference('watch')?.taskId).toBe('task');

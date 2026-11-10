@@ -1,3 +1,4 @@
+import {parseAssistantActionRecommendation,type AssistantActionDetails} from '../assistant/action-recommendation.js';
 import { ownDataArrayIsArray, ownDataArrayPrototypeForEach, ownDataArrayPrototypeIncludes, ownDataArrayPrototypeJoin, ownDataArrayPrototypeSome, ownDataArrayPrototypeSort, ownDataBufferByteLength, ownDataBufferCompare, ownDataBufferFrom, ownDataCryptoCreateHash, ownDataHashPrototypeDigest, ownDataHashPrototypeUpdate, ownDataNumberIsFinite, ownDataNumberIsSafeInteger, ownDataObjectFreeze, ownDataObjectKeys, ownDataObjectValues, ownDataReflectOwnKeys, ownDataRegExpPrototypeTest, ownDataSetPrototypeAdd, ownDataSetPrototypeHas, ownDataStringPrototypeTrim } from './application-native-intrinsics.js';
 import { capturedArrayIterator, createCapturedSet } from './application-iteration-intrinsics.js';
 import { applicationDataDescriptors, captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
@@ -36,6 +37,7 @@ export interface LoopAssistantCandidate {
     dedupeKey: string;
 }
 export interface LoopMorningRecommendation {
+    action?:AssistantActionDetails;
     title: string;
     reasonCode: string;
     evidenceRefs: readonly LoopCandidateEvidenceRef[];
@@ -105,6 +107,7 @@ export type LoopCandidateBody = {
     artifacts: readonly LoopArtifactDescriptor[];
 } | {
     kind: 'assistant-morning';
+    schemaVersion?:2;
     recommendations: readonly LoopMorningRecommendation[];
     artifacts: readonly LoopArtifactDescriptor[];
 };
@@ -300,13 +303,16 @@ function candidateBody(input: unknown, subject: Readonly<LoopHostSubject>, contr
         }
     }
     else if (kindField.value === 'assistant-morning') {
-        shape(raw, ['kind', 'recommendations', 'artifacts']);
+        const version=readApplicationOwnDataField(raw,'schemaVersion','loop_application_shape');
+        if(version.present&&version.value!==2)throw Error('loop_application_action_version');
+        shape(raw,version.present?['kind','schemaVersion','recommendations','artifacts']:['kind','recommendations','artifacts']);
         if (contract.kind !== 'assistant' || contract.assistantKind !== 'morning' || subject.stage !== null || subject.loopId !== 'personal-assistant-morning-briefing')
             throw Error('loop_application_body_binding');
         array(raw.recommendations);
         if (raw.recommendations.length > 3)
             throw Error('loop_application_recommendations');
         for (const r of capturedArrayIterator(raw.recommendations)) {
+            if(version.present){parseAssistantActionRecommendation(r);continue;}
             shape(r, ['title', 'reasonCode', 'evidenceRefs']);
             text(r.title);
             text(r.reasonCode);

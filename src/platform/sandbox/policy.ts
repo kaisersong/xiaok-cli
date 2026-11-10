@@ -16,7 +16,8 @@ export interface SandboxDecision {
 }
 
 function normalizePathForMatch(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/g, '');
+  const normalized=path.replace(/\\/g,'/');
+  return normalized==='/'||/^[A-Za-z]:\/$/.test(normalized)?normalized:normalized.replace(/\/+$/g,'');
 }
 
 const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/;
@@ -36,8 +37,8 @@ function matchesPrefix(prefixes: string[], value: string): boolean {
   if (prefixes.length === 0) return false;
   const normalizedValue = canonicalizePathForMatch(value);
   return prefixes.some((prefix) => {
-    const normalizedPrefix = canonicalizePathForMatch(prefix);
-    return normalizedValue === normalizedPrefix || normalizedValue.startsWith(`${normalizedPrefix}/`);
+    const normalizedPrefix = prefix;
+    return normalizedValue === normalizedPrefix || normalizedValue.startsWith(normalizedPrefix.endsWith('/')?normalizedPrefix:`${normalizedPrefix}/`);
   });
 }
 
@@ -72,11 +73,11 @@ export function extractSandboxAllowedPaths(rules: string[]): string[] {
 }
 
 const readonlyPolicyProofs=new WeakMap<object,()=>boolean>();
-const arrayPrototype=Array.prototype, some=arrayPrototype.some, includes=arrayPrototype.includes, push=arrayPrototype.push;
+const arrayPrototype=Array.prototype, some=arrayPrototype.some, includes=arrayPrototype.includes, push=arrayPrototype.push, map=arrayPrototype.map, every=arrayPrototype.every;
 const stringReplace=String.prototype.replace;
 function safeRuleArray(value:unknown):boolean{
  if(!value||typeof value!=='object'||types.isProxy(value)||!Array.isArray(value)||Object.getPrototypeOf(value)!==arrayPrototype)return false;
- if(arrayPrototype.some!==some||arrayPrototype.includes!==includes||arrayPrototype.push!==push||String.prototype.replace!==stringReplace)return false;
+ if(arrayPrototype.some!==some||arrayPrototype.includes!==includes||arrayPrototype.push!==push||arrayPrototype.map!==map||arrayPrototype.every!==every||String.prototype.replace!==stringReplace)return false;
  const descriptors=Object.getOwnPropertyDescriptors(value);
  return Reflect.ownKeys(descriptors).every(key=>key==='length'||typeof key==='string'&&/^(0|[1-9][0-9]*)$/.test(key)&&'value' in descriptors[key]&&typeof descriptors[key].value==='string');
 }
@@ -94,8 +95,10 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
   const legacyAllowlist = options.allowedPaths
     ? Array.from(options.allowedPaths)
     : [];
-  const allowlist = [...(options.pathAllowlist ?? legacyAllowlist)];
-  const denylist = options.pathDenylist ?? [];
+  const allowlist = [...(options.pathAllowlist ?? legacyAllowlist)].map(canonicalizePathForMatch);
+  const sourceDenylist=options.pathDenylist;
+  const originalDenylist=[...(sourceDenylist ?? [])];
+  const denylist = originalDenylist.map(canonicalizePathForMatch);
   const allowedEnv = new Set(options.allowedEnv ?? []);
 
   const policy = {
@@ -114,6 +117,13 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
       }
     },
 
+    getSearchScope() {
+      return Object.freeze({
+        allowedPaths: Object.freeze(allowlist.map(path=>path)),
+        deniedPaths: Object.freeze(denylist.map(path=>path)),
+      });
+    },
+
     filterEnv(env: Record<string, string>): Record<string, string> {
       return Object.fromEntries(Object.entries(env).filter(([key]) => allowedEnv.has(key)));
     },
@@ -125,7 +135,7 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
     },
 
     expandAllowedPaths(paths: string[]): void {
-      for (const path of paths) {
+      for (const path of paths.map(canonicalizePathForMatch)) {
         if (!allowlist.includes(path)) {
           allowlist.push(path);
         }
@@ -136,7 +146,8 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
   readonlyPolicyProofs.set(policy,()=>{
     if(Object.getPrototypeOf(policy)!==prototype||Reflect.ownKeys(policy).length!==Reflect.ownKeys(functions).length)return false;
     for(const key of Object.keys(functions)){const current=Object.getOwnPropertyDescriptor(policy,key);if(!current||!('value' in current)||current.value!==functions[key].value)return false;}
-    return safeRuleArray(allowlist)&&safeRuleArray(denylist)&&safeNetworkOption(options);
+    return safeRuleArray(allowlist)&&safeRuleArray(denylist)&&safeNetworkOption(options)
+      && (!sourceDenylist || safeRuleArray(sourceDenylist)&&sourceDenylist.length===originalDenylist.length&&sourceDenylist.every((path,index)=>path===originalDenylist[index]));
   });
   return policy;
 }

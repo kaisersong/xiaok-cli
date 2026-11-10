@@ -84,6 +84,14 @@ describe('AssistantDetailPanel', () => {
       </LocaleProvider>,
     );
 
-    expect(screen.queryByRole('dialog', { name: '每日助理详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '小K助理详情' })).not.toBeInTheDocument();
   });
+});
+
+
+it('keeps accepted follow-up drafts user-confirmed and exposes the next main-issued candidate page',()=>{
+ const start=vi.fn(),more=vi.fn();
+ render(<LocaleProvider><AssistantDetailPanel {...({open:true,profile:{status:'active',eveningTime:'21:30',morningTime:'08:30'},candidates:[{id:'follow',kind:'follow_up',status:'accepted',title:'Follow up',content:'Review',confidence:1,evidenceRefs:[],acceptedTargetRef:'draft://follow'}],knowledgeCollections:[],onClose:()=>{},onAcceptCandidate:()=>{},onRejectCandidate:()=>{},onStartFollowUp:start,hasMoreCandidates:true,loadingMore:false,onLoadMore:more} as any)}/></LocaleProvider>);
+ expect(start).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'开始处理'}));expect(start).toHaveBeenCalledExactlyOnceWith('follow');
+ fireEvent.click(screen.getByRole('button',{name:'加载更多候选'}));expect(more).toHaveBeenCalledTimes(1);
 });

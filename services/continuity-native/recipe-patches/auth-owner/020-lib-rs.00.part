@@ -1,0 +1,148 @@
+diff --git a/codex-rs/app-server/src/lib.rs b/codex-rs/app-server/src/lib.rs
+--- a/codex-rs/app-server/src/lib.rs
++++ b/codex-rs/app-server/src/lib.rs
+@@ -93,7 +93,6 @@
+     )
+ }
+ 
+-mod xiaok_main_bridge;
+ mod analytics_utils;
+ mod app_info;
+ mod app_server_tracing;
+@@ -145,6 +144,11 @@
+ mod turn_cost_worker;
+ mod user_verification;
+ mod user_verification_response;
++#[cfg(feature = "xiaok-auth-owner-only")]
++mod xiaok_auth_owner;
++#[cfg(all(feature = "xiaok-auth-owner-only", unix))]
++mod xiaok_auth_stdio;
++mod xiaok_main_bridge;
+ 
+ pub use crate::code_mode_host::AppServerCodeModeHostArgs;
+ pub use crate::code_mode_host::CodeModeHostTransport;
+@@ -507,15 +511,48 @@
+ ) -> IoResult<AppServerExit> {
+     let strict_config = strict_config || codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY;
+     let mut runtime_options = runtime_options;
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    {
++        let explicit = std::env::var_os("CODEX_HOME")
++            .ok_or_else(|| std::io::Error::other("xiaok_auth_vault_unavailable"))?;
++        let root = std::path::Path::new(&explicit);
++        if explicit.is_empty()
++            || !root.is_absolute()
++            || root.file_name().is_some_and(|v| v == ".codex")
++            || std::fs::symlink_metadata(root)
++                .map_err(|_| std::io::Error::other("xiaok_auth_vault_unavailable"))?
++                .file_type()
++                .is_symlink()
++        {
++            return Err(std::io::Error::other("xiaok_auth_vault_unavailable"));
++        }
++    }
++    let private_codex_home = if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
++        Some(find_codex_home()?)
++    } else {
++        None
++    };
+     if codex_extension_api::XIAOK_MAIN_BRIDGE_ONLY {
+-        if !matches!(&transport, AppServerTransport::Stdio) || std::env::var("XIAOK_NATIVE_ISOLATED_V1").as_deref() != Ok("1") {
+-            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_stdio_required"));
+-        }
+-        let home = find_codex_home()?;
++        if !matches!(&transport, AppServerTransport::Stdio)
++            || std::env::var("XIAOK_NATIVE_ISOLATED_V1").as_deref() != Ok("1")
++        {
++            return Err(std::io::Error::new(
++                ErrorKind::PermissionDenied,
++                "xiaok_native_private_stdio_required",
++            ));
++        }
++        let home = private_codex_home
++            .as_ref()
++            .ok_or_else(|| std::io::Error::other("xiaok_native_private_cwd_required"))?;
+         let expected = std::fs::canonicalize(home.join("workspace"))?;
+         if std::fs::canonicalize(std::env::current_dir()?)? != expected {
+-            return Err(std::io::Error::new(ErrorKind::PermissionDenied, "xiaok_native_private_cwd_required"));
+-        }
++            return Err(std::io::Error::new(
++                ErrorKind::PermissionDenied,
++                "xiaok_native_private_cwd_required",
++            ));
++        }
++        #[cfg(feature = "xiaok-auth-owner-only")]
++        codex_login::initialize_xiaok_auth_vault(home)?;
+         runtime_options.plugin_startup_tasks = PluginStartupTasks::Skip;
+         runtime_options.remote_control_startup_mode = RemoteControlStartupMode::DisabledEphemeral;
+         runtime_options.code_mode_host_transport = CodeModeHostTransport::Local;
+@@ -545,7 +582,10 @@
+             format!("error parsing -c overrides: {e}"),
+         )
+     })?;
+-    let codex_home = find_codex_home()?;
++    let codex_home = match private_codex_home {
++        Some(home) => home,
++        None => find_codex_home()?,
++    };
+     let local_runtime_paths = ExecServerRuntimeOptions::from_optional_paths(
+         arg0_paths.codex_self_exe.clone(),
+         arg0_paths.codex_linux_sandbox_exe.clone(),
+@@ -774,6 +814,13 @@
+     if let Some(Err(err)) = nofile_limit_result {
+         warn!(%err, "failed to raise managed app-server file descriptor limit");
+     }
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    for warning in &mut config_warnings {
++        warning.summary = "xiaok_auth_config_warning".to_owned();
++        warning.details = None;
++        warning.path = None;
++        warning.range = None;
++    }
+     for warning in &config_warnings {
+         match &warning.details {
+             Some(details) => error!("{} {}", warning.summary, details),
+@@ -808,6 +855,8 @@
+     let remote_control_shutdown_token = transport_shutdown_token.child_token();
+     let mut transport_accept_handles = Vec::<JoinHandle<()>>::new();
+ 
++    #[cfg(feature = "xiaok-auth-owner-only")]
++    let xiaok_auth_connection = Arc::new(crate::xiaok_auth_owner::AuthOwnerConnection::new());
+     let single_client_mode = matches!(&transport, AppServerTransport::Stdio);
+     let graceful_signal_restart_enabled =
+         runtime_options.install_shutdown_signal_handler && !single_client_mode;
+@@ -817,12 +866,25 @@
+         AppServerTransport::Stdio => {
+             let (stdio_client_name_tx, stdio_client_name_rx) = oneshot::channel::<String>();
+             app_server_client_name_rx = Some(stdio_client_name_rx);
++            #[cfg(not(feature = "xiaok-auth-owner-only"))]
+             let handle = start_stdio_connection(
+                 transport_event_tx.clone(),
+                 stdio_client_name_tx,
+                 runtime_options.install_shutdown_signal_handler,
+             )
+             .await?;
++            #[cfg(all(feature = "xiaok-auth-owner-only", unix))]
++            let handle = crate::xiaok_auth_stdio::start(
++                transport_event_tx.clone(),
++                stdio_client_name_tx,
++                runtime_options.install_shutdown_signal_handler,
++                Arc::clone(&xiaok_auth_connection),
++            )
++            .await?;
++            #[cfg(all(feature = "xiaok-auth-owner-only", not(unix)))]
++            return Err(std::io::Error::other(
++                "xiaok_auth_stdio_platform_unavailable",
++            ));
+             transport_accept_handles.push(handle);
+         }
+         AppServerTransport::UnixSocket { socket_path } => {
+@@ -996,6 +1058,8 @@
+         let initialize_notification_sender = outgoing_message_sender.clone();
+         let outbound_control_tx = outbound_control_tx;
+         let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
++            #[cfg(feature = "xiaok-auth-owner-only")]
++            xiaok_auth_connection: Arc::clone(&xiaok_auth_connection),
+             outgoing: outgoing_message_sender,
+             analytics_events_client,
+             arg0_paths,

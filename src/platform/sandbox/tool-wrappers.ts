@@ -1,3 +1,6 @@
+import {realpathSync} from 'node:fs';
+import {withSearchScope} from '../../ai/tools/search-scope-context.js';
+import {hasOriginalMainSdkBridgeInstallation} from '../../runtime/verification/original-main-sdk-bridge.js';
 import {types} from 'node:util';
 import {resolve} from 'node:path';
 import {isReadonlySandboxEnforcer} from './enforcer.js';
@@ -15,6 +18,11 @@ function detectNetworkIntent(command:string):boolean{return /(curl|wget|https?:\
 type CompoundSandboxPreparation=(input:Readonly<Record<string,unknown>>,context?:ToolExecutionContext)=>Promise<string|undefined>;
 interface PreparationBinding {execute:Tool['execute'];prepare:CompoundSandboxPreparation}
 const compoundPreparations=new WeakMap<Tool,PreparationBinding>();
+const readonlyScopes=new WeakMap<Tool,{execute:Tool['execute'];current:()=>boolean}>();
+/** A path scope is host wrapper authority, never a readOnly/name descriptor. */
+export function isScopedSandboxReadonlyTool(tool:Tool):boolean {
+ const binding=readonlyScopes.get(tool);return !!binding&&binding.execute===tool.execute&&binding.current();
+}
 /** Only first-party wrappers created below possess this port. A plugin property
  * named compoundPrepare is not consulted and cannot issue a preparation grant. */
 export function getCompoundSandboxPreparation(tool:Tool):CompoundSandboxPreparation|undefined{
@@ -27,6 +35,7 @@ export function inheritCompoundSandboxPreparation(source:Tool,target:Tool):void{
  const prepare=getCompoundSandboxPreparation(source);if(!prepare)return;
  if(target.execute!==source.execute||target.permission!==source.permission||target.definition.name!==source.definition.name)throw Error('compound_sandbox_clone_changed');
  compoundPreparations.set(target,{execute:target.execute,prepare});
+ if(source!==target&&isScopedSandboxReadonlyTool(source))readonlyScopes.set(target,{execute:target.execute,current:()=>isScopedSandboxReadonlyTool(source)});
 }
 
 export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optionsOrCallback?:SandboxToolWrapperOptions|SandboxDenialCallback):Tool[]{
@@ -58,7 +67,15 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    const denial=await prepare(effective,context,!context?.compoundPhase);
    if(denial)return denial;
    context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
-   return tool.execute(effective,search?withSandboxSearchScope(context,enforcer):context);
+   if(search){
+    if(hasOriginalMainSdkBridgeInstallation()){
+     const path=realpathSync(effective.path as string);
+     if(!enforcer.enforceFile(path).allowed)return 'Error: sandbox denied search path';
+     return tool.execute({...effective,path},withSandboxSearchScope(withSearchScope(context,enforcer.getSearchScope()),enforcer));
+    }
+    return tool.execute(effective,withSandboxSearchScope(context,enforcer));
+   }
+   return tool.execute(effective,context);
   }};
   inheritBuiltinToolIdentity(tool,wrapped,()=>{
    if(!isReadonlySandboxEnforcer(enforcer)||types.isProxy(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))return false;
@@ -66,6 +83,7 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    if(callback)return 'value' in callback&&callback.value===undefined;
    return Object.getOwnPropertyDescriptor(Object.prototype,'onSandboxDenied')===undefined;
   });
+  if(['read','grep','glob'].includes(name))readonlyScopes.set(wrapped,{execute:wrapped.execute,current:()=>isReadonlySandboxEnforcer(enforcer)&&enforcer.getSearchScope().allowedPaths.length>0});
   compoundPreparations.set(wrapped,{execute:wrapped.execute,prepare:(input,context)=>prepare(input,context,true)});
   return wrapped;
  });

@@ -195,7 +195,7 @@ it('actual completed mutation actor still owns its same Root scope for the real 
   const service = new DesktopMultiAgentService({store, coordinator: new DesktopExecutionCoordinator(), createSession: async () => { throw Error('unused child'); }});
   cleanup.push(() => service.dispose()); service.registerThread({threadId: 'summary', profileId: 'profile', workspaceId: 'workspace', cwd: root});
   let sends = 0, result = '';
-  const host = new InProcessTaskRuntimeHost({snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')), materialRegistry: new MaterialRegistry({workspaceRoot: join(root, 'materials'), maxBytes: 1024}),
+  const host = new InProcessTaskRuntimeHost({snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')), materialRegistry: new MaterialRegistry({workspaceRoot: join(root, 'materials'), maxBytes: 1024}), groupObservationSource: service,
     authorizePreparation: (id, marker) => service.assertHostPreparation(id, marker), assertTaskAdmission: snapshot => service.assertHostAdmission(snapshot),
     runner: input => service.runRoot(input, async context => {
       await context.mailbox.trySealTurn({outcome: 'completed'});

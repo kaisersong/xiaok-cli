@@ -1,0 +1,32 @@
+{
+  "schema": "xiaok-broker-runtime-lock/v1",
+  "node": "24.19.0",
+  "sqlite": "3.53.3",
+  "targets": {
+    "darwin-arm64": {
+      "archive": "node-v24.19.0-darwin-arm64.tar.gz",
+      "archiveSha256": "8294b7aa9b03997481c06babf1e8b270c859358f27da57a11509afe537ac381d",
+      "archiveSize": 52234372,
+      "executable": "node",
+      "member": "node-v24.19.0-darwin-arm64/bin/node",
+      "license": "node-v24.19.0-darwin-arm64/LICENSE",
+      "executableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+      "executableSize": 121306800,
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5",
+      "licenseSize": 157606,
+      "minimumDarwinRelease": "22.6.0"
+    },
+    "win32-x64": {
+      "archive": "node-v24.19.0-win-x64.zip",
+      "archiveSha256": "57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73",
+      "archiveSize": 37304352,
+      "executable": "node.exe",
+      "member": "node-v24.19.0-win-x64/node.exe",
+      "license": "node-v24.19.0-win-x64/LICENSE",
+      "executableSha256": "3602f2bb1a10f2cbab4c36886218a33c1ab3db87290e73b033c46c77147d0237",
+      "executableSize": 92825416,
+      "licenseSha256": "d9c4eeda951d6d08f4aa1316b61aafcf67e6da5f79b18f8edeb56fa6abdc038c",
+      "licenseSize": 160552
+    }
+  }
+}

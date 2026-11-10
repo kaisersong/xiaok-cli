@@ -3,6 +3,7 @@ import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from
 import {assertRootProtectedFile,assertRootProtectedExecutable} from './installed-identity.js';
 import {parseDeploymentPackageInventory,verifyDeploymentPackage} from './deployment-package.js';
 import {readExistingEngineBootstrap} from './engine-bootstrap-journal.js';
+import {assertPrivateEngineImageStore} from './engine-image-store.js';
 import {buildPrivateMacEnginePlan} from './macos-engine-bootstrap.js';
 import {runInstallationCommand,assertInstallationCommandIdle} from './installation-command.js';
 import {verifyEngineBinaryCensus,ENGINE_BINARY_CENSUS_SCRIPT} from './engine-binary-census.js';
@@ -34,7 +35,7 @@ export async function attachInstalledMacEngineForMaintenance(input:{lifetime:Ins
   if(hash(await run(plan.executable,['validate','--fill',join(directory,'lima.yaml')]))!==baseline.proposal.configHash)throw Error('maintenance_engine_config');
   const ids=(await shell('set -eu\ncat /etc/machine-id\ncat /proc/sys/kernel/random/boot_id\ncat /etc/xiaok-controller-creation-nonce\n')).trim().split('\n');if(ids.length!==3||ids[0]!==baseline.observation.machineId||ids[1]!==baseline.observation.bootId||ids[2]!==baseline.proposal.creationNonce)throw Error('maintenance_engine_guest');
   const docker='/usr/local/lib/xiaok-engine/docker --host unix:///run/xiaok-engine/docker.sock';
-  const engine=JSON.parse(await shell(`${docker} info --format '{{json .}}'\n`));if(engine.ID!==baseline.observation.engineId||engine.OSType!=='linux'||!['aarch64','arm64'].includes(engine.Architecture))throw Error('maintenance_engine_identity_changed');
+  const engine=JSON.parse(await shell(`${docker} info --format '{{json .}}'\n`));assertPrivateEngineImageStore(engine);if(engine.ID!==baseline.observation.engineId||engine.OSType!=='linux'||!['aarch64','arm64'].includes(engine.Architecture))throw Error('maintenance_engine_identity_changed');
   await shell(`set -eu\n[ ! -L /etc/systemd/system/xiaok-engine.service ]\nprintf '%s  %s\\n' '${hash(plan.unit)}' '/etc/systemd/system/xiaok-engine.service' | sha256sum -c - >/dev/null\nsystemctl is-active --quiet xiaok-engine.service\n`);
   verifyEngineBinaryCensus(binaries,await shell(ENGINE_BINARY_CENSUS_SCRIPT));if((await shell(`${docker} image inspect '${sources.workerImage.imageId}' --format '{{.Id}}'\n`)).trim()!==sources.workerImage.imageId)throw Error('maintenance_engine_image');
   const after=JSON.parse(await run(observer,[pid]));if(json(before)!==json(after))throw Error('maintenance_engine_process_changed');current();

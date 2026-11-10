@@ -1,3 +1,10 @@
+import {TASK7_SNAPSHOT} from '../shared/task7-ipc-contract.js';
+import {registerContextContinuityIpc} from './context-continuity/ipc.js';
+import {registerContinuityInputIpc} from './context-continuity/input-ipc.js';
+import {registerDecisionModelIpc} from './decision-model-ipc.js';
+import {registerRoomConversionCaptureIpc} from './room-conversion-typed-ipc.js';
+import {registerUserTaskSubmissionIpc} from './user-task-submission-typed-ipc.js';
+import {expandSelectedMaterialPaths} from './material-selection.js';
 import { registerGoalTaskMutationsIpc } from './goal-task-mutation-typed-ipc.js';
 import { createGoalAttachmentNativeTransportIpc } from './goal-attachment-native-typed-ipc.js';
 import { registerGoalPublicationIpc } from './goal-publication-typed-ipc.js';
@@ -35,7 +42,9 @@ import { registerModelProviderIpc } from './model-provider-typed-ipc.js';
 import { registerLoopManagementIpc } from './loop-management-typed-ipc.js';
 import { MEMORY_IPC_CONTRACTS, type MemoryIpcOperation } from './memory-ipc-contract.js';
 import { ARTIFACT_WORKSPACE_OUTPUT_SCHEMAS, ARTIFACT_WORKSPACE_RISK_TAGS } from './artifact-workspace-ipc-contract.js';
-import { registerMemoryDistillationIpc, getActiveMemoryEmbeddingModel, selectMemoryEmbeddingModel } from './memory-distillation.js';
+import { getActiveMemoryEmbeddingModel } from './memory-distillation.js';
+import { MemorySettingsService } from './memory-settings-service.js';
+import { registerMemorySettingsIpc } from './memory-settings-ipc.js';
 import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
@@ -51,6 +60,8 @@ import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs
 import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
+import {readOriginalMainMaterialServicesBinding} from './desktop-services.js';
+import {dispatchSourceExtract,readOriginalMainMaterialSourceBinding} from './main-material-source.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { MeetingTranscriber } from './meeting-service.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
@@ -505,6 +516,9 @@ function invokeArtifactWorkspaceIpcOperation(
 }
 
 interface RegisterDesktopIpcOptions {
+  materialSource?:object;
+  materialUserSource?:import('./main-dsh-control-source.js').MainDshControlSource;
+  modelProbeUserSource?:import('./main-dsh-control-source.js').MainDshControlSource;
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'evidenceStore' | 'scanner' | 'runner' | 'listAnomalies'>;
   multiAgentAuthorize?: (event: MultiAgentIpcEvent) => { actorId: string } | null;
   getMainWindow?: () => BrowserWindow | null;
@@ -803,13 +817,19 @@ export async function registerDesktopIpc(
   const primaryWindow = () => options.getMainWindow?.() ?? window;
   const taskActor = (event: IpcMainInvokeEvent) => {
     const actor = options.multiAgentAuthorize?.(event);
-    if (!actor) throw new Error('task_actor_forbidden');
+    if (!actor || event.sender.isDestroyed()) throw new Error('task_actor_forbidden');
     return { ...actor, requestSource: 'user' as const };
   };
   const recheckTaskActor = (event: IpcMainInvokeEvent, actor: { actorId: string }) => {
     if (taskActor(event).actorId !== actor.actorId) throw Error('task_actor_forbidden');
   };
+  registerContextContinuityIpc(ipcMain,()=>services.continuity.port(),event=>Boolean(options.multiAgentAuthorize?.(event))&&!event.sender.isDestroyed());
+  registerContinuityInputIpc(ipcMain,services.inputQueue,taskActor);
   const task7Producers = new Map<string, IpcHandlerListener>();
+  const unsubscribeContinuityInputs=services.inputQueue?.subscribe(conversationId=>{
+    const target=primaryWindow();try{if(target.isDestroyed())return;const event={sender:target.webContents,senderFrame:target.webContents.mainFrame} as IpcMainInvokeEvent;const user=taskActor(event);services.inputQueue!.assertPointer(conversationId,user);target.webContents.send('desktop:inputs:changed',{conversationId});}catch{/* Unavailable sender receives no private pointer. */}
+  });
+  window.once('closed',()=>unsubscribeContinuityInputs?.());
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
@@ -987,13 +1007,14 @@ export async function registerDesktopIpc(
   artifactHandler('recordArtifactWorkspaceEvent', async (rawInput, _event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'recordArtifactWorkspaceEvent', rawInput);
   });
-  registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2]);
-  registerProjectPlanningIpc(ipcMain, async (_event, input) => {
-    log('info', 'startProjectPlanning', { projectId: input?.projectId });
-    const r = services.startProjectPlanning(input, 'user');
-    log('info', 'startProjectPlanning ok', { ok: r?.ok });
+  registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2],options.modelProbeUserSource);
+  registerProjectPlanningIpc(ipcMain, async (event, input,triggerProof) => {
+    const actor=taskActor(event),current=()=>recheckTaskActor(event,actor);
+    current();log('info', 'startProjectPlanning', { projectId: input?.projectId });
+    const r = await services.startProjectPlanning(input, 'user',current,triggerProof);
+    current();log('info', 'startProjectPlanning ok', { ok: r?.ok });
     return r;
-  });
+  },{beforeInput(event){taskActor(event);return undefined;},beforeOutput(event){taskActor(event);return undefined;},nativeTrigger:{owner:services.getProjectPlanningTriggerOwner(),authorize:taskActor}});
   fileHandler('desktop:readClipboardFilePaths', ignoredClipboardInput, clipboardFilePathsResult, ['clipboard', 'fs-read'], async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)), 2);
   const materialAccessProducers = new Map<string, IpcHandlerListener>([
     ['desktop:readClipboardImage', async () => {
@@ -1142,7 +1163,7 @@ export async function registerDesktopIpc(
     const actor = taskActor(_event);
     const clean = sanitizeTaskCreateInput(input);
     log('info', 'createTask', { prompt: clean.prompt.slice(0, 50) });
-    const r = captureTask7Output('createTask', await callTask7Producer(() => services.createTask(clean, actor)));
+    const r = captureTask7Output('createTask', await callTask7Producer(() => services.createTask(clean, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
   });
@@ -1203,12 +1224,12 @@ export async function registerDesktopIpc(
   task7Producers.set('desktop:answerQuestion', async (_event, input) => {
     const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = captureTask7Output('answerQuestion', await callTask7Producer(() => services.answerQuestion(input, actor)));
+    const r = captureTask7Output('answerQuestion', await callTask7Producer(() => services.answerQuestion(input, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'answerQuestion ok');
     return r;
   });
   task7Producers.set('desktop:cancelTask', async (_event, input) => {
-    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskControl(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
     captureTask7Output('cancelTask', await callTask7Producer(() => services.cancelTask(input.taskId, actor)));
     log('info', 'cancelTask ok');
@@ -1251,7 +1272,7 @@ export async function registerDesktopIpc(
       return { content: '', error: String(e) };
     }
   });
-  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null);
+  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null,{authorize:taskActor});
   options.registerLifetimeDisposer?.(disposeActivity);
   const activeTaskSubs = new Map<string, AbortController>();
   const activeTaskSubIds = new Map<string, string>();
@@ -1293,13 +1314,13 @@ export async function registerDesktopIpc(
     void (async () => {
       try {
         const stream = sinceIndex !== undefined
-          ? services.subscribeTask(taskId, { sinceIndex, signal: controller.signal })
-          : services.subscribeTask(taskId, { signal: controller.signal });
+          ? services.subscribeTaskRecords(taskId, { sinceIndex, signal: controller.signal })
+          : services.subscribeTaskRecords(taskId, { signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
-          const dto = captureTask7Event(event);
+          const dto = {taskId:event.taskId,eventIndex:event.eventIndex,sourceDataEpoch:event.sourceDataEpoch,event:captureTask7Event(event.event)};
           await callTask7Producer(() => services.authorizeTaskRead(taskId, actor));
           if (controller.signal.aborted || target.isDestroyed?.()) break;
           recheckTaskActor(_event, actor);
@@ -1373,11 +1394,20 @@ export async function registerDesktopIpc(
       prompt: input.prompt,
       filePaths: expanded,
       ...(context ? { context } : {}),
-    }, actor)));
+    }, actor,()=>recheckTaskActor(_event,actor))));
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
   registerTask7Ipc(ipcMain, task7Producers, event => { taskActor(event); });
+  {
+    const originals=new WeakMap<object,{event:IpcMainInvokeEvent;actor:ReturnType<typeof taskActor>;value:Awaited<ReturnType<DesktopServices['readTaskHistory']>>}>();
+    registerIpcHandler({registrar:ipcMain,channel:'desktop:readTaskHistory',input:z.object({taskId:z.string().min(1).max(256)}).strict(),output:z.object({snapshot:TASK7_SNAPSHOT,presentation:z.object({version:z.literal(1),basis:z.enum(['qualified_legacy_owner','claimed_archive']).optional(),taskId:z.string().min(1),sourceEpoch:z.string().min(1),prompt:z.string(),includeUser:z.boolean()}).strict().nullable()}).strict(),sourceFile:'context-continuity/history-port.ts',rolloutRound:3,riskTags:['fs-read'],
+      beforeInput:event=>{taskActor(event);return undefined;},handler:async(input,event)=>{const actor=taskActor(event),value=await services.readTaskHistory(input.taskId,actor);recheckTaskActor(event,actor);services.assertTaskHistoryCurrent(value,actor);originals.set(value,{event,actor,value});return value;},
+      afterOutputValidation:value=>{if(!value||typeof value!=='object')throw Error('task_history_unavailable');const original=originals.get(value);if(!original)throw Error('task_history_unavailable');recheckTaskActor(original.event,original.actor);services.assertTaskHistoryCurrent(original.value,original.actor);return undefined;},
+    });
+  }
+  registerUserTaskSubmissionIpc(ipcMain, (event,input)=>{const actor=taskActor(event);return services.submitUserTask(input,actor,()=>recheckTaskActor(event,actor));}, event=>{taskActor(event);});
+  registerRoomConversionCaptureIpc(ipcMain,services,taskActor);
   registerDiagnosticsIpc(ipcMain, services);
 
   registerLoopManagementIpc(ipcMain, options.loopRuntime);
@@ -1386,6 +1416,17 @@ export async function registerDesktopIpc(
   const { getDesktopMemoryStore } = await import('./desktop-services.js');
   const { parseMemories } = await import('./memory-import-parser.js');
   const memoryStore = getDesktopMemoryStore(services.getDataRoot());
+  const memoryConfig = await import('../../src/utils/config.js');
+  const memorySettings = new MemorySettingsService({load:memoryConfig.loadConfig,save:memoryConfig.saveConfig,update:memoryConfig.updateConfigCredential,store:memoryStore});
+  const memorySource = (event:IpcMainInvokeEvent) => {
+    if (event.sender !== primaryWindow().webContents || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw Error('memory_settings_forbidden');
+    const actor=taskActor(event); const frame=event.senderFrame;
+    return {requestSource:'user' as const,assertCurrent:()=>{
+      if(event.sender !== primaryWindow().webContents || event.senderFrame !== frame || event.sender.mainFrame !== frame) throw Error('memory_settings_forbidden');
+      recheckTaskActor(event,actor);
+    }};
+  };
+  registerMemorySettingsIpc({registrar:ipcMain,service:memorySettings,source:memorySource});
 
   const memoryHandler = (operation: MemoryIpcOperation, listener: IpcHandlerListener) => {
     const contract = MEMORY_IPC_CONTRACTS[operation];
@@ -1393,13 +1434,13 @@ export async function registerDesktopIpc(
       registrar: ipcMain, channel: `desktop:${operation}`, output: contract.output,
       sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 4 as const,
       riskTags: contract.riskTags, inputError: contract.inputError, outputError: contract.outputError,
-      ...(operation === 'memoryCompact' ? {
+      ...(['memoryCompact','memoryGetModelId','memorySetModelId','downloadEmbeddingModel','setEmbeddingModel'].includes(operation) ? {
         beforeInput: (event: IpcMainInvokeEvent): undefined => {
-          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          memorySource(event);
           return undefined;
         },
         beforeOutput: (event: IpcMainInvokeEvent): undefined => {
-          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          memorySource(event);
           return undefined;
         },
       } : {}),
@@ -1472,12 +1513,7 @@ export async function registerDesktopIpc(
     try { return memoryStore.getStats?.() ?? null; }
     catch (e) { log('error', 'memoryStats failed', e); return null; }
   });
-  registerMemoryDistillationIpc<IpcMainInvokeEvent>({
-    handle(channel, listener) {
-      if (channel !== 'desktop:memoryCompact') throw Error('memory_compaction_channel');
-      memoryHandler('memoryCompact', listener);
-    },
-  }, memoryStore, event => event.sender === primaryWindow().webContents);
+  memoryHandler('memoryCompact', async (event, input?: {expectedModelId:string}) => memorySettings.compact(memorySource(event),input?.expectedModelId));
   memoryHandler('memoryPersonaTraits', async () => {
     try { return memoryStore.getPersonaTraits?.() ?? []; }
     catch (e) { log('error', 'memoryPersonaTraits failed', e); return []; }
@@ -1494,26 +1530,18 @@ export async function registerDesktopIpc(
     try { memoryStore.clearAll?.(); return true; }
     catch (e) { log('error', 'memoryClearAll failed', e); return false; }
   });
-  memoryHandler('memoryGetModelId', async () => {
-    try {
-      const config = await (await import('../../src/utils/config.js')).loadConfig();
-      return config.memory?.modelId ?? null;
-    } catch { return null; }
+  registerDecisionModelIpc({registrar:ipcMain,dataRoot:services.getDataRoot(),
+    authorize:options.multiAgentAuthorize??(()=>null),
+    window:()=>options.getMainWindow?.()??window,
+    registerDisposer:dispose=>options.registerLifetimeDisposer?.(dispose),
   });
-  memoryHandler('memorySetModelId', async (_event, modelId: string | null) => {
-    try {
-      const { loadConfig, saveConfig: saveConfigFn } = await import('../../src/utils/config.js');
-      const config = await loadConfig();
-      if (!config.memory) config.memory = {};
-      config.memory.modelId = modelId ?? undefined;
-      await saveConfigFn(config);
-      return true;
-    } catch (e) { log('error', 'memorySetModelId failed', e); return false; }
-  });
+
+  memoryHandler('memoryGetModelId', async event => (await memorySettings.settings(memorySource(event))).compactionModelId);
+  memoryHandler('memorySetModelId', async (event, modelId: string | null) => memorySettings.setCompactionModel(modelId ?? null,memorySource(event)));
 
   memoryHandler('getEmbeddingModels', async () => {
     try {
-      const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint } = await import('../../src/ai/memory/model-registry.js');
+      const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint, modelFilesPresent } = await import('../../src/ai/memory/model-registry.js');
       const { loadConfig } = await import('../../src/utils/config.js');
       const config = await loadConfig();
       const activeModelId = getActiveMemoryEmbeddingModel(config, MODEL_REGISTRY.map(model => model.id));
@@ -1524,37 +1552,15 @@ export async function registerDesktopIpc(
         size: m.size,
         languages: m.languages,
         downloaded: isModelDownloaded(m.id),
+        filesPresent: modelFilesPresent(m.id),
         active: m.id === activeModelId,
         manualHint: getManualDownloadHint(m.id),
       }));
     } catch (e) { log('error', 'getEmbeddingModels failed', e); return []; }
   });
 
-  memoryHandler('downloadEmbeddingModel', async (_event, modelId: string) => {
-    const { downloadModel } = await import('../../src/ai/memory/model-registry.js');
-    await downloadModel(modelId);
-  });
-
-  memoryHandler('setEmbeddingModel', async (_event, modelId: string) => {
-    try {
-      const { loadConfig, saveConfig: saveConfigFn, getConfigDir } = await import('../../src/utils/config.js');
-      const config = await loadConfig();
-      const { MODEL_REGISTRY } = await import('../../src/ai/memory/model-registry.js');
-      const selected = selectMemoryEmbeddingModel(config, modelId, MODEL_REGISTRY.map(model => model.id));
-      await saveConfigFn(selected.config);
-      if (selected.changed) {
-        try {
-          const Database = (await import('better-sqlite3')).default;
-          const path = await import('node:path');
-          const dbPath = path.join(getConfigDir(), 'memory.db');
-          const db = new Database(dbPath);
-          db.prepare('DELETE FROM memory_embeddings').run();
-          db.close();
-          log('info', 'Cleared memory_embeddings after model switch', { from: selected.previousModelId, to: modelId });
-        } catch (e) { log('warn', 'Failed to clear embeddings on model switch', e); }
-      }
-    } catch (e) { log('error', 'setEmbeddingModel failed', e); throw e; }
-  });
+  memoryHandler('downloadEmbeddingModel', async (event, modelId: string) => memorySettings.downloadEmbeddingModel(modelId,memorySource(event)));
+  memoryHandler('setEmbeddingModel', async (event, modelId: string) => memorySettings.setEmbeddingModel(modelId,memorySource(event)));
 
   // ---- Artifact Editing ----
   const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');
@@ -1637,8 +1643,12 @@ export async function registerDesktopIpc(
   const { createChunker } = await import('./kb-chunker.js');
   const { createSourceExtractor } = await import('./kb-source-extractor.js');
   const { app } = await import('electron');
+  const materialBinding=options.materialSource ? (()=>{
+    readOriginalMainMaterialSourceBinding(options.materialSource,services);
+    return readOriginalMainMaterialServicesBinding(services,options.materialUserSource);
+  })() : null;
   const kbSourceExtractor = createSourceExtractor({
-    officeParser: { parse: input => services.parseOfficeDocument(input) },
+    officeParser: { parse: materialBinding ? materialBinding.parseOfficeDocument as typeof services.parseOfficeDocument : input => services.parseOfficeDocument(input) },
   });
   const kbChunker = createChunker();
 
@@ -1717,7 +1727,7 @@ export async function registerDesktopIpc(
                 store.updateSourceParseResult(src.id, {
                   parseStatus: 'failed',
                   errorCode: 'io_error',
-                  errorMessage: error instanceof Error ? error.message : String(error),
+                  errorMessage: '',
                 }, 'scheduler');
               } catch {
                 // Another recovery path already finalized this source.
@@ -1754,7 +1764,14 @@ export async function registerDesktopIpc(
     return getKbStore().listSources(collectionId);
   });
 
-  knowledgeIpc.handle('desktop:kb:addSource', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:addSource', async (event, input) => {
+    const materialFrame=input?.kind==='file'&&options.materialSource ? (()=>{
+      if(!options.materialUserSource)throw Error('MAIN_MATERIAL_ORIGINAL_SOURCE_REQUIRED');
+      return options.materialUserSource.openMaterialRead(event,{schemaVersion:1,purpose:'kb_add_source_file',input},'user');
+    })() : undefined;
+    let primaryPresent=false,primary:unknown,response:unknown;
+    try {
+    response=await (async()=>{
     log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
     const store = getKbStore();
     const unsafeMetadata = input?.metadata && typeof input.metadata === 'object'
@@ -1779,7 +1796,8 @@ export async function registerDesktopIpc(
       if (input?.kind === 'paste' && input?.text) {
         extractResult = kbSourceExtractor.extractFromText(input.text, input.title || '粘贴文本');
       } else if (input?.kind === 'file' && input?.filePath) {
-        extractResult = await kbSourceExtractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
+        extractResult = materialFrame ? await dispatchSourceExtract(options.materialSource!,materialFrame.proof,store,source,kbSourceExtractor)
+          : await kbSourceExtractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
       } else if (input?.kind === 'url' && input?.uri) {
         extractResult = await kbSourceExtractor.extractFromUrl(input.uri);
       }
@@ -1790,18 +1808,23 @@ export async function registerDesktopIpc(
       }, 'user');
       return captureKnowledgeOutput('addSource', finalized);
     } catch (e) {
-      log('error', 'kb:addSource processing failed', String(e));
+      log('error', 'kb:addSource processing failed', {code:'knowledge_source_extraction_unconfirmed',sourceId:source.id});
       try {
         store.updateSourceParseResult(source.id, {
           parseStatus: 'failed',
           errorCode: 'io_error',
-          errorMessage: e instanceof Error ? e.message : String(e),
+          errorMessage: '',
         }, 'user');
       } catch {
         // The source may already have reached a terminal parse state.
       }
     }
     return captureKnowledgeOutput('addSource', store.getSource(source.id) ?? source);
+    })();
+    } catch(raw) {primaryPresent=true;primary=raw;}
+    if(materialFrame)try{materialFrame.release();}catch(raw){if(!primaryPresent){primaryPresent=true;primary=raw;}}
+    if(primaryPresent)throw primary;
+    return response;
   });
 
   knowledgeIpc.handle('desktop:kb:pickFiles', async () => {
@@ -2150,35 +2173,4 @@ function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
-export async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
-  const files = new Set<string>();
-  for (const path of paths) {
-    try {
-      const entry = await stat(path);
-      if (entry.isFile()) {
-        files.add(path);
-      } else if (entry.isDirectory()) {
-        for (const file of await listFilesInDirectory(path)) files.add(file);
-      }
-    } catch {
-      // Skip non-existent paths (e.g. pasted text that looks like a path)
-    }
-  }
-  return [...files].sort();
-}
-
-async function listFilesInDirectory(directory: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await listFilesInDirectory(path));
-      continue;
-    }
-    if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
-}
+export {expandSelectedMaterialPaths} from './material-selection.js';

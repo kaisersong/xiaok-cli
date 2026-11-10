@@ -1,5 +1,6 @@
 import {types as utilTypes} from 'node:util';
 import {guestInstallationLock,guestArchiveInstall} from './guest-installation-phase.js';
+import {assertPrivateEngineImageStore} from './engine-image-store.js';
 import type {Database} from 'better-sqlite3';
 import {verifyEngineBinaryCensus,ENGINE_BINARY_CENSUS_SCRIPT} from './engine-binary-census.js';
 import {runInstallationCommand,assertInstallationCommandIdle} from './installation-command.js';
@@ -91,9 +92,9 @@ export async function initializeInstalledMacEngine(input:{database:Database;sign
   if(target!=='/home/xiaokvm/'+file)throw Error('installed_engine_archive_target');const bytes=readFileSync(join(release,'vm',file));if(hash(bytes)!==digest)throw Error('installed_engine_archive_changed');
   await run(plan.executable,['shell',plan.name,'sudo','-n','/bin/sh','-c',guestArchiveInstall({creationNonce:nonce,file,sha256:digest})],bytes,180000);
  };
- async function engineFacts(){const raw=JSON.parse(await shell(`${docker} info --format '{{json .}}'\n`));if(typeof raw.ID!=='string'||!raw.ID||raw.OSType!=='linux'||!['aarch64','arm64'].includes(raw.Architecture))throw Error('installed_engine_info');return raw;}
+ async function engineFacts(){const raw=JSON.parse(await shell(`${docker} info --format '{{json .}}'\n`));assertPrivateEngineImageStore(raw);if(typeof raw.ID!=='string'||!raw.ID||raw.OSType!=='linux'||!['aarch64','arm64'].includes(raw.Architecture))throw Error('installed_engine_info');return raw;}
  async function installationComplete(){const output=await shell(`set -eu\nif [ ! -e /etc/systemd/system/xiaok-engine.service ]; then printf missing; else [ ! -L /etc/systemd/system/xiaok-engine.service ]; printf '%s  %s\\n' '${hash(plan.unit)}' '/etc/systemd/system/xiaok-engine.service' | sha256sum -c - >/dev/null; if systemctl is-active --quiet xiaok-engine.service; then printf complete; else printf missing; fi; fi\n`);if(!['missing','complete'].includes(output))throw Error('installed_engine_unit');if(output==='complete')verifyEngineBinaryCensus(expectedBinaries,await shell(ENGINE_BINARY_CENSUS_SCRIPT));return output==='complete';}
- async function imageComplete(){const result=await shell(`set -eu\nif ${docker} image inspect '${sources.workerImage.imageId}' >/dev/null 2>&1; then ${docker} image inspect '${sources.workerImage.imageId}' --format '{{.Id}}'; else printf missing; fi\n`);if(result.trim()==='missing')return false;if(result.trim()!==sources.workerImage.imageId)throw Error('installed_engine_image');return true;}
+ async function imageComplete(){await engineFacts();const result=await shell(`set -eu\nif ${docker} image inspect '${sources.workerImage.imageId}' >/dev/null 2>&1; then ${docker} image inspect '${sources.workerImage.imageId}' --format '{{.Id}}'; else printf missing; fi\n`);if(result.trim()==='missing')return false;if(result.trim()!==sources.workerImage.imageId)throw Error('installed_engine_image');return true;}
  const observe=async()=>({...await observeVm(),engineId:(await engineFacts()).ID as string});
  const observation=await recoverPrivateEngine({journal,proposal,signal:input.signal,ports:{assertCurrent:current,observeVm,observe,phases:[
   {name:'copy-engine',digest:sources.engine.sha256,isComplete:()=>archiveStatus('/home/xiaokvm/docker.tgz',sources.engine.sha256),apply:()=>copyArchive('docker.tgz','/home/xiaokvm/docker.tgz',sources.engine.sha256)},

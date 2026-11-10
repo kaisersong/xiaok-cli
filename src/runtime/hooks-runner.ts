@@ -550,6 +550,8 @@ function executeCommand(
     const timer = setTimeout(() => { if (childClosed) return; remember(closure.timeoutError); terminate(); }, timeoutMs);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdout.on('error', remember);
+    child.stderr.on('error', remember);
     child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
     child.on('error', remember);
     child.once('exit', () => { rootExited = true; });
