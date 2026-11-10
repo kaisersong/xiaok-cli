@@ -59,6 +59,8 @@ import { registerHarnessOptimizationIpc } from '../../electron/harness-optimizat
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import { projectActivityAttention } from '../../../src/runtime/conversation-activity/attention-projector.js';
 import { registerContextContinuityIpc } from '../../electron/context-continuity/ipc.js';
+import { registerContinuityInputIpc } from '../../electron/context-continuity/input-ipc.js';
+import { registerMemorySettingsIpc } from '../../electron/memory-settings-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { registerLoopPublicationIpc } from '../../electron/loop-publication-ipc.js';
@@ -396,6 +398,9 @@ describe('preload API contract', () => {
       'importMemories',
       'memoryStats',
       'memoryCompact',
+      'memoryGetSettings',
+      'memoryCancelCompaction',
+      'deleteEmbeddingModel',
       'memoryPersonaTraits',
       'memoryListLayer',
       'memoryDeleteEntry',
@@ -488,6 +493,27 @@ describe('preload API contract', () => {
       'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
       'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
       'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands',
+      'getAssistantCandidatePage',
+      'dismissAssistantAction',
+      'snoozeAssistantAction',
+      'getAssistantActionOverview',
+      'getAssistantAnalysisProvider',
+      'configureAssistantAnalysisProvider',
+      'getAssistantLaunchTargets',
+      'getAssistantQualityStatus',
+      'exportAssistantQualityReview',
+      'importAssistantQualityReview',
+      'revokeAssistantQualityReview',
+      'getAssistantPeriodicStatus',
+      'configureAssistantPeriodic',
+      'checkAssistantPeriodic',
+      'cancelAssistantLaunch',
+      'prepareAssistantReconfirmation',
+      'prepareAssistantFollowUpLaunch',
+      'prepareAssistantLaunch',
+      'confirmAssistantLaunch',
+      'getAssistantLaunch',
+      'resolveAssistantLaunch',
     ]);
   });
 
@@ -1265,13 +1291,15 @@ registerComputerUseCapabilityReadonlyIpc({ handle: channel => { channels.add(cha
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
   registerContextContinuityIpc({ handle: channel => { channels.add(channel); } }, null, () => false);
+  registerContinuityInputIpc({ handle: channel => { channels.add(channel); } } as never, undefined, () => { throw Error('registry-only'); });
+  registerMemorySettingsIpc({ registrar: { handle: channel => { channels.add(channel); } } as never, service: {} as never, source: () => { throw Error('registry-only'); } });
   registerDecisionModelIpc({registrar:{handle:channel=>{channels.add(channel);}} as never,dataRoot:join(import.meta.dirname,'preload-registration-no-io'),authorize:()=>null,window:()=>{throw Error('preload_registration_window_unexpected');},registerDisposer:dispose=>{dispose();}});
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
-    const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;
+    const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'|registerIpcHandler\(\{\s*registrar:\s*ipcMain,\s*channel:\s*'([^']+)'/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(source)) !== null) {
-      channels.add(match[1]!);
+      channels.add((match[1] ?? match[2])!);
     }
     // artifactHandler owns the fixed semantic prefix; actual registration and
     // consumer delivery are covered by artifact-workspace-ipc-registry.test.ts.
