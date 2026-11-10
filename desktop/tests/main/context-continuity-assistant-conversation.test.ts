@@ -32,3 +32,21 @@ it('keeps ordinary threads strict and never resurrects a deleted assistant conve
   expect(service.ensureAssistantConversation(actor, ASSISTANT_CHAT_THREAD)).toBeNull();
   expect(() => assembleOwnedHistory(service, actor, 'task_y', { threadId: ASSISTANT_CHAT_THREAD })).toThrow('not_readable');
 });
+
+it('never recreates a deleted assistant conversation on later reads', () => {
+  assembleOwnedHistory(service, actor, 'task_a', { threadId: ASSISTANT_CHAT_THREAD });
+  service.store.db.prepare('UPDATE conversations SET deleted=1 WHERE id=?').run(ASSISTANT_CHAT_THREAD);
+  for (let i = 0; i < 3; i++) expect(() => assembleOwnedHistory(service, actor, `task_b${i}`, { threadId: ASSISTANT_CHAT_THREAD })).toThrow('not_readable');
+  expect(service.store.db.prepare('SELECT COUNT(*) AS n, MAX(deleted) AS d FROM conversations WHERE id=?').get(ASSISTANT_CHAT_THREAD)).toEqual({ n: 1, d: 1 });
+});
+
+it('creates exactly one assistant conversation for two concurrent first reads on the same store', async () => {
+  const other = new ContinuityService({ dbPath: join(root, 'store.sqlite'), profileId: 'a' });
+  try {
+    const reads = await Promise.all([service, other, service, other].map((owner, index) => Promise.resolve().then(() => assembleOwnedHistory(owner, actor, `task_c${index}`, { threadId: ASSISTANT_CHAT_THREAD }))));
+    for (const read of reads) expect(read).toMatchObject({ history: [], audit: { threadId: ASSISTANT_CHAT_THREAD } });
+    expect(service.store.db.prepare('SELECT COUNT(*) AS n FROM conversations WHERE id=?').get(ASSISTANT_CHAT_THREAD)).toEqual({ n: 1 });
+    expect(other.getConversation(actor, ASSISTANT_CHAT_THREAD)).toEqual(service.getConversation(actor, ASSISTANT_CHAT_THREAD));
+  } finally { other.close(); }
+});
+

@@ -143,8 +143,9 @@ export class ContinuityService {
       const now = this.options.now?.() ?? Date.now();
       const record: ContinuityConversation = { id, title: null, status: 'idle', mode: 'work', createdAt: now, updatedAt: now,
         starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: null, taskIds: [], revision: 0, coverage: 'complete' };
-      this.store.db.prepare('INSERT INTO conversations(id,record) VALUES (?,?)').run(record.id, JSON.stringify(record));
-      return record;
+      // Another connection may have created it first; exactly one row wins and both read that row.
+      this.store.db.prepare('INSERT OR IGNORE INTO conversations(id,record) VALUES (?,?)').run(record.id, JSON.stringify(record));
+      return this.getConversation(actor, id);
     });
   }
   /** Internal importer only; adopting an E3 legacy ID requires a verified user-claim manifest. */
