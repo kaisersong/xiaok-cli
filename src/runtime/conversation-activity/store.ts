@@ -2,7 +2,7 @@ import {migrateAssistantDigestReceipts,getAssistantDigestReceipt,claimAssistantD
 import { pathToFileURL } from 'node:url';
 import { activityReadonlyNeedsSnapshot, createActivityReadonlySnapshot } from './readonly-snapshot.js';
 import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -170,7 +170,7 @@ export class ConversationActivityStore {
     }
     let opened: DatabaseSync | undefined;
     try {
-      this.db = opened = new DatabaseSync(file);
+      this.db = opened = cachePreparedStatements(new DatabaseSync(file));
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
       try {
         if (process.platform !== 'win32') for (const suffix of ['', '-wal', '-shm']) if (existsSync(file + suffix)) chmodSync(file + suffix, 0o600);
@@ -962,4 +962,27 @@ export class ConversationActivityStore {
     if (this.readonlySnapshot) { this.readonlySnapshot.close(); return; }
     this.db.close(); this.owner?.close();
   }
+}
+
+/** Bound for distinct SQL texts kept prepared on one writer connection. */
+const MAX_CACHED_STATEMENTS = 512;
+/**
+ * The writer connection re-prepared every statement on every ingest. Since
+ * c28e2025 one ingest issues ~31 statements (was ~18), so prepare alone took
+ * as long as the work. Statements are reused per SQL text on this connection
+ * only; SQLite re-prepares a cached statement itself after a schema change.
+ * No caller in this store uses iterate(), so a reused statement is never
+ * reset under an open cursor. Statements are finalized by db.close().
+ */
+function cachePreparedStatements(db: DatabaseSync): DatabaseSync {
+  const prepare = db.prepare.bind(db), statements = new Map<string, StatementSync>();
+  db.prepare = (sql: string) => {
+    let statement = statements.get(sql);
+    if (!statement) {
+      if (statements.size >= MAX_CACHED_STATEMENTS) statements.clear();
+      statement = prepare(sql); statements.set(sql, statement);
+    }
+    return statement;
+  };
+  return db;
 }
