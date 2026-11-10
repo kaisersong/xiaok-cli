@@ -1,3 +1,4 @@
+import { markMintedLocalThread, mintedLocalThreadCount } from '../../electron/context-continuity/history.js';
 import { mockKSwarmService } from '../support/desktop-services-fixtures.js';
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
 import {createDesktopAssistantInbox} from '../../electron/desktop-assistant-inbox.js';
@@ -613,6 +614,51 @@ describe('desktop services', () => {
     } finally {
       streamSpy.mockRestore();
     }
+  });
+
+  it('consumes the Main-minted unthreaded thread mark once its request has read history', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
+    });
+    const settle = async (taskId: string) => {
+      await waitFor(async () => {
+        const status = (await services.recoverTask(taskId)).snapshot.status;
+        return status === 'completed' || status === 'failed';
+      });
+      return (await services.recoverTask(taskId)).snapshot;
+    };
+    try {
+      await withoutBrowserGlobals(async () => {
+        const first = await settle((await services.createTask({ prompt: '直接回复 ok', materials: [] })).taskId);
+        expect(first.status).toBe('completed');
+        const mintedThreadId = first.context?.threadId;
+        expect(mintedThreadId).toMatch(/^local_/);
+        const before = streamSpy.mock.calls.length;
+        await expect((async () => {
+          const reused = await settle((await services.createTask({
+            prompt: '直接回复 ok',
+            materials: [],
+            context: { threadId: mintedThreadId },
+          })).taskId);
+          if (reused.status !== 'completed') throw new Error('not_readable');
+        })()).rejects.toThrow('not_readable');
+        expect(streamSpy.mock.calls.length).toBe(before);
+      });
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('bounds the Main-minted unthreaded thread marks', () => {
+    for (let index = 0; index < 1000; index += 1) markMintedLocalThread(`local_bound-${index}`);
+    expect(mintedLocalThreadCount()).toBeLessThanOrEqual(256);
   });
 
   it('derives one provider-neutral cache affinity for a real default desktop task runner session', async () => {

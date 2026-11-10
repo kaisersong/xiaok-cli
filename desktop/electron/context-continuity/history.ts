@@ -5,15 +5,22 @@ import type { ContinuityMessage } from '../../shared/context-continuity-types.js
 import type { ContinuityActor, ContinuityService } from './service.js';
 
 /** Server-side marks for thread IDs Main itself minted for unthreaded Chat. Renderer input never lands here. */
+/** Bounded and one-shot: a mark is consumed by the request's first history read and the oldest marks are evicted. */
+const MINTED_LOCAL_THREAD_LIMIT=256;
 const mintedLocalThreads=new Set<string>();
-export function markMintedLocalThread(threadId: string): string { mintedLocalThreads.add(threadId); return threadId; }
+export function markMintedLocalThread(threadId: string): string {
+  mintedLocalThreads.add(threadId);
+  while(mintedLocalThreads.size>MINTED_LOCAL_THREAD_LIMIT)mintedLocalThreads.delete(mintedLocalThreads.values().next().value as string);
+  return threadId;
+}
+export function mintedLocalThreadCount(): number { return mintedLocalThreads.size; }
 
 /** Main canonical public history is mandatory. Renderer task IDs can never omit it. */
 export function assembleOwnedHistory(service: ContinuityService, actor: ContinuityActor, taskId: string, context?: TaskCreateContext): OwnedTaskHistory | null {
   if (!context?.threadId) return null;
   service.assertConversationExecution(context.threadId);
   // A thread Main minted for this unthreaded request has no conversation and therefore no prior history.
-  if(mintedLocalThreads.has(context.threadId)&&!service.getConversation(actor,context.threadId))return null;
+  if(mintedLocalThreads.delete(context.threadId)&&!service.getConversation(actor,context.threadId))return null;
   const read=()=>{
     const conversation=service.getConversation(actor,context.threadId!);if(!conversation)throw new Error('not_readable');
     if(service.store.db.prepare("SELECT 1 FROM source_bindings WHERE kind='cli_session' AND conversation_id=? LIMIT 1").get(conversation.id))throw new Error('cli_archive_read_only');
