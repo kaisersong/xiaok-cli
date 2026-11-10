@@ -1,0 +1,7 @@
+{
+  "original_commit": "04e7955d83976b71f6671a442f580bbdf7b6d7e7",
+  "safe_equivalent_commit": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+  "complete_tree": "af14e9351036c11d846b45ffe570b183d78fcc3a",
+  "source_and_all_tip_files_identical": true,
+  "reason": "Original ancestry contains private historical backups; preserve the original bundle locally and push the byte-identical public-history commit."
+}
