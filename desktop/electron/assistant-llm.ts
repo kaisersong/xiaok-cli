@@ -1,3 +1,4 @@
+import { parseAssistantActionRecommendation, type AssistantActionDetails } from '../../src/runtime/assistant/action-recommendation.js';
 import type { LoopLLMPort } from './loop-llm-port.js';
 
 export interface AssistantEvidenceRef {
@@ -22,12 +23,14 @@ export interface EveningReflectionOutput {
 }
 
 export interface MorningRecommendation {
+  action?:AssistantActionDetails;
   title: string;
   reasonCode: string;
   evidenceRefs: AssistantEvidenceRef[];
 }
 
 export interface MorningBriefingOutput {
+  schemaVersion?:2;
   recommendations: MorningRecommendation[];
 }
 
@@ -70,10 +73,28 @@ export function validateEveningReflection(value: unknown): EveningReflectionOutp
   };
 }
 
-export function validateMorningBriefing(value: unknown): MorningBriefingOutput {
+export function validateMorningBriefing(value: unknown, context?:{evidenceRefs:readonly AssistantEvidenceRef[]}): MorningBriefingOutput {
+  const output=validateMorningBriefingStructure(value);
+  if(output.schemaVersion===2){
+    if(!context)throw Error('assistant_action_evidence_context_required');
+    const allowed=new Set(context.evidenceRefs.map(ref=>JSON.stringify([ref.kind,ref.id])));
+    for(const recommendation of output.recommendations)for(const reference of recommendation.evidenceRefs){
+      if(!allowed.has(JSON.stringify([reference.kind,reference.id])))throw Error('assistant_action_evidence_unavailable');
+    }
+  }
+  return output;
+}
+
+/** Publication re-validation only; callers must not treat shape as authority. */
+export function validateMorningBriefingStructure(value: unknown): MorningBriefingOutput {
   const record = asRecord(value, 'assistant_morning_invalid');
   if (!Array.isArray(record.recommendations)) throw new Error('assistant recommendations invalid');
   if (record.recommendations.length > 3) throw new Error('assistant recommendations exceed three');
+  if(record.schemaVersion!==undefined&&record.schemaVersion!==2)throw Error('assistant_action_version');
+  if(record.schemaVersion===2){
+    if(Object.keys(record).some(key=>!['schemaVersion','recommendations'].includes(key)))throw Error('assistant_action_shape');
+    return {schemaVersion:2,recommendations:record.recommendations.map(parseAssistantActionRecommendation)};
+  }
   return {
     recommendations: record.recommendations.map((item) => {
       const recommendation = asRecord(item, 'assistant recommendation invalid');

@@ -219,7 +219,10 @@ export interface Config {
   memory?: {
     type?: 'file' | 'layered';
     dbPath?: string;
-    modelId?: string; // references config.models[id] for compaction; defaults to main model
+    modelId?: string; // legacy; normalized into an explicit embedding or compaction selection
+    legacyModelId?: string;
+    legacyModelUnresolved?: boolean;
+    settingsVersion?: 1;
     embedding?: {
       provider?: 'local' | 'api';
       apiUrl?: string;
@@ -227,6 +230,7 @@ export interface Config {
       dimensions?: number;
     };
     compaction?: {
+      modelId?: string | null;
       l0MinMessages?: number;
       autoCompact?: boolean;
       compactIntervalMs?: number;
@@ -331,6 +335,13 @@ export type PermissionChoice =
 
 export interface MemoryCompactionRequest {
   requestSource: 'user' | 'scheduler' | 'agent';
+  signal?: AbortSignal;
+  /** Main supplies the current actor fence; never accepted from renderer payloads. */
+  assertCurrent?: () => void;
+  /** Runs inside the existing owner job, so preparation is cancellable and counted as busy. */
+  prepare?: (signal: AbortSignal) => Promise<void>;
+  /** Per-job Main selection fence; automatic compaction keeps its current-config resolver. */
+  llm?: (prompt: string, signal?: AbortSignal) => Promise<string>;
   force?: boolean;
 }
 export interface MemoryCompactionResult {

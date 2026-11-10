@@ -1,3 +1,4 @@
+import {parseAssistantActionRecommendation} from '../../src/runtime/assistant/action-recommendation.js';
 interface MorningSuggestionRun {
   id: string;
   status: string;
@@ -29,6 +30,7 @@ export function listLatestMorningSuggestions(input: {
       const title = readString(recommendation.title);
       const reasonCode = readString(recommendation.reasonCode);
       if (!title || !reasonCode || !hasEvidenceRefs(recommendation.evidenceRefs)) return [];
+      if(output.schemaVersion===2){try{const action=parseAssistantActionRecommendation(recommendation);return [{id:`${run.id}:${index}`,title:action.title,summary:action.action.reason}];}catch{return [];}}
       return [{ id: `${run.id}:${index}`, title, summary: reasonCode }];
     });
   }

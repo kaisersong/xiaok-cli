@@ -1,3 +1,21 @@
+import type { MemorySettingsSnapshot } from '../shared/memory-settings-types.js';
+export function sanitizeAssistantPeriodicInput(input:{enabled?:unknown;notificationsEnabled?:unknown;intervalMinutes?:unknown;quietHours?:unknown;expectedRevision?:unknown}){
+ return Object.fromEntries(Object.entries({enabled:input?.enabled,notificationsEnabled:input?.notificationsEnabled,intervalMinutes:input?.intervalMinutes,quietHours:input?.quietHours,expectedRevision:input?.expectedRevision}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantLaunchInput(input:{proposalId?:unknown;expectedRevision?:unknown;draftId?:unknown;instruction?:unknown;expectedResultDigest?:unknown;existingThreadId?:unknown;goalConsentChecked?:unknown}){
+  return Object.fromEntries(Object.entries({proposalId:input?.proposalId,expectedRevision:input?.expectedRevision,draftId:input?.draftId,instruction:input?.instruction,expectedResultDigest:input?.expectedResultDigest,existingThreadId:input?.existingThreadId,goalConsentChecked:input?.goalConsentChecked}).filter(([,value])=>value!==undefined));
+}
+export function sanitizeAssistantActionInput(input:{proposalId?:unknown;expectedRevision?:unknown;snoozeUntil?:unknown}){
+  return pickDefined({proposalId:typeof input?.proposalId==='string'?input.proposalId:'',expectedRevision:input?.expectedRevision,
+    snoozeUntil:input?.snoozeUntil});
+}
+import type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantThreadTargetPage} from '../shared/assistant-launch-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
+import type {AssistantPeriodicStatus,AssistantPeriodicSettings,AssistantPeriodicCheck} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchDraft,AssistantLaunchOperation} from '../shared/assistant-launch-contract.js';
+import type {AssistantActionDecisionResultDto} from '../shared/assistant-action-contract.js';
+import type {AssistantCandidatePageDto,AssistantActionOverviewDto} from '../shared/assistant-ipc-contract.js';
 import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {DecisionModelView,DecisionModelSelection,DecisionModelAction} from '../shared/decision-model-types.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
@@ -395,6 +413,9 @@ export const PRELOAD_API_KEYS = [
   'importMemories',
   'memoryStats',
   'memoryCompact',
+  'memoryGetSettings',
+  'memoryCancelCompaction',
+  'deleteEmbeddingModel',
   'memoryPersonaTraits',
   'memoryListLayer',
   'memoryDeleteEntry',
@@ -475,7 +496,29 @@ export const PRELOAD_API_KEYS = [
   , 'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
   'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
   'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
-  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands'
+  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands',
+
+'getAssistantCandidatePage',
+'dismissAssistantAction',
+'snoozeAssistantAction',
+'getAssistantActionOverview',
+'getAssistantAnalysisProvider',
+'configureAssistantAnalysisProvider',
+'getAssistantLaunchTargets',
+'getAssistantQualityStatus',
+'exportAssistantQualityReview',
+'importAssistantQualityReview',
+'revokeAssistantQualityReview',
+'getAssistantPeriodicStatus',
+'configureAssistantPeriodic',
+'checkAssistantPeriodic',
+'cancelAssistantLaunch',
+'prepareAssistantReconfirmation',
+'prepareAssistantFollowUpLaunch',
+'prepareAssistantLaunch',
+'confirmAssistantLaunch',
+'getAssistantLaunch',
+'resolveAssistantLaunch',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -829,6 +872,9 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   importMemories: 'desktop:importMemories',
   memoryStats: 'desktop:memoryStats',
   memoryCompact: 'desktop:memoryCompact',
+  memoryGetSettings: 'desktop:memoryGetSettings',
+  memoryCancelCompaction: 'desktop:memoryCancelCompaction',
+  deleteEmbeddingModel: 'desktop:deleteEmbeddingModel',
   memoryPersonaTraits: 'desktop:memoryPersonaTraits',
   memoryListLayer: 'desktop:memoryListLayer',
   memoryDeleteEntry: 'desktop:memoryDeleteEntry',
@@ -951,6 +997,28 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getAppFlag: 'desktop:getAppFlag',
   setAppFlag: 'desktop:setAppFlag',
   migrateLegacyThreadMeta: 'desktop:migrateLegacyThreadMeta',
+
+getAssistantCandidatePage:'desktop:assistant:getActionCandidatesPage',
+dismissAssistantAction:'desktop:assistant:dismissAction',
+snoozeAssistantAction:'desktop:assistant:snoozeAction',
+getAssistantAnalysisProvider:'desktop:assistant:getAnalysisProvider',
+configureAssistantAnalysisProvider:'desktop:assistant:configureAnalysisProvider',
+getAssistantLaunchTargets:'desktop:assistant:listLaunchTargets',
+getAssistantQualityStatus:'desktop:assistant:getQualityStatus',
+exportAssistantQualityReview:'desktop:assistant:exportQualityReview',
+importAssistantQualityReview:'desktop:assistant:importQualityReview',
+revokeAssistantQualityReview:'desktop:assistant:revokeQualityReview',
+getAssistantPeriodicStatus:'desktop:assistant:getPeriodicStatus',
+configureAssistantPeriodic:'desktop:assistant:configurePeriodic',
+checkAssistantPeriodic:'desktop:assistant:checkPeriodic',
+cancelAssistantLaunch:'desktop:assistant:cancelLaunch',
+prepareAssistantReconfirmation:'desktop:assistant:prepareReconfirmation',
+prepareAssistantFollowUpLaunch:'desktop:assistant:prepareFollowUpLaunch',
+prepareAssistantLaunch:'desktop:assistant:prepareLaunch',
+confirmAssistantLaunch:'desktop:assistant:confirmLaunch',
+getAssistantLaunch:'desktop:assistant:getActionLaunch',
+resolveAssistantLaunch:'desktop:assistant:resolveActionLaunch',
+getAssistantActionOverview: 'desktop:assistant:getActionOverview',
 };
 
 // Channels that are intentionally registered on main but not exposed via the
@@ -1610,7 +1678,10 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, Cont
   deleteMemory(id: string): Promise<boolean>;
   importMemories(raw: string): Promise<MemoryImportIpcResult>;
   memoryStats(): Promise<MemoryStatsIpcSnapshot | null>;
-  memoryCompact(): Promise<MemoryCompactionResult>;
+  memoryCompact(input?:{expectedModelId:string}): Promise<MemoryCompactionResult>;
+  memoryGetSettings(): Promise<MemorySettingsSnapshot>;
+  memoryCancelCompaction(): Promise<boolean>;
+  deleteEmbeddingModel(modelId:string): Promise<void>;
   memoryPersonaTraits(): Promise<MemoryPersonaIpcTrait[]>;
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
@@ -1710,6 +1781,27 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, Cont
   getAppFlag(key: AppFlagKey): Promise<string | null>;
   setAppFlag(key: AppFlagKey, value: string): Promise<ThreadMetaWriteResult>;
   migrateLegacyThreadMeta(data: ThreadMetaSnapshot): Promise<ThreadMetadataMigrationResultDto>;
+getAssistantCandidatePage(input:{cursor:string}):Promise<AssistantCandidatePageDto>;
+dismissAssistantAction(input:{proposalId:string;expectedRevision:number}):Promise<AssistantActionDecisionResultDto>;
+snoozeAssistantAction(input:{proposalId:string;expectedRevision:number;snoozeUntil:number}):Promise<AssistantActionDecisionResultDto>;
+getAssistantAnalysisProvider():Promise<AssistantAnalysisStatus>;
+configureAssistantAnalysisProvider(input:AssistantAnalysisSettingsInput):Promise<AssistantAnalysisStatus>;
+getAssistantLaunchTargets(input:{cursor?:string}):Promise<AssistantThreadTargetPage>;
+getAssistantQualityStatus():Promise<AssistantQualityStatus>;
+exportAssistantQualityReview():Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+importAssistantQualityReview(input:{attestHumanReview:true}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+revokeAssistantQualityReview():Promise<AssistantQualityStatus>;
+getAssistantPeriodicStatus():Promise<AssistantPeriodicStatus>;
+configureAssistantPeriodic(input:AssistantPeriodicSettings):Promise<AssistantPeriodicStatus>;
+checkAssistantPeriodic():Promise<AssistantPeriodicCheck>;
+cancelAssistantLaunch(input:{draftId:string}):Promise<AssistantLaunchOperation>;
+prepareAssistantReconfirmation(input:{draftId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+prepareAssistantFollowUpLaunch(input:{candidateId:string;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+prepareAssistantLaunch(input:{proposalId:string;expectedRevision:number;existingThreadId?:string}):Promise<AssistantLaunchDraft>;
+confirmAssistantLaunch(input:{draftId:string;instruction:string;goalConsentChecked?:boolean}):Promise<AssistantLaunchOperation>;
+getAssistantLaunch(input:{draftId:string}):Promise<{draft:AssistantLaunchDraft;operation:AssistantLaunchOperation|null}>;
+resolveAssistantLaunch(input:{draftId:string;expectedResultDigest:string}):Promise<AssistantLaunchOperation>;
+getAssistantActionOverview(): Promise<AssistantActionOverviewDto>;
 }
 
 export type AppFlagKey = 'gtd-enabled';
@@ -2283,7 +2375,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<boolean>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<MemoryImportIpcResult>,
     memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<MemoryStatsIpcSnapshot | null>,
-    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
+    memoryCompact: (input?:{expectedModelId:string}) => (input === undefined ? ipcRenderer.invoke('desktop:memoryCompact') : ipcRenderer.invoke('desktop:memoryCompact',input)) as Promise<MemoryCompactionResult>,
+    memoryGetSettings: () => ipcRenderer.invoke('desktop:memoryGetSettings') as Promise<MemorySettingsSnapshot>,
+    memoryCancelCompaction: () => ipcRenderer.invoke('desktop:memoryCancelCompaction') as Promise<boolean>,
+    deleteEmbeddingModel: (modelId:string) => ipcRenderer.invoke('desktop:deleteEmbeddingModel', modelId) as Promise<void>,
     memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<MemoryPersonaIpcTrait[]>,
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<MemoryLayerIpcEntry[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,
@@ -2454,7 +2549,29 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     connectionHealthz: (url) => ipcRenderer.invoke('desktop:connection:healthz', url) as Promise<ProxyHealthResult>,
     connectionHealth: (url) => ipcRenderer.invoke('desktop:connection:health', url) as Promise<ProxyHealthResult>,
     systemUsername,
-  };
+
+getAssistantCandidatePage:input=>ipcRenderer.invoke('desktop:assistant:getActionCandidatesPage',{cursor:input.cursor}) as ReturnType<DesktopApi['getAssistantCandidatePage']>,
+dismissAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:dismissAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['dismissAssistantAction']>,
+snoozeAssistantAction:input=>ipcRenderer.invoke('desktop:assistant:snoozeAction',sanitizeAssistantActionInput(input)) as ReturnType<DesktopApi['snoozeAssistantAction']>,
+getAssistantAnalysisProvider:()=>ipcRenderer.invoke('desktop:assistant:getAnalysisProvider') as ReturnType<DesktopApi['getAssistantAnalysisProvider']>,
+configureAssistantAnalysisProvider:input=>ipcRenderer.invoke('desktop:assistant:configureAnalysisProvider',{modelId:input?.modelId,expectedRevision:input?.expectedRevision}) as ReturnType<DesktopApi['configureAssistantAnalysisProvider']>,
+getAssistantLaunchTargets:input=>ipcRenderer.invoke('desktop:assistant:listLaunchTargets',pickDefined({cursor:input?.cursor})) as ReturnType<DesktopApi['getAssistantLaunchTargets']>,
+getAssistantQualityStatus:()=>ipcRenderer.invoke('desktop:assistant:getQualityStatus') as ReturnType<DesktopApi['getAssistantQualityStatus']>,
+exportAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:exportQualityReview') as ReturnType<DesktopApi['exportAssistantQualityReview']>,
+importAssistantQualityReview:input=>ipcRenderer.invoke('desktop:assistant:importQualityReview',{attestHumanReview:input?.attestHumanReview===true}) as ReturnType<DesktopApi['importAssistantQualityReview']>,
+revokeAssistantQualityReview:()=>ipcRenderer.invoke('desktop:assistant:revokeQualityReview') as ReturnType<DesktopApi['revokeAssistantQualityReview']>,
+getAssistantPeriodicStatus:()=>ipcRenderer.invoke('desktop:assistant:getPeriodicStatus') as ReturnType<DesktopApi['getAssistantPeriodicStatus']>,
+configureAssistantPeriodic:input=>ipcRenderer.invoke('desktop:assistant:configurePeriodic',sanitizeAssistantPeriodicInput(input)) as ReturnType<DesktopApi['configureAssistantPeriodic']>,
+checkAssistantPeriodic:()=>ipcRenderer.invoke('desktop:assistant:checkPeriodic') as ReturnType<DesktopApi['checkAssistantPeriodic']>,
+cancelAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:cancelLaunch',{draftId:input.draftId}) as ReturnType<DesktopApi['cancelAssistantLaunch']>,
+prepareAssistantReconfirmation:input=>ipcRenderer.invoke('desktop:assistant:prepareReconfirmation',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantReconfirmation']>,
+prepareAssistantFollowUpLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareFollowUpLaunch',pickDefined({candidateId:input.candidateId,existingThreadId:input.existingThreadId})) as ReturnType<DesktopApi['prepareAssistantFollowUpLaunch']>,
+prepareAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:prepareLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['prepareAssistantLaunch']>,
+confirmAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:confirmLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['confirmAssistantLaunch']>,
+getAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:getActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['getAssistantLaunch']>,
+resolveAssistantLaunch:input=>ipcRenderer.invoke('desktop:assistant:resolveActionLaunch',sanitizeAssistantLaunchInput(input)) as ReturnType<DesktopApi['resolveAssistantLaunch']>,
+getAssistantActionOverview: () => ipcRenderer.invoke('desktop:assistant:getActionOverview') as ReturnType<DesktopApi['getAssistantActionOverview']>,
+};
 }
 
 export type { IpcRenderer };

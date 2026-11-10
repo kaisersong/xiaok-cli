@@ -1,3 +1,16 @@
+import {validateMorningBriefingStructure} from './assistant-llm.js';
+type Tail<T extends readonly unknown[]>=T extends readonly [unknown,...infer R]?R:never;
+import {ASSISTANT_CHECK_LOOP_ID} from './assistant-types.js';
+import {getAssistantDigestDelivery,claimAssistantDigestDispatch,finishAssistantDigestDelivery,listAssistantDigestRecovery,migrateAssistantPeriodicPolicy,getAssistantPeriodicPolicy,setAssistantPeriodicPolicy,prepareAssistantDigest} from './assistant-periodic-policy.js';
+import {requestAssistantLaunchCancel,findAssistantLaunchTask,listAssistantLaunchRecovery,migrateAssistantLaunch,readAssistantLaunchDraft,readAssistantLaunchOperation,listAssistantLaunchOperations,prepareAssistantLaunchDraft,confirmAssistantLaunch,claimAssistantLaunchDispatch,consumeAssistantLaunchStart,updateAssistantLaunchObservation} from './assistant-launch-store.js';
+import {migrateAssistantActions,projectAssistantActions,decideAssistantAction,type AssistantActionSource} from './assistant-action-store.js';
+import {migrateAssistantSourceRuns,recordAssistantSourceRun,finishAssistantSourceAnalysis,latestAssistantSourceRun} from './assistant-source-store.js';
+import type {AssistantSourceRun} from '../shared/assistant-coverage-contract.js';
+import {migrateAssistantAnalysisSelection,readAssistantAnalysisSelection,selectAssistantAnalysisModel} from './assistant-analysis-settings.js';
+import {AssistantQualityWorkflow,migrateAssistantQuality,syncAssistantQualityContext,type AssistantQualityPorts} from './assistant-quality-workflow.js';
+import {qualityContextSchema,type QualityModelReader} from '../../src/runtime/assistant/quality-authorization.js';
+import {readAssistantQualityAuthorization} from './assistant-quality-authorization.js';
+import {migrateAssistantAnalysisBudget,reserveAssistantAnalysisForRun,sendAssistantAnalysisForRun,reserveAssistantAnalysis,sendAssistantAnalysis,settleAssistantAnalysis,readAssistantAnalysisAttempt} from './assistant-analysis-budget.js';
 import {migrateAssistantDerived,readAssistantCalendarMemorySettings,setAssistantCalendarMemorySettings,readAssistantDerivedLineage,isAssistantDerivedRunTracked,recordAssistantDerivedLineage} from './assistant-derived-store.js';
 import {assistantDerivedHash} from './assistant-derived-data.js';
 import type {AssistantDerivedVisibility} from './assistant-derived-lineage.js';
@@ -27,7 +40,7 @@ import {parseVerificationOperationRequestObservation,type VerificationOperationR
 import type {VerificationObligationObservation} from '../../src/runtime/verification/verification-obligation-observation.js';
 export type {LoopVerificationExecution} from './loop-verification-execution.js';
 import {createLoopApplicationBinding,parseLoopApplicationBinding,loopApplicationBindingHash,parseLoopCandidateBody,type LoopApplicationBinding,type LoopArtifactDescriptor} from '../../src/runtime/verification/loop-application-binding.js';
-import {validateEveningReflection,validateMorningBriefing,type EveningReflectionOutput,type MorningBriefingOutput} from './assistant-llm.js';
+import {validateEveningReflection,type EveningReflectionOutput,type MorningBriefingOutput} from './assistant-llm.js';
 import type {ArtifactEvidenceRegressionScanResult} from './artifact-evidence-regression-loop.js';
 import type {KSwarmServiceHealthScanResult} from './kswarm-health-loop.js';
 import type {TaskSnapshot} from '../../src/runtime/task-host/types.js';
@@ -150,6 +163,7 @@ export interface AddConstraintInput {
 }
 
 const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description' | 'status'>> = [
+ {id:ASSISTANT_CHECK_LOOP_ID,title:'Personal assistant transaction check',description:'Opt-in bounded transaction analysis; requires quality and provider budget qualification.',status:'paused'},
   {
     id: BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION,
     title: 'Artifact Evidence Regression',
@@ -230,7 +244,67 @@ export class LoopStore {
 
   constructor(dbPath: string|LoopDatabaseSource) {
     this.connection=openLoopDatabase(dbPath);
-    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); migrateAssistantCalendar(this.db,this.connection); migrateAssistantDerived(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
+    try { this.applySchema(); migrateLoopNativeSchema(this.db,this.connection); migrateLoopArtifactExportJournal(this.db,this.connection); migrateAssistantCalendar(this.db,this.connection); migrateAssistantDerived(this.db,this.connection); migrateAssistantAnalysisBudget(this.db,this.connection); migrateAssistantQuality(this.db,this.connection); migrateAssistantAnalysisSelection(this.db,this.connection); migrateAssistantSourceRuns(this.db,this.connection); migrateAssistantActions(this.db,this.connection); migrateAssistantLaunch(this.db,this.connection); migrateAssistantPeriodicPolicy(this.db,this.connection); this.connection.recordComponent('loop'); } catch(error) { try{this.connection.close();}catch{/* The owner retains cleanup uncertainty; preserve the original construction error. */}throw error; }
+  }
+
+  getAssistantAnalysisSelection(){return readAssistantAnalysisSelection(this.db, this.connection);}
+  selectAssistantAnalysisModel(input:Parameters<typeof selectAssistantAnalysisModel>[2]){return this.transaction(()=>{const result=selectAssistantAnalysisModel(this.db, this.connection,input);syncAssistantQualityContext(this.db, this.connection,null);return result;});}
+  createAssistantQualityWorkflow(ports:AssistantQualityPorts){return new AssistantQualityWorkflow(this.db,this.connection,ports);}
+  syncAssistantQualityContext(input:Parameters<typeof syncAssistantQualityContext>[2]){return this.transaction(()=>syncAssistantQualityContext(this.db, this.connection,input));}
+  invalidateAssistantQualityModelIdentity(identity:ReturnType<QualityModelReader>|null){
+    const needsInvalidation=()=>{
+      const row=this.db.prepare('SELECT payload_json FROM assistant_quality_context WHERE singleton=1').get();
+      if(!row)return false;
+      try{const context=qualityContextSchema.parse(JSON.parse(String(row.payload_json)));return !identity||context.modelEpoch!==identity.modelEpoch||context.configFingerprint!==identity.configFingerprint;}catch{return true;}
+    };
+    // Matching identity is a synchronous read, safe inside a pure reader's savepoint.
+    if(!needsInvalidation())return false;
+    return this.transaction(()=>{
+      if(!needsInvalidation())return false;
+      syncAssistantQualityContext(this.db, this.connection,null);
+      return true;
+    });
+  }
+  readAssistantQualityAuthorization(readModel:QualityModelReader){return readAssistantQualityAuthorization(this.db, this.connection,readModel);}
+  reserveAssistantAnalysisForRun(input:Parameters<typeof reserveAssistantAnalysisForRun>[2],runId:string){return this.transaction(()=>reserveAssistantAnalysisForRun(this.db, this.connection,input,runId));}
+  sendAssistantAnalysisForRun(input:Parameters<typeof sendAssistantAnalysisForRun>[2],runId:string){return this.transaction(()=>sendAssistantAnalysisForRun(this.db, this.connection,input,runId));}
+  reserveAssistantAnalysis(input:Parameters<typeof reserveAssistantAnalysis>[2]){return this.transaction(()=>reserveAssistantAnalysis(this.db, this.connection,input));}
+  sendAssistantAnalysis(input:Parameters<typeof sendAssistantAnalysis>[2]){return this.transaction(()=>sendAssistantAnalysis(this.db, this.connection,input));}
+  settleAssistantAnalysis(input:Parameters<typeof settleAssistantAnalysis>[2]){return this.transaction(()=>settleAssistantAnalysis(this.db, this.connection,input));}
+  readAssistantAnalysisAttempt(id:string){return readAssistantAnalysisAttempt(this.db, this.connection,id);}
+
+  getAssistantDigestDelivery(id:string){return getAssistantDigestDelivery(this.db, this.connection,id);}
+  claimAssistantDigestDispatch(envelope:Parameters<typeof claimAssistantDigestDispatch>[2]){return this.transaction(()=>claimAssistantDigestDispatch(this.db, this.connection,envelope));}
+  finishAssistantDigestDelivery(receipt:Parameters<typeof finishAssistantDigestDelivery>[2]){return this.transaction(()=>finishAssistantDigestDelivery(this.db, this.connection,receipt));}
+  listAssistantDigestRecovery(){return listAssistantDigestRecovery(this.db, this.connection);}
+  getAssistantPeriodicPolicy(){return getAssistantPeriodicPolicy(this.db, this.connection);}
+  setAssistantPeriodicPolicy(value:Parameters<typeof setAssistantPeriodicPolicy>[2],revision:number){return this.transaction(()=>setAssistantPeriodicPolicy(this.db, this.connection,value,revision));}
+  prepareAssistantDigest(input:Parameters<typeof prepareAssistantDigest>[2]){return this.transaction(()=>prepareAssistantDigest(this.db, this.connection,input));}
+  requestAssistantLaunchCancel(id:string,now:number){return this.transaction(()=>requestAssistantLaunchCancel(this.db, this.connection,id,now));}
+  findAssistantLaunchTask(taskId:string){return findAssistantLaunchTask(this.db, this.connection,taskId);}
+  listAssistantLaunchRecovery(){return listAssistantLaunchRecovery(this.db, this.connection);}
+  readAssistantLaunchDraft(id:string){return readAssistantLaunchDraft(this.db, this.connection,id);}
+  readAssistantLaunchOperation(key:string,by:'id'|'draft_id'='id'){return readAssistantLaunchOperation(this.db, this.connection,key,by);}
+  listAssistantLaunchOperations(){return listAssistantLaunchOperations(this.db, this.connection);}
+  prepareAssistantLaunchDraft(...args:Tail<Tail<Parameters<typeof prepareAssistantLaunchDraft>>>){return this.transaction(()=>prepareAssistantLaunchDraft(this.db, this.connection,...args));}
+  confirmAssistantLaunch(...args:Tail<Tail<Parameters<typeof confirmAssistantLaunch>>>){return this.transaction(()=>confirmAssistantLaunch(this.db, this.connection,...args));}
+  claimAssistantLaunchDispatch(...args:Tail<Tail<Parameters<typeof claimAssistantLaunchDispatch>>>){return this.transaction(()=>claimAssistantLaunchDispatch(this.db, this.connection,...args));}
+  consumeAssistantLaunchStart(...args:Tail<Tail<Parameters<typeof consumeAssistantLaunchStart>>>){return this.transaction(()=>consumeAssistantLaunchStart(this.db, this.connection,...args));}
+  updateAssistantLaunchObservation(...args:Tail<Tail<Parameters<typeof updateAssistantLaunchObservation>>>){return this.transaction(()=>updateAssistantLaunchObservation(this.db, this.connection,...args));}
+  projectAssistantActions(source:AssistantActionSource,now:number){
+    return this.transaction(()=>projectAssistantActions(this.db, this.connection,source,now));
+  }
+  decideAssistantAction(source:AssistantActionSource,input:Parameters<typeof decideAssistantAction>[3]){
+    return this.transaction(()=>decideAssistantAction(this.db, this.connection,source,input));
+  }
+  recordAssistantSourceRun(input: Omit<AssistantSourceRun,'analysisStatus'>): void {
+    this.transaction(() => recordAssistantSourceRun(this.db, this.connection,input));
+  }
+  finishAssistantSourceAnalysis(runId:string,status:'complete'|'failed'):void {
+    this.transaction(() => finishAssistantSourceAnalysis(this.db, this.connection,runId,status));
+  }
+  getLatestAssistantSourceRun(profileId:string):AssistantSourceRun|undefined {
+    return latestAssistantSourceRun(this.db, this.connection,profileId);
   }
 
   close(): void {
@@ -675,9 +749,9 @@ export class LoopStore {
             this.stageAssistantCandidatesInTransaction(current.runId,normalized.candidates,copied.now);
             body={kind:'assistant-evening',summary:normalized.summary,candidates:this.assistantPublicationRows(current.runId).map(row=>this.assistantPublicationValue(row)),artifacts:copied.artifacts};
           }else{
-            const normalized=validateMorningBriefing(copied.output);
+            const normalized=validateMorningBriefingStructure(copied.output);
             if(publicationJson(normalized)!==publicationJson(copied.output))throw Error('loop_publication_output_shape');
-            body={kind:'assistant-morning',recommendations:normalized.recommendations,artifacts:copied.artifacts};
+            body={kind:'assistant-morning',...(normalized.schemaVersion===2?{schemaVersion:2}:{}),recommendations:normalized.recommendations,artifacts:copied.artifacts};
           }
           this.writeLoopProducerResult(current,body,null,[],copied.now);
         });
@@ -1509,7 +1583,7 @@ export class LoopStore {
 
   setAssistantProfileStatus(id: AssistantProfile['id'], status: AssistantProfile['status'], now: number): AssistantProfile | undefined {
     return this.transaction(() => {
-      this.connection.runWrite('update assistant_profiles set status = ?, updated_at = ? where id = ?', status, now, id);
+      this.connection.runWrite('update assistant_profiles set status = ?, updated_at = MAX(updated_at + 1, ?) where id = ?', status, now, id);
       return this.getAssistantProfile(id);
     });
   }

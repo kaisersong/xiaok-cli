@@ -128,7 +128,7 @@ function bm25Search(db: Database.Database, ftsQuery: string | null, segmentedQue
   if (layers.includes(0) && ftsQuery) {
     try {
       const rows = db.prepare(`
-        SELECT r.id, r.content, r.session_id, r.role, r.created_at
+        SELECT r.id, r.content, r.session_id, r.role, r.created_at, r.scope, r.cwd, r.mem_type
         FROM memory_l0_fts f
         JOIN memory_l0_raw r ON r.rowid = f.rowid
         WHERE memory_l0_fts MATCH ?
@@ -139,7 +139,7 @@ function bm25Search(db: Database.Database, ftsQuery: string | null, segmentedQue
       for (const row of rows) {
         results.push({
           id: row.id, layer: 0, content: row.content,
-          metadata: { sessionId: row.session_id, role: row.role, createdAt: row.created_at },
+          metadata: { sessionId: row.session_id, role: row.role, createdAt: row.created_at, scope: row.scope, cwd: row.cwd, mem_type: row.mem_type },
           rank: ++rank,
         });
       }
@@ -256,7 +256,7 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 
 function getLayerContent(db: Database.Database, id: string, layer: number): { text: string; metadata: Record<string, unknown> } | null {
   const tableMap: Record<number, { table: string; textCol: string; metaCols: string[] }> = {
-    0: { table: 'memory_l0_raw', textCol: 'content', metaCols: ['session_id', 'role', 'created_at'] },
+    0: { table: 'memory_l0_raw', textCol: 'content', metaCols: ['session_id', 'role', 'created_at', 'scope', 'cwd', 'mem_type'] },
     1: { table: 'memory_l1_extracted', textCol: 'summary', metaCols: ['tags', 'scope', 'mem_type', 'cwd', 'created_at'] },
     2: { table: 'memory_l2_scenario', textCol: 'scenario', metaCols: ['key_facts', 'scope', 'cwd', 'created_at'] },
     3: { table: 'memory_l3_persona', textCol: 'trait', metaCols: ['evidence', 'confidence', 'scope', 'cwd', 'created_at'] },

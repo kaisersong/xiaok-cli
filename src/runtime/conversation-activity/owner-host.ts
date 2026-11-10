@@ -1,3 +1,4 @@
+import {assistantDigestEnvelopeSchema} from '../assistant/notification-policy.js';
 import {assertBeforeEffects} from '../verification/before-effects.js';
 import { chmodPrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
@@ -108,7 +109,9 @@ export class ConversationActivityOwnerHost {
     authorizeProducer(threadId: string, instanceId?: string): boolean;
     notify?: ConstructorParameters<typeof ConversationActivityService>[0]['notify'];
     stopWatch?(watchId: string): void; watchBound?(watchId: string): Promise<void> | void;
-    sourceHint?(source: string, workId: string): Promise<void> | void; onError?(error: unknown): void }) {
+    sourceHint?(source: string, workId: string): Promise<void> | void; onError?(error: unknown): void
+ assistantDigest?:ConstructorParameters<typeof ConversationActivityService>[0]['assistantDigest'];
+}) {
     this.now = options.now ?? Date.now;
     this.lastActivity = this.unattendedSince = this.now();
     this.idleMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_IDLE_MS, ACTIVITY_OWNER_IDLE_MS);
@@ -306,6 +309,10 @@ export class ConversationActivityOwnerHost {
       return () => client.active && !this.stopped && this.options.authorizeProducer(watch.origin.threadId, client.instanceId);
     };
     switch (method) {
+      case 'assistantDigestReceipt': {const input=z.object({deliveryId:z.string().uuid()}).strict().parse(params);if(client.role!=='producer')throw Error('activity_method_forbidden');return this.store.getAssistantDigestReceipt(input.deliveryId)??null;}
+      case 'assistantDigestReady': {z.object({}).strict().parse(params);if(client.role!=='producer')throw Error('activity_method_forbidden');return {available:!!this.options.assistantDigest&&this.options.assistantDigest.platformAvailable()};}
+      case 'assistantDigest': {if(client.role!=='producer')throw Error('activity_method_forbidden');return service.enqueueAssistantDigest(assistantDigestEnvelopeSchema.parse(params),{requestSource:'scheduler'});}
+
       case 'authorizeNativeSource': {
         this.nativeSourceClients.delete(client);
         const credential=this.assertNativeCredentialCurrent();

@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalMemoryStatsCard } from '../../renderer/src/components/settings/LocalMemoryStatsCard';
 import { zh } from '../../renderer/src/locales/zh';
 
 const api = vi.hoisted(() => ({ memory: {
-  stats: vi.fn(), listLayer: vi.fn(), getModelId: vi.fn(), compact: vi.fn(),
+  stats: vi.fn(), listLayer: vi.fn(), getModelId: vi.fn(), compact: vi.fn(), getSettings:vi.fn(),
 }, getModelConfig: vi.fn() }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => api }));
 vi.mock('../../renderer/src/contexts/LocaleContext', () => ({ useLocale: () => ({ t: zh }) }));
@@ -12,7 +12,7 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({ useLocale: () => (
 describe('local memory distillation result UI', () => {
   afterEach(() => cleanup());
   beforeEach(() => {
-    vi.clearAllMocks(); api.memory.stats.mockResolvedValue({ l0: 17, l1: 17, l2: 0, l3: 0, dbSizeBytes: 0 });
+    vi.clearAllMocks(); api.memory.getSettings.mockResolvedValue({resolvedCompactionModelId:'configured-model',warning:null}); api.memory.stats.mockResolvedValue({ l0: 17, l1: 17, l2: 0, l3: 0, dbSizeBytes: 0 });
     api.memory.listLayer.mockResolvedValue([]); api.memory.getModelId.mockResolvedValue(null);
     api.getModelConfig.mockResolvedValue({ models: [{ id: 'configured-model', label: 'Current model' }] });
   });
@@ -25,6 +25,7 @@ describe('local memory distillation result UI', () => {
   it('shows failure and permits retry instead of showing done', async () => {
     api.memory.compact.mockRejectedValueOnce(new Error('quota')); render(<LocalMemoryStatsCard />);
     fireEvent.click(await screen.findByRole('button', { name: zh.desktopSettings.memoryCompact }));
+    fireEvent.click(within(await screen.findByRole('presentation')).getByRole('button',{name:zh.desktopSettings.memoryCompact}));
     expect(await screen.findByRole('alert')).toHaveTextContent(zh.desktopSettings.memoryCompactFailed);
     expect(screen.queryByRole('button', { name: zh.desktopSettings.memoryCompactDone })).toBeNull();
     expect(screen.getByRole('button', { name: zh.desktopSettings.memoryCompact })).toBeEnabled();
@@ -35,6 +36,7 @@ describe('local memory distillation result UI', () => {
     await waitFor(() => expect(api.memory.stats).toHaveBeenCalled());
     api.memory.stats.mockResolvedValue({ l0: 17, l1: 17, l2: 3, l3: 2, dbSizeBytes: 0 });
     fireEvent.click(screen.getByRole('button', { name: zh.desktopSettings.memoryCompact }));
+    fireEvent.click(within(await screen.findByRole('presentation')).getByRole('button',{name:zh.desktopSettings.memoryCompact}));
     expect(await screen.findByRole('button', { name: zh.desktopSettings.memoryCompactDone })).toBeInTheDocument();
     await waitFor(() => expect(api.memory.stats).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('option', { name: 'Current model' })).toHaveValue('configured-model');
@@ -42,6 +44,7 @@ describe('local memory distillation result UI', () => {
   it('rejects a legacy false/no-op receipt', async () => {
     api.memory.compact.mockResolvedValueOnce(false); render(<LocalMemoryStatsCard />);
     fireEvent.click(await screen.findByRole('button', { name: zh.desktopSettings.memoryCompact }));
+    fireEvent.click(within(await screen.findByRole('presentation')).getByRole('button',{name:zh.desktopSettings.memoryCompact}));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
 });

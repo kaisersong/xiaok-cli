@@ -42,7 +42,9 @@ import { registerModelProviderIpc } from './model-provider-typed-ipc.js';
 import { registerLoopManagementIpc } from './loop-management-typed-ipc.js';
 import { MEMORY_IPC_CONTRACTS, type MemoryIpcOperation } from './memory-ipc-contract.js';
 import { ARTIFACT_WORKSPACE_OUTPUT_SCHEMAS, ARTIFACT_WORKSPACE_RISK_TAGS } from './artifact-workspace-ipc-contract.js';
-import { registerMemoryDistillationIpc, getActiveMemoryEmbeddingModel, selectMemoryEmbeddingModel } from './memory-distillation.js';
+import { getActiveMemoryEmbeddingModel } from './memory-distillation.js';
+import { MemorySettingsService } from './memory-settings-service.js';
+import { registerMemorySettingsIpc } from './memory-settings-ipc.js';
 import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
@@ -1414,6 +1416,17 @@ export async function registerDesktopIpc(
   const { getDesktopMemoryStore } = await import('./desktop-services.js');
   const { parseMemories } = await import('./memory-import-parser.js');
   const memoryStore = getDesktopMemoryStore(services.getDataRoot());
+  const memoryConfig = await import('../../src/utils/config.js');
+  const memorySettings = new MemorySettingsService({load:memoryConfig.loadConfig,save:memoryConfig.saveConfig,update:memoryConfig.updateConfigCredential,store:memoryStore});
+  const memorySource = (event:IpcMainInvokeEvent) => {
+    if (event.sender !== primaryWindow().webContents || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw Error('memory_settings_forbidden');
+    const actor=taskActor(event); const frame=event.senderFrame;
+    return {requestSource:'user' as const,assertCurrent:()=>{
+      if(event.sender !== primaryWindow().webContents || event.senderFrame !== frame || event.sender.mainFrame !== frame) throw Error('memory_settings_forbidden');
+      recheckTaskActor(event,actor);
+    }};
+  };
+  registerMemorySettingsIpc({registrar:ipcMain,service:memorySettings,source:memorySource});
 
   const memoryHandler = (operation: MemoryIpcOperation, listener: IpcHandlerListener) => {
     const contract = MEMORY_IPC_CONTRACTS[operation];
@@ -1421,13 +1434,13 @@ export async function registerDesktopIpc(
       registrar: ipcMain, channel: `desktop:${operation}`, output: contract.output,
       sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 4 as const,
       riskTags: contract.riskTags, inputError: contract.inputError, outputError: contract.outputError,
-      ...(operation === 'memoryCompact' ? {
+      ...(['memoryCompact','memoryGetModelId','memorySetModelId','downloadEmbeddingModel','setEmbeddingModel'].includes(operation) ? {
         beforeInput: (event: IpcMainInvokeEvent): undefined => {
-          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          memorySource(event);
           return undefined;
         },
         beforeOutput: (event: IpcMainInvokeEvent): undefined => {
-          if (event.sender !== primaryWindow().webContents) throw Error('memory_compaction_forbidden');
+          memorySource(event);
           return undefined;
         },
       } : {}),
@@ -1500,12 +1513,7 @@ export async function registerDesktopIpc(
     try { return memoryStore.getStats?.() ?? null; }
     catch (e) { log('error', 'memoryStats failed', e); return null; }
   });
-  registerMemoryDistillationIpc<IpcMainInvokeEvent>({
-    handle(channel, listener) {
-      if (channel !== 'desktop:memoryCompact') throw Error('memory_compaction_channel');
-      memoryHandler('memoryCompact', listener);
-    },
-  }, memoryStore, event => event.sender === primaryWindow().webContents);
+  memoryHandler('memoryCompact', async (event, input?: {expectedModelId:string}) => memorySettings.compact(memorySource(event),input?.expectedModelId));
   memoryHandler('memoryPersonaTraits', async () => {
     try { return memoryStore.getPersonaTraits?.() ?? []; }
     catch (e) { log('error', 'memoryPersonaTraits failed', e); return []; }
@@ -1528,26 +1536,12 @@ export async function registerDesktopIpc(
     registerDisposer:dispose=>options.registerLifetimeDisposer?.(dispose),
   });
 
-  memoryHandler('memoryGetModelId', async () => {
-    try {
-      const config = await (await import('../../src/utils/config.js')).loadConfig();
-      return config.memory?.modelId ?? null;
-    } catch { return null; }
-  });
-  memoryHandler('memorySetModelId', async (_event, modelId: string | null) => {
-    try {
-      const { loadConfig, saveConfig: saveConfigFn } = await import('../../src/utils/config.js');
-      const config = await loadConfig();
-      if (!config.memory) config.memory = {};
-      config.memory.modelId = modelId ?? undefined;
-      await saveConfigFn(config);
-      return true;
-    } catch (e) { log('error', 'memorySetModelId failed', e); return false; }
-  });
+  memoryHandler('memoryGetModelId', async event => (await memorySettings.settings(memorySource(event))).compactionModelId);
+  memoryHandler('memorySetModelId', async (event, modelId: string | null) => memorySettings.setCompactionModel(modelId ?? null,memorySource(event)));
 
   memoryHandler('getEmbeddingModels', async () => {
     try {
-      const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint } = await import('../../src/ai/memory/model-registry.js');
+      const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint, modelFilesPresent } = await import('../../src/ai/memory/model-registry.js');
       const { loadConfig } = await import('../../src/utils/config.js');
       const config = await loadConfig();
       const activeModelId = getActiveMemoryEmbeddingModel(config, MODEL_REGISTRY.map(model => model.id));
@@ -1558,37 +1552,15 @@ export async function registerDesktopIpc(
         size: m.size,
         languages: m.languages,
         downloaded: isModelDownloaded(m.id),
+        filesPresent: modelFilesPresent(m.id),
         active: m.id === activeModelId,
         manualHint: getManualDownloadHint(m.id),
       }));
     } catch (e) { log('error', 'getEmbeddingModels failed', e); return []; }
   });
 
-  memoryHandler('downloadEmbeddingModel', async (_event, modelId: string) => {
-    const { downloadModel } = await import('../../src/ai/memory/model-registry.js');
-    await downloadModel(modelId);
-  });
-
-  memoryHandler('setEmbeddingModel', async (_event, modelId: string) => {
-    try {
-      const { loadConfig, saveConfig: saveConfigFn, getConfigDir } = await import('../../src/utils/config.js');
-      const config = await loadConfig();
-      const { MODEL_REGISTRY } = await import('../../src/ai/memory/model-registry.js');
-      const selected = selectMemoryEmbeddingModel(config, modelId, MODEL_REGISTRY.map(model => model.id));
-      await saveConfigFn(selected.config);
-      if (selected.changed) {
-        try {
-          const Database = (await import('better-sqlite3')).default;
-          const path = await import('node:path');
-          const dbPath = path.join(getConfigDir(), 'memory.db');
-          const db = new Database(dbPath);
-          db.prepare('DELETE FROM memory_embeddings').run();
-          db.close();
-          log('info', 'Cleared memory_embeddings after model switch', { from: selected.previousModelId, to: modelId });
-        } catch (e) { log('warn', 'Failed to clear embeddings on model switch', e); }
-      }
-    } catch (e) { log('error', 'setEmbeddingModel failed', e); throw e; }
-  });
+  memoryHandler('downloadEmbeddingModel', async (event, modelId: string) => memorySettings.downloadEmbeddingModel(modelId,memorySource(event)));
+  memoryHandler('setEmbeddingModel', async (event, modelId: string) => memorySettings.setEmbeddingModel(modelId,memorySource(event)));
 
   // ---- Artifact Editing ----
   const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');

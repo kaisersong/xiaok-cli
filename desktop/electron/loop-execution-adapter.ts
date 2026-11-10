@@ -1,3 +1,4 @@
+import {ASSISTANT_CHECK_LOOP_ID} from './assistant-types.js';
 import {
   ASSISTANT_EVENING_LOOP_ID,
   ASSISTANT_MORNING_LOOP_ID,
@@ -14,9 +15,11 @@ import type {
 export function createLoopExecutionAdapter(options: {
   genericRunner: LoopRunner;
   assistantRuntime: AssistantRuntime;
+  periodicRuntime?:LoopRunner;
 }): LoopRunner {
   return {
     runLoopNow(loopId, trigger, signal, context) {
+      if(loopId===ASSISTANT_CHECK_LOOP_ID)return options.periodicRuntime?.runLoopNow(loopId,trigger,signal,context)??Promise.resolve({status:'skipped' as const,reason:'missing_loop' as const});
       if (isAssistantLoopId(loopId)) {
         return options.assistantRuntime.runLoopNow(loopId, trigger, signal, context);
       }
@@ -28,9 +31,10 @@ export function createLoopExecutionAdapter(options: {
 export function createAssistantAwareLoopTimedActionExecutor(options: {
   genericExecutor: TimedActionExecutorHandler;
   assistantRuntime: AssistantRuntime;
+  periodicRuntime?:LoopRunner;
 }): TimedActionExecutorHandler {
   const assistantExecutor = createLoopExecutor({
-    runLoop: (loopId, trigger, signal, context) => options.assistantRuntime.runLoopNow(loopId, trigger, signal, context),
+    runLoop: (loopId, trigger, signal, context) => loopId===ASSISTANT_CHECK_LOOP_ID?(options.periodicRuntime?.runLoopNow(loopId,trigger,signal,context)??Promise.resolve({status:'skipped' as const,reason:'missing_loop' as const})):options.assistantRuntime.runLoopNow(loopId, trigger, signal, context),
   });
   return {
     kind: 'loop',
@@ -49,7 +53,7 @@ export function createAssistantAwareLoopTimedActionExecutor(options: {
 }
 
 export function isAssistantLoopId(loopId: string): boolean {
-  return loopId === ASSISTANT_EVENING_LOOP_ID || loopId === ASSISTANT_MORNING_LOOP_ID;
+  return loopId===ASSISTANT_CHECK_LOOP_ID||loopId === ASSISTANT_EVENING_LOOP_ID || loopId === ASSISTANT_MORNING_LOOP_ID;
 }
 
 function isAssistantAction(action: TimedActionRecord): boolean {
@@ -61,6 +65,7 @@ function assistantRecoveryDecision(
   context: OverdueRecoveryContext,
 ): ExecutorRecoveryDecision {
   if (action.executor.kind !== 'loop') return { action: 'execute', reason: 'due loop' };
+  if(action.executor.loopId===ASSISTANT_CHECK_LOOP_ID)return {action:'execute',reason:'assistant_check_coalesced_current'};
   const timeZone = action.trigger.kind === 'daily' && action.trigger.timeZone
     ? action.trigger.timeZone
     : Intl.DateTimeFormat().resolvedOptions().timeZone;

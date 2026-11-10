@@ -158,7 +158,7 @@ describe('DesktopSettings SystemOne (Jev) section', () => {
     fireEvent.click(screen.getByRole('button',{name:'记忆管理'}));
     fireEvent.click(screen.getByRole('tab',{name:'记忆配置'}));
     expect(await screen.findByTestId('memory-embedding-settings')).toBeInTheDocument();
-    expect(screen.getByRole('combobox',{name:'压缩模型'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'更换模型：压缩模型'})).toBeInTheDocument();
     expect(screen.queryByLabelText('jev-api-key')).toBeNull();
     expect(screen.queryByTestId('kim-decision-settings')).toBeNull();
     expect(mocks.getSystemOneConfig).not.toHaveBeenCalled();
@@ -397,4 +397,5 @@ describe('DesktopSettings SystemOne (Jev) section', () => {
       consoleErrorSpy.mockRestore();
     }
   });
+
 });

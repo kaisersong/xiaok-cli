@@ -1,3 +1,10 @@
+import type {AssistantCandidatePageDto,AssistantActionOverviewDto} from '../shared/assistant-ipc-contract.js';
+import type {AssistantAnalysisStatus,AssistantAnalysisSettingsInput} from '../shared/assistant-analysis-settings-contract.js';
+import type {AssistantThreadTargetPage} from '../shared/assistant-launch-contract.js';
+import type {AssistantQualityStatus} from '../shared/assistant-quality-contract.js';
+import type {AssistantPeriodicSettings,AssistantPeriodicStatus,AssistantPeriodicCheck} from '../shared/assistant-periodic-contract.js';
+import type {AssistantLaunchService} from './assistant-launch-service.js';
+import type {AssistantActionDecisionResultDto} from '../shared/assistant-action-contract.js';
 import type {AssistantCalendarMemorySettingsDto,AssistantCalendarMemoryInput} from '../shared/assistant-calendar-memory-contract.js';
 import type {AssistantCalendarStatus} from '../shared/assistant-calendar-observation-contract.js';
 import { registerCollaborationRoomTypedIpc } from './collaboration-room-typed-ipc.js';
@@ -41,6 +48,27 @@ export interface AssistantSemanticController {
   resume(input: { requestSource: 'user' }): AssistantProfileDto | Promise<AssistantProfileDto>;
   acceptCandidate(input: { candidateId: string; collectionId?: string; requestSource: 'user' }): AssistantAcceptResultDto | Promise<AssistantAcceptResultDto>;
   rejectCandidate(input: { candidateId: string; requestSource: 'user' }): AssistantCandidateDto | Promise<AssistantCandidateDto>;
+getAnalysisProvider?():Promise<AssistantAnalysisStatus>;
+configureAnalysisProvider?(input:AssistantAnalysisSettingsInput&{requestSource:'user'}):Promise<AssistantAnalysisStatus>;
+listLaunchTargets?(input:{cursor?:string;requestSource:'user'}):Promise<AssistantThreadTargetPage>;
+getQualityStatus?():Promise<AssistantQualityStatus>;
+exportQualityReview?(input:{requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+importQualityReview?(input:{attestHumanReview:true;requestSource:'user'}):Promise<{cancelled:boolean;status:AssistantQualityStatus}>;
+revokeQualityReview?(input:{requestSource:'user'}):Promise<AssistantQualityStatus>;
+getPeriodicStatus?():Promise<AssistantPeriodicStatus>;
+configurePeriodic?(input:AssistantPeriodicSettings&{requestSource:'user'}):Promise<AssistantPeriodicStatus>;
+checkPeriodic?(input:{requestSource:'user'}):Promise<AssistantPeriodicCheck>;
+cancelLaunch?(input:Parameters<AssistantLaunchService['cancel']>[0]):ReturnType<AssistantLaunchService['cancel']>;
+prepareReconfirmation?(input:Parameters<AssistantLaunchService['prepareReconfirmation']>[0]):ReturnType<AssistantLaunchService['prepareReconfirmation']>;
+prepareFollowUpLaunch?(input:Parameters<AssistantLaunchService['prepareFollowUp']>[0]):ReturnType<AssistantLaunchService['prepareFollowUp']>;
+prepareLaunch?(input:Parameters<AssistantLaunchService['prepare']>[0]):ReturnType<AssistantLaunchService['prepare']>;
+confirmLaunch?(input:Parameters<AssistantLaunchService['confirm']>[0]):ReturnType<AssistantLaunchService['confirm']>;
+getActionLaunch?(input:Parameters<AssistantLaunchService['get']>[0]):ReturnType<AssistantLaunchService['get']>;
+resolveActionLaunch?(input:Parameters<AssistantLaunchService['resolve']>[0]):ReturnType<AssistantLaunchService['resolve']>;
+getActionCandidatesPage?(input:{cursor:string}):AssistantCandidatePageDto|Promise<AssistantCandidatePageDto>;
+dismissAction?(input:{proposalId:string;expectedRevision:number;existingThreadId?:string;requestSource:'user'}):Promise<AssistantActionDecisionResultDto>;
+snoozeAction?(input:{proposalId:string;expectedRevision:number;snoozeUntil:number;requestSource:'user'}):Promise<AssistantActionDecisionResultDto>;
+getActionOverview?(): AssistantActionOverviewDto | Promise<AssistantActionOverviewDto>;
 }
 
 export function registerSemanticDesktopIpc(

@@ -39,3 +39,11 @@ describe('listLatestMorningSuggestions', () => {
     })).toEqual([]);
   });
 });
+
+
+it('shows the validated v2 action reason without turning malformed action data into a legacy suggestion',()=>{
+ const recommendation={title:'Review',reasonCode:'raw_code',evidenceRefs:[{kind:'task',id:'task'}],action:{kind:'review',reason:'Human-readable next action',nextStep:'Inspect',instruction:'Review evidence'}};
+ const read=(row:unknown)=>listLatestMorningSuggestions({listRuns:()=>[{id:'morning',status:'success'}],listEvidence:()=>[{metadata:{assistantKind:'morning',output:{schemaVersion:2,recommendations:[row]}}}]});
+ expect(read(recommendation)).toEqual([{id:'morning:0',title:'Review',summary:'Human-readable next action'}]);
+ expect(read({...recommendation,action:{...recommendation.action,permissionMode:'yolo'}})).toEqual([]);
+});

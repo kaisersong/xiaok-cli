@@ -1,3 +1,4 @@
+import type { MemorySettingsSnapshot } from '../../../shared/memory-settings-types.js';
 import type { UpdateInstallDto } from '../../../shared/updater-ipc-contract.js';
 import type { MemoryLayerIpcEntry } from '../../../shared/memory-ipc-types.js';
 import type { MemoryCompactionResult } from '../../../shared/memory-distillation-contract.js';
@@ -82,7 +83,11 @@ export interface DesktopMemoryApi {
   add(content: string, category?: string): Promise<unknown>;
   delete(id: string): Promise<unknown>;
   stats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
-  compact(): Promise<MemoryCompactionResult>;
+  compact(input?:{expectedModelId:string}): Promise<MemoryCompactionResult>;
+  settings(): Promise<MemorySettingsSnapshot>;
+  getSettings(): Promise<MemorySettingsSnapshot>;
+  cancelCompaction(): Promise<boolean>;
+  deleteEmbeddingModel(modelId:string): Promise<void>;
   personaTraits(): Promise<{ trait: string; confidence: number }[]>;
   listLayer(layer: number, limit?: number, offset?: number): Promise<MemoryLayerIpcEntry[]>;
   deleteEntry(id: string, layer: number): Promise<boolean>;
@@ -182,9 +187,13 @@ export function getDesktopApi(): ExtendedDesktopApi | null {
     async stats() {
       return raw.memoryStats() as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>
     },
-    async compact() {
-      return raw.memoryCompact() as Promise<MemoryCompactionResult>
+    async compact(input?:{expectedModelId:string}) {
+      return raw.memoryCompact(input) as Promise<MemoryCompactionResult>
     },
+    async settings() { return raw.memoryGetSettings() },
+    async getSettings() { return raw.memoryGetSettings() },
+    async cancelCompaction() { return raw.memoryCancelCompaction() },
+    async deleteEmbeddingModel(modelId:string) { return raw.deleteEmbeddingModel(modelId) },
     async personaTraits() {
       return raw.memoryPersonaTraits() as Promise<{ trait: string; confidence: number }[]>
     },
