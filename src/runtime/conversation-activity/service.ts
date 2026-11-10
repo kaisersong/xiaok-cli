@@ -1,4 +1,5 @@
 import type { ConversationActivityStore } from './store.js';
+import {unavailableProjection,unavailableActivity} from './disclosure.js';
 import type { ActivityOrigin, ConversationActivity, ReportingPreference, WorkBinding, WorkWatch, WorkProjection, ConversationWorkView } from './types.js';
 import type { SerializedTaskReference } from '@modelcontextprotocol/ext-tasks/client';
 import { projectActivityAttention, projectUnavailableActivityAttention } from './attention-projector.js';
@@ -459,9 +460,7 @@ export class ConversationActivityService {
           // A scope-local warning preserves the user's own watch without
           // exposing source text, outcome, evidence or unread counts.
           unavailable.add(row.watchId);
-          rows.push({ ...row, activityId: `unavailable:${row.watchId}`, kind: 'diagnostic', projection: { ...row.projection,
-            executionState: 'accepted', businessOutcome: 'unknown', freshness: 'unavailable', summary: undefined,
-            evidenceRefs: [], sourceSequence: 0, lastProgressAt: null, lastHeartbeatAt: null, lastReportAt: null, errorCode: 'activity_source_forbidden' } });
+          rows.push(unavailableActivity(row));
         }
         if (rows.length >= limit) break;
       }
@@ -513,8 +512,7 @@ export class ConversationActivityService {
   private async basicGetWork(watchId: string, actor: ActivityActor): Promise<ConversationWorkView> {
     const context=await this.readContext(watchId,actor),{watch,projection}=this.finishReadContext(context.watch,actor);
     if (context.allowed){const presentation=projectActivityAttention(watch,projection);if(watch.source==='mcp')presentation.protocolUnavailable=true;return {watch,projection,presentation};}
-    const unavailable: WorkProjection = { ...projection, executionState: 'accepted', businessOutcome: 'unknown',
-      freshness: 'unavailable', summary: undefined, evidenceRefs: [], sourceSequence: 0, lastProgressAt: null, lastHeartbeatAt: null, lastReportAt: null, errorCode: 'activity_source_forbidden' };
+    const unavailable = unavailableProjection(projection);
     return { watch, projection: unavailable, presentation: projectUnavailableActivityAttention(watch, projection.revision) };
   }
   private workReader():AttentionWorkReader{

@@ -1,6 +1,7 @@
 import type { Tool, ToolExecutionContext } from '../../types.js';
 
 export interface GoalToolHost {
+  assertReadCurrent?(value:unknown,context?:ToolExecutionContext):void;
   getGoal(context?: ToolExecutionContext): Promise<unknown> | unknown;
   requestComplete(summary: string, context?: ToolExecutionContext): Promise<{ accepted: boolean; reason?: string }>;
   requestBlocked(input: { reason: string; fingerprint: string }, context?: ToolExecutionContext): Promise<{ accepted: boolean; reason?: string }>;
@@ -16,7 +17,9 @@ export function createGoalTools(host: GoalToolHost): Tool[] {
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       },
       async execute(_input, context) {
-        return JSON.stringify(await host.getGoal(context));
+        const value=await host.getGoal(context);
+        const current=()=>{const checked:unknown=host.assertReadCurrent?.(value,context);if(checked!==undefined){if(checked instanceof Promise)void checked.catch(()=>{});throw Error("goal_content_unavailable");}};
+        current();const result=JSON.stringify(value);current();return result;
       },
     },
     {

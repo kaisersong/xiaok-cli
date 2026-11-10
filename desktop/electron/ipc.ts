@@ -1,3 +1,6 @@
+import {TASK7_SNAPSHOT} from '../shared/task7-ipc-contract.js';
+import {registerContextContinuityIpc} from './context-continuity/ipc.js';
+import {registerContinuityInputIpc} from './context-continuity/input-ipc.js';
 import {registerDecisionModelIpc} from './decision-model-ipc.js';
 import {registerRoomConversionCaptureIpc} from './room-conversion-typed-ipc.js';
 import {registerUserTaskSubmissionIpc} from './user-task-submission-typed-ipc.js';
@@ -818,7 +821,13 @@ export async function registerDesktopIpc(
   const recheckTaskActor = (event: IpcMainInvokeEvent, actor: { actorId: string }) => {
     if (taskActor(event).actorId !== actor.actorId) throw Error('task_actor_forbidden');
   };
+  registerContextContinuityIpc(ipcMain,()=>services.continuity.port(),event=>Boolean(options.multiAgentAuthorize?.(event))&&!event.sender.isDestroyed());
+  registerContinuityInputIpc(ipcMain,services.inputQueue,taskActor);
   const task7Producers = new Map<string, IpcHandlerListener>();
+  const unsubscribeContinuityInputs=services.inputQueue?.subscribe(conversationId=>{
+    const target=primaryWindow();try{if(target.isDestroyed())return;const event={sender:target.webContents,senderFrame:target.webContents.mainFrame} as IpcMainInvokeEvent;const user=taskActor(event);services.inputQueue!.assertPointer(conversationId,user);target.webContents.send('desktop:inputs:changed',{conversationId});}catch{/* Unavailable sender receives no private pointer. */}
+  });
+  window.once('closed',()=>unsubscribeContinuityInputs?.());
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
@@ -1218,7 +1227,7 @@ export async function registerDesktopIpc(
     return r;
   });
   task7Producers.set('desktop:cancelTask', async (_event, input) => {
-    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskControl(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
     captureTask7Output('cancelTask', await callTask7Producer(() => services.cancelTask(input.taskId, actor)));
     log('info', 'cancelTask ok');
@@ -1303,13 +1312,13 @@ export async function registerDesktopIpc(
     void (async () => {
       try {
         const stream = sinceIndex !== undefined
-          ? services.subscribeTask(taskId, { sinceIndex, signal: controller.signal })
-          : services.subscribeTask(taskId, { signal: controller.signal });
+          ? services.subscribeTaskRecords(taskId, { sinceIndex, signal: controller.signal })
+          : services.subscribeTaskRecords(taskId, { signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
-          const dto = captureTask7Event(event);
+          const dto = {taskId:event.taskId,eventIndex:event.eventIndex,sourceDataEpoch:event.sourceDataEpoch,event:captureTask7Event(event.event)};
           await callTask7Producer(() => services.authorizeTaskRead(taskId, actor));
           if (controller.signal.aborted || target.isDestroyed?.()) break;
           recheckTaskActor(_event, actor);
@@ -1388,6 +1397,13 @@ export async function registerDesktopIpc(
     return r;
   });
   registerTask7Ipc(ipcMain, task7Producers, event => { taskActor(event); });
+  {
+    const originals=new WeakMap<object,{event:IpcMainInvokeEvent;actor:ReturnType<typeof taskActor>;value:Awaited<ReturnType<DesktopServices['readTaskHistory']>>}>();
+    registerIpcHandler({registrar:ipcMain,channel:'desktop:readTaskHistory',input:z.object({taskId:z.string().min(1).max(256)}).strict(),output:z.object({snapshot:TASK7_SNAPSHOT,presentation:z.object({version:z.literal(1),basis:z.enum(['qualified_legacy_owner','claimed_archive']).optional(),taskId:z.string().min(1),sourceEpoch:z.string().min(1),prompt:z.string(),includeUser:z.boolean()}).strict().nullable()}).strict(),sourceFile:'context-continuity/history-port.ts',rolloutRound:3,riskTags:['fs-read'],
+      beforeInput:event=>{taskActor(event);return undefined;},handler:async(input,event)=>{const actor=taskActor(event),value=await services.readTaskHistory(input.taskId,actor);recheckTaskActor(event,actor);services.assertTaskHistoryCurrent(value,actor);originals.set(value,{event,actor,value});return value;},
+      afterOutputValidation:value=>{if(!value||typeof value!=='object')throw Error('task_history_unavailable');const original=originals.get(value);if(!original)throw Error('task_history_unavailable');recheckTaskActor(original.event,original.actor);services.assertTaskHistoryCurrent(original.value,original.actor);return undefined;},
+    });
+  }
   registerUserTaskSubmissionIpc(ipcMain, (event,input)=>{const actor=taskActor(event);return services.submitUserTask(input,actor,()=>recheckTaskActor(event,actor));}, event=>{taskActor(event);});
   registerRoomConversionCaptureIpc(ipcMain,services,taskActor);
   registerDiagnosticsIpc(ipcMain, services);

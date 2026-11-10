@@ -12,7 +12,6 @@ function observeRuntime(raw:Promise<void>,yes:()=>void,no:(error:unknown)=>void)
 }
 import { readFileSync, statSync,realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { ConversationActivityOwnerHost } from './owner-host.js';
 import { ActivityNativeIdentityRepository } from './native-identity.js';
@@ -32,13 +31,9 @@ export interface ActivityOwnerConfig {
   managedSources?: ActivityManagedSource[];
   kswarm?: { url: string; mutationToken: string; brokerUrl: string; roomToken: string };
 }
-export function activityOwnerConfigDigest(config: ActivityOwnerConfig): string {
-  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
-    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
-  // Environment is launch input, not the identity of a running owner.
-  const digestConfig = { ...config, managedSources: config.managedSources?.map(({ env: _env, ...source }) => source) };
-  return createHash('sha256').update(JSON.stringify(canonical(digestConfig))).digest('hex');
-}
+import {activityOwnerConfigDigest} from './owner-config.js';
+export {activityOwnerConfigDigest} from './owner-config.js';
+import {hasCanonicalActivityProfile} from './owner-qualification.js';
 
 /** Private configuration is supplied by the verified native bootstrap owner. */
 export async function startConversationActivityOwner(config: ActivityOwnerConfig, options: { idle?(): void;businessBirth?:object;configFile?:string } = {}) {
@@ -91,7 +86,7 @@ export async function startConversationActivityOwner(config: ActivityOwnerConfig
       admitHint(projectId){return sources.admitProjectHint(projectId);},
     } satisfies import('./project-source-port.js').ProjectSourcePort}:{}),
     canObserveWork: async watch => {
-      if (watch.source === 'task_host') {const snapshot=await tasks.snapshot(watch.workId);return snapshot?.taskId===watch.workId&&snapshot.sessionId===watch.sourceDataEpoch&&snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);}
+      if (watch.source === 'task_host') {if(hasCanonicalActivityProfile(config.dataRoot))return false;const snapshot=await tasks.snapshot(watch.workId);return snapshot?.taskId===watch.workId&&snapshot.sessionId===watch.sourceDataEpoch&&snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);}
       if (watch.source === 'mcp') return mcp?.canObserve(watch) ?? false;
       if (watch.source === 'agent_group') return groups?.groupThread(watch.workId) === watch.origin.threadId;
       if (watch.source !== 'kswarm' || !projectHttp) return false;

@@ -83,9 +83,14 @@ export interface DesktopGoalCoordinatorOptions {
   /** Actual Main population verifier; no renderer flag or serialized receipt. */
   assertNativePersistedEvent?(input:PersistedTaskEvent,receipt:NativePersistedTaskEventReceipt):void;
   assertTaskSourceShutdownDrainedReceipt?(receipt:TaskSourceShutdownDrainedReceipt):void;
+  captureGoalRead?(threadId:string,value:DesktopGoalProjection|null):void;
+  assertGoalReadCurrent?(threadId:string,value:DesktopGoalProjection|null,receiverTaskId?:string):void;
+  assertPreparedTaskCurrent?(value:PreparedGoalTask):void;
+  preparePublicTask?(input:TaskCreateInput,publicInput:{prompt:string;includeUser:boolean}):Promise<{taskId:string;understanding?:TaskUnderstanding}>;
 }
 
 export class DesktopGoalCoordinator {
+  private readonly projectionOrigins = new WeakMap<object,{threadId:string;bytes:string}>();
   private readonly now: () => number;
   private readonly service: GoalService;
   private readonly activation = new Map<string, { goalId: string; armed: boolean; permissionRevision: number | undefined }>();
@@ -170,6 +175,7 @@ export class DesktopGoalCoordinator {
       let document = await this.service.load(threadId);
       if (!document) {
         this.activation.delete(threadId);
+        this.options.captureGoalRead?.(threadId,null);
         return null;
       }
       const captured = JSON.stringify(document.state);
@@ -178,13 +184,35 @@ export class DesktopGoalCoordinator {
       if (!latest) return null;
       if (JSON.stringify(latest.state) !== captured) currentCompletion = unobservedGoalCompletion(latest.state);
       document = latest;
-      return {
+      const value:DesktopGoalProjection={
         currentCompletion,
         state: document.state,
         activation: this.isArmed(threadId, document.state.goalId) ? 'armed' : 'disarmed',
         ...this.waitingProjection(threadId, document.state),
       };
+      this.captureProjection(threadId,value);return value;
       });
+  }
+
+  /** Actual coordinator origin plus current SQL/activation facts, never DTO presence. */
+  assertLiveProjection(threadId:string,value:DesktopGoalProjection):void {
+    const origin=this.projectionOrigins.get(value),state=this.options.store.readDisclosureDocument(threadId)?.state;
+    if(!origin||origin.threadId!==threadId||origin.bytes!==JSON.stringify(value)||!state
+      ||JSON.stringify(value.state)!==JSON.stringify(state)
+      ||value.activation!==(this.isArmed(threadId,state.goalId)?'armed':'disarmed')
+      ||value.waitingReason!==this.waitingProjection(threadId,state).waitingReason)throw Error('goal_content_unavailable');
+  }
+  assertPreparedCurrent(value:PreparedGoalTask):void {
+    const pending=this.pendingByThread.get(value.threadId),state=this.options.store.readDisclosureDocument(value.threadId)?.state;
+    if(!pending||!state||this.now()>=pending.expiresAt||JSON.stringify(value)!==JSON.stringify(stripTimeout(pending))
+      ||state.goalId!==pending.goalRef.goalId||state.revision!==pending.goalRef.revision||state.epoch!==pending.executionScope.epoch
+      ||state.status!=='active'||!this.isArmed(value.threadId,state.goalId)||this.userQueuePending.has(value.threadId)||this.runningByThread.has(value.threadId))throw Error('goal_content_unavailable');
+    this.assertExecutionAdmission(value.threadId,pending.permissionRevision);
+    const checked:unknown=this.options.assertPreparedTaskCurrent?.(value);
+    if(checked!==undefined){if(checked instanceof Promise)void checked.catch(()=>{});throw Error('goal_content_unavailable');}
+  }
+  private captureProjection(threadId:string,value:DesktopGoalProjection):void {
+    this.projectionOrigins.set(value,{threadId,bytes:JSON.stringify(value)});this.options.captureGoalRead?.(threadId,value);
   }
 
   async createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<{
@@ -206,6 +234,7 @@ export class DesktopGoalCoordinator {
         const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', permissionRevision, attachmentSource, state.objective);
         this.assertExecutionAdmission(input.threadId, permissionRevision);
         const goal = { state, activation: 'armed' as const };
+        this.captureProjection(input.threadId,goal);
         this.options.publishGoalChanged?.({ threadId: input.threadId, goal });
         return { goal, preparedTask };
       });
@@ -649,6 +678,7 @@ export class DesktopGoalCoordinator {
 
   createGoalToolHost(taskId: string): GoalToolHost {
     return {
+      assertReadCurrent:value=>{const binding=this.requireTaskBinding(taskId);this.options.assertGoalReadCurrent?.(binding.threadId,value as DesktopGoalProjection|null,taskId);},
       getGoal: async () => {
         const binding = this.requireTaskBinding(taskId);
         return this.getGoal(binding.threadId);
@@ -681,6 +711,7 @@ export class DesktopGoalCoordinator {
       return this.createGoalToolHost(context.taskId);
     };
     return {
+      assertReadCurrent:(value,context)=>forContext(context).assertReadCurrent?.(value,context),
       getGoal: context => forContext(context).getGoal(context),
       requestComplete: (summary, context) => forContext(context).requestComplete(summary, context),
       requestBlocked: (claim, context) => forContext(context).requestBlocked(claim, context),
@@ -1142,7 +1173,7 @@ export class DesktopGoalCoordinator {
     const executionScope = taskInput.executionScope;
     if (executionScope?.kind !== 'goal_turn' || executionScope.goalId !== state.goalId || executionScope.epoch !== state.epoch
       || executionScope.origin !== origin || executionScope.threadId !== threadId) throw Error('goal_continuation_source_mismatch');
-    const prepared = await this.options.taskHost.prepareTask(taskInput);
+    const prepared=this.options.preparePublicTask?await this.options.preparePublicTask(taskInput,{prompt:prompt??state.objective,includeUser:origin==='user'}):await this.options.taskHost.prepareTask(taskInput);
     const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
     if (compensation) await compensation;
     this.options.store.bindTask({ ...scopeToBinding(executionScope, prepared.taskId), attachedAt: null });
@@ -1333,6 +1364,7 @@ export class DesktopGoalCoordinator {
       activation: this.isArmed(threadId, state.goalId) ? 'armed' as const : 'disarmed' as const,
       ...this.waitingProjection(threadId, state),
     };
+    this.captureProjection(threadId,goal);
     if (!this.closed) this.options.publishGoalChanged?.({ threadId, goal });
     return goal;
   }

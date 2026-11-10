@@ -236,6 +236,7 @@ export interface TaskMultiAgentPreparation {
 }
 
 export interface TaskSnapshot {
+  inputPreparation?: {inputId:string;inputRevision:string};
   /** Original durable prepare fact; never an execution/launch capability. */
   originalChildPreparation?: import('./default-dispatch-preparation.js').OriginalChildPreparation;
   /** Fresh read observation only; omitted for ordinary tasks, never persisted or used as a write grant. */

@@ -136,6 +136,11 @@ export interface CompoundRegistryExecutionPort {
 }
 
 export interface RegistryOptions {
+  /** Main-only restrictions. Undefined results grant no permission by themselves. */
+  /** Exact fixed Main local executors only; never a Native/role permission. */
+  settledLocalExecutors?:ReadonlyMap<Tool,Tool['execute']>;
+  assertContextAdmission?:()=>void;
+  recordUnprovenEffect?:(toolName:string)=>void;
   /** Host-only review role; native object identity is the sole admission authority. */
   nativeReadonlyOnly?: boolean;
   /** Host-only readonly model boundary: every admitted tool needs path scope. */
@@ -244,7 +249,7 @@ export class ToolRegistry {
     if(this.#requireSandboxScope)scopedNativeReadonlyRegistries.add(this);
     Object.defineProperty(this, 'isNativeReadonlyOnly', { get: () => this.#nativeReadonlyOnly, configurable: false });
     if (this.#nativeReadonlyOnly) {
-      if (options.compoundExecution || options.onToolObserved || options.protectedOutputGuard || options.onPrompt) throw Error('native_readonly_external_callback_denied');
+      if (options.compoundExecution || options.onToolObserved || options.protectedOutputGuard || options.onPrompt || options.assertContextAdmission || options.recordUnprovenEffect || options.settledLocalExecutors) throw Error('native_readonly_external_callback_denied');
       if (options.hooksRunner && (options.hookInputMode === 'direct-callback' || !isEmptyConfiguredHooksRunner(options.hooksRunner))) throw Error('native_readonly_external_callback_denied');
       options = { ...options, hooksRunner: undefined };
       // Validate the complete constructor population before publishing any binding.
@@ -965,6 +970,8 @@ export class ToolRegistry {
       let commandFact: ToolExecutionFact | undefined;
       const assertInvocationCurrent = () => {
         context?.signal?.throwIfAborted();
+        if(this.options.assertContextAdmission)assertSynchronousGrantResult(this.options.assertContextAdmission());
+        if(context?.assertContextAdmission)assertSynchronousGrantResult(context.assertContextAdmission());
         context?.assertPermissionApproval?.();
         if (permissionGrant) assertSynchronousGrantResult(permissionGrant.assertCurrent());
         context?.signal?.throwIfAborted();
@@ -1019,11 +1026,15 @@ export class ToolRegistry {
             ctx?.signal?.throwIfAborted();assertInvocationCurrent();ctx?.signal?.throwIfAborted();
           }};
           processAuthorizationApply(processAuthorizationSet,originalProcessAuthorizations,[processToken,processRow]);
-          try{return await processAuthorizationApply(processAuthorizationScopeRun,originalProcessAuthorizationScope,[processToken,()=>execute.call(tool,input,this.#nativeReadonlyOnly?createNativeReadonlyExecutionContext(ctx):ctx)]) as Promise<string>;}
+          try{
+            if(this.options.recordUnprovenEffect&&!(tool.permission==='safe'&&this.options.settledLocalExecutors?.get(tool)===execute&&!this.options.hooksRunner&&!this.options.onToolObserved&&!this.options.protectedOutputGuard))assertSynchronousGrantResult(this.options.recordUnprovenEffect(tool.definition.name));
+            if(ctx?.recordUnprovenEffect&&!(tool.permission==='safe'&&this.options.settledLocalExecutors?.get(tool)===execute&&!this.options.hooksRunner&&!this.options.onToolObserved&&!this.options.protectedOutputGuard))assertSynchronousGrantResult(ctx.recordUnprovenEffect(tool.definition.name));
+            return await processAuthorizationApply(processAuthorizationScopeRun,originalProcessAuthorizationScope,[processToken,()=>execute.call(tool,input,this.#nativeReadonlyOnly?createNativeReadonlyExecutionContext(ctx):ctx)]) as Promise<string>;
+          }
           finally{processRow.active=false;}
         },
       });
-      context?.signal?.throwIfAborted();
+      assertInvocationCurrent();
       const project = projectResult ?? context?.projectObservationResult;
       if (project) {
         rawResult = await project(rawResult);

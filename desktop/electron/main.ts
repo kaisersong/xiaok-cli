@@ -30,6 +30,7 @@ import { createAutomationConfigOwner } from './automation-config-owner.js';
 import { configureBundledYzjCli } from '../../src/runtime/bundled-yzj-cli.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
+import {createOriginalMobileDisclosureOwner} from './mobile-disclosure-owner.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { createDesktopServiceControl } from './desktop-service-control.js';
@@ -470,8 +471,8 @@ function readRecentTaskSnapshots(dataRoot: string, limit = 20): TaskSnapshot[] {
     });
 }
 
-function findMobileArtifactPreview(dataRoot: string, artifactId: string): MobileArtifactPreview | null {
-  for (const snapshot of readRecentTaskSnapshots(dataRoot, 30)) {
+function findMobileArtifactPreview(snapshots: readonly TaskSnapshot[], artifactId: string): MobileArtifactPreview | null {
+  for (const snapshot of snapshots) {
     for (const artifact of snapshot.result?.artifacts ?? []) {
       if (artifact.artifactId !== artifactId) continue;
       return buildArtifactPreview({
@@ -1013,19 +1014,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
   const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
   const mobileMessages: MobileChatMessage[] = [];
+  const mobileDisclosure=createOriginalMobileDisclosureOwner(services);
+  registerLifetimeDisposerStep('mobile-disclosure-read-owner',()=>mobileDisclosure.close());
   const getMobileSnapshot = async () => {
     const activeTask = await services.getActiveTask().catch(() => null);
-    const snapshots = readRecentTaskSnapshots(dataRoot);
-    if (activeTask && !snapshots.some(snapshot => snapshot.taskId === activeTask.taskId)) {
-      const recovered = await services.recoverTask(activeTask.taskId).catch(() => null);
-      if (recovered?.snapshot) snapshots.unshift(recovered.snapshot);
-    }
+    const read=await mobileDisclosure.recentTasks(20);
+    const snapshots=[...read.snapshots];
     const loopDefinitions = loopStoreRef?.listLoopDefinitions() ?? [];
     const loopRunsByLoopId = new Map(loopDefinitions.map(definition => [
       definition.id,
       loopStoreRef?.listLoopRuns(definition.id, 1) ?? [],
     ]));
-    return buildMobileSnapshotFromSources({
+    const value=buildMobileSnapshotFromSources({
       desktopName: 'Xiaok Desktop',
       activeTaskId: activeTask?.taskId ?? null,
       mobileMessages,
@@ -1035,8 +1035,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       userLoopTemplates: loopStoreRef?.listUserLoopTemplates() ?? [],
       loopRunsByLoopId,
     });
+    return mobileDisclosure.bind('snapshot',value,read.cut);
   };
   const sendMobileMessage = async (text: string) => {
+    const cut=mobileDisclosure.emptyCut();
     const created = await services.createTask({ prompt: text, materials: [] });
     const sequence = Date.now();
     const userMessage = {
@@ -1049,7 +1051,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     };
     mobileMessages.push(userMessage);
     mobileMessages.splice(0, Math.max(0, mobileMessages.length - 30));
-    return [
+    const events = [
       {
         type: 'chat.message_appended' as const,
         sequence,
@@ -1066,36 +1068,41 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       },
       { type: 'snapshot.required' as const, sequence: sequence + 2 },
     ];
+    return mobileDisclosure.bind('chat.send',events,cut);
   };
   const respondMobileApproval = async (input: { id: string; decision: MobileApprovalDecision }) => {
     const [taskId, questionId] = input.id.split(':');
     if (!taskId || !questionId) throw new Error('invalid_mobile_approval_id');
-    const recovered = await services.recoverTask(taskId);
-    const event = recovered.snapshot.events.find(candidate => (
+    const read = await mobileDisclosure.task(taskId);
+    const event = read.snapshot.events.find(candidate => (
       candidate.type === 'needs_user' && candidate.question.questionId === questionId
     ));
     if (!event || event.type !== 'needs_user') throw new Error('mobile_approval_not_found');
     const answer = resolveMobileApprovalAnswer(event.question, input.decision);
     if (!answer) throw new Error('mobile_approval_not_resolvable');
+    mobileDisclosure.assertCurrent(read.cut);
     await services.answerQuestion({ taskId, answer });
-    return {
+    mobileDisclosure.assertCurrent(read.cut);
+    return mobileDisclosure.bind('approval.respond',{
       id: input.id,
       title: event.question.prompt.slice(0, 80),
       detail: event.question.choices?.map(choice => choice.label).join(' / ') ?? event.question.kind,
       risk: 'low',
       status: input.decision === 'approve' ? 'approved' : 'rejected',
       createdAt: new Date().toISOString(),
-    };
+    },read.cut);
   };
-  const getMobileArtifactPreview = async (artifactId: string) => (
-    findMobileArtifactPreview(dataRoot, artifactId)
-      ?? await findKSwarmMobileArtifactPreview(kswarmService, artifactId)
-  );
+  const getMobileArtifactPreview = async (artifactId: string) => {
+    const read=await mobileDisclosure.recentTasks(30);
+    const value=findMobileArtifactPreview(read.snapshots,artifactId)??await findKSwarmMobileArtifactPreview(kswarmService,artifactId);
+    return value?mobileDisclosure.bind('artifact.preview',value,read.cut):null;
+  };
   const mobileGateway = createMobileGateway({
     host: process.env.XIAOK_MOBILE_GATEWAY_HOST ?? '0.0.0.0',
     port: Number(process.env.XIAOK_MOBILE_GATEWAY_PORT ?? '47891'),
     desktopName: 'Xiaok Desktop',
     desktopId: mobileIdentity.desktopId,
+    requireDisclosurePolicy:true,assertOutputCurrent:mobileDisclosure.assertOutputCurrent,
     mobileAccessToken: mobileIdentity.mobileAccessToken,
     getSnapshot: getMobileSnapshot,
     sendMessage: sendMobileMessage,
@@ -1166,6 +1173,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const mobileRelayBridge = mobileRelayConfig
     ? createMobileRelayBridge({
       identity: mobileIdentity,
+      requireDisclosurePolicy:true,assertOutputCurrent:mobileDisclosure.assertOutputCurrent,
       desktopName: 'Xiaok Desktop',
       relayUrl: mobileRelayConfig.relayUrl,
       relayJwt: mobileRelayConfig.relayJwt,

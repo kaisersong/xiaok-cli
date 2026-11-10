@@ -95,9 +95,9 @@ export function registerConversationActivityIpc(
     nativeReadProofs.set(frame,proof);
     return {frame,current:()=>{inspectNativeActivityReadAdmission(frame,owner);},release:()=>{proof.active=false;nativeReadProofs.delete(frame);}};
   };
-  const read=async<O>(event:IpcMainInvokeEvent,run:(identity:ActivityActor,frame?:NativeActivityReadAdmission)=>Promise<unknown>,parse:(raw:unknown)=>O,required=false):Promise<O>=>{
+  const read=async<O>(event:IpcMainInvokeEvent,run:(identity:ActivityActor,frame?:NativeActivityReadAdmission)=>Promise<unknown>,parse:(raw:unknown)=>O,required=false,native=true):Promise<O>=>{
     if(disposed)throw Error('activity_unavailable');
-    const identity=actor(event),owner=get(),scope=captureRead(event,identity,required);
+    const identity=actor(event),owner=get(),scope=native?captureRead(event,identity,required):undefined;
     let handed=false;
     try{
       scope?.current();const raw=await run(identity,scope?.frame);scope?.current();const result=parse(raw);
@@ -128,7 +128,7 @@ export function registerConversationActivityIpc(
     registerIpcHandler({ registrar, channel, input, output, handler,outputCheck(result){if(!result||typeof result!=='object')return;const check=readOutputChecks.get(result);if(!check)return;readOutputChecks.delete(result);try{check.check();}finally{check.release();}},sourceFile: 'conversation-activity-ipc.ts', rolloutRound: 3, riskTags: ['internal-mutation'] });
 
   register('desktop:activity:list', z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(), z.array(activity),
-    async (input, event) => get().list(input.threadId, actor(event), { afterLocalSeq: input.afterLocalSeq, limit: input.limit }));
+    async (input, event) => read(event,identity=>get().list(input.threadId,identity,{afterLocalSeq:input.afterLocalSeq,limit:input.limit}),raw=>z.array(activity).parse(raw),false,false));
   register('desktop:activity:work', z.object({ watchId: key }).strict(), workView, async (input, event) => read(event,(identity,frame)=>frame?get().getWork(input.watchId,identity,frame):get().getWork(input.watchId,identity),raw=>workView.parse(raw)));
   register('desktop:activity:attention:dismiss', z.object({ watchId: key, expectedProjectionVersion: z.number().int().nonnegative().safe(), expectedPresentationIncarnation: z.string().uuid() }).strict(), workView, async (input, event) => {
     const handler = get().dismissAttention;

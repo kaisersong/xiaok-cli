@@ -161,7 +161,7 @@ export class ConversationActivityOwnerHost {
             try { message = JSON.parse(line); } catch { socket.destroy(); return; }
             if (!client.role) {
               try { client.role = authenticateActivityClient(credentials, message); client.instanceId = (message as { instanceId?: string }).instanceId; clearTimeout(handshake); this.lastActivity = this.unattendedSince = this.now();
-                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch }); }
+                this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch,profileId:this.options.profileId,configDigest:this.options.configDigest,generation:ACTIVITY_OWNER_GENERATION }); }
               catch { socket.destroy(); return; }
             } else void this.request(client, message);
           }

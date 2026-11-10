@@ -84,7 +84,7 @@ export const TASK7_SNAPSHOT = z.object({ taskId: id, sessionId: id, status, prom
   materials: z.array(z.object({ materialId: id, originalName: text, role, parseStatus, parseSummary: text.optional() }).strict()),
   events: z.array(TASK7_EVENT), understanding: TASK7_UNDERSTANDING.optional(), result: result.optional(), salvage: salvage.optional(),
   context: z.object({ threadId: id.optional(), taskIds: z.array(id), loadedTaskIds: z.array(id), skipped: z.array(z.object({ taskId: id, reason: z.enum(['missing', 'invalid', 'non_terminal', 'self', 'too_old']) }).strict()) }).strict().optional(),
-  executionScope: scope.optional(), multiAgentPreparation: preparation.optional(), hostDelivery: delivery.optional(),
+  executionScope: scope.optional(), multiAgentPreparation: preparation.optional(), inputPreparation:z.object({inputId:id,inputRevision:id}).strict().optional(), hostDelivery: delivery.optional(),
   usage: z.object({ inputTokens: count, outputTokens: count, known: z.boolean() }).strict().optional(),
   executionProtected: z.literal(true).optional(), protectedObservationClosure: closure.optional(), currentCompletion: completion.optional(), createdAt: time, updatedAt: time }).strict();
 const created = z.object({ taskId: id, understanding: TASK7_UNDERSTANDING.optional() }).strict();

@@ -1,3 +1,4 @@
+import {readProtectedOwnerQualification} from './owner-qualification.js';
 import { assertBeforeEffects } from '../verification/before-effects.js';
 import { createConnection, type Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +45,7 @@ export function connectOriginalActivityOwner(
     if (this.disposed) return Promise.reject(new Error('activity_client_disposed'));
     if (this.socket && this.ownerEpoch) return Promise.resolve();
     if (this.connecting) return this.connecting;
+    const expected=readProtectedOwnerQualification(this.address.dataRoot);
     const credentials = readActivityOwnerCredentials(this.address);
     const pending = new Promise<void>((resolve, reject) => {
       const socket = createConnection(this.address.socketPath); this.trackSocket(socket); this.socket = socket; this.connectionIncarnation=randomUUID(); socket.setEncoding('utf8');
@@ -80,6 +82,7 @@ export function connectOriginalActivityOwner(
         if(!admitted&&batch.length){
           const message=batch.shift()!;
           if(message.type!=='hello'||message.protocol!==ACTIVITY_OWNER_PROTOCOL||message.rootHash!==this.address.rootHash||typeof message.ownerEpoch!=='string'){closed(Error('activity_owner_protocol_invalid'));socket.destroy();return;}
+          if(expected&&(message.profileId!==expected.profileId||message.configDigest!==expected.configDigest||message.generation!==expected.generation)){closed(Error('activity_owner_qualification_mismatch'));socket.destroy();return;}
           admitted=true;clearTimeout(timeout);this.ownerEpoch=message.ownerEpoch;epoch=message.ownerEpoch;
           resolve();
           queueMicrotask(()=>{for(const[subscriptionId,subscription]of this.subscriptions){if(this.disposed||this.socket!==socket)break;void this.request(subscription.threadId===null?'overview':'subscribe',{subscriptionId,...(subscription.threadId===null?{}:{threadId:subscription.threadId})}).catch(()=>{});}});

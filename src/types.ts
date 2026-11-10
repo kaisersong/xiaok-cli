@@ -61,6 +61,9 @@ export interface ToolDefinition {
 }
 
 export interface ToolExecutionContext {
+  /** Main-only extra denial and unknown-effect record; never a provider/model field. */
+  assertContextAdmission?:()=>void;
+  recordUnprovenEffect?:(toolName:string)=>void;
   observationCollector?: import('./runtime/sol-pi/collector-port.js').ObservationCollectorPort;
   /** Host-only native-body projection, before observers and independently sourced hook text. */
   projectObservationResult?: (nativeResult: string) => Promise<string>;
