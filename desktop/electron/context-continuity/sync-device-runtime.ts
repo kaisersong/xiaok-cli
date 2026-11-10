@@ -1,4 +1,4 @@
-import {app} from 'electron';
+import * as electron from 'electron';
 import {createHash} from 'node:crypto';
 import {lstatSync,readFileSync,readdirSync,realpathSync} from 'node:fs';
 import {createRequire} from 'node:module';
@@ -33,6 +33,8 @@ type State={key:string;phase:'opening'|'live'|'closing'|'unknown'|'closed';owner
 const reservations=new Map<string,State>(),bindings=new WeakMap<DesktopSyncDevice,State>();
 const unavailable=()=>new Error('desktop_sync_device_unavailable');
 const startupQualified=process.platform==='darwin'&&process.arch==='arm64'&&process.type==='browser'&&process.versions.electron==='39.8.10'&&process.versions.node==='22.22.1'&&process.env.ELECTRON_RUN_AS_NODE!=='1';
+// Plain Node (pure-node import contract) has no named Electron exports; read app only in qualified Electron Main.
+const app=startupQualified?electron.app:undefined as unknown as typeof electron.app;
 const originalGetAppPath=startupQualified?app.getAppPath:undefined;
 const originalAppRoot=originalGetAppPath?Reflect.apply(originalGetAppPath,app,[]):undefined;
 const originalPackaged=startupQualified?app.isPackaged:undefined,originalResources=startupQualified?process.resourcesPath:undefined;
