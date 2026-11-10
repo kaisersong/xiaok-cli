@@ -6209,17 +6209,20 @@ describe('desktop services', () => {
         });
       },
     });
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-files' }).id; })();
 
     const task1 = await services.createTask({
       prompt: '第一轮带附件任务',
       materials: [],
+      context: { threadId: continuityThreadId },
     });
     await waitFor(async () => (await services.recoverTask(task1.taskId)).snapshot.status === 'completed', 5000);
 
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(task1.taskId)), 5000);
     const task2 = await services.createTaskWithFiles({
       prompt: '第二轮继续分析新材料',
       filePaths: [],
-      context: { threadId: 'thread-files', taskIds: [task1.taskId] },
+      context: { threadId: continuityThreadId, taskIds: [task1.taskId] },
     });
     await waitFor(async () => runCount === 2, 5000);
     await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
@@ -6227,7 +6230,7 @@ describe('desktop services', () => {
     expect(historySeenOnSecondRun.map(message => message.content)).toEqual(['第一轮带附件任务', '完成任务1']);
     const recovered = await services.recoverTask(task2.taskId);
     expect(recovered.snapshot.context).toEqual({
-      threadId: 'thread-files',
+      threadId: continuityThreadId,
       taskIds: [task1.taskId],
       loadedTaskIds: [task1.taskId],
       skipped: [],
