@@ -32,7 +32,14 @@ jobs:
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
       - name: Install the locked Electron runtime
         working-directory: desktop
-        run: node node_modules/electron/install.js
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            node node_modules/electron/install.js && test -f node_modules/electron/path.txt && break
+            echo "electron install attempt $i did not produce path.txt; retrying"; rm -rf node_modules/electron/dist; sleep 5
+          done
+          test -f node_modules/electron/path.txt
+          echo "electron path: $(cat node_modules/electron/path.txt)"
       - name: Compile the real main graph
         working-directory: desktop
         shell: bash
