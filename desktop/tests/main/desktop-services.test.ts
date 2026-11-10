@@ -6151,11 +6151,13 @@ describe('desktop services', () => {
         });
       },
     });
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a' }).id; })();
 
     // First task - will be cancelled
     const task1 = await services.createTask({
       prompt: '创建定时任务，每天晚上11点同步mydocs',
       materials: [],
+      context: { threadId: continuityThreadId },
     });
     await waitFor(async () => runCount === 1);
     await services.cancelTask(task1.taskId);
@@ -6165,10 +6167,11 @@ describe('desktop services', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Second task explicitly references the prior thread task.
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(task1.taskId)), 5000);
     const task2 = await services.createTask({
       prompt: '不是创建mac定时任务，是xiaok定时任务',
       materials: [],
-      context: { threadId: 'thread-a', taskIds: [task1.taskId] },
+      context: { threadId: continuityThreadId, taskIds: [task1.taskId] },
     });
     await waitFor(async () => runCount === 2, 5000);
     await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
@@ -6180,7 +6183,7 @@ describe('desktop services', () => {
     expect(historySeenOnSecondRun[1].role).toBe('assistant');
     const recovered = await services.recoverTask(task2.taskId);
     expect(recovered.snapshot.context).toEqual({
-      threadId: 'thread-a',
+      threadId: continuityThreadId,
       taskIds: [task1.taskId],
       loadedTaskIds: [task1.taskId],
       skipped: [],
