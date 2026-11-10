@@ -1,0 +1,46 @@
+[
+  {
+    "branch": "fix/afterpack-fixture-interface-20261110",
+    "sha": "04e7955d83976b71f6671a442f580bbdf7b6d7e7",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 28,
+    "ahead_main": 1010,
+    "contains_old_private_wip": true,
+    "remote_safe_equivalent": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+    "excluded_private_history_path_count": 66
+  },
+  {
+    "branch": "fix/assistant-launch-source-final-20261110",
+    "sha": "04e7955d83976b71f6671a442f580bbdf7b6d7e7",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 28,
+    "ahead_main": 1010,
+    "contains_old_private_wip": true,
+    "remote_safe_equivalent": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+    "excluded_private_history_path_count": 66
+  },
+  {
+    "branch": "integration/final-43-history-20261110",
+    "sha": "04e7955d83976b71f6671a442f580bbdf7b6d7e7",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 28,
+    "ahead_main": 1010,
+    "contains_old_private_wip": true,
+    "remote_safe_equivalent": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+    "excluded_private_history_path_count": 66
+  },
+  {
+    "branch": "release/1.6.3-coherent-20261110",
+    "sha": "04e7955d83976b71f6671a442f580bbdf7b6d7e7",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 28,
+    "ahead_main": 1010,
+    "contains_old_private_wip": true,
+    "remote_safe_equivalent": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+    "excluded_private_history_path_count": 66
+  }
+]

@@ -1,0 +1,122 @@
+[
+  {
+    "branch": "integration/assistant-116-history-20261109",
+    "sha": "afeea6af262bbcd000f477c0d0fea56f2757c081",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 3,
+    "ahead_main": 893,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/continuity-core-main-20261109",
+    "sha": "4825ca5a1e3d108abedf25f7b62ce63ec11281f7",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 15,
+    "ahead_main": 978,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/continuity-packaging-20261110",
+    "sha": "8c05b4e7cd2fe2211b0b86e4200d140d2a9579a1",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 4,
+    "ahead_main": 963,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/decision-model-manager-20261109",
+    "sha": "f0145f16499df36497f00c50cac71367302ba016",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 2,
+    "ahead_main": 951,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/final-reviewed-head-20261109",
+    "sha": "45ab662121caf7702ed8ec272abb5b929cda4d8d",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 11,
+    "ahead_main": 970,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/memory-configuration-20261110",
+    "sha": "2b83e61bb054e0d2811866636cf10e2e742008c1",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 13,
+    "ahead_main": 972,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/memory-settings-20261110",
+    "sha": "9656a0a8c0840af5035044d1468f8b99c49c1a5a",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 14,
+    "ahead_main": 973,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/model-invocation-tests-20261110",
+    "sha": "3472c2c9d52881911ffde6f4bc84198c08b2baac",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 12,
+    "ahead_main": 971,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/release-1.6.3-continuity-renderer-20261109",
+    "sha": "c65d9a583988015a18404ffe5d970005536f3ac9",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 2,
+    "ahead_main": 961,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "integration/release-1.6.3-decision-model-ui-20261109",
+    "sha": "ff58242551aaf1fe89ff25cd679cc343d611fcc6",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 1,
+    "ahead_main": 950,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "release/1.6.3-final-20261110",
+    "sha": "869a270c4f12618d73c2a644ae36c3d248ccc2bb",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 21,
+    "ahead_main": 999,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  },
+  {
+    "branch": "release/1.6.3-public-history-option-20261110",
+    "sha": "4792806f83f8b09fcd12b3fac00723bb3242d4cb",
+    "merged": false,
+    "remote_tip": false,
+    "local_only_count": 27,
+    "ahead_main": 1009,
+    "contains_old_private_wip": false,
+    "private_history_paths": []
+  }
+]
