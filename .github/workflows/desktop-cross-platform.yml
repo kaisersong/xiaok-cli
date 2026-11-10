@@ -159,6 +159,10 @@ jobs:
           node node_modules/typescript/bin/tsc -p tsconfig.electron.json
           node ../scripts/copy-harness-runtime.mjs
           node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
+          node scripts/copy-broker-runtime-package.cjs
+          test -f dist/main/desktop/electron/broker-runtime-package.cjs
+          test -f dist/main/desktop/electron/broker-runtime-file.cjs
+          test -f dist/main/desktop/resources/broker-runtime-lock.json
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
