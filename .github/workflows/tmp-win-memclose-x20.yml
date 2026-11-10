@@ -40,6 +40,8 @@ jobs:
           node node_modules/typescript/bin/tsc -p tsconfig.electron.json
           node ../scripts/copy-harness-runtime.mjs
           node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
+          node scripts/copy-broker-runtime-package.cjs
+          test -f dist/main/desktop/electron/broker-runtime-package.cjs
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Run desktop-memory-store-close 20 times (fresh process each)
