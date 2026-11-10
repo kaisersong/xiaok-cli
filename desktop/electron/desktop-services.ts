@@ -2387,6 +2387,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   let hostDeliveryAuthority: DesktopHostDeliveryAuthority | undefined;
   const host = taskSourcePopulation.createHost({
     ...continuityBinding.hostOptions,
+    // Automatic Goal turns read the predecessor's history, which continuity settles only here.
+    onWorkReleased: async (taskId: string) => { await continuityBinding.hostOptions.onWorkReleased(); goalCoordinator?.handleTaskWorkReleased(taskId); },
     materialRegistry,
     groupObservationSource: multiAgentService,
     runner: async input => {
@@ -2493,6 +2495,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   };
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
+    awaitPredecessorWorkRelease: true,
     nativeJournal: new FileGoalNativeJournal(join(options.dataRoot, 'goals')),
     taskHost: localTaskHost,
     assertNativePersistedEvent:taskSourcePopulation.assertNativePersistedEvent,

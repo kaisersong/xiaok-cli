@@ -6273,6 +6273,63 @@ describe('desktop services', () => {
     await services.pauseGoal(continuityThreadId);
   });
 
+  it('prepares the automatic Goal continuation exactly once, after the predecessor work release and with no blocked_unsettled history', async () => {
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.map(String).join(' ')); });
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        kswarmService: mockKSwarmService(),
+        runner: async ({ sessionId, emitRuntimeEvent, emitUsage }) => {
+          await emitUsage({ inputTokens: 2, outputTokens: 3 });
+          await emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '继续工作' });
+        },
+      });
+      const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
+      services.subscribeGoalTaskPrepared(event => prepared.push(event));
+      const threadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal-once' }).id; })();
+      const created = await services.createGoal({ threadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+      await services.ackGoalTaskAttached({ threadId, attachmentId: created.preparedTask.attachmentId });
+      const failed = () => warnings.filter(line => line.includes('blocked_unsettled') || line.includes('automatic continuation failed'));
+      await waitFor(async () => prepared.length === 2 || failed().length > 0, 5000);
+      expect(failed()).toEqual([]);
+      const first = prepared[0].taskId;
+      // The predecessor is physically settled before its successor exists.
+      expect(services.continuity.port().service.store.db.prepare('SELECT 1 AS ok FROM source_settlements WHERE task_id=?').get(first)).toEqual({ ok: 1 });
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(prepared).toHaveLength(2);
+      expect(new Set(prepared.map(event => event.taskId)).size).toBe(2);
+      expect(failed()).toEqual([]);
+      await services.pauseGoal(threadId);
+    } finally { warn.mockRestore(); }
+  }, 15_000);
+
+  it('does not continue a Goal whose previous turn was cancelled', async () => {
+    let started = 0;
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      runner: async ({ signal, emitUsage }) => {
+        started += 1;
+        await emitUsage({ inputTokens: 2, outputTokens: 3 });
+        await new Promise<void>(resolve => { if (signal?.aborted) resolve(); else signal?.addEventListener('abort', () => resolve(), { once: true }); });
+      },
+    });
+    const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
+    services.subscribeGoalTaskPrepared(event => prepared.push(event));
+    const threadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal-cancel' }).id; })();
+    const created = await services.createGoal({ threadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+    await services.ackGoalTaskAttached({ threadId, attachmentId: created.preparedTask.attachmentId });
+    await waitFor(async () => started === 1, 5000);
+    await services.cancelTask(prepared[0].taskId);
+    await waitFor(async () => (await services.getGoal(threadId))?.state.turnsUsed === 1, 5000);
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(prepared[0].taskId)), 5000);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(prepared).toHaveLength(1);
+    expect(started).toBe(1);
+    expect((await services.getGoal(threadId))?.state.status).toBe('paused');
+  }, 15_000);
+
   it('passes discussion cancellation through the real service runner boundary',async()=>{
     const controller=new AbortController();let seen:AbortSignal|undefined,settle!:()=>void;
     const services=createDesktopServices({dataRoot:join(rootDir,'data'),kswarmService:mockKSwarmService(),runner:async({signal})=>{seen=signal;await new Promise<void>(resolve=>{settle=resolve;});}});
