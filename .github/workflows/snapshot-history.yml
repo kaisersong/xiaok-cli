@@ -43,6 +43,8 @@ jobs:
         run: bash .github/scripts/retry.sh npm ci
       - name: Compile the actual source and test graph
         run: npm run test:sandbox:build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - name: Read durable snapshots through the original physical owner
         run: >-
           npm run test:sandbox:run --
