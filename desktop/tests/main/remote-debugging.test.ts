@@ -218,6 +218,7 @@ describe('Desktop service port discovery (#168)', () => {
 
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
+import { loadContinuityProfile } from '../../../src/runtime/context-continuity/profile.js';
 import { activeOwnerServicePorts } from '../../electron/active-owner-service-ports.js';
 import { activityOwnerAddress, createActivityOwnerCredentials, ACTIVITY_OWNER_GENERATION, ACTIVITY_OWNER_PROTOCOL } from '../../../src/runtime/conversation-activity/owner-protocol.js';
 import { activityOwnerConfigDigest, type ActivityOwnerConfig } from '../../../src/runtime/conversation-activity/owner-runtime.js';
@@ -227,9 +228,11 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
   const root = mkdtempSync(join(tmpdir(), 'xiaok-port-owner-'));
   const address = activityOwnerAddress(root);
   const credentials = createActivityOwnerCredentials(address);
+  // Owner qualification (26564c70) binds the config to the persisted continuity profile and canonical desktop identity path.
+  const profileId = loadContinuityProfile(root);
   const config: ActivityOwnerConfig = {
-    schemaVersion: 1, dataRoot: address.dataRoot, profileId: createHash('sha256').update(resolve(root)).digest('hex'), actorId: 'fixture',
-    identity: { kind: 'desktop', path: join(root, 'groups.sqlite') },
+    schemaVersion: 1, dataRoot: address.dataRoot, profileId, actorId: `desktop-user:${profileId}`,
+    identity: { kind: 'desktop', path: join(root, 'multi-agent', 'groups.sqlite') },
     kswarm: { url: 'http://127.0.0.1:45001', brokerUrl: 'http://127.0.0.1:45002', mutationToken: 'fixture', roomToken: 'fixture' },
     managedSources: [
       { name: 'kswarm', executable: process.execPath, entryPath: join(root, 'ks.js'), healthUrl: 'http://127.0.0.1:45001/health' },
@@ -248,7 +251,8 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
         const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
         if (message.type === 'hello') {
           if (message.token !== credentials.producer) { socket.destroy(); return; }
-          socket.write(JSON.stringify({ type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: address.rootHash, ownerEpoch: 'fixture' }) + '\n');
+          socket.write(JSON.stringify({ type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: address.rootHash, ownerEpoch: 'fixture',
+            profileId: config.profileId, configDigest: activityOwnerConfigDigest(config), generation: ACTIVITY_OWNER_GENERATION }) + '\n');
         } else socket.write(JSON.stringify({ type: 'result', id: message.id, result: { profileId: config.profileId, generation: ACTIVITY_OWNER_GENERATION,
           configDigest: mismatch ? 'invalid' : activityOwnerConfigDigest(config) } }) + '\n');
       }
