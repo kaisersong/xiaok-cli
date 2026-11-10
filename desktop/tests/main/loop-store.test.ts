@@ -315,6 +315,11 @@ describe('LoopStore', () => {
         status: 'paused',
         updatedAt: 1_000,
       }),
+      expect.objectContaining({
+        id: BUILT_IN_LOOP_IDS.PERSONAL_ASSISTANT_TRANSACTION_CHECK,
+        status: 'paused',
+        updatedAt: 1_000,
+      }),
     ]);
   });
 
