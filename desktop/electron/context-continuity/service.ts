@@ -9,6 +9,7 @@ import { NativeContextPolicy } from './native-policy.js';
 import { HistorySearch } from './history-search.js';
 import {ContextDependencyPolicy} from './dependencies.js';
 import { ContinuityInputJournal, type InputOwnerDependencies } from './input-journal.js';
+import { isAssistantThread } from '../../shared/assistant-inbox-contract.js';
 import type { HistorySearchInput, HistorySearchResult } from '../../shared/context-continuity-types.js';
 
 /** Constructed only by authenticated main IPC or a main-owned task binding. */
@@ -123,6 +124,24 @@ export class ContinuityService {
     return this.store.operation('createConversation', input.operationId, input, () => {
       const now = this.options.now?.() ?? Date.now();
       const record: ContinuityConversation = { id: randomUUID(), title: input.title ?? null, status: 'idle', mode: 'work', createdAt: now, updatedAt: now,
+        starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: null, taskIds: [], revision: 0, coverage: 'complete' };
+      this.store.db.prepare('INSERT INTO conversations(id,record) VALUES (?,?)').run(record.id, JSON.stringify(record));
+      return record;
+    });
+  }
+  /**
+   * The assistant chat and work threads use fixed, Main-recognised IDs that the renderer only
+   * keeps locally, so Main owns their continuity conversation: it is created once, on the first
+   * owned-history read. A deleted assistant conversation is never resurrected; other IDs are refused.
+   */
+  ensureAssistantConversation(actor: ContinuityActor, id: string): ContinuityConversation | null {
+    this.assertActor(actor, true); key(id);
+    if (!isAssistantThread(id)) throw new Error('invalid_argument');
+    return this.store.transaction(() => {
+      const row = this.store.db.prepare('SELECT deleted FROM conversations WHERE id=?').get(id);
+      if (row) return this.getConversation(actor, id);
+      const now = this.options.now?.() ?? Date.now();
+      const record: ContinuityConversation = { id, title: null, status: 'idle', mode: 'work', createdAt: now, updatedAt: now,
         starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: null, taskIds: [], revision: 0, coverage: 'complete' };
       this.store.db.prepare('INSERT INTO conversations(id,record) VALUES (?,?)').run(record.id, JSON.stringify(record));
       return record;
