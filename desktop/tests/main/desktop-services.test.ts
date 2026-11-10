@@ -579,6 +579,42 @@ describe('desktop services', () => {
     );
   });
 
+  it('keeps renderer-supplied local_ thread ids under strict continuity history checks', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    let adapterCalls = 0;
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      adapterCalls += 1;
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
+    });
+    try {
+      // Only Main-minted unthreaded IDs carry the server-side mark; a forged prefix must not.
+      await withoutBrowserGlobals(async () => {
+        await expect((async () => {
+          const created = await services.createTask({
+            prompt: '直接回复 ok',
+            materials: [],
+            context: { threadId: 'local_00000000-0000-4000-8000-000000000000' },
+          });
+          await waitFor(async () => {
+            const status = (await services.recoverTask(created.taskId)).snapshot.status;
+            return status === 'completed' || status === 'failed';
+          });
+          const recovered = await services.recoverTask(created.taskId);
+          if (recovered.snapshot.status !== 'completed') throw new Error('not_readable');
+        })()).rejects.toThrow('not_readable');
+      });
+      expect(adapterCalls).toBe(0);
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
   it('derives one provider-neutral cache affinity for a real default desktop task runner session', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -6357,12 +6393,13 @@ describe('A1 actual Main prepared-user admission entry',()=>{
     mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
     const runner=vi.fn(async()=>{}),failure=new Error('main-user-source-IO-failed'),actual=atomicUserFile.writeFileAtomicallySync;
     const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:mockKSwarmService(),runner});
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a1-failure' }).id; })();
     const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
     const writer=vi.spyOn(atomicUserFile,'writeFileAtomicallySync').mockImplementation((path,...args)=>{
       if(path.includes('user-inputs'))throw failure;return actual(path,...args);
     });
     try{
-      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:'thread-a1-failure'}})).rejects.toBe(failure);
+      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:continuityThreadId}})).rejects.toBe(failure);
       expect(runner).not.toHaveBeenCalled();expect(record).toHaveBeenCalledOnce();
       const actualTaskId=record.mock.calls[0][0].taskId;
       expect((await services.recoverTask(actualTaskId)).snapshot.status).toBe('cancelled');
