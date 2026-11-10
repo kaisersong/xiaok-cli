@@ -5107,16 +5107,40 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       return null;
     },
     async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
-      try { return await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
+      contextContinuity.assertTaskReadable(taskId);
+      let recovered: { snapshot: TaskSnapshot; recoveredFromTaskId?: string };
+      try { recovered = await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
       catch (error) {
         // Only a physically missing legacy task may use this read-only fallback.
         // Existing-but-unreadable/protected tasks retain their original error.
         if (!legacyPrompt || existsSync(join(options.dataRoot, 'tasks', 'snapshots', `${taskId}.json`))) throw error;
+        let legacyDenial: { raw: unknown } | undefined;
+        const assertLegacyReadable = (id: string) => {
+          if (legacyDenial) throw legacyDenial.raw;
+          try { contextContinuity.assertTaskReadable(id); }
+          catch (raw) { legacyDenial = { raw }; throw raw; }
+        };
         const snapshot = await findLegacyTaskHistory({ root: join(options.dataRoot, 'tasks'), prompt: legacyPrompt,
-          read: id => snapshotStore.recoverTask(id) });
+          read: async id => {
+            assertLegacyReadable(id);
+            const candidate = await snapshotStore.recoverTask(id);
+            assertLegacyReadable(id);
+            if (candidate) assertLegacyReadable(candidate.taskId);
+            return candidate;
+          } });
+        // The legacy selector catches read failures; a denied candidate must
+        // stop disclosure rather than silently select a different match.
+        if (legacyDenial) throw legacyDenial.raw;
+        contextContinuity.assertTaskReadable(taskId);
         if (!snapshot) throw error;
+        contextContinuity.assertTaskReadable(snapshot.taskId);
         return { snapshot, recoveredFromTaskId: snapshot.taskId };
       }
+      // Read denials after await must never enter the legacy fallback above.
+      contextContinuity.assertTaskReadable(taskId);
+      if (recovered.snapshot.taskId !== taskId) throw new Error('recovered_task_mismatch');
+      contextContinuity.assertTaskReadable(recovered.snapshot.taskId);
+      return recovered;
     },
     async recoverStaleTasks(): Promise<void> {
       await multiAgentReady;

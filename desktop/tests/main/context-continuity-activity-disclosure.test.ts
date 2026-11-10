@@ -9,9 +9,11 @@ import {ConversationActivityService} from '../../../src/runtime/conversation-act
 import {ConversationActivityStore} from '../../../src/runtime/conversation-activity/store.js';
 import {ConversationActivityOwnerClient} from '../../../src/runtime/conversation-activity/owner-client.js';
 import {activityOwnerConfigDigest,startConversationActivityOwner} from '../../../src/runtime/conversation-activity/owner-runtime.js';
+import {InProcessTaskRuntimeHost} from '../../../src/runtime/task-host/task-runtime-host.js';
 import {FileTaskSnapshotStore,recoverTaskSnapshotSync} from '../../../src/runtime/task-host/snapshot-store.js';
 const kswarmService={getStatus:()=>({running:false,port:0}),request:async()=>new Response('{}'),getDesktopMutationToken:()=> 'test'} as never;
-it.each(['main','attached-owner','ipc-microtask','ipc-sender-after-inner','ipc-diagnostic-microtask','owner-socket-microtask','owner-source-profile-work','owner-source-profile-list','owner-source-workspace-work','owner-source-workspace-list','ipc-source-epoch','ipc-source-thread','owner-source-epoch-socket','owner-source-thread-socket','ipc-source-epoch-journal','owner-source-thread-journal-socket'] as const)('enforces current grant, scope and source identity at real %s Activity disclosure',async mode=>{
+it.each(['main','main-recover-await','main-legacy-denial','attached-owner','ipc-microtask','ipc-sender-after-inner','ipc-diagnostic-microtask','owner-socket-microtask','owner-source-profile-work','owner-source-profile-list','owner-source-workspace-work','owner-source-workspace-list','ipc-source-epoch','ipc-source-thread','owner-source-epoch-socket','owner-source-thread-socket','ipc-source-epoch-journal','owner-source-thread-journal-socket'] as const)('enforces current grant, scope and source identity at real %s Activity disclosure',async mode=>{
+ const mainMode=mode==='main'||mode.startsWith('main-');
  const root=mkdtempSync(join(tmpdir(),'continuity-activity-disclosure-'));let refId='';
  let main=createDesktopServices({ knowledgeDbPath: join(root, 'knowledge.test.sqlite'),dataRoot:root,kswarmService,runner:async input=>{
   const p=main.continuity.port(),summary=input.prompt==='source'?'ACTIVITY_DERIVED_CANARY':p.service.resolveReference({...p.actor,requestSource:'agent',taskId:input.taskId},{refId}).messages.find(message=>message.role==='assistant')!.text;
@@ -34,11 +36,11 @@ it.each(['main','attached-owner','ipc-microtask','ipc-sender-after-inner','ipc-d
   try{store.prepareAssociation({operationId:'watch-op',creationIdempotencyKey:'watch-op',origin:{profileId,workspaceId,threadId:target.id,actorId:`desktop-user:${profileId}`}});
    store.bindWork({operationId:'watch-op',watchId:'derived-watch',source:'task_host',logicalSourceId:'task-host-local',sourceDataEpoch:snapshot.sessionId,workId:b.taskId,actualExecutionThreadId:target.id});
   }finally{store.close();}
-  if(mode!=='main'&&!mode.startsWith('ipc-'))process.env.XIAOK_CONVERSATION_ACTIVITY='0';
+  if(!mainMode&&!mode.startsWith('ipc-'))process.env.XIAOK_CONVERSATION_ACTIVITY='0';
   main=createDesktopServices({ knowledgeDbPath: join(root, 'knowledge.test.sqlite'),dataRoot:root,kswarmService});await main.multiAgent!.ready;
   const actor={requestSource:'user' as const,actorId:`desktop-user:${profileId}`};
   let getWork:()=>Promise<unknown>,list:()=>Promise<unknown>;
-  if(mode==='main'||mode.startsWith('ipc-')){
+  if(mainMode||mode.startsWith('ipc-')){
    main.bindConversationProjectRoomClient({} as never);
    getWork=()=>main.conversationActivity!.getWork('derived-watch',actor);list=()=>main.conversationActivity!.list(target.id,actor);
   }else{
@@ -83,11 +85,31 @@ it.each(['main','attached-owner','ipc-microtask','ipc-sender-after-inner','ipc-d
    // invalidation, which would otherwise mask the daemon's missing scope check.
    await expect(main.recoverTask(b.taskId)).rejects.toThrow('not_readable');
    expect(JSON.stringify(result)).not.toContain('ACTIVITY_DERIVED_CANARY');
+  }else if(mode==='main-recover-await'){
+   const original=InProcessTaskRuntimeHost.prototype.recoverTask;let revoked=false;
+   const spy=vi.spyOn(InProcessTaskRuntimeHost.prototype,'recoverTask').mockImplementation(async function(...args){
+    const result=await original.apply(this,args);
+    if(args[0]===b.taskId&&!revoked){revoked=true;current.service.revokeGrant(current.actor,grant);}
+    return result;
+   });
+   try{await expect(main.recoverTask(b.taskId)).rejects.toThrow('not_readable');expect(revoked).toBe(true);}
+   finally{spy.mockRestore();}
   }else current.service.revokeGrant(current.actor,grant);
   if(identityRace)return;
-  await expect(main.recoverTask(b.taskId)).rejects.toThrow('not_readable');
-  expect(JSON.stringify(await getWork())).not.toContain('ACTIVITY_DERIVED_CANARY');
-  expect(JSON.stringify(await list())).not.toContain('ACTIVITY_DERIVED_CANARY');
+  if(mode==='main-legacy-denial')await expect(main.recoverTask(b.taskId,'an old legacy prompt must never override revoked context access')).rejects.toThrow('not_readable');
+  else await expect(main.recoverTask(b.taskId)).rejects.toThrow('not_readable');
+  for (const read of [getWork, list]) {
+   let value: unknown;
+   try { value = await read(); }
+   catch (error) {
+    // The current Main reader may explicitly refuse a revoked source rather
+    // than return a redacted view. Unexpected failures are never accepted.
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^(not_readable|activity_source_forbidden)$/);
+    continue;
+   }
+   expect(JSON.stringify(value)).not.toContain('ACTIVITY_DERIVED_CANARY');
+  }
  }finally{
   client?.dispose();await owner?.stop();await main.disposeMultiAgent();if(prior===undefined)delete process.env.XIAOK_CONVERSATION_ACTIVITY;else process.env.XIAOK_CONVERSATION_ACTIVITY=prior;
   rmSync(root,{recursive:true,force:true,maxRetries:3});
