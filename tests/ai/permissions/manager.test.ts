@@ -2,6 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 
 describe('PermissionManager', () => {
+  it('synchronously notifies each policy revision so in-flight disclosure can be aborted', () => {
+    const pm = new PermissionManager({ mode: 'default' }); const request = new AbortController();
+    const seen: Array<[number, string]> = [];
+    const stop = pm.onRevisionChanged(revision => { seen.push([revision, pm.getMode()]); request.abort(); });
+    pm.setMode('auto'); expect(request.signal.aborted).toBe(true);
+    pm.addSessionRule('read:*'); pm.addSessionDenyRule('bash:*');
+    pm.setMode('auto'); pm.addSessionRule('read:*'); pm.addSessionDenyRule('bash:*');
+    expect(seen).toEqual([[1, 'auto'], [2, 'auto'], [3, 'auto']]);
+    stop(); pm.setMode('default'); expect(seen).toHaveLength(3);
+  });
+  it('notifies remaining revocation listeners even if an earlier host listener fails', () => {
+    const pm = new PermissionManager({ mode: 'default' }); const request = new AbortController();
+    pm.onRevisionChanged(() => { throw new Error('host-failure'); });
+    pm.onRevisionChanged(() => request.abort());
+    expect(() => pm.setMode('plan')).toThrow('permission_revision_listener_failed');
+    expect(request.signal.aborted).toBe(true); expect(pm.getRevision()).toBe(1); expect(pm.getMode()).toBe('plan');
+  });
+
   it('denies write tools in plan mode', async () => {
     const pm = new PermissionManager({ mode: 'plan' });
 
