@@ -6254,22 +6254,23 @@ describe('desktop services', () => {
     });
     const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
     services.subscribeGoalTaskPrepared(event => prepared.push(event));
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal' }).id; })();
 
     const created = await services.createGoal({
-      threadId: 'thread-goal', objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3,
+      threadId: continuityThreadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3,
     });
     expect(await services.getActiveTask()).toBeNull();
     await services.ackGoalTaskAttached({
-      threadId: 'thread-goal', attachmentId: created.preparedTask.attachmentId,
+      threadId: continuityThreadId, attachmentId: created.preparedTask.attachmentId,
     });
-    await waitFor(async () => (await services.getGoal('thread-goal'))?.state.turnsUsed === 1, 5000);
+    await waitFor(async () => (await services.getGoal(continuityThreadId))?.state.turnsUsed === 1, 5000);
     await waitFor(async () => prepared.length === 2, 5000);
     expect(prepared).toHaveLength(2);
     expect(await services.getActiveTask()).toBeNull();
-    expect(await services.getGoal('thread-goal')).toMatchObject({
+    expect(await services.getGoal(continuityThreadId)).toMatchObject({
       activation: 'armed', state: { status: 'active', tokensUsed: 5 },
     });
-    await services.pauseGoal('thread-goal');
+    await services.pauseGoal(continuityThreadId);
   });
 
   it('passes discussion cancellation through the real service runner boundary',async()=>{
@@ -6419,17 +6420,18 @@ describe('A1 actual Main prepared-user admission entry',()=>{
   it('commits an actual Host task/session source before the ordinary user runner starts',async()=>{
     const root=join(tmpdir(),`main-user-source-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
-    const dataRoot=join(root,'data');let observed=false;
+    const dataRoot=join(root,'data');let observed=false;let continuityThreadId='';
     const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
     const services=createDesktopServices({dataRoot,kswarmService:mockKSwarmService(),runner:async input=>{
       const path=join(dataRoot,'conversation-projects','user-inputs',createHash('sha256').update(input.taskId).digest('hex')+'.json');
       const fact=JSON.parse(readFileSync(path,'utf8'));
-      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:'thread-a1-main',requestSource:'user'});
+      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:continuityThreadId,requestSource:'user'});
       expect(fact.promptSha256).toBe(createHash('sha256').update(input.prompt).digest('hex'));observed=true;
       await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'analysis',stepId:'done',note:'已完成分析。'});
     }});
+    continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a1-main' }).id; })();
     try{
-      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:'thread-a1-main'}});
+      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:continuityThreadId}});
       for await(const event of services.subscribeTask(task.taskId)){if(event.type==='task_terminal')break;}
       expect(observed).toBe(true);expect(record).toHaveBeenCalledOnce();
       expect(record.mock.calls[0][0]).toMatchObject({taskId:task.taskId,status:'understanding'});
