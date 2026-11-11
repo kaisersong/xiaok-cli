@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { readContinuityProfile } from '../../src/runtime/context-continuity/profile-identity.js';
 import { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
@@ -10,6 +10,10 @@ import type { DesktopServicePorts } from './desktop-service-discovery.js';
 /** Read endpoints only after the existing profile credential handshake. The
  * ordinary owner attach still verifies current executable paths, hashes and tokens. */
 export async function activeOwnerServicePorts(dataRoot: string): Promise<DesktopServicePorts | undefined> {
+  // First start: the profile may already exist while no owner was ever
+  // configured. Nothing can be discovered then, and the owner client would
+  // refuse qualification before probing the socket (1.6.3 blank-config start).
+  if (!ownerConfigPresent(dataRoot)) return undefined;
   const client = new ConversationActivityOwnerClient(dataRoot, 'producer');
   try {
     let status: { generation: number; configDigest: string; profileId: string };
@@ -34,4 +38,9 @@ export async function activeOwnerServicePorts(dataRoot: string): Promise<Desktop
       || config.managedSources?.find(source => source.name === 'broker')?.healthUrl !== `${config.kswarm!.brokerUrl}/health`) throw new Error('activity_owner_endpoint_invalid');
     return ports;
   } finally { client.dispose(); }
+}
+
+function ownerConfigPresent(dataRoot: string): boolean {
+  try { lstatSync(join(realpathSync(dataRoot), ACTIVITY_STORAGE_NAMES.config)); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
 }

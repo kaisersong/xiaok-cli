@@ -1015,7 +1015,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if (dshSources) throw error;
     const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
     console.error('[main] Service bootstrap refused:', message);
-    dialog.showErrorBox('xiaok — 服务启动失败 / Service startup failed', message);
+    // Never block the main process with a synchronous modal here: the initial
+    // window may still be loading and would never appear (1.6.3 RC blocker).
+    void dialog.showMessageBox({ type: 'error', title: 'xiaok', message: 'xiaok — 服务启动失败 / Service startup failed', detail: message }).catch(() => undefined);
   });
   if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
