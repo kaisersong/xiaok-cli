@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, normalize } from 'node:path';
+import { join, normalize, relative, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { finished } from 'node:stream/promises';
 import { createPackageWithOptions, extractFile, statFile, uncache } from '@electron/asar';
@@ -75,3 +75,35 @@ describe('production dependency closure copy', () => {
 it('resolves a symlinked build project through its real installed ancestry',async()=>{const f=await fixture();const alias=join(f.root,'alias');symlinkSync(f.projectDir,alias,'junction');await copy({...f,projectDir:alias});expect(JSON.parse(extractFile(f.asarPath,normalize('node_modules/leaf/package.json')).toString()).version).toBe('1.0.0');});
 it('copies scoped nested versions using the actual npm scope directory layout',async()=>{const f=await fixture();pkg(f.projectDir,'@scope/leaf','1.0.0');pkg(join(f.projectDir,'node_modules','other'),'@scope/leaf','2.0.0');writeFileSync(join(f.projectDir,'node_modules','parent','package.json'),JSON.stringify({name:'parent',version:'1.0.0',dependencies:{'@scope/leaf':'1'}}));writeFileSync(join(f.projectDir,'node_modules','other','package.json'),JSON.stringify({name:'other',version:'1.0.0',dependencies:{'@scope/leaf':'2'}}));await copy(f);expect(JSON.parse(extractFile(f.asarPath,normalize('node_modules/@scope/leaf/package.json')).toString()).version).toBe('1.0.0');expect(JSON.parse(extractFile(f.asarPath,normalize('node_modules/other/node_modules/@scope/leaf/package.json')).toString()).version).toBe('2.0.0');});
 it('rejects a package-internal symlink before mutating either the archive or existing unpacked bytes',async()=>{const f=await fixture();symlinkSync('index.js',join(f.projectDir,'node_modules','leaf','linked.js'));const before=readFileSync(f.asarPath),native=readFileSync(join(f.asarPath+'.unpacked','dist','native.node'));await expect(copy(f)).rejects.toThrow(/symlink/);expect(readFileSync(f.asarPath)).toEqual(before);expect(readFileSync(join(f.asarPath+'.unpacked','dist','native.node'))).toEqual(native);});
+
+function unpackedModes(dir: string, base = dir, out = new Map<string, number>()) {
+  for (const item of readdirSync(dir, { withFileTypes: true })) {
+    const file = join(dir, item.name);
+    if (item.isDirectory()) unpackedModes(file, base, out);
+    else out.set(relative(base, file).split(sep).join('/'), statSync(file).mode & 0o7777);
+  }
+  return out;
+}
+it('keeps the on-disk permission bits of every existing unpacked file when the archive is rebuilt', async () => {
+  const f = await fixture();
+  const bin = join(f.app, 'node_modules', 'parent', 'bin'); mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'tool'), '#!/bin/sh\necho ok\n'); chmodSync(join(bin, 'tool'), 0o755);
+  writeFileSync(join(bin, 'data.txt'), 'plain'); chmodSync(join(bin, 'data.txt'), 0o644);
+  chmodSync(join(f.app, 'dist', 'native.node'), 0o755);
+  rmSync(f.asarPath + '.unpacked', { recursive: true, force: true }); // existing files would keep their old mode
+  await finished(await createPackageWithOptions(f.app, f.asarPath, { unpack: '**/*.node', unpackDir: 'node_modules/parent/bin' }), { cleanup: true }); uncache(f.asarPath);
+  const unpacked = f.asarPath + '.unpacked';
+  const before = unpackedModes(unpacked);
+  expect([...before.keys()].sort()).toEqual(['dist/native.node', 'node_modules/parent/bin/data.txt', 'node_modules/parent/bin/tool']);
+  if (process.platform !== 'win32') {
+    expect(before.get('node_modules/parent/bin/tool')).toBe(0o755);
+    expect(before.get('dist/native.node')).toBe(0o755);
+    expect(before.get('node_modules/parent/bin/data.txt')).toBe(0o644);
+  }
+  const result = await copy(f);
+  expect(result.copied.length).toBeGreaterThan(0); // the rebuild path actually ran
+  const after = unpackedModes(unpacked);
+  for (const [key, mode] of before) expect([key, (after.get(key) ?? -1).toString(8)]).toEqual([key, mode.toString(8)]);
+  expect(readFileSync(join(unpacked, 'node_modules', 'parent', 'bin', 'tool'), 'utf8')).toBe('#!/bin/sh\necho ok\n');
+  expect(statFile(f.asarPath, normalize('node_modules/parent/bin/tool')).unpacked).toBe(true);
+});
