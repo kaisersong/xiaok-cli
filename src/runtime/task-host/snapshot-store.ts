@@ -5,7 +5,7 @@ import {scanTaskStoreSdkChildren} from './source-sdk-children.js';
 import {registerSourceSyncCustodyOwner,createSourceSyncCustodyContext,type SourceSyncSdkKind} from './source-sync-custody.js';
 import {captureOriginalChildPreparation,readOriginalChildPreparationObservationTicket,readOriginalChildPreparationTicket,assertOriginalChildPreparationSnapshot,assertOriginalChildPreparationTransition,originalPreparedContentDigest,originalChildPreparationSourceData,assertOriginalChildPreparationInput} from './default-dispatch-preparation.js';
 import {createKnownDirectoryWriterFence} from '../verification/known-directory-writer-fence.js';
-import {assertOrdinarySourceWriterRoute,observeOrdinaryDirectoryWriter} from '../verification/ordinary-source-writer-observation.js';
+import {assertOrdinarySourceWriterRoute,observeOrdinaryDirectoryWriter,openOrdinarySourceRouteScope} from '../verification/ordinary-source-writer-observation.js';
 import {assertCapturedJsonUniqueKeys} from '../verification/captured-source-json.js';
 import {createCapturedTaskDeclarationAccumulator} from './captured-task-declarations.js';
 import {observeTaskSnapshotCompletion,observeTaskSnapshotCompletionSync,withoutTaskCompletionObservation} from './snapshot-completion-observation.js';
@@ -632,8 +632,11 @@ export class FileTaskSnapshotStore {
     context??=this.#sourceContext(()=>{},'prepare');
     const job:StorePhysicalJob={done:false,operations:[],raws:[],resources:[]};this.#physicalJobs.add(job);syncApply(sdkWeakSet,this.#physicalContextJobs,[context,job]);
     const run = this.#writerQueue.then(async () => {
+      // One Windows absence spawn per job: the route checks below share this
+      // job's own answer; it is closed before the action and when the job ends.
+      const routeScope=openOrdinarySourceRouteScope();
       try{
-      assertOrdinarySourceWriterRoute();
+      assertOrdinarySourceWriterRoute(routeScope);
       await this.#sourceSdk(context,'mkdir',sdkMkdir,[this.#rootDir,{recursive:true}]);
       const root = this.#sourceStat(this.#rootDir,context), resolved = context?this.#sourceSyncSdk(context,'string',sdkRealpath,[this.#rootDir]) as string:realpathSync(this.#rootDir);
       if (!this.#statKind(root,'directory',context) || this.#statKind(root,'symlink',context)) throw Error('task_store_identity_changed');
@@ -656,8 +659,9 @@ export class FileTaskSnapshotStore {
           try {
               assertCurrent();
               knownTaskWriters.get(this)!.fence.assertOpen();
-              observeOrdinaryDirectoryWriter(resolved, 'task-root');
-              assertOrdinarySourceWriterRoute();
+              observeOrdinaryDirectoryWriter(resolved, 'task-root', routeScope);
+              assertOrdinarySourceWriterRoute(routeScope);
+              routeScope.close();
               assertCurrent();
               // This admitted sequence retains the original Task lock across every
               // awaited write. Pending migration must acquire that same lock later.
@@ -696,7 +700,7 @@ export class FileTaskSnapshotStore {
       if (settledBodyFailure)
           throw settledBodyFailure.error;
       return settledBodyResult;
-      }finally{await this.#joinSourceSync(context);}
+      }finally{routeScope.close();await this.#joinSourceSync(context);}
     }).finally(()=>{job.done=true;this.#physicalJobs.delete(job);});
     const tracked = run.then(() => undefined, () => undefined);
     this.#writerQueue = tracked;

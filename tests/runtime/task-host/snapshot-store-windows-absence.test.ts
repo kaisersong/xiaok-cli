@@ -44,27 +44,69 @@ import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-s
 const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-it('spawns the absence helper for every route check of every separate save, hashing the unchanged helper once', async () => {
+const baseSnapshot = (taskId: string): TaskSnapshot => ({ taskId, sessionId: 'sess_1', status: 'running', prompt: 'p', materials: [], events: [], createdAt: 1, updatedAt: 2 });
+const withEvent = (snapshot: TaskSnapshot, id: string): TaskSnapshot => ({ ...snapshot, events: [...snapshot.events, { type: 'assistant_delta', eventId: id, delta: 'x' }], updatedAt: snapshot.updatedAt + 1 });
+function newStore(): FileTaskSnapshotStore {
   const root = mkdtempSync(join(tmpdir(), 'task-store-win-absence-')); roots.push(root);
-  const store = new FileTaskSnapshotStore(root);
-  let snapshot: TaskSnapshot = { taskId: 'task_win', sessionId: 'sess_1', status: 'running', prompt: 'p', materials: [], events: [], createdAt: 1, updatedAt: 2 };
+  return new FileTaskSnapshotStore(root);
+}
+
+it('spawns the absence helper exactly once per save (one write job), hashing the unchanged helper once', async () => {
+  fixture.reply = '{"version":1,"kind":"ordinary"}';
+  const store = newStore();
+  let snapshot = baseSnapshot('task_win');
   const perSave: number[] = [];
   vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
   for (let index = 0; index < 5; index += 1) {
-    snapshot = { ...snapshot, events: [...snapshot.events, { type: 'assistant_delta', eventId: `event-${index}`, delta: 'x' }], updatedAt: index + 3 };
+    snapshot = withEvent(snapshot, `event-${index}`);
     const before = fixture.spawned;
     await store.save(snapshot);
     perSave.push(fixture.spawned - before);
   }
-  // #enqueueWrite: route check at job start, observeOrdinaryDirectoryWriter's
-  // own check, and the route check after it. No observation crosses a call.
-  expect(perSave).toEqual([3, 3, 3, 3, 3]);
-  expect(fixture.spawned).toBe(15);
+  // #enqueueWrite: the route check at job start spawns; observeOrdinaryDirectoryWriter's
+  // check and the route check after it reuse that job's own answer. Nothing crosses a save.
+  expect(perSave).toEqual([1, 1, 1, 1, 1]);
+  expect(fixture.spawned).toBe(5);
   // Integrity is verified once (manifest parse + one helper hash) and then
   // reused only because the fixture keeps both files' identity unchanged.
   expect(fixture.helperReads).toBe(1);
   expect(fixture.manifestReads).toBe(2);
   // A changed system answer is still seen by the very next save.
   fixture.reply = '{"version":1,"kind":"installed"}';
-  await expect(store.save({ ...snapshot, updatedAt: 99 })).rejects.toThrow('ordinary_source_route');
+  const before = fixture.spawned;
+  await expect(store.save(withEvent(snapshot, 'event-installed'))).rejects.toThrow('ordinary_source_route');
+  expect(fixture.spawned - before).toBe(1);
+});
+
+it('does not carry a failed job\'s ordinary answer into the next job', async () => {
+  fixture.reply = '{"version":1,"kind":"ordinary"}';
+  const store = newStore();
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+  const first = withEvent(withEvent(baseSnapshot('task_err'), 'event-a'), 'event-b');
+  await store.save(first);
+  // Dropping an event fails inside the job's action, after the route checks.
+  let before = fixture.spawned;
+  await expect(store.save({ ...first, events: first.events.slice(0, 1), updatedAt: 50 })).rejects.toThrow();
+  expect(fixture.spawned - before).toBe(1);
+  fixture.reply = '{"version":1,"kind":"installed"}';
+  before = fixture.spawned;
+  await expect(store.save(withEvent(first, 'event-c'))).rejects.toThrow('ordinary_source_route');
+  expect(fixture.spawned - before).toBe(1);
+  fixture.reply = '{"version":1,"kind":"ordinary"}';
+  before = fixture.spawned;
+  await store.save(withEvent(first, 'event-d'));
+  expect(fixture.spawned - before).toBe(1);
+});
+
+it('gives overlapping jobs on different stores their own spawn each', async () => {
+  fixture.reply = '{"version":1,"kind":"ordinary"}';
+  const left = newStore(), right = newStore();
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+  const before = fixture.spawned;
+  let settled = 0, spawnedBeforeFirstSettle = -1;
+  const track = (job: Promise<void>) => job.then(() => { if (settled++ === 0) spawnedBeforeFirstSettle = fixture.spawned - before; });
+  await Promise.all([track(left.save(withEvent(baseSnapshot('task_left'), 'l'))), track(right.save(withEvent(baseSnapshot('task_right'), 'r')))]);
+  // Both jobs were in flight together, and neither reused the other's answer.
+  expect(spawnedBeforeFirstSettle).toBe(2);
+  expect(fixture.spawned - before).toBe(2);
 });

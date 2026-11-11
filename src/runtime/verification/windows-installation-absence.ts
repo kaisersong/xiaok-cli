@@ -9,6 +9,26 @@ type IntegrityMemo = { helper: string; manifestPath: string; key: string | undef
 /** Process-lifetime memo of the helper integrity check only (manifest parse and
  * helper sha256), bound to both files' identity. Never holds a helper answer. */
 let integrityMemo: IntegrityMemo | undefined;
+/** One write job's absence observation, opened and closed by that job. The
+ * object is opaque: only this module fills or reads its answer. */
+export type WindowsAbsenceJobScope = Readonly<{ close(): void }>;
+const jobScopes = new WeakMap<object, { open: boolean; ordinary: boolean }>();
+export function openWindowsAbsenceJobScope(): WindowsAbsenceJobScope {
+    const state = { open: true, ordinary: false };
+    const scope: WindowsAbsenceJobScope = Object.freeze({ close(): void { state.open = false; state.ordinary = false; } });
+    jobScopes.set(scope, state);
+    return scope;
+}
+/** Reuses only an 'ordinary' answer spawned inside the same still-open job
+ * scope. A closed, foreign or missing scope, and every non-ordinary answer,
+ * spawn the helper again; nothing crosses jobs. */
+export function readWindowsInstallationAbsenceInJob(scope: WindowsAbsenceJobScope): WindowsInstallationObservation {
+    const state = jobScopes.get(scope);
+    if (state?.open && state.ordinary) return 'ordinary';
+    const answer = readWindowsInstallationAbsence();
+    if (state?.open && answer === 'ordinary') state.ordinary = true;
+    return answer;
+}
 /** Fixed client-bundled read-only helper. This is not a protected Windows
  * controller or a qualification receipt. Missing build artifacts deny fallback. */
 export function readWindowsInstallationAbsence(): WindowsInstallationObservation {

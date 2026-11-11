@@ -1,5 +1,5 @@
 import {isKSwarmOwnerIdentity} from './kswarm-host-subject.js';
-import {readWindowsInstallationAbsence} from './windows-installation-absence.js';
+import {readWindowsInstallationAbsence,readWindowsInstallationAbsenceInJob,type WindowsAbsenceJobScope} from './windows-installation-absence.js';
 import {createHash} from 'node:crypto';
 import {constants,closeSync,fstatSync,lstatSync,openSync,readFileSync,type Stats} from 'node:fs';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
@@ -96,10 +96,11 @@ export function readInstalledMigrationOwner(raw:VerificationOwner):Readonly<Inst
 }
 
 export type InstalledCurrentProfile={kind:'ordinary'}|{kind:'protected';index:Readonly<PublicProfileIndex>}|{kind:'unavailable';reason:'migration_authority_unavailable'};
-/** Current OS account only; no model-selected profile, UID, root or helper override. */
-export function readInstalledCurrentProfile():Readonly<InstalledCurrentProfile>{
+/** Current OS account only; no model-selected profile, UID, root or helper override.
+ * An open write-job scope may only reuse that job's own Windows absence answer. */
+export function readInstalledCurrentProfile(jobScope?:WindowsAbsenceJobScope):Readonly<InstalledCurrentProfile>{
  try{
-  if(process.platform==='win32'){if(readWindowsInstallationAbsence()==='ordinary')return Object.freeze({kind:'ordinary'});throw Error('profile_installed_windows_unavailable');}
+  if(process.platform==='win32'){if((jobScope?readWindowsInstallationAbsenceInJob(jobScope):readWindowsInstallationAbsence())==='ordinary')return Object.freeze({kind:'ordinary'});throw Error('profile_installed_windows_unavailable');}
   if(!['darwin','linux'].includes(process.platform))throw Error('profile_installed_platform');
   const base=process.platform==='darwin'?'/Library/Application Support/xiaok-verification':'/var/lib/xiaok-verification';
   if(!probe(base)){rootAncestors(dirname(base));return Object.freeze({kind:'ordinary'});}
