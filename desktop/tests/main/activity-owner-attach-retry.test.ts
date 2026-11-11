@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Socket } from 'node:net';
 
 const ensure = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/runtime/conversation-activity/owner-launcher.js', async importOriginal => ({
@@ -137,6 +138,14 @@ describe('all public activity facades share the existing owner attachment gate',
     // attached-service actor checks and overview subscription lifecycle are real.
     const request = vi.spyOn(client, 'request').mockResolvedValue(undefined);
     const overview = vi.spyOn(client, 'subscribeOverview');
+    // subscribe/overview are already inside the client's #admit and use the
+    // private #requestEntered (no nested admission), so they never reach the
+    // public request() above. Script their wire RPC at the same inner boundary:
+    // the client is handed over as an attached owner connection (as the launcher
+    // returns it) and the socket write is replaced, so no real socket is opened.
+    const wire = { destroyed: false } as unknown as Socket;
+    Object.assign(client as unknown as { socket: Socket; ownerEpoch: string; connectionIncarnation: string }, { socket: wire, ownerEpoch: 'e1', connectionIncarnation: 'attached' });
+    const socketRpc = vi.spyOn(client as unknown as { requestOnSocket(method: string, params: Record<string, unknown>, connection: unknown): Promise<unknown> }, 'requestOnSocket').mockResolvedValue(undefined);
     const disposed = vi.spyOn(ConversationActivityService.prototype, 'dispose');
     const localCalls = [
       vi.spyOn(ConversationActivityService.prototype, 'getWork'),
@@ -177,7 +186,7 @@ describe('all public activity facades share the existing owner attachment gate',
       await checkpoint();
       expect(firstCall.settled()).toBe(false);
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       expect(kswarmService.bindActivityOwner).not.toHaveBeenCalled();
       const primary = new Error('activity_owner_start_timeout'); first.reject(primary);
       expect(await attachment.outcome).toEqual({ ok: false, error: primary });
@@ -186,7 +195,7 @@ describe('all public activity facades share the existing owner attachment gate',
       expect(failed.error).toBeInstanceOf(Error);
       expect(failed.error).toHaveProperty('message', 'activity_owner_unavailable');
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       expect(callback).not.toHaveBeenCalled(); expect(kswarmService.bindActivityOwner).not.toHaveBeenCalled();
 
       // The failed attach already closed Main's in-process writer, so the
@@ -202,7 +211,7 @@ describe('all public activity facades share the existing owner attachment gate',
       await vi.waitFor(() => expect(ensure).toHaveBeenCalledTimes(2));
       const retryCall = observe(() => invokeFacade(name, api, identity, callback)); pending.push(retryCall.outcome);
       await checkpoint(); expect(retryCall.settled()).toBe(false);
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       retry.resolve(client);
       expect(await retryAttachment.outcome).toEqual({ ok: true, value: undefined });
       const success = await retryCall.outcome;
@@ -212,12 +221,14 @@ describe('all public activity facades share the existing owner attachment gate',
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
       if (name === 'overview') {
         expect(overview).toHaveBeenCalledTimes(1); expect(overview).toHaveBeenCalledWith(callback);
-        expect(request).toHaveBeenCalledTimes(1);
-        expect(request).toHaveBeenCalledWith('overview', { subscriptionId: expect.any(String) });
+        expect(socketRpc).toHaveBeenCalledTimes(1);
+        expect(socketRpc).toHaveBeenCalledWith('overview', { subscriptionId: expect.any(String) }, { socket: wire, epoch: 'e1', incarnation: 'attached' });
+        expect(request).not.toHaveBeenCalled();
         if (typeof success.value !== 'function') throw new Error('overview_cleanup_missing');
         const unsubscribe = success.value; stopOverview = () => { unsubscribe(); };
         stopOverview(); stopOverview = undefined;
-        expect(request).toHaveBeenCalledWith('unsubscribe', request.mock.calls[0][1]);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(request).toHaveBeenCalledWith('unsubscribe', socketRpc.mock.calls[0][1]);
       } else {
         const expected: Record<Exclude<FacadeName, 'overview'>, unknown[][]> = {
           mcpInputs: [['work', { watchId: 'watch' }], ['work', { watchId: 'watch' }], ['mcpInputs', { watchId: 'watch' }]],
@@ -227,6 +238,7 @@ describe('all public activity facades share the existing owner attachment gate',
           stop: [['stop', { watchId: 'watch', revision: 7 }]],
         };
         expect(request.mock.calls).toEqual(expected[name]);
+        expect(socketRpc).not.toHaveBeenCalled();
       }
     } catch (error) { errors.push(error); } finally {
       // Always settle/join this test's held attach/call promises before closing

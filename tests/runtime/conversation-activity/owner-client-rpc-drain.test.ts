@@ -224,3 +224,40 @@ it('waits for an earlier actual socket after reconnect, even with no pending wir
     expect(previous.closed).toBe(true);
   });
 });
+
+it('rejects subscribe/overview admitted after seal, leaves no subscription rows and closes within the drain budget', async () => {
+  await withActualClient(async (client, _service, observeSocket) => {
+    const rows = () => (client as unknown as { subscriptions: Map<string, unknown> }).subscriptions;
+    await client.connect(); observeSocket();
+    // One established overview subscription and one still in flight when close seals.
+    const established = await client.subscribeOverview(() => {});
+    expect(typeof established).toBe('function');
+    expect(rows().size).toBe(1);
+    const inFlight = client.subscribeOverview(() => {});
+    const inFlightOutcome = Promise.allSettled([inFlight]);
+    expect(rows().size).toBe(2);
+    const closing = client.close();
+    // seal() is synchronous inside close(): the cut is taken and rows are cleared.
+    expect(rows().size).toBe(0);
+    const late = [client.subscribe('thread', () => {}), client.subscribeOverview(() => {})];
+    const lateOutcome = await Promise.allSettled(late);
+    for (const result of lateOutcome) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') expect(result.reason).toHaveProperty('message', 'activity_client_disposed');
+    }
+    expect(rows().size).toBe(0);
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    const closed = await Promise.race([
+      closing.then(() => 'closed' as const),
+      new Promise<'over_budget'>(resolve => { budget = setTimeout(() => resolve('over_budget'), 3000); }),
+    ]).finally(() => clearTimeout(budget));
+    expect(closed).toBe('closed');
+    // The in-flight call was admitted before seal, so it is in the close cut and
+    // completes normally; its row was already cleared by seal and is not re-added.
+    const [flight] = await inFlightOutcome;
+    expect(flight.status).toBe('fulfilled');
+    expect(rows().size).toBe(0);
+    established();
+    expect(rows().size).toBe(0);
+  });
+});

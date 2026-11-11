@@ -238,7 +238,7 @@ export class ConversationActivityOwnerClient {
   }
   async #subscribeEntered(threadId: string, handler: (change: ActivityChange) => void): Promise<() => void> {
     const subscriptionId = randomUUID(); this.subscriptions.set(subscriptionId, { threadId, handler });
-    try { await this.request('subscribe', { threadId, subscriptionId }); }
+    try { await this.#requestEntered('subscribe', { threadId, subscriptionId }); }
     catch (error) { this.subscriptions.delete(subscriptionId); throw error; }
     return () => { this.subscriptions.delete(subscriptionId); if (!this.disposed) void this.request('unsubscribe', { subscriptionId }).catch(() => {}); };
   }
@@ -247,7 +247,7 @@ export class ConversationActivityOwnerClient {
   }
   async #subscribeOverviewEntered(handler: (change: ActivityChange) => void): Promise<() => void> {
     const subscriptionId = randomUUID(); this.subscriptions.set(subscriptionId, { threadId: null, handler });
-    try { await this.request('overview', { subscriptionId }); }
+    try { await this.#requestEntered('overview', { subscriptionId }); }
     catch (error) { this.subscriptions.delete(subscriptionId); throw error; }
     return () => { this.subscriptions.delete(subscriptionId); if (!this.disposed) void this.request('unsubscribe', { subscriptionId }).catch(() => {}); };
   }
