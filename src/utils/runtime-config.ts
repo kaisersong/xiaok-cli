@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from 'node:util';
 import type {Config,LegacyConfig,ModelAdapter} from '../types.js';
 import {DEFAULT_CONFIG,isValidLegacyProvider} from '../types.js';
 import {ProtectedJsonFile} from './protected-json.js';
@@ -18,25 +19,39 @@ export function loadRuntimeConfig(){
   const legacyApiPath=['models',String(raw?.defaultModel),'apiKey'];
   const selectedProvider=resolveConfiguredModelBinding(config).providerId;
   const hasModelCredentials=snapshot.credentialPaths.some(path=>raw?.schemaVersion===1?JSON.stringify(path)===JSON.stringify(legacyApiPath):path[0]==='providers'&&path[1]===selectedProvider&&['apiKey','headers'].includes(path[2]));
+  const transportIdentity=(view:ReturnType<ProtectedJsonFile['readPublic']>)=>{
+    const current=view.value?normalizeConfig(view.value as unknown as Config|LegacyConfig):structuredClone(DEFAULT_CONFIG);
+    const binding=resolveConfiguredModelBinding(current);
+    const selectedPaths=view.credentialPaths.filter(path=>view.value?.schemaVersion===1
+      ?path[0]==='models'&&path[1]===view.value.defaultModel
+      :path[0]==='providers'&&path[1]===binding.providerId);
+    return {schemaVersion:view.value?.schemaVersion,providerId:binding.providerId,modelId:binding.modelId,
+      provider:current.providers[binding.providerId],model:current.models[binding.modelId],
+      credentials:selectedPaths.map(path=>({path,version:view.credentialVersion(path)})).sort((a,b)=>JSON.stringify(a.path).localeCompare(JSON.stringify(b.path)))};
+  };
+  let acceptedIdentity=transportIdentity(snapshot);
   freezePublicConfig(config);
   return {config,hasModelCredentials,hasCredentials:snapshot.credentialPaths.length>0,
     resolveTransport:()=>{
+      const fresh=store.readPublic();
+      if(!isDeepStrictEqual(acceptedIdentity,transportIdentity(fresh)))throw Error('credential_config_changed');
       const {providerId}=resolveConfiguredModelBinding(config);
       const resolved=structuredClone(config);
       const provider=resolved.providers[providerId];
       const hasEnvironmentKey=Boolean(resolveProviderApiKey(config,providerId));
       try{
-        for(const path of snapshot.credentialPaths){
+        for(const path of fresh.credentialPaths){
           if(raw?.schemaVersion===1){
-            if(path[0]==='models'&&path[1]===raw.defaultModel&&path[2]==='apiKey'&&!hasEnvironmentKey)provider.apiKey=snapshot.resolve(path) as string;
+            if(path[0]==='models'&&path[1]===raw.defaultModel&&path[2]==='apiKey'&&!hasEnvironmentKey)provider.apiKey=fresh.resolve(path) as string;
           }else if(path[0]==='providers'&&path[1]===providerId){
-            if(path.length===3&&path[2]==='apiKey'&&!hasEnvironmentKey)provider.apiKey=snapshot.resolve(path) as string;
-            if(path.length===4&&path[2]==='headers')provider.headers={...provider.headers,[path[3]]:snapshot.resolve(path) as string};
+            if(path.length===3&&path[2]==='apiKey'&&!hasEnvironmentKey)provider.apiKey=fresh.resolve(path) as string;
+            if(path.length===4&&path[2]==='headers')provider.headers={...provider.headers,[path[3]]:fresh.resolve(path) as string};
           }
         }
         // Also check the version for env-only and unauthenticated providers.
-        snapshot.resolve([]);
+        fresh.resolve([]);
         const binding=resolveRuntimeModelBinding(resolved);
+        acceptedIdentity=transportIdentity(fresh);
         return {apiKey:binding.apiKey,headers:binding.headers};
       }catch(error){
         if(error instanceof Error&&['credential_store_unavailable','credential_missing'].includes(error.message)){
