@@ -19,6 +19,20 @@ export function openWindowsAbsenceJobScope(): WindowsAbsenceJobScope {
     jobScopes.set(scope, state);
     return scope;
 }
+/** Test-only invert for the documented reverse-control run. Default stays enabled. */
+let ordinaryRouteJobScopeReuse = true;
+export function setOrdinaryRouteJobScopeReuse(enabled: boolean): void { ordinaryRouteJobScopeReuse = enabled; }
+export function isOrdinaryRouteJobScopeReuseEnabled(): boolean { return ordinaryRouteJobScopeReuse; }
+/** True only while this still-open job already stored its own ordinary-route answer. */
+export function ordinaryRouteCachedInJob(scope: WindowsAbsenceJobScope): boolean {
+    const state = jobScopes.get(scope);
+    return !!(state?.open && state.ordinary);
+}
+/** Remember an ordinary-route answer only if this scope is still open and known. */
+export function rememberOrdinaryRouteInJob(scope: WindowsAbsenceJobScope): void {
+    const state = jobScopes.get(scope);
+    if (state?.open) state.ordinary = true;
+}
 /** Reuses only an 'ordinary' answer spawned inside the same still-open job
  * scope. A closed, foreign or missing scope, and every non-ordinary answer,
  * spawn the helper again; nothing crosses jobs. */

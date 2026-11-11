@@ -632,8 +632,9 @@ export class FileTaskSnapshotStore {
     context??=this.#sourceContext(()=>{},'prepare');
     const job:StorePhysicalJob={done:false,operations:[],raws:[],resources:[]};this.#physicalJobs.add(job);syncApply(sdkWeakSet,this.#physicalContextJobs,[context,job]);
     const run = this.#writerQueue.then(async () => {
-      // One Windows absence spawn per job: the route checks below share this
-      // job's own answer; it is closed before the action and when the job ends.
+      // One ordinary-route probe per job (Windows absence or POSIX ancestor ACL):
+      // the route checks below share this job's own answer; it is closed before
+      // the action and when the job ends.
       const routeScope=openOrdinarySourceRouteScope();
       try{
       assertOrdinarySourceWriterRoute(routeScope);

@@ -17,7 +17,7 @@ export function assertOrdinarySourceWriterRoute(jobScope?:OrdinarySourceRouteSco
 export function observeOrdinaryDirectoryWriter(path:string,kind:Exclude<OrdinaryProfileSourceInput['kind'],'sqlite-db'>,jobScope?:OrdinarySourceRouteScope):void {
  assertOrdinarySourceWriterRoute(jobScope);
  if(process.platform==='win32')return;
- registerOrdinaryProfileSource({kind,directory:realpathSync(path)});
+ registerOrdinaryProfileSource({kind,directory:realpathSync(path)},jobScope);
 }
 /** Called after the original SQLite open and before its first schema/data write.
  * Windows ordinary absence is verified first; its POSIX inventory stays unknown. */

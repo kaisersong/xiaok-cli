@@ -8,6 +8,7 @@ import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {acquireSaveLock} from '../../ai/runtime/session-store/mutation-lock.js';
 import {writeFileAtomicallySync,syncDirectoryTreeStrict,readOwnAtomicErrorCode} from '../../utils/atomic-file.js';
 import {readInstalledCurrentProfile} from './migration-markers.js';
+import type {WindowsAbsenceJobScope} from './windows-installation-absence.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
 const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1','broker-room-sqlite-v1'] as const;
@@ -136,17 +137,17 @@ function read(path:string,uid:number):Readonly<OrdinaryProfileSources>|undefined
 export function readOrdinaryProfileSources():Readonly<OrdinaryProfileSources>|undefined{
  const loc=location(false);if(!loc)return undefined;const facts=read(loc.path,loc.uid);loc.assertCurrent();return facts;
 }
-export function registerOrdinaryProfileSource(input:OrdinaryProfileSourceInput):void{ registerSource(input); }
+export function registerOrdinaryProfileSource(input:OrdinaryProfileSourceInput,jobScope?:WindowsAbsenceJobScope):void{ registerSource(input,undefined,undefined,jobScope); }
 /** Discovery observations only: these never clear legacy/unknown history or grant custody. */
 export function registerOrdinarySQLiteLayout(input:Extract<OrdinaryProfileSourceInput,{kind:'sqlite-db'}>,layout:OrdinarySQLiteLayout,expectedPhysicalIdentity?:string):void{
  if(input.kind!=='sqlite-db'||input.snapshotFormat!=='loop-sqlite-v1')fail('schema');
  registerSource(input,parseLayout(structuredClone(layout)),expectedPhysicalIdentity);
 }
-function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<OrdinarySQLiteLayout>,expectedPhysicalIdentity?:string):void{
- if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<OrdinarySQLiteLayout>,expectedPhysicalIdentity?:string,jobScope?:WindowsAbsenceJobScope):void{
+ if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
  const observed=source(input);if(expectedPhysicalIdentity!==undefined&&(!observed.database||`${observed.database.device}:${observed.database.inode}`!==expectedPhysicalIdentity))fail('identity');const loc=location(true)!;const release=acquireSaveLock(join(loc.root,'.profile-source-registry.lock'));
  try{
-  loc.assertCurrent();if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+  loc.assertCurrent();if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
   const original=read(loc.path,loc.uid);let sources=[...(original?.sources??[])];
   const priorByNamespace=sources.find(row=>row.namespaceId===observed.namespaceId);let priorBySource=sources.find(row=>row.sourceId===observed.sourceId);
   const removed:Readonly<OrdinaryProfileSource>[]=[];
@@ -181,7 +182,7 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
    catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
     fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); source size ${Buffer.byteLength(JSON.stringify({...validated,sources:[merged]}))} bytes (expanded JSON). Source: ${shortPath(merged.directory.canonicalPath)}. 这个来源自己就超过上限，清理其他项目没有用；Reduce source path or metadata size（换一个更短的项目路径后重试）。`);}
    fail(`capacity: registry cannot fit the current source; ${capacityDetails}`);}
-  loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+  loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();
   // Remember only the bytes this call wrote and synced; a concurrent replacement is not ours to vouch for.

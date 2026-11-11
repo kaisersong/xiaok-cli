@@ -53,5 +53,6 @@ jobs:
           .test-dist/tests/runtime/task-host/snapshot-store-ordinary-physical.test.js
           .test-dist/tests/runtime/task-host/snapshot-store-close-physical.test.js
           .test-dist/tests/runtime/task-host/snapshot-store-windows-temp-identity.test.js
+          .test-dist/tests/runtime/task-host/snapshot-store-ordinary-acl-scope.test.js
           .test-dist/tests/runtime/task-host/snapshot-protection-worker.test.js
           --maxWorkers=1 --no-file-parallelism

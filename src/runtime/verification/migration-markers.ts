@@ -1,5 +1,5 @@
 import {isKSwarmOwnerIdentity} from './kswarm-host-subject.js';
-import {readWindowsInstallationAbsence,readWindowsInstallationAbsenceInJob,type WindowsAbsenceJobScope} from './windows-installation-absence.js';
+import {isOrdinaryRouteJobScopeReuseEnabled,ordinaryRouteCachedInJob,readWindowsInstallationAbsence,readWindowsInstallationAbsenceInJob,rememberOrdinaryRouteInJob,type WindowsAbsenceJobScope} from './windows-installation-absence.js';
 import {createHash} from 'node:crypto';
 import {constants,closeSync,fstatSync,lstatSync,openSync,readFileSync,type Stats} from 'node:fs';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
@@ -38,13 +38,19 @@ function rootAncestors(input:string){
  const snapshots:Array<{path:string;stat:ReturnType<typeof rootAncestorStat>}>=[];
  let path=resolve(input);
  for(;;){snapshots.push({path,stat:rootAncestorStat(path)});const parent=dirname(path);if(parent===path)break;path=parent;}
- acl(...snapshots.map(row=>row.path));
+ const paths=snapshots.map(row=>row.path);
+ acl(...paths);
  for(const original of snapshots){
   const current=rootAncestorStat(original.path);
   if(current.dev!==original.stat.dev||current.ino!==original.stat.ino||current.uid!==original.stat.uid
    ||current.mode!==original.stat.mode||current.ctimeNs!==original.stat.ctimeNs)throw Error('migration_marker_ancestor_changed');
  }
+ return paths;
 }
+type OrdinaryRouteAclProbeListener=(paths:readonly string[])=>void;
+let ordinaryRouteAclProbeListener:OrdinaryRouteAclProbeListener|undefined;
+/** Test seam: notified when the ordinary-route ancestor ACL probe actually runs (linux included). */
+export function setOrdinaryRouteAclProbeListener(listener?:OrdinaryRouteAclProbeListener):void{ordinaryRouteAclProbeListener=listener;}
 function rootAncestorStat(path:string){
  const stat=lstatSync(path,{bigint:true});
  if(!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==0n||(stat.mode&0o022n)!==0n)throw Error('migration_marker_ancestor');
@@ -97,13 +103,15 @@ export function readInstalledMigrationOwner(raw:VerificationOwner):Readonly<Inst
 
 export type InstalledCurrentProfile={kind:'ordinary'}|{kind:'protected';index:Readonly<PublicProfileIndex>}|{kind:'unavailable';reason:'migration_authority_unavailable'};
 /** Current OS account only; no model-selected profile, UID, root or helper override.
- * An open write-job scope may only reuse that job's own Windows absence answer. */
+ * An open write-job scope may only reuse that job's own ordinary-route probe
+ * (Windows absence or POSIX ancestor ACL). Nothing is reused across jobs. */
 export function readInstalledCurrentProfile(jobScope?:WindowsAbsenceJobScope):Readonly<InstalledCurrentProfile>{
  try{
   if(process.platform==='win32'){if((jobScope?readWindowsInstallationAbsenceInJob(jobScope):readWindowsInstallationAbsence())==='ordinary')return Object.freeze({kind:'ordinary'});throw Error('profile_installed_windows_unavailable');}
   if(!['darwin','linux'].includes(process.platform))throw Error('profile_installed_platform');
   const base=process.platform==='darwin'?'/Library/Application Support/xiaok-verification':'/var/lib/xiaok-verification';
-  if(!probe(base)){rootAncestors(dirname(base));return Object.freeze({kind:'ordinary'});}
+  if(isOrdinaryRouteJobScopeReuseEnabled()&&jobScope&&ordinaryRouteCachedInJob(jobScope))return Object.freeze({kind:'ordinary'});
+  if(!probe(base)){const paths=rootAncestors(dirname(base));ordinaryRouteAclProbeListener?.(paths);if(jobScope)rememberOrdinaryRouteInJob(jobScope);return Object.freeze({kind:'ordinary'});}
   if(process.platform!=='darwin')throw Error('profile_installed_account_adapter_unavailable');
   const uid=process.getuid?.();if(!uid||process.geteuid?.()!==uid)throw Error('profile_installed_user');
   const manifestPath=join(base,'deployment.json');assertRootProtectedFile(manifestPath);const manifest=parseInstalledDeploymentManifest(readSmall(manifestPath,0,65536));
