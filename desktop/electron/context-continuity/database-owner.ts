@@ -33,10 +33,14 @@ function captureConstructor(row:Row):void{
 interface Row{stocks:ReturnType<typeof createRoomTurnCustody>[];callbacks:ReturnType<typeof createProtectedChildCallbackCustody>;database?:DatabaseSync;closed:boolean;failed:boolean;raws:unknown[];unknownFds:{fd:number;raw:unknown}[];closeEntered?:boolean;first?:{raw:unknown};fence?:ReturnType<typeof createKnownDirectoryWriterFence>}
 const rows=new WeakMap<object,Row>(),held=new Set<Row>();
 function retain(row:Row,raw:unknown){row.first??={raw};row.raws.push(raw);held.add(row);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.inventory(raw);}catch(extra){row.failed=true;row.raws.push(extra);}}
+/** A synchronous statement stock whose call returned with no root, tail, held resource or unknown
+ * left is final: nothing else references it, so re-asserting it on every later call only made each
+ * call O(all prior calls). Stocks that are not yet known stay owned and are still asserted. */
+function releaseKnownStock(row:Row,stock:ReturnType<typeof createRoomTurnCustody>):void{try{stock.assertPhysicalKnown();}catch{return;}const index=row.stocks.lastIndexOf(stock);if(index>=0)row.stocks.splice(index,1);}
 function check(row:Row){if(row.closed||row.failed)throw Error('continuity_database_unavailable',{cause:row.first?.raw});assertOrdinarySourceWriterRoute();row.fence?.assertOpen();for(const stock of row.stocks)stock.assertPhysicalKnown();}
 function invoke<T>(row:Row,fn:Function,receiver:unknown,args:unknown[]):T{
  check(row);row.callbacks.capture(fn);let value!:T;
- const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{value=apply(fn,receiver,args);},undefined,[]);stock.inventory(value);stock.assertPhysicalKnown();return value;}catch(raw){retain(row,raw);throw raw;}
+ const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{value=apply(fn,receiver,args);},undefined,[]);stock.inventory(value);stock.assertPhysicalKnown();}catch(raw){retain(row,raw);throw raw;}releaseKnownStock(row,stock);return value;
 }
 function identity(path:string){const s=lstatSync(path,{bigint:true});if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1n||(typeof process.getuid==='function'&&s.uid!==BigInt(process.getuid()))||(process.platform!=='win32'&&(s.mode&0o077n)!==0n))throw Error('continuity_database_identity');return s;}
 function closeFd(row:Row,fd:number):void{try{closeSync(fd);}catch(raw){row.failed=true;row.unknownFds.push({fd,raw});retain(row,raw);throw raw;}}
@@ -61,11 +65,11 @@ export function openContinuityDatabase(path:string):DatabaseSync{
   captureConstructor(row);row.failed=true;row.database=new NativeDatabase(path);row.failed=false;same(before,identity(path),path,row);same(before,fstatSync(fd,{bigint:true}) as ReturnType<typeof identity>,path,row);
   const database=row.database;rows.set(database,row);
   // Keep actual native receivers; wrapped results carry no synthetic physical proof.
-  define(database,'prepare',{configurable:false,value:(sql:string)=>{let statement!:StatementSync;check(row);row.callbacks.capture(prepare);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{statement=apply(prepare,database,[sql]);},undefined,[]);}catch(raw){retain(row,raw);throw raw;}
+  define(database,'prepare',{configurable:false,value:(sql:string)=>{let statement!:StatementSync;check(row);row.callbacks.capture(prepare);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{statement=apply(prepare,database,[sql]);},undefined,[]);}catch(raw){retain(row,raw);throw raw;}releaseKnownStock(row,stock);
    for(const [name,fn] of [['run',run],['get',get],['all',all]] as const)define(statement,name,{value:(...args:unknown[])=>{return invoke<unknown>(row,fn,statement,args);}});
    return statement;
   }});
-  define(database,'exec',{value:(sql:string)=>{check(row);row.callbacks.capture(exec);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{apply(exec,database,[sql]);},undefined,[]);}catch(raw){retain(row,raw);throw raw;}}});
+  define(database,'exec',{value:(sql:string)=>{check(row);row.callbacks.capture(exec);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{apply(exec,database,[sql]);},undefined,[]);}catch(raw){retain(row,raw);throw raw;}releaseKnownStock(row,stock);}});
   define(database,'close',{value:()=>closeContinuityDatabase(database)});const closingFd=fd;fd=undefined;closeFd(row,closingFd);held.delete(row);return database;
  }catch(raw){retain(row,raw);if(row.database)try{apply(close,row.database,[]);row.closed=true;}catch(extra){retain(row,extra);}if(fd!==undefined){const closingFd=fd;fd=undefined;try{closeFd(row,closingFd);}catch(extra){retain(row,extra);}}throw raw;}
 
