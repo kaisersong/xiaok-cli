@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ openPath: vi.fn(async () => ''), send: vi.fn() }));
-vi.mock('electron', () => ({ app: { getPath: () => '/tmp/test' }, BrowserWindow: undefined, webContents: undefined, clipboard: {}, dialog: {}, shell: { openPath: mocks.openPath } }));
+vi.mock('electron', () => ({ app: { getPath: () => '/tmp/test' }, BrowserWindow: { getAllWindows: () => [], fromWebContents: (sender: any) => ({ once: vi.fn(), webContents: sender, isDestroyed: (): boolean => false }) }, webContents: { fromId: () => undefined }, clipboard: {}, dialog: {}, shell: { openPath: mocks.openPath } }));
 import { registerDesktopIpc } from '../../electron/ipc.js';
 import { IPC_SCHEMA_REGISTRY } from '../../electron/ipc-runtime.js';
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from '../../electron/shutdown-aware-ipc-main.js';
@@ -13,7 +13,7 @@ describe('real file IPC schema rollout', () => {
     let root: string;
     let handlers: Map<string, Function>;
     let gate: DesktopShutdownGate;
-    beforeEach(async () => { root = mkdtempSync(join(tmpdir(), 'xiaok-file-schema-')); handlers = new Map(); gate = new DesktopShutdownGate(); const registrar = new ShutdownAwareIpcMain({ handle: (c, h) => { handlers.set(c, h); } }, gate); await registerDesktopIpc(registrar, { isDestroyed: () => false, webContents: { send: mocks.send } } as never, { getDataRoot: () => join(root, 'data'), getProjectPlanningTriggerOwner: () => undefined } as never); mocks.openPath.mockClear(); }, 60000);
+    beforeEach(async () => { root = mkdtempSync(join(tmpdir(), 'xiaok-file-schema-')); handlers = new Map(); gate = new DesktopShutdownGate(); const registrar = new ShutdownAwareIpcMain({ handle: (c, h) => { handlers.set(c, h); } }, gate); await registerDesktopIpc(registrar, { once: vi.fn(), isDestroyed: () => false, webContents: { send: mocks.send } } as never, { getDataRoot: () => join(root, 'data'), getProjectPlanningTriggerOwner: () => undefined } as never); mocks.openPath.mockClear(); }, 60000);
     afterEach(async () => {
         // The IPC registrar opens SQLite; Windows cannot unlink its live handle.
         const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');

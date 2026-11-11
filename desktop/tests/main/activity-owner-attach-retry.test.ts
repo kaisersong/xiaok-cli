@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Socket } from 'node:net';
 
 const ensure = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/runtime/conversation-activity/owner-launcher.js', async importOriginal => ({
@@ -11,6 +12,8 @@ import { createDesktopServices } from '../../electron/desktop-services.js';
 import { ConversationActivityOwnerClient } from '../../../src/runtime/conversation-activity/owner-client.js';
 import {ConversationActivitySources} from '../../../src/runtime/conversation-activity/sources.js';
 import { ConversationActivityService, type ActivityActor, type ActivityChange } from '../../../src/runtime/conversation-activity/service.js';
+import { ConversationActivityStore } from '../../../src/runtime/conversation-activity/store.js';
+import type { WorkWatch } from '../../../src/runtime/conversation-activity/types.js';
 
 const roots: string[] = [];
 afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -45,7 +48,7 @@ describe('desktop activity owner attach failure', () => {
       const connection = api.projectConnectionChanged('connected').finally(() => { settled = true; });
       const project = api.projectChanged('p');
       await Promise.resolve(); expect(settled).toBe(false);
-      const client = { request: vi.fn(async () => ({})), dispose: vi.fn(), ownerEpoch: 'e1',hintProject:vi.fn(async()=>{}),projectConnectionChanged:vi.fn(async()=>{}) };
+      const client = { request: vi.fn(async () => ({})), seal: vi.fn(), close: vi.fn(async () => {}), dispose: vi.fn(), ownerEpoch: 'e1',hintProject:vi.fn(async()=>{}),projectConnectionChanged:vi.fn(async()=>{}) };
       resolve(client); await attachment; await connection; await project;
       expect(client.hintProject).toHaveBeenCalledExactlyOnceWith('p');expect(client.projectConnectionChanged).toHaveBeenCalledExactlyOnceWith('connected');
     } finally { await services.disposeMultiAgent(); }
@@ -68,7 +71,7 @@ describe('desktop activity owner attach failure', () => {
   it('recovers on a later attach after an earlier failure (no permanent failure state)', async () => {
     const { services, kswarmService } = await makeServices();
     try {
-      const client = { request: vi.fn(async () => ({})), dispose: vi.fn(), ownerEpoch: 'e1' };
+      const client = { request: vi.fn(async () => ({})), seal: vi.fn(), close: vi.fn(async () => {}), dispose: vi.fn(), ownerEpoch: 'e1' };
       ensure.mockRejectedValueOnce(new Error('activity_owner_start_timeout')).mockResolvedValueOnce(client);
       await expect(services.attachConversationActivityOwner(sourceConfig)).rejects.toThrow('activity_owner_start_timeout');
       await expect(services.attachConversationActivityOwner(sourceConfig)).resolves.toBeUndefined();
@@ -135,6 +138,14 @@ describe('all public activity facades share the existing owner attachment gate',
     // attached-service actor checks and overview subscription lifecycle are real.
     const request = vi.spyOn(client, 'request').mockResolvedValue(undefined);
     const overview = vi.spyOn(client, 'subscribeOverview');
+    // subscribe/overview are already inside the client's #admit and use the
+    // private #requestEntered (no nested admission), so they never reach the
+    // public request() above. Script their wire RPC at the same inner boundary:
+    // the client is handed over as an attached owner connection (as the launcher
+    // returns it) and the socket write is replaced, so no real socket is opened.
+    const wire = { destroyed: false } as unknown as Socket;
+    Object.assign(client as unknown as { socket: Socket; ownerEpoch: string; connectionIncarnation: string }, { socket: wire, ownerEpoch: 'e1', connectionIncarnation: 'attached' });
+    const socketRpc = vi.spyOn(client as unknown as { requestOnSocket(method: string, params: Record<string, unknown>, connection: unknown): Promise<unknown> }, 'requestOnSocket').mockResolvedValue(undefined);
     const disposed = vi.spyOn(ConversationActivityService.prototype, 'dispose');
     const localCalls = [
       vi.spyOn(ConversationActivityService.prototype, 'getWork'),
@@ -154,8 +165,13 @@ describe('all public activity facades share the existing owner attachment gate',
       profile.service.registerThread({threadId:'thread',profileId:profile.profileId,workspaceId:profile.workspaceId,cwd:profile.cwd,activeGroupId:null,threadRevision:0});
       // Script a real ordinary DTO at the transport boundary. Undefined is
       // not a work response; current WorkReader keeps its real actor guards.
+      // The owner process persists the watch it reports into the shared
+      // activity database; Main's disclosure owner re-reads that row and never
+      // treats the socket DTO itself as a read grant. The scripted owner below
+      // reports exactly the row it "wrote" (seeded once the local writer is closed).
+      let ownerWatch: WorkWatch | undefined;
       request.mockImplementation(async method=>method==='work'?{
-        watch:{operationId:'op',watchId:'watch',source:'agent_group',logicalSourceId:'local-group',sourceDataEpoch:'epoch',workId:'group',origin:{profileId:profile.profileId,workspaceId:profile.workspaceId,threadId:'thread',actorId:identity.actorId},status:'active',generation:0,preference:'normal',policyRevision:0,nextReportDueAt:0},
+        watch:ownerWatch,
         projection:{watchId:'watch',executionState:'running',businessOutcome:'unknown',freshness:'fresh',sourceSequence:1,revision:1,lastProgressAt:null,lastHeartbeatAt:null,lastReportAt:null,evidenceRefs:[]}
       }:undefined);
 
@@ -170,7 +186,7 @@ describe('all public activity facades share the existing owner attachment gate',
       await checkpoint();
       expect(firstCall.settled()).toBe(false);
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       expect(kswarmService.bindActivityOwner).not.toHaveBeenCalled();
       const primary = new Error('activity_owner_start_timeout'); first.reject(primary);
       expect(await attachment.outcome).toEqual({ ok: false, error: primary });
@@ -179,14 +195,23 @@ describe('all public activity facades share the existing owner attachment gate',
       expect(failed.error).toBeInstanceOf(Error);
       expect(failed.error).toHaveProperty('message', 'activity_owner_unavailable');
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       expect(callback).not.toHaveBeenCalled(); expect(kswarmService.bindActivityOwner).not.toHaveBeenCalled();
+
+      // The failed attach already closed Main's in-process writer, so the
+      // owner's database row can be written exactly as the owner would.
+      const ownerStore = new ConversationActivityStore(join(root, 'data', 'conversation-activity.sqlite'));
+      try {
+        const origin = { profileId: profile.profileId, workspaceId: profile.workspaceId, threadId: 'thread', actorId: identity.actorId };
+        ownerStore.prepareAssociation({ operationId: 'op', creationIdempotencyKey: 'op', origin });
+        ownerWatch = ownerStore.bindWork({ operationId: 'op', watchId: 'watch', source: 'agent_group', logicalSourceId: 'local-group', sourceDataEpoch: 'epoch', workId: 'group' });
+      } finally { ownerStore.close(); }
 
       const retryAttachment = observe(() => services.attachConversationActivityOwner(sourceConfig)); pending.push(retryAttachment.outcome);
       await vi.waitFor(() => expect(ensure).toHaveBeenCalledTimes(2));
       const retryCall = observe(() => invokeFacade(name, api, identity, callback)); pending.push(retryCall.outcome);
       await checkpoint(); expect(retryCall.settled()).toBe(false);
-      expect(request).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled(); expect(socketRpc).not.toHaveBeenCalled(); expect(overview).not.toHaveBeenCalled();
       retry.resolve(client);
       expect(await retryAttachment.outcome).toEqual({ ok: true, value: undefined });
       const success = await retryCall.outcome;
@@ -196,12 +221,14 @@ describe('all public activity facades share the existing owner attachment gate',
       for (const spy of localCalls) expect(spy).not.toHaveBeenCalled();
       if (name === 'overview') {
         expect(overview).toHaveBeenCalledTimes(1); expect(overview).toHaveBeenCalledWith(callback);
-        expect(request).toHaveBeenCalledTimes(1);
-        expect(request).toHaveBeenCalledWith('overview', { subscriptionId: expect.any(String) });
+        expect(socketRpc).toHaveBeenCalledTimes(1);
+        expect(socketRpc).toHaveBeenCalledWith('overview', { subscriptionId: expect.any(String) }, { socket: wire, epoch: 'e1', incarnation: 'attached' });
+        expect(request).not.toHaveBeenCalled();
         if (typeof success.value !== 'function') throw new Error('overview_cleanup_missing');
         const unsubscribe = success.value; stopOverview = () => { unsubscribe(); };
         stopOverview(); stopOverview = undefined;
-        expect(request).toHaveBeenCalledWith('unsubscribe', request.mock.calls[0][1]);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(request).toHaveBeenCalledWith('unsubscribe', socketRpc.mock.calls[0][1]);
       } else {
         const expected: Record<Exclude<FacadeName, 'overview'>, unknown[][]> = {
           mcpInputs: [['work', { watchId: 'watch' }], ['work', { watchId: 'watch' }], ['mcpInputs', { watchId: 'watch' }]],
@@ -211,6 +238,7 @@ describe('all public activity facades share the existing owner attachment gate',
           stop: [['stop', { watchId: 'watch', revision: 7 }]],
         };
         expect(request.mock.calls).toEqual(expected[name]);
+        expect(socketRpc).not.toHaveBeenCalled();
       }
     } catch (error) { errors.push(error); } finally {
       // Always settle/join this test's held attach/call promises before closing

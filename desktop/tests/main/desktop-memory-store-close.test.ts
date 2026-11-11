@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-type Internals = { db: { open: boolean }; embeddingClient: { embed(text: string): Promise<Float32Array> } };
+type Internals = { db: { open: boolean }; embeddingClient: { embedRaw(text: string): Promise<Float32Array> } };
 
 // #150 CI: a LayeredMemoryStore close() waits for writes accepted before it (M3) and keeps
 // memory.db open until then. A store replaced on a data-root switch is closed without the
@@ -26,7 +26,7 @@ describe('desktop memory store close (#150)', () => {
   beforeAll(async () => {
     const warmRoot = join(base, 'warm');
     const warm = getDesktopMemoryStore(warmRoot);
-    (warm as unknown as Internals).embeddingClient.embed = async () => new Float32Array(384).fill(0.25);
+    (warm as unknown as Internals).embeddingClient.embedRaw = async () => new Float32Array(384).fill(0.25);
     await warm.save({ id: 'warm-up', scope: 'global', title: '预热', summary: '冷启动预热写入', tags: [], updatedAt: 1, type: 'user' });
     await closeDesktopMemoryStore(warmRoot);
     expect((warm as unknown as Internals).db.open).toBe(false);
@@ -41,7 +41,9 @@ describe('desktop memory store close (#150)', () => {
     expect(getDesktopMemoryBackend(rootA)).toBe('layered');
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    (first as unknown as Internals).embeddingClient.embed = async () => { await gate; return new Float32Array(384).fill(0.25); };
+    // The vector write goes embedAndStore -> embedRaw (9656a0a8); gate that seam, and fail loudly if it moves.
+    expect(typeof (first as unknown as Internals).embeddingClient.embedRaw).toBe('function');
+    (first as unknown as Internals).embeddingClient.embedRaw = async () => { await gate; return new Float32Array(384).fill(0.25); };
     await first.save({ id: 'retired-inflight', scope: 'global', title: '切换前', summary: '切换数据根之前的写入', tags: [], updatedAt: 1, type: 'user' });
     const firstDb = (first as unknown as Internals).db;
 

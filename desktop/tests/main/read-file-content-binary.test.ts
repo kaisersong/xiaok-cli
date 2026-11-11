@@ -12,8 +12,7 @@ const { electronMocks } = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/xiaok-electron-test' },
-  BrowserWindow: undefined,
-  webContents: undefined,
+  BrowserWindow: { getAllWindows: () => [], fromWebContents: (sender: any) => ({ once: vi.fn(), webContents: sender, isDestroyed: (): boolean => false }) }, webContents: { fromId: () => undefined },
   clipboard: { read: vi.fn(), readImage: vi.fn() },
   dialog: { showOpenDialog: electronMocks.showOpenDialog, showSaveDialog: electronMocks.showSaveDialog },
   shell: { openExternal: vi.fn(), openPath: vi.fn(), showItemInFolder: vi.fn() },
@@ -33,7 +32,7 @@ describe('desktop file content IPC binary handling', () => {
     const ipcMain = {
       handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler),
     };
-    const window = { isDestroyed: () => false, webContents: { send: vi.fn() } };
+    const window = { once: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
     const services = {
       getDataRoot: () => join(rootDir, 'data'),
       getProjectPlanningTriggerOwner: () => undefined,

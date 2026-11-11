@@ -12,6 +12,7 @@ import {createOriginalCanonicalMainSource} from './context-continuity/canonical-
 import {createContinuityHistoryPort} from './context-continuity/history-port.js';
 import {readCurrentOriginalTaskRunnerResourceContext,readOriginalTaskRunnerResourceContextForHost} from '../../src/runtime/task-host/task-runtime-host.js';
 import {createContinuityMainBinding} from './context-continuity/main-binding.js';
+import {markMintedLocalThread} from './context-continuity/history.js';
 import {createContextResolverTool,createHistorySearchTool} from './context-continuity/tool.js';
 import { RenderUiPreviewStream } from '../../src/a2ui/preview-stream.js';
 import {configuredCredentialValues} from '../../src/shared/credential-fields.js';
@@ -2386,6 +2387,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   let hostDeliveryAuthority: DesktopHostDeliveryAuthority | undefined;
   const host = taskSourcePopulation.createHost({
     ...continuityBinding.hostOptions,
+    // Automatic Goal turns read the predecessor's history, which continuity settles only here.
+    onWorkReleased: async (taskId: string) => { await continuityBinding.hostOptions.onWorkReleased(); goalCoordinator?.handleTaskWorkReleased(taskId); },
     materialRegistry,
     groupObservationSource: multiAgentService,
     runner: async input => {
@@ -2492,6 +2495,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   };
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
+    awaitPredecessorWorkRelease: true,
     nativeJournal: new FileGoalNativeJournal(join(options.dataRoot, 'goals')),
     taskHost: localTaskHost,
     assertNativePersistedEvent:taskSourcePopulation.assertNativePersistedEvent,
@@ -2628,7 +2632,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   // The local host already creates this ID for unthreaded Chat. Capture it at
   // the public admission boundary so Goal can fence the same request across IO.
   const localChatContext = (context?: TaskCreateContext): TaskCreateContext | undefined => (
-    multiAgentService ? { ...context, threadId: context?.threadId || `local_${randomUUID()}` } : context
+    multiAgentService ? { ...context, threadId: context?.threadId || markMintedLocalThread(`local_${randomUUID()}`) } : context
   );
   const backgroundTaskIdentity=createBackgroundTaskIdentityController({host,assertAdmission:()=>goalCoordinator.assertBackgroundAdmission(),captureAdmission:()=>goalCoordinator.captureBackgroundAdmission(),
     create:(input,reservation,guard)=>withExecutionLane('background',()=>afterLocalRecovery(()=>goalCoordinator.admitReservedBackgroundTask(input,reservation,guard)))});

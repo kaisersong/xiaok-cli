@@ -69,6 +69,13 @@ export type DesktopGoalNativeMutationProjection = Pick<GoalNativeMutation, 'id' 
 
 export interface DesktopGoalCoordinatorOptions {
   store: SqliteGoalStore;
+  /**
+   * When set, the automatic next turn waits for handleTaskWorkReleased(predecessor). Main's
+   * continuity settles a turn's public history only after its work is released (onWorkReleased ->
+   * reconcile), which runs after the task_terminal consumers; preparing inside that consumer
+   * would always read blocked_unsettled history.
+   */
+  awaitPredecessorWorkRelease?: boolean;
   nativeJournal?: FileGoalNativeJournal;
   taskHost: GoalTaskHost;
   instanceId: string;
@@ -114,13 +121,27 @@ export class DesktopGoalCoordinator {
   private nativeTailSealed=false;
   private operations = 0;
   private readonly drainWaiters = new Set<() => void>();
+  /** Automatic continuations waiting for their predecessor's work release, keyed by predecessor task. */
+  private readonly releaseContinuations = new Map<string, () => void>();
+  /** Bounded record of released tasks whose terminal consumer has not run yet. */
+  private readonly releasedBeforeTerminal = new Set<string>();
 
   /** Permanent process-lifetime gate, unlike an ordinary disarm/regrant. */
   stopAccepting(): void {
     if (this.closed) return;
     this.closed = true;
+    this.releaseContinuations.clear(); this.releasedBeforeTerminal.clear();
     this.disarmAll();
     this.notifyDrain();
+  }
+
+  /** Main calls this after a task's work release and continuity reconcile. Never awaits the continuation. */
+  handleTaskWorkReleased(taskId: string): void {
+    const run = this.releaseContinuations.get(taskId);
+    if (run) { this.releaseContinuations.delete(taskId); run(); return; }
+    if (this.closed) return;
+    this.releasedBeforeTerminal.add(taskId);
+    while (this.releasedBeforeTerminal.size > 256) this.releasedBeforeTerminal.delete(this.releasedBeforeTerminal.values().next().value as string);
   }
 
   drainShutdown(deadlineMs: number): Promise<boolean> {
@@ -1001,6 +1022,7 @@ export class DesktopGoalCoordinator {
       });
       if (nextContinuation) {
         const continuation: GoalState = nextContinuation;
+        const continueGoal = async () => {
         const observed = await this.observeGoalExecution(binding.threadId, continuation, permissionRevision);
         await this.withThread(binding.threadId, async () => {
           await observed();
@@ -1013,6 +1035,18 @@ export class DesktopGoalCoordinator {
           };
           if (this.options.multiAgent) await this.options.multiAgent.withGoalDecision(input.taskId, prepare, continuationInput); else await prepare('ready');
         });
+        };
+        if (!this.options.awaitPredecessorWorkRelease || this.releasedBeforeTerminal.delete(predecessorTaskId)) await continueGoal();
+        else {
+          // Every admission check above re-runs at release time inside continueGoal.
+          this.releaseContinuations.set(predecessorTaskId, () => {
+            if (this.closed) return;
+            void this.withOperation(continueGoal).catch(error => {
+              if (error instanceof Error && error.message === 'goal_coordinator_closed') return;
+              console.warn('[goal] automatic continuation failed:', error instanceof Error ? error.message : String(error));
+            });
+          });
+        }
       }
       // Native authorization and receiver reads must never hold the thread queue.
       for (const publication of publications) await this.finishGoalPublication(binding.threadId, publication, publicationEpoch, permissionRevision);

@@ -145,7 +145,7 @@ export class EmbeddingClient {
     return this.admit(() => this.embedAndStoreRaw(memoryId, layer, text));
   }
   private async embedAndStoreRaw(memoryId: string, layer: number, text: string): Promise<Float32Array> {
-    const embedding = await this.embedRaw(text);
+    const embedding = await this.embed(text);
     const buf = Buffer.from(embedding.buffer);
 
     this.db.prepare(

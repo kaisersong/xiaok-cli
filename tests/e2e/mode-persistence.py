@@ -18,6 +18,7 @@ def run(entry):
     work.mkdir(); home.mkdir()
     target = work / 'synthetic-output.txt'
     server = h.FakeOpenAIServer([
+        'WARMUP_CREDENTIAL_MIGRATION_OK',
         h.tool_call_response_events('write', {'file_path': str(target), 'content': 'RESTORED_YOLO'}, 'restored'),
         'RESTORED_MODE_AUTHORITY_OK',
         h.tool_call_response_events('bash', {'command': 'echo mkfs'}, 'non_tty'),
@@ -50,6 +51,17 @@ def run(entry):
         send('/exit'); time.sleep(.5); tty.stop()
     try:
         server.start(); h.write_config(config, server.base_url, 'gpt-4o')
+        # Setup only: the first model request migrates the fixture's plaintext apiKey
+        # into the credential store and rewrites config.json once (master 0251241b).
+        # Finish that before recording the bytes that mode switching must never touch.
+        warm = subprocess.run(['node', str(entry), '--print', 'warm up credential migration'], cwd=work,
+            env={**os.environ, 'HOME': str(home), 'XIAOK_CONFIG_DIR': str(config), 'XIAOK_DISABLE_GLOBAL_PLUGINS': '1'},
+            capture_output=True, text=True, timeout=30)
+        assert warm.returncode == 0 and 'WARMUP_CREDENTIAL_MIGRATION_OK' in warm.stdout, warm.stderr
+        migrated = json.loads((config / 'config.json').read_text())
+        assert 'apiKey' not in migrated['models']['custom'], 'warm-up did not migrate plaintext apiKey'
+        assert any(ref.get('path') == ['models', 'custom', 'apiKey']
+            for ref in migrated.get('$xiaokCredentials', {}).get('entries', [])), 'warm-up did not write $xiaokCredentials ref'
         original_config = (config / 'config.json').read_bytes()
         for mode in ['default', 'auto', 'plan', 'yolo']:
             start(); choose(mode); stop()

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {it,expect,vi,afterAll} from 'vitest';
+import {InProcessTaskRuntimeHost} from '../../../src/runtime/task-host/task-runtime-host.ts';
 import {mkdirSync,writeFileSync,readFileSync,existsSync,mkdtempSync,rmSync} from 'node:fs';import {join,resolve,relative,isAbsolute} from 'node:path';
 import {setTimeout as realDelay} from 'node:timers/promises';
 import {tmpdir} from 'node:os';
@@ -27,7 +28,7 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
  const owned=await openOwnedWorkflowServiceCase(null,{issuer:mode==='expired-approved'?'po_generated_project':'po_generated',tasks:[{title:'Fictional report',assignedAgent:'xiaok-worker',requiredOutputs:['markdown']}]});
  const {fixture,kswarmService:ks}=owned;let first:{error:unknown}|undefined;
  const {createDesktopServices}=await import('../../electron/desktop-services.ts'),{OpenAIAdapter}=await import('../../../src/ai/adapters/openai.ts'),{DesktopExecutionCoordinator}=await import('../../electron/desktop-execution-coordinator.ts');
- const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any;let retryWaits=0,providerFailed=false;
+ const previous={config:process.env.XIAOK_CONFIG_DIR,entry:process.env.KSWARM_SERVER_PATH,plugins:process.env.XIAOK_DISABLE_GLOBAL_PLUGINS,recovery:process.env.XIAOK_MODEL_RECOVERY_WINDOW_MS};let desktop:any,lease:any;const release=deferred();let calls=0,closed=0,settled=false,providerSignal:AbortSignal|undefined;let outcome:Promise<any>|undefined;let mock:any,prepareMock:any,retryTimerMock:any,inspectSpy:ReturnType<typeof vi.spyOn>|undefined;let retryWaits=0,providerFailed=false;
  try{await (async()=>{
  const config=join(fixture.root,'config');writeFileSync(join(config,'config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture',model:'fixture-model'}},channels:{}}));
  process.env.XIAOK_CONFIG_DIR=config;
@@ -48,6 +49,15 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
    yield {type:'done' as const};
   }finally{closed++;}
  });
+ let inspectStarted=0,inspectInFlight=0;
+ if(mode==='queued-fifteen'){
+  const originalInspect=InProcessTaskRuntimeHost.prototype.inspectTask;
+  inspectSpy=vi.spyOn(InProcessTaskRuntimeHost.prototype,'inspectTask').mockImplementation(async function(this:InProcessTaskRuntimeHost,...args:Parameters<typeof originalInspect>){
+   inspectStarted++;inspectInFlight++;
+   try{return await originalInspect.apply(this,args);}
+   finally{inspectInFlight--;}
+  });
+ }
  desktop=createDesktopServices({dataRoot:join(fixture.root,'desktop-data'),kswarmService:ks,executionCoordinator:coordinator});
  if(mode==='queued-fifteen')lease=await coordinator.acquireLease({lane:'background',policy:'ordinary'});
  const run=desktop.runKSwarmWorkflowNode({handoff:{...fixture.issued.dispatches[0],input:{...fixture.issued.dispatches[0].input,budget:{maxMinutes:10000}},project:{id:fixture.project.id,name:fixture.project.name,workFolder:fixture.workspace.path}},targetParticipantId:'xiaok-worker'});
@@ -56,8 +66,11 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
  if(mode==='delayed-setup'||mode==='late-prepared'){await waitFor(()=>settled);expect((await outcome).ok).toBe(false);expect(existsSync(file)).toBe(false);return;}
  await waitFor(()=>mode==='queued-fifteen'?coordinator.snapshot().waiting===1:calls===1);
  // Fake Date only. Real HTTP, fixture ownership timers and provider cleanup stay real.
- vi.useFakeTimers({toFake:['Date']});if(mode==='expired-approved'){vi.setSystemTime(fixture.issued.workflowRun.startedAt+(approvedMinutes-1)*60000);await realDelay(650);expect(settled).toBe(false);}vi.setSystemTime(fixture.issued.workflowRun.startedAt+((mode==='active-eleven'||mode==='worker-then-reviewer')?11:approvedMinutes)*60000+50);
- await realDelay(650);
+ vi.useFakeTimers({toFake:['Date']});
+ if(mode==='queued-fifteen')await waitFor(()=>inspectStarted>=1&&inspectInFlight===0);
+ if(mode==='expired-approved'){vi.setSystemTime(fixture.issued.workflowRun.startedAt+(approvedMinutes-1)*60000);await realDelay(650);expect(settled).toBe(false);}vi.setSystemTime(fixture.issued.workflowRun.startedAt+((mode==='active-eleven'||mode==='worker-then-reviewer')?11:approvedMinutes)*60000+50);
+ if(mode==='queued-fifteen'){const started=performance.now();while(!settled&&performance.now()-started<650)await realDelay(10);}
+ else await realDelay(650);
  if(mode==='active-eleven'||mode==='worker-then-reviewer'){
   expect(settled).toBe(false);release.resolve();await waitFor(()=>settled);const result=await outcome;
   expect(result.ok,JSON.stringify({error:result.error?.stack??String(result.error),server:fixture.getOwnedServerState()})).toBe(true);expect(fixture.getOwnedServerState().protectionTriggered).toBe(false);expect(readFileSync(file,'utf8')).toContain('Verified evidence');expect(calls).toBe(2);expect(closed).toBe(2);
@@ -82,5 +95,5 @@ for(const mode of ['active-eleven','expired-approved','queued-fifteen','delayed-
  await finishOwnedWorkflowServiceCase(owned,desktop,first,[
  ()=>vi.useRealTimers(),()=>release.resolve(),()=>lease?.release(),
  ()=>{for(const [key,value]of [['XIAOK_CONFIG_DIR',previous.config],['KSWARM_SERVER_PATH',previous.entry],['XIAOK_DISABLE_GLOBAL_PLUGINS',previous.plugins],['XIAOK_MODEL_RECOVERY_WINDOW_MS',previous.recovery]]as const){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
- ],[()=>outcome,()=>mock?.mockRestore(),()=>prepareMock?.mockRestore(),()=>retryTimerMock?.mockRestore()]);
+ ],[()=>outcome,()=>mock?.mockRestore(),()=>prepareMock?.mockRestore(),()=>retryTimerMock?.mockRestore(),()=>inspectSpy?.mockRestore()]);
 },8000);

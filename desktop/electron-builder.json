@@ -312,6 +312,16 @@
       "nsis",
       "portable"
     ],
+    "extraResources": [
+      {
+        "from": "dist/main/src/runtime/verification/native",
+        "to": "services/intent-broker/runtime/native",
+        "filter": [
+          "win32-*/windows-installation-absence.exe",
+          "win32-*/windows-installation-absence.json"
+        ]
+      }
+    ],
     "icon": "build/icon.ico"
   },
   "nsis": {

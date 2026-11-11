@@ -2,17 +2,22 @@ import {realpathSync} from 'node:fs';
 import {basename,dirname,resolve} from 'node:path';
 import {readInstalledCurrentProfile} from './migration-markers.js';
 import {registerOrdinaryProfileSource,type OrdinaryProfileSourceInput} from './ordinary-profile-source-registry.js';
+import {openWindowsAbsenceJobScope,type WindowsAbsenceJobScope} from './windows-installation-absence.js';
+
+export type OrdinarySourceRouteScope=WindowsAbsenceJobScope;
+/** Opens one write job's route scope; the job must close it when it ends. */
+export function openOrdinarySourceRouteScope():OrdinarySourceRouteScope{return openWindowsAbsenceJobScope();}
 
 /** Routing check only: no source completeness, ownership or custody grant. */
-export function assertOrdinarySourceWriterRoute():void {
- if(readInstalledCurrentProfile().kind!=='ordinary')throw Error('ordinary_source_route');
+export function assertOrdinarySourceWriterRoute(jobScope?:OrdinarySourceRouteScope):void {
+ if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')throw Error('ordinary_source_route');
 }
 /** Original directory writer discovery only; this grants no protected writer
  * or source custody. The caller must retain its own original mutation lock. */
-export function observeOrdinaryDirectoryWriter(path:string,kind:Exclude<OrdinaryProfileSourceInput['kind'],'sqlite-db'>):void {
- assertOrdinarySourceWriterRoute();
+export function observeOrdinaryDirectoryWriter(path:string,kind:Exclude<OrdinaryProfileSourceInput['kind'],'sqlite-db'>,jobScope?:OrdinarySourceRouteScope):void {
+ assertOrdinarySourceWriterRoute(jobScope);
  if(process.platform==='win32')return;
- registerOrdinaryProfileSource({kind,directory:realpathSync(path)});
+ registerOrdinaryProfileSource({kind,directory:realpathSync(path)},jobScope);
 }
 /** Called after the original SQLite open and before its first schema/data write.
  * Windows ordinary absence is verified first; its POSIX inventory stays unknown. */

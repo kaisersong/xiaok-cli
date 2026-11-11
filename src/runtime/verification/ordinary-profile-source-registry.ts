@@ -8,6 +8,7 @@ import {basename,dirname,isAbsolute,join,resolve} from 'node:path';
 import {acquireSaveLock} from '../../ai/runtime/session-store/mutation-lock.js';
 import {writeFileAtomicallySync,syncDirectoryTreeStrict,readOwnAtomicErrorCode} from '../../utils/atomic-file.js';
 import {readInstalledCurrentProfile} from './migration-markers.js';
+import type {WindowsAbsenceJobScope} from './windows-installation-absence.js';
 import type {ProfileSourceDirectory} from './profile-source-descriptor.js';
 
 const ordinarySqliteFormats=['session-sqlite-v1','loop-sqlite-v1','goal-sqlite-v1','codex-native-sqlite-v1','codex-routes-sqlite-v1','artifact-workspace-sqlite-v1','kswarm-state-sqlite-v1','multi-agent-groups-sqlite-v1','timed-actions-sqlite-v1','harness-budget-sqlite-v1','broker-room-sqlite-v1'] as const;
@@ -38,6 +39,13 @@ function shortPath(path:string):string{return path.length<=160?path:`${path.slic
 function registryFull(path:string,size:bigint):never{fail(`identity: registry is full; limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); current usage ${size} bytes. Registry: ${path}. 先备份，再用编辑器打开该文件删除不再使用的项目条目。`);}
 function digest(value:unknown){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function decimal(value:unknown):value is string{return typeof value==='string'&&/^(0|[1-9][0-9]*)$/.test(value)&&value.length<=20&&BigInt(value)<=U64;}
+/**
+ * Registry directories this process has already made durable for one exact registry file.
+ * Keyed by root; the value binds registry path, file identity (dev/ino/size/mtime) and content hash.
+ * Set only after a successful directory barrier; any change, write or error drops it.
+ */
+const durableRegistryTrees=new Map<string,string>();
+function registryDurabilityKey(path:string):string{const stat=lstatSync(path,{bigint:true});return JSON.stringify([path,String(stat.dev),String(stat.ino),String(stat.size),String(stat.mtimeNs),createHash('sha256').update(readFileSync(path)).digest('hex')]);}
 function syncOrdinaryRegistryTree(path:string):void{try{syncDirectoryTreeStrict(path);}catch(error){const code=readOwnAtomicErrorCode(error);if(!code||!UNSUPPORTED_DIRECTORY_SYNC.has(code))throw error;}}
 function shape(value:unknown,keys:string[]):asserts value is Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==keys.sort().join(','))fail('schema');}
 function directory(path:string):Readonly<ProfileSourceDirectory>{
@@ -129,17 +137,17 @@ function read(path:string,uid:number):Readonly<OrdinaryProfileSources>|undefined
 export function readOrdinaryProfileSources():Readonly<OrdinaryProfileSources>|undefined{
  const loc=location(false);if(!loc)return undefined;const facts=read(loc.path,loc.uid);loc.assertCurrent();return facts;
 }
-export function registerOrdinaryProfileSource(input:OrdinaryProfileSourceInput):void{ registerSource(input); }
+export function registerOrdinaryProfileSource(input:OrdinaryProfileSourceInput,jobScope?:WindowsAbsenceJobScope):void{ registerSource(input,undefined,undefined,jobScope); }
 /** Discovery observations only: these never clear legacy/unknown history or grant custody. */
 export function registerOrdinarySQLiteLayout(input:Extract<OrdinaryProfileSourceInput,{kind:'sqlite-db'}>,layout:OrdinarySQLiteLayout,expectedPhysicalIdentity?:string):void{
  if(input.kind!=='sqlite-db'||input.snapshotFormat!=='loop-sqlite-v1')fail('schema');
  registerSource(input,parseLayout(structuredClone(layout)),expectedPhysicalIdentity);
 }
-function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<OrdinarySQLiteLayout>,expectedPhysicalIdentity?:string):void{
- if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<OrdinarySQLiteLayout>,expectedPhysicalIdentity?:string,jobScope?:WindowsAbsenceJobScope):void{
+ if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
  const observed=source(input);if(expectedPhysicalIdentity!==undefined&&(!observed.database||`${observed.database.device}:${observed.database.inode}`!==expectedPhysicalIdentity))fail('identity');const loc=location(true)!;const release=acquireSaveLock(join(loc.root,'.profile-source-registry.lock'));
  try{
-  loc.assertCurrent();if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+  loc.assertCurrent();if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
   const original=read(loc.path,loc.uid);let sources=[...(original?.sources??[])];
   const priorByNamespace=sources.find(row=>row.namespaceId===observed.namespaceId);let priorBySource=sources.find(row=>row.sourceId===observed.sourceId);
   const removed:Readonly<OrdinaryProfileSource>[]=[];
@@ -153,7 +161,12 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
   // Keep current/rebound history out of the sweep. Unknown IO failures are not proof of staleness.
   sources=sources.filter(row=>{if(row===prior)return true;try{return !isStaleOrdinaryProfileSource(row,undefined,true);}catch(error){if(typeof readOwnAtomicErrorCode(error)==='string')return true;throw error;}});
   // Unchanged observations preserve bytes and generation after the stale sweep.
-  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){syncOrdinaryRegistryTree(loc.root);loc.assertCurrent();return;}
+  if(!removed.length&&sources.length===(original?.sources.length??0)&&prior&&canonicalJson(prior)===canonicalJson(merged)){
+   // Unchanged bytes this process already made durable need no second directory barrier.
+   const durable=registryDurabilityKey(loc.path);
+   if(durableRegistryTrees.get(loc.root)!==durable){durableRegistryTrees.delete(loc.root);syncOrdinaryRegistryTree(loc.root);durableRegistryTrees.set(loc.root,durable);}
+   loc.assertCurrent();return;}
+  durableRegistryTrees.delete(loc.root);
   const generation=BigInt(original?.generation??'0')+1n;if(generation>U64)fail(`capacity: registry generation exhausted at ${loc.path}. Move this discovery registry to a backup or remove it, then retry.`);
   const existingSources=sources;
   sources=[...sources.filter(row=>row!==prior),merged];
@@ -169,8 +182,10 @@ function registerSource(input:OrdinaryProfileSourceInput,layout?:Readonly<Ordina
    catch(singleError){if(!(singleError instanceof Error)||!singleError.message.startsWith('profile_source_registry_capacity'))throw singleError;
     fail(`capacity: current source itself exceeds registry limit ${MAX_BYTES} bytes (${MAX_BYTES/1024} KiB); source size ${Buffer.byteLength(JSON.stringify({...validated,sources:[merged]}))} bytes (expanded JSON). Source: ${shortPath(merged.directory.canonicalPath)}. 这个来源自己就超过上限，清理其他项目没有用；Reduce source path or metadata size（换一个更短的项目路径后重试）。`);}
    fail(`capacity: registry cannot fit the current source; ${capacityDetails}`);}
-  loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile().kind!=='ordinary')fail('route');
+  loc.assertCurrent();if(JSON.stringify(source(input))!==JSON.stringify(observed))fail('identity');if(readInstalledCurrentProfile(jobScope).kind!=='ordinary')fail('route');
   writeFileAtomicallySync(loc.path,bytes);syncOrdinaryRegistryTree(loc.root);
   loc.assertCurrent();
- }finally{loc.assertCurrent();release();}
+  // Remember only the bytes this call wrote and synced; a concurrent replacement is not ours to vouch for.
+  const written=registryDurabilityKey(loc.path);if(written.endsWith(JSON.stringify(createHash('sha256').update(bytes).digest('hex'))+']'))durableRegistryTrees.set(loc.root,written);
+ }catch(error){durableRegistryTrees.delete(loc.root);throw error;}finally{loc.assertCurrent();release();}
 }

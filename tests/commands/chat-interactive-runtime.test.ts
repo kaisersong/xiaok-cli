@@ -1354,7 +1354,14 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     catch (error) { diagnosticReadFailures.push(error); }
   };
 
-  beforeEach(() => {
+  // #228: a Windows shard's first case pays a cold dynamic-import cost (~4s).
+  // Combined with waitFor's ×5 platform factor (3s → 15s for prompt-visible),
+  // that can exhaust the 20s case budget before the prompt appears. Preheat
+  // once per worker after this hook isolates HOME/config, then drop the
+  // initialized module state so the case can still install its adapter hook
+  // on a fresh import. afterEach still resetModules() as before.
+  let moduleGraphWarmed = false;
+  beforeEach(async () => {
     ownedChats.beforeCase();
     fixtureActivityOwners.current=createActivityOwnerTestScope(()=>tempDirs.filter(root=>!retainedUnknownActivityRoots.has(root)));
     resetAdapterState();
@@ -1370,6 +1377,15 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     process.env.XIAOK_DISABLE_GLOBAL_PLUGINS = '1';
     diagnosticCase += 1;
     reportWorkerResources('before-case');
+    if (!moduleGraphWarmed) {
+      await Promise.all([
+        import('../../src/ai/models.js'),
+        import('../../src/commands/chat.js'),
+        import('../../src/ui/image-input.js'),
+      ]);
+      vi.resetModules();
+      moduleGraphWarmed = true;
+    }
   });
 
   afterAll(async () => {

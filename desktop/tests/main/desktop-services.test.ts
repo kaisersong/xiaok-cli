@@ -1,3 +1,4 @@
+import { markMintedLocalThread, mintedLocalThreadCount } from '../../electron/context-continuity/history.js';
 import { mockKSwarmService } from '../support/desktop-services-fixtures.js';
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
 import {createDesktopAssistantInbox} from '../../electron/desktop-assistant-inbox.js';
@@ -577,6 +578,87 @@ describe('desktop services', () => {
     expect(observedSessionIds[0]).toMatch(
       /^sess_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+  });
+
+  it('keeps renderer-supplied local_ thread ids under strict continuity history checks', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    let adapterCalls = 0;
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      adapterCalls += 1;
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
+    });
+    try {
+      // Only Main-minted unthreaded IDs carry the server-side mark; a forged prefix must not.
+      await withoutBrowserGlobals(async () => {
+        await expect((async () => {
+          const created = await services.createTask({
+            prompt: '直接回复 ok',
+            materials: [],
+            context: { threadId: 'local_00000000-0000-4000-8000-000000000000' },
+          });
+          await waitFor(async () => {
+            const status = (await services.recoverTask(created.taskId)).snapshot.status;
+            return status === 'completed' || status === 'failed';
+          });
+          const recovered = await services.recoverTask(created.taskId);
+          if (recovered.snapshot.status !== 'completed') throw new Error('not_readable');
+        })()).rejects.toThrow('not_readable');
+      });
+      expect(adapterCalls).toBe(0);
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('consumes the Main-minted unthreaded thread mark once its request has read history', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
+    });
+    const settle = async (taskId: string) => {
+      await waitFor(async () => {
+        const status = (await services.recoverTask(taskId)).snapshot.status;
+        return status === 'completed' || status === 'failed';
+      });
+      return (await services.recoverTask(taskId)).snapshot;
+    };
+    try {
+      await withoutBrowserGlobals(async () => {
+        const first = await settle((await services.createTask({ prompt: '直接回复 ok', materials: [] })).taskId);
+        expect(first.status).toBe('completed');
+        const mintedThreadId = first.context?.threadId;
+        expect(mintedThreadId).toMatch(/^local_/);
+        const before = streamSpy.mock.calls.length;
+        await expect((async () => {
+          const reused = await settle((await services.createTask({
+            prompt: '直接回复 ok',
+            materials: [],
+            context: { threadId: mintedThreadId },
+          })).taskId);
+          if (reused.status !== 'completed') throw new Error('not_readable');
+        })()).rejects.toThrow('not_readable');
+        expect(streamSpy.mock.calls.length).toBe(before);
+      });
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('bounds the Main-minted unthreaded thread marks', () => {
+    for (let index = 0; index < 1000; index += 1) markMintedLocalThread(`local_bound-${index}`);
+    expect(mintedLocalThreadCount()).toBeLessThanOrEqual(256);
   });
 
   it('derives one provider-neutral cache affinity for a real default desktop task runner session', async () => {
@@ -6069,11 +6151,13 @@ describe('desktop services', () => {
         });
       },
     });
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a' }).id; })();
 
     // First task - will be cancelled
     const task1 = await services.createTask({
       prompt: '创建定时任务，每天晚上11点同步mydocs',
       materials: [],
+      context: { threadId: continuityThreadId },
     });
     await waitFor(async () => runCount === 1);
     await services.cancelTask(task1.taskId);
@@ -6083,10 +6167,11 @@ describe('desktop services', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Second task explicitly references the prior thread task.
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(task1.taskId)), 5000);
     const task2 = await services.createTask({
       prompt: '不是创建mac定时任务，是xiaok定时任务',
       materials: [],
-      context: { threadId: 'thread-a', taskIds: [task1.taskId] },
+      context: { threadId: continuityThreadId, taskIds: [task1.taskId] },
     });
     await waitFor(async () => runCount === 2, 5000);
     await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
@@ -6098,7 +6183,7 @@ describe('desktop services', () => {
     expect(historySeenOnSecondRun[1].role).toBe('assistant');
     const recovered = await services.recoverTask(task2.taskId);
     expect(recovered.snapshot.context).toEqual({
-      threadId: 'thread-a',
+      threadId: continuityThreadId,
       taskIds: [task1.taskId],
       loadedTaskIds: [task1.taskId],
       skipped: [],
@@ -6127,17 +6212,20 @@ describe('desktop services', () => {
         });
       },
     });
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-files' }).id; })();
 
     const task1 = await services.createTask({
       prompt: '第一轮带附件任务',
       materials: [],
+      context: { threadId: continuityThreadId },
     });
     await waitFor(async () => (await services.recoverTask(task1.taskId)).snapshot.status === 'completed', 5000);
 
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(task1.taskId)), 5000);
     const task2 = await services.createTaskWithFiles({
       prompt: '第二轮继续分析新材料',
       filePaths: [],
-      context: { threadId: 'thread-files', taskIds: [task1.taskId] },
+      context: { threadId: continuityThreadId, taskIds: [task1.taskId] },
     });
     await waitFor(async () => runCount === 2, 5000);
     await waitFor(async () => (await services.recoverTask(task2.taskId)).snapshot.status === 'completed', 5000);
@@ -6145,7 +6233,7 @@ describe('desktop services', () => {
     expect(historySeenOnSecondRun.map(message => message.content)).toEqual(['第一轮带附件任务', '完成任务1']);
     const recovered = await services.recoverTask(task2.taskId);
     expect(recovered.snapshot.context).toEqual({
-      threadId: 'thread-files',
+      threadId: continuityThreadId,
       taskIds: [task1.taskId],
       loadedTaskIds: [task1.taskId],
       skipped: [],
@@ -6166,23 +6254,81 @@ describe('desktop services', () => {
     });
     const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
     services.subscribeGoalTaskPrepared(event => prepared.push(event));
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal' }).id; })();
 
     const created = await services.createGoal({
-      threadId: 'thread-goal', objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3,
+      threadId: continuityThreadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3,
     });
     expect(await services.getActiveTask()).toBeNull();
     await services.ackGoalTaskAttached({
-      threadId: 'thread-goal', attachmentId: created.preparedTask.attachmentId,
+      threadId: continuityThreadId, attachmentId: created.preparedTask.attachmentId,
     });
-    await waitFor(async () => (await services.getGoal('thread-goal'))?.state.turnsUsed === 1, 5000);
+    await waitFor(async () => (await services.getGoal(continuityThreadId))?.state.turnsUsed === 1, 5000);
     await waitFor(async () => prepared.length === 2, 5000);
     expect(prepared).toHaveLength(2);
     expect(await services.getActiveTask()).toBeNull();
-    expect(await services.getGoal('thread-goal')).toMatchObject({
+    expect(await services.getGoal(continuityThreadId)).toMatchObject({
       activation: 'armed', state: { status: 'active', tokensUsed: 5 },
     });
-    await services.pauseGoal('thread-goal');
+    await services.pauseGoal(continuityThreadId);
   });
+
+  it('prepares the automatic Goal continuation exactly once, after the predecessor work release and with no blocked_unsettled history', async () => {
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.map(String).join(' ')); });
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        kswarmService: mockKSwarmService(),
+        runner: async ({ sessionId, emitRuntimeEvent, emitUsage }) => {
+          await emitUsage({ inputTokens: 2, outputTokens: 3 });
+          await emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '继续工作' });
+        },
+      });
+      const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
+      services.subscribeGoalTaskPrepared(event => prepared.push(event));
+      const threadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal-once' }).id; })();
+      const created = await services.createGoal({ threadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+      await services.ackGoalTaskAttached({ threadId, attachmentId: created.preparedTask.attachmentId });
+      const failed = () => warnings.filter(line => line.includes('blocked_unsettled') || line.includes('automatic continuation failed'));
+      await waitFor(async () => prepared.length === 2 || failed().length > 0, 5000);
+      expect(failed()).toEqual([]);
+      const first = prepared[0].taskId;
+      // The predecessor is physically settled before its successor exists.
+      expect(services.continuity.port().service.store.db.prepare('SELECT 1 AS ok FROM source_settlements WHERE task_id=?').get(first)).toEqual({ ok: 1 });
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(prepared).toHaveLength(2);
+      expect(new Set(prepared.map(event => event.taskId)).size).toBe(2);
+      expect(failed()).toEqual([]);
+      await services.pauseGoal(threadId);
+    } finally { warn.mockRestore(); }
+  }, 15_000);
+
+  it('does not continue a Goal whose previous turn was cancelled', async () => {
+    let started = 0;
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      runner: async ({ signal, emitUsage }) => {
+        started += 1;
+        await emitUsage({ inputTokens: 2, outputTokens: 3 });
+        await new Promise<void>(resolve => { if (signal?.aborted) resolve(); else signal?.addEventListener('abort', () => resolve(), { once: true }); });
+      },
+    });
+    const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
+    services.subscribeGoalTaskPrepared(event => prepared.push(event));
+    const threadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-goal-cancel' }).id; })();
+    const created = await services.createGoal({ threadId, objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+    await services.ackGoalTaskAttached({ threadId, attachmentId: created.preparedTask.attachmentId });
+    await waitFor(async () => started === 1, 5000);
+    await services.cancelTask(prepared[0].taskId);
+    await waitFor(async () => (await services.getGoal(threadId))?.state.turnsUsed === 1, 5000);
+    await waitFor(() => Boolean(services.continuity.port().service.store.db.prepare('SELECT 1 FROM source_settlements WHERE task_id=?').get(prepared[0].taskId)), 5000);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(prepared).toHaveLength(1);
+    expect(started).toBe(1);
+    expect((await services.getGoal(threadId))?.state.status).toBe('paused');
+  }, 15_000);
 
   it('passes discussion cancellation through the real service runner boundary',async()=>{
     const controller=new AbortController();let seen:AbortSignal|undefined,settle!:()=>void;
@@ -6331,17 +6477,18 @@ describe('A1 actual Main prepared-user admission entry',()=>{
   it('commits an actual Host task/session source before the ordinary user runner starts',async()=>{
     const root=join(tmpdir(),`main-user-source-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
-    const dataRoot=join(root,'data');let observed=false;
+    const dataRoot=join(root,'data');let observed=false;let continuityThreadId='';
     const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
     const services=createDesktopServices({dataRoot,kswarmService:mockKSwarmService(),runner:async input=>{
       const path=join(dataRoot,'conversation-projects','user-inputs',createHash('sha256').update(input.taskId).digest('hex')+'.json');
       const fact=JSON.parse(readFileSync(path,'utf8'));
-      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:'thread-a1-main',requestSource:'user'});
+      expect(fact).toMatchObject({taskId:input.taskId,sessionId:input.sessionId,threadId:continuityThreadId,requestSource:'user'});
       expect(fact.promptSha256).toBe(createHash('sha256').update(input.prompt).digest('hex'));observed=true;
       await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:input.taskId,intentId:'analysis',stepId:'done',note:'已完成分析。'});
     }});
+    continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a1-main' }).id; })();
     try{
-      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:'thread-a1-main'}});
+      const task=await services.createTask({prompt:'请分析当前说明',materials:[],context:{threadId:continuityThreadId}});
       for await(const event of services.subscribeTask(task.taskId)){if(event.type==='task_terminal')break;}
       expect(observed).toBe(true);expect(record).toHaveBeenCalledOnce();
       expect(record.mock.calls[0][0]).toMatchObject({taskId:task.taskId,status:'understanding'});
@@ -6357,12 +6504,13 @@ describe('A1 actual Main prepared-user admission entry',()=>{
     mkdirSync(root,{recursive:true});const oldConfig=process.env.XIAOK_CONFIG_DIR;process.env.XIAOK_CONFIG_DIR=join(root,'config');
     const runner=vi.fn(async()=>{}),failure=new Error('main-user-source-IO-failed'),actual=atomicUserFile.writeFileAtomicallySync;
     const services=createDesktopServices({dataRoot:join(root,'data'),kswarmService:mockKSwarmService(),runner});
+    const continuityThreadId = (() => { const { service, actor } = services.continuity.port(); return service.createConversation(actor, { operationId: 'thread-a1-failure' }).id; })();
     const record=vi.spyOn(ConversationProjectService.prototype,'recordPreparedUserTask');
     const writer=vi.spyOn(atomicUserFile,'writeFileAtomicallySync').mockImplementation((path,...args)=>{
       if(path.includes('user-inputs'))throw failure;return actual(path,...args);
     });
     try{
-      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:'thread-a1-failure'}})).rejects.toBe(failure);
+      await expect(services.createTask({prompt:'创建一个项目',materials:[],context:{threadId:continuityThreadId}})).rejects.toBe(failure);
       expect(runner).not.toHaveBeenCalled();expect(record).toHaveBeenCalledOnce();
       const actualTaskId=record.mock.calls[0][0].taskId;
       expect((await services.recoverTask(actualTaskId)).snapshot.status).toBe('cancelled');

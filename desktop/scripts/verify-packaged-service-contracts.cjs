@@ -122,16 +122,31 @@ async function reportProbe(resources, projectDir, root, timeoutMs) {
   } catch (error) { fail('kai-report-creator', `actual bundle Tasks probe failed: ${error.message}`); }
   finally { await stop(child); }
 }
-async function verify({ resources, projectDir, timeoutMs = 10000 }) {
+// The packaged Broker sidecar (services/intent-broker/runtime/xiaok-source-runtime.cjs)
+// resolves the Windows installation-absence helper next to itself. Without it the
+// sidecar observes 'unavailable' and every ordinary source route fails closed.
+const WINDOWS_ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64' };
+function brokerWindowsAbsenceHelper(resources, arch) {
+  const component = 'intent-broker windows-installation-absence';
+  if (!['x64','arm64'].includes(arch)) fail(component, `unsupported Windows package arch ${arch}`);
+  const root = path.join(resources, 'services', 'intent-broker', 'runtime');
+  const exe = file(root, path.join('native', `win32-${arch}`, 'windows-installation-absence.exe'), component);
+  const manifest = JSON.parse(readFileSync(file(root, path.join('native', `win32-${arch}`, 'windows-installation-absence.json'), component), 'utf8'));
+  if (manifest?.target !== `win32-${arch}` || createHash('sha256').update(readFileSync(exe)).digest('hex') !== manifest.sha256)
+    fail(component, `packaged helper does not match its manifest for win32-${arch}`);
+  return { component: 'intent-broker-windows-absence', version: `win32-${arch}` };
+}
+async function verify({ resources, projectDir, timeoutMs = 10000, platform, arch }) {
   const root = await mkdtemp(path.join(tmpdir(), 'xiaok-pack-contract-'));
   try {
     const plugins = pluginFiles(resources);
+    const helpers = platform === 'win32' ? [brokerWindowsAbsenceHelper(resources, arch)] : [];
     const contractPath = file(projectDir, 'dist/main/desktop/shared/kswarm-health-contract.js', 'Desktop health contract');
     const { hasDynamicWorkflowSupport } = await import(pathToFileURL(contractPath).href);
     const services = [];
     for (const name of ['kswarm','intent-broker']) services.push(await serviceProbe(name, resources, root, timeoutMs, hasDynamicWorkflowSupport));
     await reportProbe(resources, projectDir, root, timeoutMs);
-    return [...services, ...plugins];
+    return [...services, ...helpers, ...plugins];
   } catch (error) {
     if (error.message.startsWith('packaged service contract:')) throw error;
     fail('resources', error.message);
@@ -141,9 +156,11 @@ module.exports = async context => {
   const resources = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
-  const result = await verify({ resources, projectDir: context.packager.projectDir });
+  const arch = typeof context.arch === 'number' ? WINDOWS_ARCH_NAMES[context.arch] : context.arch;
+  const result = await verify({ resources, projectDir: context.packager.projectDir, platform: context.electronPlatformName, arch });
   console.log('packaged service contracts verified:', result.map(item => `${item.component}@${item.version}`).join(', '));
 };
 module.exports.verify = verify;
 module.exports.validateHealth = validateHealth;
 module.exports.pluginFiles = pluginFiles;
+module.exports.brokerWindowsAbsenceHelper = brokerWindowsAbsenceHelper;

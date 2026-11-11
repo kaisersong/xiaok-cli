@@ -2,7 +2,7 @@ import {migrateAssistantDigestReceipts,getAssistantDigestReceipt,claimAssistantD
 import { pathToFileURL } from 'node:url';
 import { activityReadonlyNeedsSnapshot, createActivityReadonlySnapshot } from './readonly-snapshot.js';
 import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -103,6 +103,8 @@ export class ConversationActivityStore {
   private projectDeliveryMetadata?:ReturnType<typeof createProjectDeliveryFacts>;
   private readonly projectDeliveryReads=new WeakMap<object,Readonly<{frame:object;membershipDigest:string;witnessDigest:string;presentationIncarnation:string;projectionVersion:number;dismissed:boolean;viewDigest:string}>>();
   private projectSnapshotUnconfirmed=false;
+  /** True while the open transaction was begun with synchronous=FULL; see transaction(). */
+  private durableCommit=false;
 
   private secureSidecars(): void {
     if (this.readOnly) return;
@@ -170,8 +172,9 @@ export class ConversationActivityStore {
     }
     let opened: DatabaseSync | undefined;
     try {
-      this.db = opened = new DatabaseSync(file);
-      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
+      this.db = opened = cachePreparedStatements(new DatabaseSync(file));
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
+      assertWriterDurabilityMode(this.db);
       try {
         if (process.platform !== 'win32') for (const suffix of ['', '-wal', '-shm']) if (existsSync(file + suffix)) chmodSync(file + suffix, 0o600);
       } catch { throw new Error('activity_storage_not_private'); }
@@ -220,10 +223,23 @@ export class ConversationActivityStore {
   claimAssistantDigest(input:Parameters<typeof claimAssistantDigest>[1]){return this.transaction(()=>claimAssistantDigest(this.db,input));}
   finishAssistantDigest(input:Parameters<typeof finishAssistantDigest>[1]){return this.transaction(()=>finishAssistantDigest(this.db,input));}
 
-  private transaction<T>(fn: () => T,beforeCommit?:()=>void): T {
+  private transaction<T>(fn: () => T,beforeCommit?:()=>void,durable=false): T {
     if (this.readOnly) throw new Error('conversation_activity_readonly');
     if (this.closed) throw new Error('conversation_activity_store_closed');
     if (this.writeState !== 'writable') throw new Error('conversation_activity_write_unconfirmed');
+    // SQLite refuses to change the safety level inside a transaction, so a
+    // terminal-state write must be declared before BEGIN.
+    if (durable) this.db.exec('PRAGMA synchronous=FULL');
+    this.durableCommit=durable;
+    try { return this.transactionBody(fn,beforeCommit); }
+    finally {
+      this.durableCommit=false;
+      // If restoring NORMAL fails the connection stays FULL: slower, never less durable.
+      if (durable) try { this.db.exec('PRAGMA synchronous=NORMAL'); } catch {}
+    }
+  }
+
+  private transactionBody<T>(fn: () => T,beforeCommit?:()=>void): T {
     try { this.db.exec('BEGIN IMMEDIATE'); }
     catch (primary) {
       // Only the thrown call is known. Do not infer BEGIN opened a transaction,
@@ -556,6 +572,7 @@ export class ConversationActivityStore {
   }
 
   private addActivity(watch: WorkWatch, projection: WorkProjection, kind: ConversationActivity['kind'], activityId: string): void {
+    if (TERMINAL.has(kind)) this.assertDurableCommit();
     const data = { activityId, watchId: watch.watchId, threadId: watch.origin.threadId, kind, at: this.now(), projection };
     if (kind === 'progress') {
       const prior = this.db.prepare('SELECT 1 FROM conversation_activities WHERE activity_id=?').get(activityId);
@@ -574,7 +591,7 @@ export class ConversationActivityStore {
 
   ingest(watchId: string, raw: unknown,delivery?:ActivitySourceDelivery): { acknowledge: boolean; duplicate?: boolean; quarantined?: boolean } {
     if(delivery&&this.projectWrites.has(delivery as ProjectOrdinaryWriteCapability))throw Error('activity_project_source_delivery_required');
-    const result=this.transaction(() => this.ingestLocked(watchId, raw,delivery),()=>this.assertProjectSourceWriter(watchId,delivery));
+    const result=this.transaction(() => this.ingestLocked(watchId, raw,delivery),()=>this.assertProjectSourceWriter(watchId,delivery),isTerminalEvent(raw));
     // A verified source gap is a committed restrictive observation, not an
     // accepted Host event. Return its original semantic rejection after commit.
     if(result.gapFailure)throw result.gapFailure;
@@ -643,6 +660,7 @@ export class ConversationActivityStore {
         this.compactSourceProgress(watchId, event.kind === 'progress' || event.kind === 'heartbeat' ? 255 : 256);
         const total = (this.db.prepare('SELECT COUNT(*) AS count FROM source_events').get() as { count: number }).count;
         if (total >= this.maxSourceEvents) throw new Error('activity_capacity_exceeded');
+        if (TERMINAL.has(event.kind)) this.assertDurableCommit();
         this.db.prepare('INSERT INTO source_events VALUES(?,?,?)').run(eventKey, watchId, content);
         this.db.prepare('INSERT INTO source_event_retention VALUES(?,?,?)').run(eventKey, this.now(), event.kind);
       }
@@ -751,7 +769,7 @@ export class ConversationActivityStore {
         this.ingestLocked(watchId, raw,delivery);
       }
       cover(page.coveredThrough);
-    },()=>this.assertProjectSourceWriter(watchId,delivery));
+    },()=>this.assertProjectSourceWriter(watchId,delivery),Array.isArray(page.events)&&page.events.some(isTerminalEvent));
     if(gapFailure)throw gapFailure;
   }
 
@@ -952,7 +970,7 @@ export class ConversationActivityStore {
       if (historyGap) this.addActivity(watch, projection, 'diagnostic', `gap:${watchId}:${sequence}`);
       else if (changedState && TERMINAL.has(state)) this.addActivity(watch, projection, state as 'completed' | 'failed' | 'cancelled', `snapshot:${watchId}:${sourceDataEpoch}:${sequence}:${state}`);
       this.db.prepare('INSERT INTO source_cursors VALUES(?,?) ON CONFLICT(watch_id) DO UPDATE SET sequence=excluded.sequence').run(watchId, sequence);
-    },()=>this.assertProjectSourceWriter(watchId,delivery));
+    },()=>this.assertProjectSourceWriter(watchId,delivery),TERMINAL.has(state));
   }
 
   close(): void {
@@ -960,6 +978,56 @@ export class ConversationActivityStore {
     this.closed = true;
     this.nativeDeliveries=new WeakMap();
     if (this.readonlySnapshot) { this.readonlySnapshot.close(); return; }
-    this.db.close(); this.owner?.close();
+    releaseCachedStatements(this.db); this.db.close(); this.owner?.close();
   }
+
+  /**
+   * The writer runs WAL with synchronous=NORMAL: a commit is atomic and the DB
+   * cannot be corrupted by a crash, but on power loss the last non-terminal
+   * events (progress, heartbeat, ...) may roll back; sources replay them and a
+   * missing tail is read as interrupted. A transaction that records a terminal
+   * state (completed/failed/cancelled) is begun with synchronous=FULL so that
+   * outcome is fsynced before COMMIT returns. A terminal write in a transaction
+   * not declared durable fails closed instead of committing with NORMAL.
+   */
+  private assertDurableCommit(): void {
+    if (!this.durableCommit) throw new Error('conversation_activity_terminal_commit_not_durable');
+  }
+}
+
+function isTerminalEvent(raw: unknown): boolean {
+  return Boolean(raw && typeof raw === 'object' && TERMINAL.has((raw as { kind?: unknown }).kind as string));
+}
+
+/** journal_mode=WAL (not a silent fallback) and synchronous=NORMAL (1) are required. */
+function assertWriterDurabilityMode(db: DatabaseSync): void {
+  const mode = (db.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode;
+  const sync = (db.prepare('PRAGMA synchronous').get() as { synchronous: number }).synchronous;
+  if (String(mode).toLowerCase() !== 'wal' || Number(sync) !== 1) throw new Error(`conversation_activity_durability_mode:${mode}:${sync}`);
+}
+
+/** Bound for distinct SQL texts kept prepared on one writer connection. */
+const MAX_CACHED_STATEMENTS = 512;
+/**
+ * The writer connection re-prepared every statement on every ingest. Since
+ * c28e2025 one ingest issues ~31 statements (was ~18), so prepare alone took
+ * as long as the work. Statements are reused per SQL text on this connection
+ * only; SQLite re-prepares a cached statement itself after a schema change.
+ * No caller in this store uses iterate(), so a reused statement is never
+ * reset under an open cursor. Statements are finalized by db.close().
+ */
+const CACHED_STATEMENTS = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
+function releaseCachedStatements(db: DatabaseSync): void { CACHED_STATEMENTS.get(db)?.clear(); CACHED_STATEMENTS.delete(db); }
+function cachePreparedStatements(db: DatabaseSync): DatabaseSync {
+  const prepare = db.prepare.bind(db), statements = new Map<string, StatementSync>();
+  CACHED_STATEMENTS.set(db, statements);
+  db.prepare = (sql: string) => {
+    let statement = statements.get(sql);
+    if (!statement) {
+      if (statements.size >= MAX_CACHED_STATEMENTS) statements.clear();
+      statement = prepare(sql); statements.set(sql, statement);
+    }
+    return statement;
+  };
+  return db;
 }

@@ -285,7 +285,7 @@ export class LayeredMemoryStore implements MemoryStore {
     request.signal?.addEventListener('abort', abort, { once: true });
     this.compacting = true; this.compactionController = controller;
     const llm = request.llm ?? this.llmFn!;
-    const assertOpen = () => { request.assertCurrent?.(); controller.signal.throwIfAborted(); if (this.closed) throw new Error('memory_store_closed'); };
+    const assertOpen = () => { if (this.closed) throw new Error('memory_store_closed'); request.assertCurrent?.(); controller.signal.throwIfAborted(); };
     try {
       assertOpen();
       if (request.prepare) { await request.prepare(controller.signal); assertOpen(); }
@@ -483,7 +483,7 @@ export class LayeredMemoryStore implements MemoryStore {
   close(): void | Promise<void> {
     if (this.closed) return this.closing;
     this.closed = true;
-    this.compactionController?.abort();
+    this.compactionController?.abort(new Error('memory_store_closed'));
     if (this.compactTimer) {
       clearInterval(this.compactTimer);
     }

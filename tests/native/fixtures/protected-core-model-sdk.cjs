@@ -26,6 +26,7 @@ module.exports = function protectedCoreModelSdk(options) {
    require('node:module').syncBuiltinESMExports();
    fs.writeFileSync(path.join(config,'config.json'),JSON.stringify({schemaVersion:2,defaultProvider:'fixture-provider',defaultModelId:'fixture-model',providers:{'fixture-provider':{type:'custom',protocol:'openai_legacy',apiKey:'private-loopback-only',baseUrl:origin+'/v1'}},models:{'fixture-model':{provider:'fixture-provider',model:'fixture-wire',label:'Fixture',capabilities:[]}}}),{mode:0o600});
    api=await import(pathToFileURL(options.bundle).href);
+   await api.loadConfig(); // migrate the plaintext fixture key before the probe compares config bytes
    const serviceOptions={dataRoot:path.join(options.root,'desktop'),workspaceRoot:path.join(options.root,'workspace'),runner:async()=>{throw Error('business runner not used');},kswarmService:{request:async()=>{throw Error('broker unused');},getDesktopMutationToken:()=>''}};
    fs.mkdirSync(serviceOptions.workspaceRoot,{recursive:true});const scope=api.resolveDesktopServiceScope(serviceOptions);
    const preload=path.join(options.root,'protected-probe-preload.cjs');fs.writeFileSync(preload,"const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('protectedProbe',{go:()=>ipcRenderer.invoke('fixture:protected-core-model')});");
