@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import ts from 'typescript';
 import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -48,28 +48,131 @@ type ActualRoomWorkspaceTemplateEntry = RoomWorkspaceChangeInput['templateEntrie
 
 const root = resolve(process.cwd(), basename(process.cwd()) === 'desktop' ? '..' : '.');
 const filename = resolve(root, 'desktop/tests/main/room-field-classification.test.ts');
-const options: ts.CompilerOptions = { noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext };
-const program = ts.createProgram([filename], options);
-const checker = program.getTypeChecker();
-const source = program.getSourceFile(filename)!;
+const contractPath = resolve(root, 'desktop/shared/room-workspace-contract.ts');
+const dispatcherPath = resolve(root, 'desktop/electron/collaboration-room-wake-dispatcher.ts');
+const sensitivityPath = resolve(root, 'src/runtime/conversation-activity/sensitivity.ts');
+const typeRoot = resolve(root, 'desktop/tests/main/room-field-classification-types.ts');
+const options: ts.CompilerOptions = { noEmit: true, strict: true, skipLibCheck: true, types: [], target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext };
 const canary = 'CANARY-room-secret-内容';
+const LOCAL_ROOM_INTERFACES = [
+  'LocalRoomWakeSettled',
+  'LocalRoomDiscussionSettled',
+  'LocalRoomWorkspaceChanged',
+  'LocalRoomWorkspacePermissions',
+  'LocalRoomWorkspaceInstructions',
+  'LocalRoomWorkspaceClaim',
+  'LocalRoomWorkspaceArtifact',
+  'LocalRoomWorkspaceProjectMapping',
+  'LocalRoomWorkspaceSnapshot',
+  'LocalRoomWorkspaceFilePreview',
+  'LocalRoomWorkspaceChangeInput',
+  'LocalRoomWorkspaceTemplateEntry',
+] as const;
+
+function assertSelfContained(node: ts.Node, source: ts.SourceFile, label: string): void {
+  const visit = (item: ts.Node) => {
+    if (ts.isTypeReferenceNode(item) || ts.isImportTypeNode(item) || ts.isExpressionWithTypeArguments(item) || ts.isTypeQueryNode(item)) {
+      throw new Error(`${label} is not self-contained: ${item.getText(source)}`);
+    }
+    ts.forEachChild(item, visit);
+  };
+  visit(node);
+}
+
+function shallowExportedTypeAlias(filePath: string, name: string): string {
+  const text = readFileSync(filePath, 'utf8');
+  const source = ts.createSourceFile(filePath, text, ts.ScriptTarget.ES2022, true);
+  for (const stmt of source.statements) {
+    if (ts.isTypeAliasDeclaration(stmt) && stmt.name.text === name) {
+      assertSelfContained(stmt.type, source, name);
+      return `export type ${name} = ${stmt.type.getText(source)};\n`;
+    }
+  }
+  throw new Error(`missing exported type ${name} in ${filePath}`);
+}
+
+function shallowExportedInterfaces(filePath: string, names: readonly string[]): string {
+  const text = readFileSync(filePath, 'utf8');
+  const source = ts.createSourceFile(filePath, text, ts.ScriptTarget.ES2022, true);
+  const found = new Map<string, string>();
+  for (const stmt of source.statements) {
+    if (ts.isInterfaceDeclaration(stmt) && names.includes(stmt.name.text)) {
+      if (stmt.heritageClauses?.length) throw new Error(`${stmt.name.text} has heritage clauses`);
+      assertSelfContained(stmt, source, stmt.name.text);
+      found.set(stmt.name.text, stmt.getText(source));
+    }
+  }
+  const missing = names.filter((name) => !found.has(name));
+  if (missing.length) throw new Error(`missing interfaces in ${filePath}: ${missing.join(', ')}`);
+  return `${names.map((name) => found.get(name)!).join('\n')}\n`;
+}
+
+function typeAssertionSource(): string {
+  const text = readFileSync(filename, 'utf8');
+  const start = text.indexOf('type SameKeys');
+  const end = text.indexOf('\nconst root');
+  if (start < 0 || end < 0) throw new Error('cannot extract type assertion aliases');
+  return [
+    "import type { CollaborationRoomDispatchEvent } from '../../electron/collaboration-room-wake-dispatcher.js';",
+    "import type { RoomWorkspaceSnapshot, RoomWorkspaceArtifact, RoomWorkspaceFilePreview, RoomWorkspaceChangeInput } from '../../shared/room-workspace-contract.js';",
+    `import type { ${LOCAL_ROOM_INTERFACES.join(', ')} } from '../../../src/runtime/conversation-activity/sensitivity.js';`,
+    text.slice(start, end).trim(),
+    '',
+  ].join('\n');
+}
+
+function createClassificationHost(contractText?: string): ts.CompilerHost {
+  const host = ts.createCompilerHost(options);
+  const getSourceFile = host.getSourceFile.bind(host);
+  const fileExists = host.fileExists.bind(host);
+  const readFile = host.readFile?.bind(host);
+  const shallowDispatcher = shallowExportedTypeAlias(dispatcherPath, 'CollaborationRoomDispatchEvent');
+  const shallowSensitivity = shallowExportedInterfaces(sensitivityPath, LOCAL_ROOM_INTERFACES);
+  const virtual = typeAssertionSource();
+  const intercepted = (path: string): string | undefined => {
+    const resolved = resolve(path);
+    if (resolved === typeRoot) return virtual;
+    if (resolved === dispatcherPath) return shallowDispatcher;
+    if (resolved === sensitivityPath) return shallowSensitivity;
+    if (resolved === contractPath && contractText !== undefined) return contractText;
+    return undefined;
+  };
+  host.fileExists = (path) => resolve(path) === typeRoot || fileExists(path);
+  if (readFile) host.readFile = (path) => intercepted(path) ?? readFile(path);
+  if (host.realpath) {
+    const realpath = host.realpath.bind(host);
+    host.realpath = (path) => resolve(path) === typeRoot ? typeRoot : realpath(path);
+  }
+  host.getSourceFile = (path, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const text = intercepted(path);
+    if (text !== undefined) return ts.createSourceFile(path, text, languageVersion, true);
+    return getSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile);
+  };
+  return host;
+}
+
 describe('Room field classification contracts', () => {
+  let program: ts.Program;
+  let checker: ts.TypeChecker;
+  let source: ts.SourceFile;
+
+  beforeAll(() => {
+    // Compile a types-only root and serve self-contained extracts of the
+    // dispatcher event and LocalRoom* interfaces. The test file itself
+    // would pull the wake-dispatcher implementation graph (~2500 files).
+    program = ts.createProgram([typeRoot], options, createClassificationHost());
+    checker = program.getTypeChecker();
+    source = program.getSourceFile(typeRoot)!;
+    if (!source) throw new Error('missing classification type root');
+  });
+
   it('type-level key equality assertions compile', () => {
     expect(program.getSemanticDiagnostics(source).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n'))).toEqual([]);
   });
   it('rejects a desktop contract field added without classification', () => {
-    const contract = resolve(root, 'desktop/shared/room-workspace-contract.ts');
-    const host = ts.createCompilerHost(options);
-    const getSourceFile = host.getSourceFile.bind(host);
-    host.getSourceFile = (path, languageVersion, onError, shouldCreateNewSourceFile) => {
-      if (resolve(path) === contract) {
-        const changed = readFileSync(contract, 'utf8').replace('export interface RoomWorkspaceArtifact {', 'export interface RoomWorkspaceArtifact { unclassifiedCanary?: string;');
-        return ts.createSourceFile(path, changed, languageVersion, true);
-      }
-      return getSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile);
-    };
-    const changed = ts.createProgram([filename], options, host);
-    expect(changed.getSemanticDiagnostics(changed.getSourceFile(filename)!).some(d => d.code === 2344)).toBe(true);
+    const changedText = readFileSync(contractPath, 'utf8').replace('export interface RoomWorkspaceArtifact {', 'export interface RoomWorkspaceArtifact { unclassifiedCanary?: string;');
+    const changed = ts.createProgram([typeRoot], options, createClassificationHost(changedText), program);
+    expect(changed.getSemanticDiagnostics(changed.getSourceFile(typeRoot)!).some(d => d.code === 2344)).toBe(true);
   });
   it.each([
     ['RoomWakeSettled', ROOM_WAKE_SETTLED_SENSITIVITY],
