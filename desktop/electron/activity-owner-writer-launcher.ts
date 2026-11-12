@@ -4,7 +4,7 @@ import {dispatchBusinessProtocolTag} from '../../src/runtime/conversation-activi
 import type {DesktopDispatchLaunch} from './default-dispatch-native-bootstrap.js';
 import {spawn,type ChildProcess} from 'node:child_process';
 import {createConnection} from 'node:net';
-import {openSync,closeSync,writeFileSync} from 'node:fs';
+import {openSync,closeSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {types} from 'node:util';
@@ -205,6 +205,18 @@ export function ensureDesktopConversationActivityOwner(config:ActivityOwnerConfi
   return state.promise;
  }catch(error){return fixedPromise((_,no)=>no(error));}
 }
+/** Writes the owner's per-launch config and publishes the same bytes as the
+ * canonical owner config. Main's attach qualifies every socket against
+ * ACTIVITY_STORAGE_NAMES.config; with only the launch file, a protected
+ * (blank first start or upgraded) Desktop root is never qualifiable and Main
+ * always falls back to starting KSwarm without the owner. */
+export function writeOwnerLaunchConfig(dataRoot:string,nonce:string,payload:unknown):string{
+ const configFile=join(dataRoot,`activity-owner-launch-${nonce}.json`),bytes=JSON.stringify(payload);
+ const configFd=openSync(configFile,'wx',0o600);try{writeFileSync(configFd,bytes);}finally{closeSync(configFd);}chmodPrivateActivityFile(configFile);
+ const canonical=join(dataRoot,ACTIVITY_STORAGE_NAMES.config),temporary=`${canonical}.${randomBytes(8).toString('hex')}.tmp`;
+ writeFileSync(temporary,bytes,{mode:0o600});chmodPrivateActivityFile(temporary);renameSync(temporary,canonical);
+ return configFile;
+}
 // This private delivery table contains no operation setter or caller callback.
 const deliveries=new WeakMap<LaunchState,(client:ConversationActivityOwnerClient)=>void>();
 async function runMainLaunch(state:LaunchState,config:ActivityOwnerConfig):Promise<void>{
@@ -221,8 +233,7 @@ async function runMainLaunch(state:LaunchState,config:ActivityOwnerConfig):Promi
  if(state.closed)throw Error('WRITER_CONFIG_LAUNCH_CLOSED');
  const launch=consumeDesktopWriterControlLaunchCapsule(state.capsule,{source:state.source,service:state.service,scope:state.scope});
  let businessBinding:typeof import('./default-dispatch-native-bootstrap.js')|undefined;if(state.business){businessBinding=await import('./default-dispatch-native-bootstrap.js');if(state.closed||state.observationUnknown)throw Error('DISPATCH_NATIVE_LAUNCH_CLOSED');state.business.launch=businessBinding.consumeDesktopDispatchLaunchCapsule(state.business.capsule,state);}
- const configFile=join(address.dataRoot,`activity-owner-launch-${launch.mainLaunchNonce}.json`);state.configArtifact=configFile;
- const configFd=openSync(configFile,'wx',0o600);try{writeFileSync(configFd,JSON.stringify(data(normalized)));}finally{closeSync(configFd);}chmodPrivateActivityFile(configFile);
+ const configFile=writeOwnerLaunchConfig(address.dataRoot,launch.mainLaunchNonce,data(normalized));state.configArtifact=configFile;
  const logFile=join(address.dataRoot,ACTIVITY_STORAGE_NAMES.log),logFd=openSync(logFile,'a',0o600);let child:ChildProcess;
  try{
   chmodPrivateActivityFile(logFile);const executable=process.execPath,args=[fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js',import.meta.url)),configFile],spawnOptions={detached:true,stdio:['ignore',logFd,logFd,'ipc'] as ['ignore',number,number,'ipc'],windowsHide:true,env:{...buildActivityOwnerEnv(process.env),ELECTRON_RUN_AS_NODE:'1'}};
