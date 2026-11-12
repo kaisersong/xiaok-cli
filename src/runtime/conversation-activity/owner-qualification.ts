@@ -47,6 +47,6 @@ export function readProtectedOwnerQualification(root:string):ActivityOwnerQualif
  // A Desktop root still needs its continuity profile (authority files lost ->
  // unavailable), but the owner config is bound to Main's id, checked below.
  try{readContinuityProfile(root);}catch{throw unavailable();}
- if(!isDesktopActivityProfile(config)||typeof config.dataRoot!=='string'||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
+ if(!isDesktopActivityProfile(config,root)||typeof config.dataRoot!=='string'||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
  return Object.freeze({profileId:config.profileId,configDigest:activityOwnerConfigDigest(config),generation:ACTIVITY_OWNER_GENERATION});
 }

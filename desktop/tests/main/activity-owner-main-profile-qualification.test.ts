@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
-import {mkdirSync,mkdtempSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {resolveDesktopServiceScope} from '../../electron/desktop-service-scope.js';
 import {mainActivityOwnerConfig} from '../../electron/activity-owner-main-config.js';
@@ -54,6 +54,23 @@ it('a 1.6.2 data directory (old continuity profile, groups.sqlite, stale owner c
  expect(()=>readProtectedOwnerQualification(root)).toThrow('activity_owner_qualification_unavailable');
  const {scope}=mainLaunch(root);
  expect(readProtectedOwnerQualification(root)).toMatchObject({profileId:scope.profileId});
+});
+function rewrite(root:string,patch:Record<string,unknown>){
+ const address=activityOwnerAddress(root),file=join(address.dataRoot,'activity-owner.config.json');
+ writeFileSync(file,JSON.stringify({...JSON.parse(readFileSync(file,'utf8')),...patch}),{mode:0o600});
+}
+it('rejects a Main-shaped config whose profileId is not the one computed from its root',async()=>{
+ const root=tempDir('owner-main-wrong-id-'),other=tempDir('owner-main-other-');await openProfile(root);mainLaunch(root);
+ const foreign=resolveDesktopServiceScope({dataRoot:other}).profileId;
+ rewrite(root,{profileId:foreign,actorId:`desktop-user:${foreign}`});
+ expect(()=>readProtectedOwnerQualification(root)).toThrow('activity_owner_qualification_unavailable');
+});
+it('rejects a config whose profile root does not resolve to the qualified root',async()=>{
+ const root=tempDir('owner-main-wrong-root-'),other=tempDir('owner-main-other-root-');await openProfile(root);mainLaunch(root);
+ // Self-consistent id for the other root: only the realpath check can refuse it.
+ const id=resolveDesktopServiceScope({dataRoot:other}).profileId;
+ rewrite(root,{profileRoot:other,profileId:id,actorId:`desktop-user:${id}`});
+ expect(()=>readProtectedOwnerQualification(root)).toThrow('activity_owner_qualification_unavailable');
 });
 it('a CLI-written owner config (real CLI launcher write) stays outside Desktop qualification',async()=>{
  const root=tempDir('owner-cli-profile-');

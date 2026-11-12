@@ -29,6 +29,8 @@ import {mintCanonicalDesktopBusinessBirth,bindCanonicalDesktopBusinessBirth,obse
 
 export interface ActivityOwnerConfig {
   schemaVersion: 1; dataRoot: string; profileId: string; actorId: string;
+  /** Desktop only: the data root Main hashed into profileId (before realpath). */
+  profileRoot?: string;
   identity: { kind: 'desktop' | 'cli'; path: string; workspaceRoot?: string };
   managedSources?: ActivityManagedSource[];
   kswarm?: { url: string; mutationToken: string; brokerUrl: string; roomToken: string };

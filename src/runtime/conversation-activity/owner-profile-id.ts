@@ -1,4 +1,5 @@
 import {createHash,Hash} from 'node:crypto';
+import {realpathSync} from 'node:fs';
 import {resolve} from 'node:path';
 
 const scopeHash=createHash,scopeUpdate=Hash.prototype.update,scopeDigest=Hash.prototype.digest,scopeApply=Reflect.apply;
@@ -10,11 +11,14 @@ const scopeHash=createHash,scopeUpdate=Hash.prototype.update,scopeDigest=Hash.pr
 export function desktopActivityProfileId(dataRoot:string):string{
   const state=scopeHash('sha256');scopeApply(scopeUpdate,state,[resolve(dataRoot)]);return scopeApply(scopeDigest,state,['hex']) as string;
 }
-/** A Desktop owner config names its profile the way Main does. The launcher
- * stores the realpath of the data root, so a root reached through a symlink
- * (macOS /var -> /private/var) cannot be re-hashed here; the id is accepted by
- * shape and by its actor binding, and the attaching launcher still requires
- * the owner's status profileId to equal Main's own. */
-export function isDesktopActivityProfile(config:{profileId?:unknown;actorId?:unknown}):boolean{
-  return typeof config.profileId==='string'&&/^[a-f0-9]{64}$/.test(config.profileId)&&config.actorId===`desktop-user:${config.profileId}`;
+/** A Desktop owner config names its profile the way Main does: profileId is
+ * recomputed from the root Main hashed. The launcher stores the realpath as
+ * dataRoot, so Main also records the path it hashed as `profileRoot` (macOS
+ * /var -> /private/var); that path must still resolve to the qualified root.
+ * Without profileRoot the stored dataRoot is the hashed path. */
+export function isDesktopActivityProfile(config:{dataRoot?:unknown;profileRoot?:unknown;profileId?:unknown;actorId?:unknown},root:string):boolean{
+  const profileRoot=config.profileRoot===undefined?config.dataRoot:config.profileRoot;
+  if(typeof profileRoot!=='string'||typeof config.profileId!=='string')return false;
+  let real:string;try{real=realpathSync(profileRoot);}catch{return false;}
+  return real===root&&config.profileId===desktopActivityProfileId(profileRoot)&&config.actorId===`desktop-user:${config.profileId}`;
 }

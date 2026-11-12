@@ -26,7 +26,7 @@ export async function activeOwnerServicePorts(dataRoot: string): Promise<Desktop
     if (status.generation !== ACTIVITY_OWNER_GENERATION || config.identity.kind !== 'desktop'
       || realpathSync(config.dataRoot) !== client.address.dataRoot
       // Same profile rule as owner qualification: Main's service-scope id, not the continuity UUID.
-      || !isDesktopActivityProfile(config) || status.profileId !== config.profileId
+      || !isDesktopActivityProfile(config, client.address.dataRoot) || status.profileId !== config.profileId
       || activityOwnerConfigDigest(config) !== status.configDigest) throw new Error('activity_owner_discovery_mismatch');
     const port = (url: string | undefined) => {
       const match = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(url ?? '');
