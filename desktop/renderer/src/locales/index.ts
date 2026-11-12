@@ -2090,6 +2090,26 @@ export interface LocaleStrings {
     connectorCancelEdit: string;
     connectorTestConnection: string;
     connectorTestSaveFirst: string;
+    // tools pane zero-config summaries
+    toolsAdvancedToggle: string;
+    toolsFreeAvailable: string;
+    toolsSummaryNoConfig: string;
+    toolsSummaryFreeNoKey: string;
+    toolsSummaryKeyRecommended: string;
+    toolsSummaryKeyConfigured: string;
+    toolsSummaryKeyRequired: string;
+    toolsSummaryKeyFromModel: string;
+    // computer use section (tools pane)
+    computerUseTitle: string;
+    computerUseDesc: string;
+    computerUseUnavailable: string;
+    computerUseRefresh: string;
+    computerUseUnsupported: string;
+    computerUseInstall: string;
+    computerUseDriverMissing: (name: string) => string;
+    computerUseCustomPath: (path: string) => string;
+    computerUseExternalUpdateBlocked: string;
+    computerUseTaskRunning: string;
     // System One decision model (tools pane)
     systemOneTitle: string;
     systemOneDesc: string;
