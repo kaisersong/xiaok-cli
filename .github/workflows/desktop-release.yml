@@ -76,6 +76,13 @@ jobs:
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
 
+      - name: Prepare locked bundled Yunzhijia binary before packaging
+        working-directory: desktop
+        run: node scripts/prepare-packaged-yzj-cli.cjs
+
+      - name: Verify prepared bundled CLI lifecycle
+        run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
+
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
 
@@ -306,6 +313,13 @@ jobs:
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
+
+      - name: Prepare locked bundled Yunzhijia binary before packaging
+        working-directory: desktop
+        run: node scripts/prepare-packaged-yzj-cli.cjs
+
+      - name: Verify prepared bundled CLI lifecycle
+        run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
 
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
