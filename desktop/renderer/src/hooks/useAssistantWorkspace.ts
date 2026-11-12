@@ -103,12 +103,19 @@ export function useAssistantWorkspace() {
         if (expectApplied) {
           pendingExpectation.current = expectApplied;
           setRechecking(true);
-          recheckTimer.current = setTimeout(() => {
-            recheckTimer.current = null;
-            const expectation = pendingExpectation.current;
-            if (!owner.active || life.current !== owner || expectation !== expectApplied) return;
-            refresh();
-          }, AUTO_RECHECK_DELAY_MS);
+          // If another read is in flight when the timer fires, the timer waits
+          // instead of queueing a second read; that read consumes the
+          // expectation or clears it.
+          const scheduleRecheck = () => {
+            recheckTimer.current = setTimeout(() => {
+              recheckTimer.current = null;
+              const expectation = pendingExpectation.current;
+              if (!owner.active || life.current !== owner || expectation !== expectApplied) return;
+              if (owner.busy || mutationLock.current) { scheduleRecheck(); return; }
+              refresh();
+            }, AUTO_RECHECK_DELAY_MS);
+          };
+          scheduleRecheck();
         } else setOperationUnknown(true);
       }
     } finally {
