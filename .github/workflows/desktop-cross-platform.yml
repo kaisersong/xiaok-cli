@@ -221,6 +221,7 @@ jobs:
           tests/main/copy-packaged-dependencies.test.ts
           tests/main/active-owner-service-ports-first-start.test.ts
           tests/main/activity-owner-launch-config-qualification.test.ts
+          tests/main/desktop-services-degrade-no-dialog.test.ts
           tests/main/scheduled-task-delivery.test.ts
           tests/renderer/scheduled-task-delivery.test.tsx
           tests/main/scheduled-preload.test.ts
