@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterEach,expect,it} from 'vitest';
 import {mkdirSync,mkdtempSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {createServer,type Server} from 'node:net';import {join} from 'node:path';import {tmpdir} from 'node:os';
-import {createHash} from 'node:crypto';
+import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {existsSync} from 'node:fs';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {resolveDesktopServiceScope} from '../../electron/desktop-service-scope.js';
 import {mainActivityOwnerConfig} from '../../electron/activity-owner-main-config.js';
@@ -52,4 +52,16 @@ it('a live owner behind a forged (unqualifiable) config is still refused',async(
  await new Promise<void>((yes,no)=>{server.once('error',no);server.listen(address.socketPath,()=>yes());});
  cleanups.push(()=>new Promise<void>(yes=>server.close(()=>yes())));
  await expect(activeOwnerServicePorts(dataRoot)).rejects.toThrow('activity_owner_qualification_unavailable');
+});
+it('a stale owner socket left by a killed owner process counts as no live owner',async()=>{
+ const {dataRoot,address}=await symlinkedProfile();
+ legacyConfig(dataRoot,address.dataRoot);
+ // A real owner-like process listens on the owner socket and is then killed, so its pid is dead.
+ const child=spawn(process.execPath,['-e',`require('node:net').createServer(()=>{}).listen(${JSON.stringify(address.socketPath)},()=>process.stdout.write('up'))`],{stdio:['ignore','pipe','inherit'],env:{...process.env,ELECTRON_RUN_AS_NODE:'1'}});
+ cleanups.push(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');});
+ await new Promise<void>((yes,no)=>{child.stdout!.once('data',()=>yes());child.once('exit',()=>no(Error('listener exited early')));});
+ const exited=new Promise<void>(yes=>child.once('exit',()=>yes()));child.kill('SIGKILL');await exited;
+ // POSIX keeps the socket file with nobody listening (ECONNREFUSED); a Windows pipe disappears (ENOENT).
+ if(process.platform!=='win32')expect(existsSync(address.socketPath)).toBe(true);
+ await expect(activeOwnerServicePorts(dataRoot)).resolves.toBeUndefined();
 });
