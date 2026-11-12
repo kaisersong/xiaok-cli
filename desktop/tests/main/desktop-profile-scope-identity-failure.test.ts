@@ -71,16 +71,37 @@ function filesContaining(root:string,needles:readonly string[]):string[]{
  }};
  walk(root);return [...new Set(hits)].sort();
 }
+/** Every sqlite table under `root` holding rows, as "<relative path> <table>=<count>". */
+function populatedTables(root:string):string[]{
+ const out:string[]=[];
+ const walk=(dir:string)=>{for(const name of readdirSync(dir)){const path=join(dir,name),st=lstatSync(path);
+  if(st.isDirectory()){walk(path);continue;}if(!st.isFile()||readFileSync(path).subarray(0,16).toString('latin1')!=='SQLite format 3\0')continue;
+  const db=new DatabaseSync(path,{readOnly:true});
+  try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>){
+   const {c}=db.prepare(`SELECT count(*) AS c FROM "${table.replaceAll('"','""')}"`).get() as {c:number};if(c>0)out.push(`${path.slice(root.length+1)} ${table}=${c}`);}
+  }finally{db.close();}
+ }};
+ walk(root);return out.sort();
+}
+/** Regular files under `dir` (relative), recursively; [] when absent. */
+function filesUnder(dir:string):string[]{
+ if(!existsSync(dir))return [];const out:string[]=[];
+ const walk=(d:string)=>{for(const name of readdirSync(d)){const path=join(d,name),st=lstatSync(path);if(st.isDirectory())walk(path);else out.push(path.slice(dir.length+1));}};
+ walk(dir);return out.sort();
+}
 async function mainStart(platform:Platform,base:string,dataRoot:string){
  const logs:string[]=[];
  const identity:DesktopMainIdentity=onPlatform(platform,()=>resolveDesktopMainIdentity(dataRoot));
  if(identity.failure!==undefined)logs.push(`[context-continuity] identity refused, continuity degrades: ${identity.failure}`);
+ // Every KSwarm business request Services makes (delegation, room, dispatch traffic).
+ const kswarmRequests:string[]=[],kswarmService=mockKSwarmService(),request=kswarmService.request.bind(kswarmService);
+ kswarmService.request=async(path,init)=>{kswarmRequests.push(String(path));return request(path,init);};
  const services=createDesktopServices({dataRoot,workspaceRoot:base,knowledgeDbPath:join(base,'knowledge.sqlite'),pluginRootDir:join(base,'plugins'),pluginDependencies:[],
-  kswarmService:mockKSwarmService(),mainIdentity:identity,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)});
+  kswarmService,mainIdentity:identity,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)});
  let closed=false;const close=async()=>{if(closed)return;closed=true;const result=await services.disposeMultiAgent();if(!result.drained)throw Error('fixture_close_unconfirmed');};
  cleanups.push(close);
  await services.multiAgent?.ready;
- return {identity,services,logs,close};
+ return {identity,services,logs,close,kswarmRequests};
 }
 /** Main's startup attach sequence; the attach is Services' own, qualified like the owner client. */
 async function attach(platform:Platform,start:Awaited<ReturnType<typeof mainStart>>,dataRoot:string){
@@ -129,6 +150,26 @@ describe.each(['win32','darwin'] as const)('fresh install whose first identity f
   expect.soft(scopeValues(dataRoot),'failed start wrote a scope row').toEqual([]);
   expect.soft(existsSync(join(dataRoot,'multi-agent','groups.sqlite'))).toBe(false);
   expect.soft(readdirSync(dataRoot).filter(name=>name.startsWith('activity-owner'))).toEqual([]);
+  // #233 质量 (b): the failed round's KSwarm, writer and dispatch leave no
+  // delegation, operation or state behind, so a later start can find no orphan.
+  // - KSwarm: delegation state lives in the KSwarm service process, not under the
+  //   Desktop base (this fixture's mockKSwarmService has no store). Desktop's side
+  //   is the owner delegation, released on the refused attach
+  //   (activity-owner-startup.ts:41; refusal desktop-services.ts
+  //   attachConversationActivityOwner), and any KSwarm business request (none; with
+  //   this fixture the later starts make none either, so that check only guards a new one).
+  // - Writer: the owner launch/config files (activity-owner-writer-launcher.ts:213
+  //   writeOwnerLaunchConfig), asserted absent above; no conversation-activity.sqlite
+  //   (association_operations, work_watches, activities) exists.
+  // - Dispatch: default-dispatch and user actions are journaled by
+  //   MainUserSubmissionOwner under conversation-projects/user-submissions, refused at
+  //   main-user-submission.ts:147/:222 (this fixture builds no defaultDispatchBootstrap).
+  // The only populated table is the artifact workspace's schema meta row (no scope, no operation).
+  expect.soft(populatedTables(base),'failed round left delegation/operation/state rows').toEqual(['data/artifact-workspace/workspace.sqlite artifact_workspace_meta=1']);
+  expect.soft(filesUnder(join(dataRoot,'conversation-projects')),'failed round journaled a submission/dispatch').toEqual([]);
+  expect.soft(filesUnder(join(dataRoot,'conversation-rooms')),'failed round left room state').toEqual([]);
+  expect.soft(existsSync(join(dataRoot,'conversation-activity.sqlite')),'failed round opened the activity store').toBe(false);
+  expect.soft(failed.kswarmRequests,'failed round sent KSwarm business requests').toEqual([]);
 
   let scope:string|undefined;
   for(const n of [2,3]){
@@ -144,6 +185,17 @@ describe.each(['win32','darwin'] as const)('fresh install whose first identity f
    expect.soft(scopeValues(dataRoot)).not.toContain(legacy);
    expect.soft(start.identity.profileId,`start ${n} read the failed round's scope`).not.toBe(failed.identity.profileId);
    expect.soft(mainDshScopeAvailable(start.identity)).toBe(true);
+   // #233 质量 (b): no residue or orphan of the failed round. Exactly this start's
+   // own rows: one boot owner per later start (none from the failed round), the
+   // fresh grant, continuity's own meta and effect-inventory row; no delegation,
+   // operation, watch, submission journal or room state.
+   expect.soft(populatedTables(base),`start ${n}: rows`).toEqual([
+    'data/artifact-workspace/workspace.sqlite artifact_workspace_meta=1',
+    'data/continuity.sqlite continuity_meta=7','data/continuity.sqlite unproven_effects=1',
+    `data/multi-agent/groups.sqlite boot_owners=${n-1}`,'data/multi-agent/groups.sqlite workspace_execution_authorizations=1',
+   ]);
+   expect.soft(filesUnder(join(dataRoot,'conversation-projects')),`start ${n}: submission/dispatch journal`).toEqual([]);
+   expect.soft(filesUnder(join(dataRoot,'conversation-rooms')),`start ${n}: room state`).toEqual([]);
    await start.close();
   }
   // Nothing persisted by starts 2 and 3 names the failed round's scope or the legacy digest.
