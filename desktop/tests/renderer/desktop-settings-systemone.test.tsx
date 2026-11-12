@@ -38,6 +38,7 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     saveKswarmConfig: vi.fn().mockResolvedValue({ maxConcurrentTasks: 3 }),
     listMCPInstalls: vi.fn().mockResolvedValue([]),
     listPluginMcpServers: vi.fn().mockResolvedValue([]),
+    listPluginDependencyStatuses: vi.fn().mockResolvedValue([]),
   },
 }));
 
