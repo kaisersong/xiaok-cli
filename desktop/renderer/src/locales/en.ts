@@ -2991,7 +2991,9 @@ export const en: LocaleStrings = {
       important_email: { title: 'Important email', description: 'Decisions, replies and approaching deadlines in your inbox.', cadence: 'Every 2 hours', requirement: 'Requires a connected inbox' },
     },
 
-    operationUnknown: "The result could not be confirmed. Data may have changed. Refresh the status before continuing.",
+    operationUnknown: "We could not confirm your last action, and the automatic re-check failed. Refresh the status before continuing.",
+    operationRecheckApplied: "Auto-checked: your last change took effect.",
+    operationRecheckNotApplied: "Auto-checked: your last change is not visible yet. You can retry.",
     refreshStatus: "Refresh status",
     title: "Xiaok assistant",
     morningScheduleName: "Xiaok assistant morning suggestions",
