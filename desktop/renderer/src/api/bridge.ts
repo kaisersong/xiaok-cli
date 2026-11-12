@@ -469,6 +469,7 @@ export const api = {
           reportPhase('recover_context_match', taskOrdinal);
         }));
       }
+      const reservedHere = !!thread && !canonical && thread.deletionPending !== true;
       if (thread && !canonical) {
         reportPhase('reservation_start');
         await mutateStoredThread(id, current => {
@@ -484,6 +485,18 @@ export const api = {
       const result = snapshot.deleteState === 'deleted' ? snapshot.operation : await desktop.deleteMultiAgentThread({
         threadId: id, expectedThreadRevision: snapshot.threadRevision,
         operationId: `delete:${snapshot.threadRevision}:${crypto.randomUUID()}`, confirmTerminate: true,
+      }).catch(async (error: unknown) => {
+        // #233 (c): Main refuses before admitting the deletion (thread unchanged);
+        // undo this attempt's local reservation so the session can still send.
+        const message = error instanceof Error ? error.message : '';
+        if (reservedHere && (message === 'continuity_unavailable' || message.endsWith(': continuity_unavailable'))) {
+          await mutateStoredThread(id, current => {
+            if (!current || threadTaskIdentity(current) !== identity || current.deletionPending !== true) return current;
+            const { deletionPending: _reserved, ...rest } = current;
+            return thread!.deletionPending === undefined ? rest : { ...rest, deletionPending: thread!.deletionPending };
+          });
+        }
+        throw error;
       });
       reportPhase('main_expression_resolved');
       if (result?.state !== 'completed') {
