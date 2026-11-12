@@ -21,8 +21,15 @@ function acl(path:string){
 it(process.platform==='win32'?'applies the real Windows DACL to the credential directory and file (no mocked PowerShell)':'leaves POSIX credential paths to mode bits',()=>{
   const p=root(),dir=join(p,'credentials'),file=join(dir,'store.json');mkdirSync(dir);writeFileSync(file,'{}');
   if(process.platform!=='win32'){protectCredentialPath(dir,true);protectCredentialPath(file,false);return;}
-  expect(()=>protectCredentialPath(dir,true)).not.toThrow();
-  expect(()=>protectCredentialPath(file,false)).not.toThrow();
+  // Real PowerShell, recorded so a failure reports the script's own stderr
+  // instead of only credential_path_unsafe (no behaviour is replaced).
+  for(const [target,directory] of [[dir,true],[file,false]] as const){
+    let last:ReturnType<typeof spawnSync>|undefined;
+    const real=((command:string,args:string[],options:Parameters<typeof spawnSync>[2])=>(last=spawnSync(command,args,{...options,encoding:'utf8'}))) as unknown as typeof spawnSync;
+    try{protectCredentialPath(target,directory,'win32',real);}
+    catch(error){throw new Error(`${(error as Error).message} for ${directory?'directory':'file'} ${target}: status=${last?.status} error=${String(last?.error??'')} stderr=${String(last?.stderr??'').trim()} stdout=${String(last?.stdout??'').trim()}`);}
+    expect(last?.status).toBe(0);
+  }
   for(const target of [dir,file]){
     const result=acl(target);expect(result.protected).toBe(true);
     expect([result.allow].flat().sort()).toEqual([result.me,'S-1-5-18','S-1-5-32-544'].sort());
