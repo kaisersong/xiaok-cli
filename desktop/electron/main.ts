@@ -60,7 +60,7 @@ import type {IpcHandleRegistrar,IpcHandlerListener} from './shutdown-aware-ipc-m
 import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
 import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
-import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import { createDesktopKSwarmService, startDesktopKSwarmService, startDesktopKSwarmServiceDegrading, reportRuntimeBridgeStartupFailure } from './kswarm-service-lifetime.js';
 import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
 import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
 import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
@@ -1001,24 +1001,29 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
-  const startMainKSwarm = () => startDesktopKSwarmService(desktopShutdownGate, kswarmService,
-    !dshSources && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
-    dshSources?undefined:error => {
-      const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
-      console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
-      activityOwnerNoticeOnce(code);
-    },
-  ).then(() => {
-    const status = kswarmService.getStatus();
-    if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
-  }).catch(error => {
-    if (dshSources) throw error;
-    const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
-    console.error('[main] Service bootstrap refused:', message);
-    // Never block the main process with a synchronous modal here: the initial
-    // window may still be loading and would never appear (1.6.3 RC blocker).
-    void dialog.showMessageBox({ type: 'error', title: 'xiaok', message: 'xiaok — 服务启动失败 / Service startup failed', detail: message }).catch(() => undefined);
-  });
+  let desktopServicesDegradedNoticeShown = false;
+  const desktopServicesDegradedNoticeOnce = (code: string) => {
+    if (desktopServicesDegradedNoticeShown) return;
+    desktopServicesDegradedNoticeShown = true;
+    try { void Promise.resolve(createElectronDesktopNotificationPort().show({ title: 'xiaok', body: `后台服务未能启动，已降级运行 / Background services unavailable, running in limited mode (${code})`, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } })).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
+  };
+  // DSH keeps its own rejection path. Ordinary Main keeps 1.6.2 parity (#235):
+  // services that cannot start degrade the window with one non-blocking
+  // notice and never a blocking error dialog.
+  const startMainKSwarm = () => dshSources
+    ? startDesktopKSwarmService(desktopShutdownGate, kswarmService).then(() => {
+      const status = kswarmService.getStatus();
+      if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
+    })
+    : startDesktopKSwarmServiceDegrading(desktopShutdownGate, kswarmService,
+      process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+      error => {
+        const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
+        console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+        activityOwnerNoticeOnce(code);
+      },
+      desktopServicesDegradedNoticeOnce,
+    );
   if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
   if(!dshSources)registerLifetimeDisposerStep('multi-agent-runtime', async () => { await services.disposeMultiAgent(); });
@@ -1961,7 +1966,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     }).catch(error => {
       if (dshSources) { debugMain('runtime-bridge:startup-unconfirmed'); return; }
       if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
-      console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
+      reportRuntimeBridgeStartupFailure(error, desktopServicesDegradedNoticeOnce);
     });
   };
   const stopRuntimeReadiness = kswarmService.onStatusChange(status => {
