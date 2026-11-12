@@ -1,4 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
+// Only the birth lookup (execFile) can be made to fail; spawn stays real.
+const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[]}));
+vi.mock('node:child_process',async importOriginal=>{
+  const real=await importOriginal<typeof import('node:child_process')>();
+  return {...real,execFile:((file:string,args:string[],options:unknown,callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
+    if(!birthFault.fail)return (real.execFile as unknown as (...a:unknown[])=>unknown)(file,args,options,callback);
+    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);
+    setImmediate(()=>callback(new Error('injected birth lookup failure'),'',''));return undefined;
+  }) as unknown as typeof real.execFile};
+});
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -71,10 +81,22 @@ describe('native source supervisor process ownership', () => {
     }finally{if(receipt)await supervisor.stopOwned(name,'original');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
   },15000);
 
+  it.each(['kswarm','broker'] as const)('reaps its actual %s child when the birth lookup fails after spawn',async name=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-fault');
+    birthFault.fail=true;birthFault.pids.length=0;
+    try{await expect(supervisor.ensure({...f.source,name})).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.fail=false;}
+    const [pid]=birthFault.pids;expect(pid).toBeGreaterThan(0);
+    let exitCode='alive';try{process.kill(pid,0);}catch(error){exitCode=(error as NodeJS.ErrnoException).code??'gone';}
+    console.log(JSON.stringify({test:'supervisor-birth-fault-reap',name,pid,birthError:'activity_source_birth_unavailable',afterReject:exitCode}));
+    try{expect(exitCode).toBe('ESRCH');}finally{try{process.kill(pid,'SIGKILL');}catch{}}
+    await supervisor.sealAndDrainSpawned();
+    // The child no longer holds the root as its cwd: removal needs no retry.
+    expect(()=>rmSync(f.root,{recursive:true})).not.toThrow();
+  },15000);
   it('actual KS startup with the inherited channel alone never installs a writer floor',async()=>{
     const f=await fixture(),entry=resolve('../kswarm/src/server/index.js'),data=join(f.root,'ks-data'),supervisor=new ActivitySourceSupervisor(f.root,'real-ks');let receipt:Awaited<ReturnType<typeof supervisor.ensure>>|undefined;
     try{
-      receipt=await supervisor.ensure({...f.source,entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
+      receipt=await supervisor.ensure({...f.source,executable:process.env.XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE||process.execPath,entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
       console.log(JSON.stringify({test:'supervisor-actual-ks-no-grant',pid:receipt.pid,birth:receipt.birth,ownerEpoch:receipt.ownerEpoch}));
       const db=new DatabaseSync(join(data,'state.sqlite'),{readOnly:true});try{expect(db.prepare("SELECT count(*) n FROM state_meta WHERE meta_key='writer_floor_v1'").get()?.n).toBe(0);}finally{db.close();}
     }finally{if(receipt)await supervisor.stopOwned('kswarm','real-ks');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}

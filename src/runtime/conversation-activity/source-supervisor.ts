@@ -448,16 +448,24 @@ export class ActivitySourceSupervisor {
     // Preserve the original idle-parent lifetime; unref is not a drain receipt.
     if (source.name === 'kswarm') child.channel?.unref();
     if (!child.pid) throw new Error('activity_source_spawn_failed');
-    this.children.set(source.name, child);registerConfigTarget(this,child,source,launchEnv);
-    const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid), entryHash, ownerEpoch: this.ownerEpoch, external: false };
-    this.receipts.set(source.name, receipt); this.save();
-    const until = Date.now() + 10_000;
-    while (Date.now() < until) { if (failure || child.exitCode !== null) { await this.reapUnstarted(source.name, child); throw new Error('activity_source_start_failed'); } if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
-    // A child that never proved health is not a usable source. Leaving it
-    // running orphans its listener (e.g. Broker on 4318) once the owner exits,
-    // and every later launcher then fails with EADDRINUSE.
-    await this.reapUnstarted(source.name, child);
-    throw new Error('activity_source_start_timeout');
+    this.children.set(source.name, child);
+    // From spawn until a receipt is returned, any failure (birth lookup,
+    // receipt save, health probe, timeout) reaps the actual child first. A
+    // child left running keeps its cwd and listener and becomes an orphan.
+    try {
+      registerConfigTarget(this,child,source,launchEnv);
+      const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid), entryHash, ownerEpoch: this.ownerEpoch, external: false };
+      this.receipts.set(source.name, receipt); this.save();
+      const until = Date.now() + 10_000;
+      while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
+      // A child that never proved health is not a usable source. Leaving it
+      // running orphans its listener (e.g. Broker on 4318) once the owner exits,
+      // and every later launcher then fails with EADDRINUSE.
+      throw new Error('activity_source_start_timeout');
+    } catch (error) {
+      await this.reapUnstarted(source.name, child);
+      throw error;
+    }
   }
   /** Kill an actual child handle this instance spawned that never became healthy, and wait for its exit. */
   private async reapUnstarted(name: string, child: ChildProcess): Promise<void> {
