@@ -8,6 +8,8 @@ on:
     paths:
       - 'src/platform/runtime/**'
       - 'src/utils/atomic-file.ts'
+      - 'src/utils/credential-store.ts'
+      - 'tests/utils/credential-store-windows-acl.test.ts'
       - 'tests/platform/runtime/**'
       - 'scripts/apply-health-cache-hotfix.mjs'
       - 'tests/scripts/health-cache-hotfix.test.mjs'
@@ -62,6 +64,7 @@ jobs:
           .test-dist/tests/platform/runtime/health-store.test.js
           .test-dist/tests/platform/runtime/health-store-io.test.js
           .test-dist/tests/utils/atomic-file.test.js
+          .test-dist/tests/utils/credential-store-windows-acl.test.js
           .test-dist/tests/platform/runtime/windows-cua-startup-boundary.test.js
           .test-dist/tests/platform/runtime/mcp-context-cancellation.bdd.test.js
       - name: Test 1.5.7 hotfix installer
