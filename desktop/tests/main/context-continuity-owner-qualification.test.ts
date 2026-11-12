@@ -51,6 +51,17 @@ it('returns a qualified business client after a read-only probe and requalifies 
 it('does not downgrade a retained Desktop configuration to Standalone when profile authority files are lost',async()=>{
  const f=await fixture();let client:ConversationActivityOwnerClient|undefined;
  try{await f.runtime.close();for(const name of ['continuity-profile.json','continuity.sqlite','continuity.sqlite-wal','continuity.sqlite-shm'])rmSync(join(f.root,name),{force:true});f.setHello({generation:3});
+  const request=(async()=>{client=new ConversationActivityOwnerClient(f.root,'producer');return client.request('list',{threadId:'target'});})();
+  // Windows only: a root with no continuity artifact and a config bound to its own
+  // legacy digest is exactly a Windows 1.6.2 root (continuity never adopted, #233),
+  // so it qualifies; the generation-3 owner is still refused before any business request.
+  // Every other platform, and Windows with any artifact left (below), stays unavailable.
+  await expect(request).rejects.toThrow(process.platform==='win32'?'activity_owner_qualification_mismatch':'activity_owner_qualification_unavailable');expect(f.received.filter(row=>row.method!=='status')).toEqual([]);
+ }finally{client?.dispose();await f.close();}
+});
+it('does not downgrade a retained Desktop configuration when the continuity profile is lost but continuity.sqlite remains',async()=>{
+ const f=await fixture();let client:ConversationActivityOwnerClient|undefined;
+ try{await f.runtime.close();rmSync(join(f.root,'continuity-profile.json'),{force:true});f.setHello({generation:3});
   const request=(async()=>{client=new ConversationActivityOwnerClient(f.root,'producer');return client.request('list',{threadId:'target'});})();await expect(request).rejects.toThrow('activity_owner_qualification_unavailable');expect(f.received.filter(row=>row.method!=='status')).toEqual([]);
  }finally{client?.dispose();await f.close();}
 });
