@@ -1,4 +1,5 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { isDesktopActivityProfile } from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
@@ -20,6 +21,13 @@ export async function activeOwnerServicePorts(dataRoot: string): Promise<Desktop
     try { status = await client.request('status'); }
     catch (error) {
       if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+      // 1.6.2 upgrade through a symlinked data root: the old Desktop config was
+      // hashed from the unresolved path and carries no profileRoot, so it never
+      // qualifies and was never rewritten. With no live owner there is nothing
+      // to discover; the launcher rewrites the config (mainActivityOwnerConfig).
+      // A live owner behind an unqualifiable config is still refused.
+      if ((error as Error)?.message === 'activity_owner_qualification_unavailable'
+        && legacyDesktopConfig(client.address.dataRoot) && !(await ownerSocketPresent(client.address.socketPath))) return undefined;
       throw error;
     }
     const config = JSON.parse(readFileSync(join(client.address.dataRoot, ACTIVITY_STORAGE_NAMES.config), 'utf8')) as ActivityOwnerConfig;
@@ -43,4 +51,23 @@ export async function activeOwnerServicePorts(dataRoot: string): Promise<Desktop
 function ownerConfigPresent(dataRoot: string): boolean {
   try { lstatSync(join(realpathSync(dataRoot), ACTIVITY_STORAGE_NAMES.config)); return true; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+function legacyDesktopConfig(root: string): boolean {
+  try {
+    const config = JSON.parse(readFileSync(join(root, ACTIVITY_STORAGE_NAMES.config), 'utf8')) as Partial<ActivityOwnerConfig>;
+    return config?.schemaVersion === 1 && config.identity?.kind === 'desktop' && config.profileRoot === undefined
+      && typeof config.dataRoot === 'string' && realpathSync(config.dataRoot) === root;
+  } catch { return false; }
+}
+
+function ownerSocketPresent(socketPath: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const socket = createConnection(socketPath);
+    const finish = (error?: unknown, present = false) => { if (done) return; done = true; clearTimeout(timer); socket.destroy(); if (error) reject(error); else resolve(present); };
+    const timer = setTimeout(() => finish(new Error('activity_owner_probe_unknown')), 1500);
+    socket.once('connect', () => finish(undefined, true));
+    socket.once('error', (error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT' || error.code === 'ECONNREFUSED') finish(undefined, false); else finish(error); });
+  });
 }
