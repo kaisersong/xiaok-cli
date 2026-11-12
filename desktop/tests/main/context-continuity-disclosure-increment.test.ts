@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
+import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import {mkdtempSync,rmSync,writeFileSync,mkdirSync} from 'node:fs';
 import {tmpdir,userInfo} from 'node:os';
 import {join,dirname} from 'node:path';
@@ -10,13 +11,13 @@ import {ConversationActivityOwnerClient} from '../../../src/runtime/conversation
 import {activityOwnerConfigDigest,type ActivityOwnerConfig} from '../../../src/runtime/conversation-activity/owner-runtime.js';
 
 it.each(['matching','wrong-profile','wrong-digest'] as const)('checks %s on the real authenticated owner hello',async mode=>{
- const root=mkdtempSync(join(tmpdir(),'continuity-owner-routing-')),profileId=randomUUID(),info=userInfo();
+ const root=mkdtempSync(join(tmpdir(),'continuity-owner-routing-')),profileId=randomUUID(),scopeId=desktopActivityProfileId(root),info=userInfo();
  writeFileSync(join(root,'continuity-profile.json'),JSON.stringify({version:1,profileId,osOwner:process.platform==='win32'?info.username:String(info.uid)}),{mode:0o600});
- const config:ActivityOwnerConfig={schemaVersion:1,dataRoot:root,profileId,actorId:`desktop-user:${profileId}`,identity:{kind:'desktop',path:join(root,'multi-agent','groups.sqlite')}};
+ const config:ActivityOwnerConfig={schemaVersion:1,dataRoot:root,profileId:scopeId,actorId:`desktop-user:${scopeId}`,identity:{kind:'desktop',path:join(root,'multi-agent','groups.sqlite')}};
  writeFileSync(join(root,'activity-owner.config.json'),JSON.stringify(config),{mode:0o600});
- const host=new ConversationActivityOwnerHost({dataRoot:root,profileId:mode==='wrong-profile'?randomUUID():profileId,actorId:config.actorId,configDigest:mode==='wrong-digest'?'0'.repeat(64):activityOwnerConfigDigest(config),getThread:()=>null,authorizeProducer:()=>false,canObserveWork:()=>false});
+ const host=new ConversationActivityOwnerHost({dataRoot:root,profileId:mode==='wrong-profile'?desktopActivityProfileId(join(root,'foreign')):scopeId,actorId:config.actorId,configDigest:mode==='wrong-digest'?'0'.repeat(64):activityOwnerConfigDigest(config),getThread:()=>null,authorizeProducer:()=>false,canObserveWork:()=>false});
  let client:ConversationActivityOwnerClient|undefined;
- try{await host.start();client=new ConversationActivityOwnerClient(root,'user');if(mode==='matching')expect(await client.request('status')).toMatchObject({profileId,configDigest:activityOwnerConfigDigest(config)});else await expect(client.request('status')).rejects.toThrow('activity_owner_qualification_mismatch');}
+ try{await host.start();client=new ConversationActivityOwnerClient(root,'user');if(mode==='matching')expect(await client.request('status')).toMatchObject({profileId:scopeId,configDigest:activityOwnerConfigDigest(config)});else await expect(client.request('status')).rejects.toThrow('activity_owner_qualification_mismatch');}
  finally{const closes=await Promise.allSettled([client?.close(),host.stop()]);const errors=closes.filter((row):row is PromiseRejectedResult=>row.status==='rejected');if(mode==='matching'){if(errors.length)throw new AggregateError(errors.map(row=>row.reason),'routing_fixture_close_failed');rmSync(root,{recursive:true,force:true});}else{if(closes[1].status==='rejected')throw closes[1].reason;console.info('retained negative routing fixture',root);}}
 });
 

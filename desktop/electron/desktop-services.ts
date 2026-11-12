@@ -25,6 +25,7 @@ import type { MailConnectorService } from './mail-connector-service.js';
 import { createMailTools } from './mail-tools.js';
 import {createRequire as createOptionalMemoryRequire} from 'node:module';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import {mainActivityOwnerConfig} from './activity-owner-main-config.js';
 import {readOriginalMainModelProbeEvent} from './main-dsh-control-source.js';
 import {loadOriginalMainModelProbeSource} from './main-model-probe-source-loader.js';
 import {hasOriginalMainSdkBridgeInstallation} from '../../src/runtime/verification/original-main-sdk-bridge.js';
@@ -4899,7 +4900,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         // daemon lock. Native executors keep their original ownership.
         await closeConversationActivity({mcp:activityMcp,sources:activitySources,service:activityService,store:activityStore});
         activityStore = undefined;
-        const ownerConfig:ActivityOwnerConfig={schemaVersion:1,dataRoot:options.dataRoot,profileId:multiAgentProfileId,actorId:`desktop-user:${multiAgentProfileId}`,identity:{kind:'desktop',path:join(options.dataRoot,'multi-agent','groups.sqlite')},...sourceConfig};
+        const ownerConfig:ActivityOwnerConfig=mainActivityOwnerConfig(options.dataRoot,multiAgentProfileId,sourceConfig);
         const client=options.writerControlBootstrap
           ?await ensureDesktopConversationActivityOwner(ownerConfig,{...options.writerControlBootstrap,service:options.kswarmService,...(options.defaultDispatchBootstrap?{businessBootstrap:options.defaultDispatchBootstrap}:{}),...(preparationBootstrap?{preparationBootstrap}:{})})
           :await ensureConversationActivityOwner(ownerConfig,{nativeSource:true,onNativeSourceUnavailable:error=>console.warn('[conversation-activity] Native source unavailable:',error)});
@@ -4924,7 +4925,10 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         installActivityGroupSubscription();
       })();
       activityAttachment = attempt;
-      attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined; }, error => {
+      attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined;
+        // Smoke evidence: the success branch used to log nothing.
+        console.log(`[conversation-activity] owner attached (profile ${multiAgentProfileId.slice(0,12)})`);
+      }, error => {
         activityChangingOwner=false;
         // Do not cache the failure: allow a later retry. The in-process writers were disposed
         // before the owner was contacted, so drop them rather than keep dead handles.

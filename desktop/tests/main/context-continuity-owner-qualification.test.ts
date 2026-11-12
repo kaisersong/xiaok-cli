@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {expect,it,vi} from 'vitest';import {createServer,type Socket} from 'node:net';
+import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import {mkdtempSync,symlinkSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {ConversationActivityOwnerClient} from '../../../src/runtime/conversation-activity/owner-client.js';
@@ -9,7 +10,7 @@ import {activityOwnerAddress,createActivityOwnerCredentials,authenticateActivity
 import {ACTIVITY_STORAGE_NAMES} from '../../../src/runtime/conversation-activity/storage-permissions.js';
 async function fixture(){
  const root=mkdtempSync(join(tmpdir(),'continuity-owner-qualification-')),runtime=new DesktopContextContinuity(root),p=runtime.port();
- const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:p.actor.profileId,actorId:p.actor.actorId,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
+ const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
  const credentials=createActivityOwnerCredentials(address),digest=activityOwnerConfigDigest(config),file=join(root,ACTIVITY_STORAGE_NAMES.config);
  writeFileSync(file,JSON.stringify(config),{mode:0o600});
  const sockets=new Set<Socket>(),received:Array<{generation:unknown;method:string}>=[];

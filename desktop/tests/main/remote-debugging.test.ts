@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -228,8 +229,10 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
   const root = mkdtempSync(join(tmpdir(), 'xiaok-port-owner-'));
   const address = activityOwnerAddress(root);
   const credentials = createActivityOwnerCredentials(address);
-  // Owner qualification (26564c70) binds the config to the persisted continuity profile and canonical desktop identity path.
-  const profileId = loadContinuityProfile(root);
+  // Protected root (continuity profile present); the owner config carries Main's
+  // service-scope profile id, as desktop-services writes it, not the continuity UUID.
+  loadContinuityProfile(root);
+  const profileId = desktopActivityProfileId(root);
   const config: ActivityOwnerConfig = {
     schemaVersion: 1, dataRoot: address.dataRoot, profileId, actorId: `desktop-user:${profileId}`,
     identity: { kind: 'desktop', path: join(root, 'multi-agent', 'groups.sqlite') },

@@ -1,6 +1,7 @@
 import {closeSync,constants,fstatSync,lstatSync,openSync,readSync,realpathSync,type BigIntStats} from 'node:fs';
 import {join,resolve,dirname,basename} from 'node:path';
 import {readContinuityProfile} from '../context-continuity/profile-identity.js';
+import {isDesktopActivityProfile} from './owner-profile-id.js';
 import {assertProfileDirectory} from '../context-continuity/profile-file.js';
 import {activityOwnerConfigDigest} from './owner-config.js';
 import {ACTIVITY_OWNER_GENERATION} from './owner-protocol.js';
@@ -41,7 +42,11 @@ export function readProtectedOwnerQualification(root:string):ActivityOwnerQualif
  if(!protectedRoot&&!configPresent)return undefined;if(!configPresent)throw unavailable();
  const config=readConfig(root);if(config.schemaVersion!==1)throw unavailable();
  if(!protectedRoot&&config.identity?.kind==='cli')return undefined;
- const profileId=readContinuityProfile(root);
- if(config.profileId!==profileId||config.actorId!==`desktop-user:${profileId}`||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
- return Object.freeze({profileId,configDigest:activityOwnerConfigDigest(config),generation:ACTIVITY_OWNER_GENERATION});
+ // Main writes the Desktop service-scope profile id (sha256 of its data root),
+ // not the continuity-profile.json UUID; requiring the UUID failed every start.
+ // A Desktop root still needs its continuity profile (authority files lost ->
+ // unavailable), but the owner config is bound to Main's id, checked below.
+ try{readContinuityProfile(root);}catch{throw unavailable();}
+ if(!isDesktopActivityProfile(config)||typeof config.dataRoot!=='string'||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
+ return Object.freeze({profileId:config.profileId,configDigest:activityOwnerConfigDigest(config),generation:ACTIVITY_OWNER_GENERATION});
 }

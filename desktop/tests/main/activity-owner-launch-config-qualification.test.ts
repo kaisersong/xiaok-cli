@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {afterEach,expect,it} from 'vitest';
+import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import {existsSync,mkdtempSync,readFileSync,rmSync,statSync,writeFileSync} from 'node:fs';import {execFileSync} from 'node:child_process';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {writeOwnerLaunchConfig} from '../../electron/activity-owner-writer-launcher.js';
@@ -18,7 +19,7 @@ afterEach(async()=>{for(const cleanup of cleanups.splice(0))await cleanup();});
 function blankRoot(){
  const root=mkdtempSync(join(tmpdir(),'owner-launch-qualification-')),runtime=new DesktopContextContinuity(root),p=runtime.port();
  cleanups.push(async()=>{await runtime.close();rmSync(root,{recursive:true,force:true});});
- const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:p.actor.profileId,actorId:p.actor.actorId,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
+ const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
  return {root,address,config};
 }
 function assertPrivate(path:string){

@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { readContinuityProfile } from '../../src/runtime/context-continuity/profile-identity.js';
+import { isDesktopActivityProfile } from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
 import { ACTIVITY_OWNER_GENERATION } from '../../src/runtime/conversation-activity/owner-protocol.js';
 import { ACTIVITY_STORAGE_NAMES } from '../../src/runtime/conversation-activity/storage-permissions.js';
@@ -25,8 +25,8 @@ export async function activeOwnerServicePorts(dataRoot: string): Promise<Desktop
     const config = JSON.parse(readFileSync(join(client.address.dataRoot, ACTIVITY_STORAGE_NAMES.config), 'utf8')) as ActivityOwnerConfig;
     if (status.generation !== ACTIVITY_OWNER_GENERATION || config.identity.kind !== 'desktop'
       || realpathSync(config.dataRoot) !== client.address.dataRoot
-      // Owner qualification (26564c70) binds the owner to the persisted continuity profile, not a root hash.
-      || status.profileId !== readContinuityProfile(client.address.dataRoot) || status.profileId !== config.profileId
+      // Same profile rule as owner qualification: Main's service-scope id, not the continuity UUID.
+      || !isDesktopActivityProfile(config) || status.profileId !== config.profileId
       || activityOwnerConfigDigest(config) !== status.configDigest) throw new Error('activity_owner_discovery_mismatch');
     const port = (url: string | undefined) => {
       const match = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(url ?? '');
