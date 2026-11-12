@@ -144,6 +144,16 @@ async function assertLegacyDataUsable(start:Start,legacy:string,n:number){
  expect(multi.service.assertExecutionAdmission('thread-162')).toBe(2);
 }
 
+async function readableAfterRefusal(start:Start,legacy:string,rows:unknown,dataRoot:string,n:number){
+ const multi=start.services.multiAgent!;
+ expect(multi.profileId).toBe(legacy);
+ const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
+ expect(multi.service.getSnapshot({access}),`start ${n}: session readable`).toMatchObject({threadId:'thread-162',threadDeleteState:'delete_pending'});
+ expect(multi.service.readThreadDeletion({access}),`start ${n}: the refusal is readable`).toMatchObject({deleteState:'delete_pending',operation:{state:'unknown',error:'Error: continuity_unavailable'}});
+ expect(groupsRows(dataRoot),`start ${n}: nothing deleted`).toEqual(rows);
+ expect(multi.service.getExecutionAuthorization()).toMatchObject({permissionRevision:2,executionAllowed:true});
+ expect(()=>multi.service.assertExecutionAdmission('thread-162'),`start ${n}: known 1.6.3 limitation`).toThrow('multi_agent_thread_deletion_pending');
+}
 /** Main's user deletion of the 1.6.2 session; a refusal is returned, not thrown. */
 async function attemptDeletion(start:Start):Promise<unknown>{
  const multi=start.services.multiAgent!;
@@ -153,6 +163,27 @@ async function attemptDeletion(start:Start):Promise<unknown>{
  catch(raw){return {thrown:raw instanceof Error?raw.message:String(raw)};}
 }
 describe('1.6.2 data upgraded, start / restart / restart',()=>{
+ it('win32 degraded: a refused deletion returns at once with continuity_unavailable, the session stays readable and survives restart',async()=>{
+  // #233 PM (c), CTO: no deletion code change in 1.6.3. Characterizes what the
+  // user gets. Known limitation, asserted so a 1.6.4 fix updates it on purpose:
+  // the refused thread stays delete_pending, and Main refuses to start new
+  // execution on it (multi_agent_thread_deletion_pending), before and after restart.
+  const {base,dataRoot}=fixture('profile-scope-162-win32-delete-');
+  const {legacy,rows}=await seed162(base,dataRoot);
+  const first=await mainStart('win32',base,dataRoot);
+  const started=performance.now(),refused=await attemptDeletion(first),elapsed=performance.now()-started;
+  expect(refused).toEqual({operationId:'delete:0:degraded',state:'unknown',error:'Error: continuity_unavailable'});
+  expect(elapsed,'refused deletion must not hang').toBeLessThan(5000);
+  await readableAfterRefusal(first,legacy,rows,dataRoot,1);
+  await stop(first);
+  const restarted=await mainStart('win32',base,dataRoot);
+  expect(restarted.identity.failure).toMatch(/^profile_identity_unavailable \(cause: /);
+  await readableAfterRefusal(restarted,legacy,rows,dataRoot,2);
+  const owner=await attachOwner('win32',restarted,dataRoot);
+  expect(owner.result,'restart after a refused deletion: owner attach').toEqual({attached:true});expect(owner.release).not.toHaveBeenCalled();
+  expect(restarted.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
+  await stop(restarted);
+ },120_000);
  it('darwin: migrates once, keeps the 1.6.2 scope, authorization and session usable, owner attaches',async()=>{
   const {base,dataRoot}=fixture('profile-scope-162-darwin-');
   const {legacy,rows}=await seed162(base,dataRoot);
