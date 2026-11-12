@@ -220,6 +220,7 @@ jobs:
           tests/main/artifact-export-package.test.ts
           tests/main/copy-packaged-dependencies.test.ts
           tests/main/active-owner-service-ports-first-start.test.ts
+          tests/main/active-owner-service-ports-legacy-symlink.test.ts
           tests/main/activity-owner-launch-config-qualification.test.ts
           tests/main/desktop-services-degrade-no-dialog.test.ts
           tests/main/activity-owner-main-profile-qualification.test.ts
