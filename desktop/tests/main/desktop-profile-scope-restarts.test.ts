@@ -1,9 +1,9 @@
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {existsSync,mkdtempSync,rmSync} from 'node:fs';
-import {randomBytes} from 'node:crypto';
+import {createHash,randomBytes} from 'node:crypto';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {createDesktopServices} from '../../electron/desktop-services.js';
 import {resolveDesktopMainIdentity,type DesktopMainIdentity} from '../../electron/desktop-main-identity.js';
@@ -79,6 +79,8 @@ describe.each(PLATFORMS)('fresh install, start / restart / restart on %s',platfo
  it('attaches every start, writes no migration file and never reports profile_identity_unavailable',async()=>{
   const {base,dataRoot}=fixture(`profile-scope-fresh-${platform}-`);
   const seen:Array<{identity:DesktopMainIdentity;servicesProfileId:string;rows:unknown[]}>=[];
+  // #233 review: computed here, independently of owner-profile-id.ts.
+  const rootSha=createHash('sha256').update(resolve(dataRoot)).digest('hex');
   for(const n of [1,2,3]){
    const start=await mainStart(platform,base,dataRoot);
    const {identity}=start;
@@ -91,6 +93,9 @@ describe.each(PLATFORMS)('fresh install, start / restart / restart on %s',platfo
    expect(owner.result,`start ${n}: owner attach`).toEqual({attached:true});
    expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);expect(owner.kswarmStart).toHaveBeenCalledTimes(1);
    expect(start.logs.join('\n')).not.toMatch(/profile_identity_unavailable|continuity_unavailable|kswarm_business_retirement_failed/);
+   expect(identity.profileId,`start ${n}: fresh install scoped by sha256(resolve(dataRoot))`).not.toBe(rootSha);
+   expect(start.services.multiAgent!.profileId,`start ${n}: Services scoped by sha256(resolve(dataRoot))`).not.toBe(rootSha);
+   expect(groupsRows(dataRoot).authorizations.map(row=>row.profile_id),`start ${n}: row scoped by sha256(resolve(dataRoot))`).not.toContain(rootSha);
    seen.push({identity,servicesProfileId:start.services.multiAgent!.profileId,rows:groupsRows(dataRoot).authorizations.map(row=>row.profile_id)});
    await stop(start);
   }
