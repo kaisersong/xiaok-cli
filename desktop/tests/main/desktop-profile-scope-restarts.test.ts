@@ -139,6 +139,14 @@ async function assertLegacyDataUsable(start:Start,legacy:string,n:number){
  expect(multi.service.assertExecutionAdmission('thread-162')).toBe(2);
 }
 
+/** Main's user deletion of the 1.6.2 session; a refusal is returned, not thrown. */
+async function attemptDeletion(start:Start):Promise<unknown>{
+ const multi=start.services.multiAgent!;
+ const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
+ const {threadRevision}=multi.service.readThreadDeletion({access});
+ try{return await multi.service.deleteThread({access,requestSource:'user',operationId:`delete:${threadRevision}:degraded`,expectedThreadRevision:threadRevision,confirmTerminate:true});}
+ catch(raw){return {thrown:raw instanceof Error?raw.message:String(raw)};}
+}
 describe('1.6.2 data upgraded, start / restart / restart',()=>{
  it('darwin: migrates once, keeps the 1.6.2 scope, authorization and session usable, owner attaches',async()=>{
   const {base,dataRoot}=fixture('profile-scope-162-darwin-');
@@ -169,13 +177,23 @@ describe('1.6.2 data upgraded, start / restart / restart',()=>{
    expect(log).toContain(`[context-continuity] identity refused, continuity degrades: ${start.identity.failure}`);
    expect(log).toContain(`[context-continuity] unavailable at identity: ${start.identity.failure}`);
    expect(()=>start.services.continuity.port()).toThrow('continuity_unavailable');
+   // #233 review: the skipped effect inventory is visible in main-debug.log (continuityLog = debugMain).
+   expect(log).toContain('[context-continuity] effect inventory deferred: continuity degraded (identity refused)');
    for(const name of ['continuity-profile.json','continuity-profile-migration.json'])expect(existsSync(join(dataRoot,name)),`start ${n}: ${name}`).toBe(false);
    await assertLegacyDataUsable(start,legacy,n);
+   // #233 review: degraded continuity still blocks conversation deletion.
+   expect(()=>start.services.continuity.assertConversationDeletionSafe('thread-162')).toThrow('continuity_unavailable');
    expect(groupsRows(dataRoot),`start ${n}: 1.6.2 rows kept as-is`).toEqual(rows);
    const owner=await attachOwner('win32',start,dataRoot);
    expect(owner.result,`start ${n}: owner attach must not fail with continuity degraded`).toEqual({attached:true});
    expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);expect(owner.kswarmStart).toHaveBeenCalledTimes(1);
    expect(start.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
+   if(n===3){
+    // Last, because a refused deletion leaves the thread delete_pending: Main's
+    // real deletion path is refused at its commit guard and deletes nothing.
+    expect(await attemptDeletion(start)).toEqual({operationId:'delete:0:degraded',state:'unknown',error:'Error: continuity_unavailable'});
+    expect(groupsRows(dataRoot),'refused deletion removed 1.6.2 rows').toEqual(rows);
+   }
    await stop(start);
   }
  },120_000);
