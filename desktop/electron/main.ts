@@ -89,7 +89,7 @@ import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOri
 import {createMainDshControlSource} from './main-dsh-control-source.js';
 import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
-import {resolveDesktopMainIdentity} from './desktop-main-identity.js';
+import {resolveDesktopMainIdentity,mainDshScopeAvailable} from './desktop-main-identity.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -852,7 +852,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if(desktopShutdownCoordinator.isQuitting)mainUserControlSource.seal();
   // Only the original installed profile may enter. There is no env/UI opt-in.
   const dshQualification=readOriginalProductionRootResourceQualification();
-  const dshSources=dshQualification.qualified?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
+  const dshSources=dshQualification.qualified&&mainDshScopeAvailable(mainIdentity)?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
   let dshServicesTransferred=false;
   if(dshSources){
     desktopFinalLifetimeSteps.push({name:'main-dsh-startup-sources',async run(){if(!dshServicesTransferred)await closeOriginalMainDshStartupSources(dshSources);}});

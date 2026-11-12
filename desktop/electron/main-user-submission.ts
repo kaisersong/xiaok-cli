@@ -114,7 +114,9 @@ export class MainUserSubmissionOwner {
  private readonly defaultDispatchActions=new WeakMap<object,{record:DefaultDispatchRecord;current(actor:SubmissionActor|undefined):void}>();
  private readonly journalReadUnknown=new Set<{fd:number;path:string;identity:{dev:number;ino:number}|null;expectedIdentity:{dev:number;ino:number};phase:'close_unknown';error:unknown}>();
  constructor(private readonly options:{dataRoot:string;profileId:string;workspaceId:string;roomConversionSources?:RoomConversionSourceAuthority;
-  defaultDispatchSource?:DefaultDispatchObservationSource;defaultDispatchUserAdmission?(frame:object,actor:SubmissionActor,expected?:DefaultDispatchUserAudience):void}){
+  defaultDispatchSource?:DefaultDispatchObservationSource;defaultDispatchUserAdmission?(frame:object,actor:SubmissionActor,expected?:DefaultDispatchUserAudience):void;
+  /** Main's profile scope is unavailable this run (#233): no user submission record is written. */
+  profileScopeUnavailable?:boolean}){
   this.directory=join(options.dataRoot,'conversation-projects','user-submissions');mkdirSync(this.directory,{recursive:true,mode:0o700});
   this.defaultDispatchScope=Object.freeze({profileId:options.profileId,workspaceId:options.workspaceId});
   const stat=lstatSync(this.directory);this.directoryIdentity={dev:stat.dev,ino:stat.ino};this.assertDirectory();
@@ -142,6 +144,7 @@ export class MainUserSubmissionOwner {
  }
  seal():void {this.sealed=true;}
  private assertActor(actor:SubmissionActor|undefined):void {
+  if(this.options.profileScopeUnavailable)throw Error('desktop_profile_scope_unavailable');
   if(!actor||actor.requestSource!=='user'||actor.actorId!==`desktop-user:${this.options.profileId}`)throw Error('user_submission_actor_forbidden');
  }
  private assertDirectory():void {
@@ -216,6 +219,7 @@ export class MainUserSubmissionOwner {
  }
  private defaultDispatchOpen():void {if(this.sealed)throw Error('default_dispatch_action_closed');this.assertRoomOpen();}
  private assertDefaultDispatchActor(actor:SubmissionActor|undefined):void {
+  if(this.options.profileScopeUnavailable)throw Error('desktop_profile_scope_unavailable');
   if(!actor||actor.requestSource!=='user'||actor.actorId!==`desktop-user:${this.defaultDispatchScope.profileId}`)throw Error('user_submission_actor_forbidden');
  }
  private defaultDispatchKey(data:z.infer<typeof defaultDispatchLookupSchema>,actorId:string):string {

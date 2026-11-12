@@ -3,6 +3,7 @@ import {resolveDesktopProfile,type DesktopProfileIdentity} from '../../src/runti
 import {readProfileDomainCensus} from '../../src/runtime/context-continuity/profile-probe.js';
 import {readCapturedProfileJson} from '../../src/runtime/context-continuity/profile-file.js';
 import {existsSync} from 'node:fs';
+import {randomBytes} from 'node:crypto';
 import {join} from 'node:path';
 
 export interface DesktopMainIdentity {
@@ -12,8 +13,10 @@ export interface DesktopMainIdentity {
   readonly continuity:Readonly<DesktopProfileIdentity>|null;
   /** 'unavailable': identity failed on a root without legacy data. Fail closed:
    * this run degrades and Services writes no scope row (groups, activity,
-   * Native sessions, owner config, project facts). `profileId` is then only the
-   * in-memory 64-hex scope the startup sources require; it is never stored. */
+   * Native sessions, owner config, project facts, user submissions, DSH,
+   * optimization store). `profileId` is then a random per-run 64-hex value the
+   * startup sources require: never the legacy digest, never stored, and never
+   * seen again by a later start. */
   readonly scope:'continuity'|'legacy'|'unavailable';
   /** Inner reason when continuity identity was refused (main-debug.log evidence). */
   readonly failure?:string;
@@ -42,7 +45,7 @@ export function resolveDesktopMainIdentity(dataRoot:string):DesktopMainIdentity 
     // (Windows 1.6.2, refused by profile.ts). Any other failure must not mint
     // legacy rows that a later census would read as 1.6.2 data.
     if(legacy!==undefined)return Object.freeze({profileId:legacy,continuity:null,scope:'legacy',failure});
-    return Object.freeze({profileId:desktopActivityProfileId(dataRoot),continuity:null,scope:'unavailable',failure});
+    return Object.freeze({profileId:randomBytes(32).toString('hex'),continuity:null,scope:'unavailable',failure});
   }
 }
 /** The legacy digest the root's own data already carries, by the same census;
@@ -60,3 +63,5 @@ function legacyScopeOf(dataRoot:string):string|undefined {
   } catch {/* census unavailable: not proven legacy */}
   return undefined;
 }
+/** DSH prepares a profile-scoped optimization runtime under dataRoot: only with a real scope. */
+export function mainDshScopeAvailable(identity:DesktopMainIdentity):boolean {return identity.scope!=='unavailable';}

@@ -1380,7 +1380,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const multiAgentProfileId = modelProbeScope.profileId;
   const multiAgentWorkspaceId = modelProbeScope.workspaceId;
   const defaultDispatchController=options.defaultDispatchBootstrap?.controller;
-  const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
+  const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(profileScopeUnavailable?{profileScopeUnavailable:true}:{}),...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
   defaultDispatchController?.bindUserOwner(userSubmissions);
   const roomConversions=createMainRoomConversionCaptureOwner({submissions:userSubmissions,scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},gateway:options.kswarmService});
   const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,profileId:multiAgentProfileId,...(profileScopeUnavailable?{profileScopeUnavailable:true}:{}),workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
@@ -1471,6 +1471,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   };
   const getHarnessRuntime = () => {
     if (harnessDisposed) throw new Error('optimization_unavailable');
+    // #233: no profile-scoped optimization store while Main's scope is unavailable.
+    if (profileScopeUnavailable) throw new Error('desktop_profile_scope_unavailable');
     harnessRuntime ??= createHarnessOptimizationRuntime({ dataRoot: options.dataRoot, profileId: multiAgentProfileId,
       workspaceId: multiAgentWorkspaceId, now: options.now,
       authorizeUser: actor => actor === options.harnessOptimizationUserActor,
