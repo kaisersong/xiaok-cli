@@ -2862,6 +2862,8 @@ export interface LocaleStrings {
     watches: Record<'ai_news' | 'yzj_messages' | 'yzj_calendar' | 'important_email', { title: string; description: string; cadence: string; requirement: string }>;
 
     operationUnknown: string;
+    operationRecheckApplied: string;
+    operationRecheckNotApplied: string;
     refreshStatus: string;
     title: string;
     morningScheduleName: string;

@@ -5,9 +5,9 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { AssistantWorkspaceContent } from '../../renderer/src/components/assistant/AssistantWorkspaceContent';
 import { useAssistantWorkspace } from '../../renderer/src/hooks/useAssistantWorkspace';
 function AssistantPage() { return <AssistantWorkspaceContent data={useAssistantWorkspace()} onPrepareSuggestion={text => window.dispatchEvent(new CustomEvent('assistant-test-draft', { detail: text }))} />; }
-const h = vi.hoisted(() => ({ product:vi.fn(),page:vi.fn(),prepareFollow:vi.fn(),confirm:vi.fn(),overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), changed: undefined as undefined | (() => void), stopAssistant:vi.fn(), due: undefined as undefined | (() => void) }));
+const h = vi.hoisted(() => ({ product:vi.fn(),page:vi.fn(),prepareFollow:vi.fn(),confirm:vi.fn(),accept:vi.fn(),overview: vi.fn(), schedules: vi.fn(), history: vi.fn(), automation: vi.fn(), activate: vi.fn(), unsubscribe: vi.fn(), changed: undefined as undefined | (() => void), stopAssistant:vi.fn(), due: undefined as undefined | (() => void) }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => ({
-  getAssistantActionOverview:h.product,getAssistantCandidatePage:h.page,prepareAssistantFollowUpLaunch:h.prepareFollow,confirmAssistantLaunch:h.confirm,kbListCollections:async()=>[],getAssistantOverview: h.overview, getScheduledTasks: h.schedules,
+  getAssistantActionOverview:h.product,getAssistantCandidatePage:h.page,prepareAssistantFollowUpLaunch:h.prepareFollow,confirmAssistantLaunch:h.confirm,acceptAssistantCandidate:h.accept,kbListCollections:async()=>[],getAssistantOverview: h.overview, getScheduledTasks: h.schedules,
   getAutomationRunHistory: h.history, getAutomationOverviewSnapshot: h.automation,
   onAssistantInboxChanged:(handler:()=>void)=>{h.changed=handler;return h.stopAssistant;},
   activateAssistant: h.activate, onScheduledTaskDue: (handler: () => void) => { h.due = handler; return h.unsubscribe; },
@@ -19,7 +19,7 @@ const automation = { generatedAt: 1, sourceVersions: { loopStore: 1, timedAction
 function Probe() { const location = useLocation(); return <output data-testid="location">{location.pathname}{location.search}{location.hash}<span data-testid="draft">{location.state?.assistantDraftPrompt}</span></output>; }
 function page() { return render(<MemoryRouter initialEntries={['/assistant']}><LocaleProvider><AssistantPage /><Probe /></LocaleProvider></MemoryRouter>); }
 beforeEach(() => {
-  h.product.mockReset();h.page.mockReset();h.prepareFollow.mockReset();h.confirm.mockReset();
+  h.product.mockReset();h.page.mockReset();h.prepareFollow.mockReset();h.confirm.mockReset();h.accept.mockReset();
   localStorage.clear(); localStorage.setItem('xiaok:locale', 'zh');
   h.overview.mockReset().mockResolvedValue(overview); h.schedules.mockReset().mockResolvedValue([schedule]);
   h.history.mockReset().mockResolvedValue([{ id: 'run1', automationKind: 'agent_task', actionId: 'ai-daily', title: '原有 AI 动态', status: 'success', startedAt: 100 }]);
@@ -76,15 +76,57 @@ it('prepares a suggestion as an editable same-page draft without starting a task
  expect(draft).toHaveBeenCalledTimes(1);expect(draft.mock.calls[0][0].detail).toContain('跟进发布评审');expect(h.activate).not.toHaveBeenCalled();window.removeEventListener('assistant-test-draft',draft);
 });
 
-it('requires a fresh read after an unknown status mutation and never replays it automatically', async () => {
+it('auto-checks an unknown status mutation once and reports it as applied without replaying it', async () => {
   h.overview.mockResolvedValue({ ...overview, profile: { ...profile, status: 'needs_consent' } });
-  h.activate.mockRejectedValue(Error('assistant_operation_unknown'));
+  h.activate.mockRejectedValueOnce(Error('assistant_operation_unknown'));
   page(); fireEvent.click(await screen.findByRole('button', { name: '启用小K助理' }));
-  await screen.findByText('无法确认操作结果，数据可能已更新。请刷新状态后再继续。');
-  expect(h.activate).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(h.activate).toHaveBeenCalledTimes(1));
+  expect(h.overview).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: '启用小K助理' })).toBeDisabled();
-  h.overview.mockResolvedValue(overview); fireEvent.click(screen.getByRole('button', { name: '刷新状态' }));
-  fireEvent.click(screen.getByText('助理设置'));await screen.findByRole('button', { name: '暂停小K助理' }); expect(h.activate).toHaveBeenCalledTimes(1);
+  h.overview.mockResolvedValue(overview);
+  await screen.findByText('已自动核对：刚才的操作已生效。', {}, { timeout: 3000 });
+  expect(h.activate).toHaveBeenCalledTimes(1);
+  expect(h.overview).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.click(screen.getByText('助理设置')); await screen.findByRole('button', { name: '暂停小K助理' });
+  expect(screen.getByRole('button', { name: '暂停小K助理' })).toBeEnabled();
+  expect(h.activate).toHaveBeenCalledTimes(1);
+});
+it('reports an unknown status mutation as not applied when the read-back keeps the previous state', async () => {
+  h.overview.mockResolvedValue({ ...overview, profile: { ...profile, status: 'needs_consent' } });
+  h.activate.mockRejectedValueOnce(Error('assistant_operation_unknown'));
+  page(); fireEvent.click(await screen.findByRole('button', { name: '启用小K助理' }));
+  await waitFor(() => expect(h.activate).toHaveBeenCalledTimes(1));
+  await screen.findByText('已自动核对：暂未看到刚才的操作生效，可直接重试。', {}, { timeout: 3000 });
+  expect(h.activate).toHaveBeenCalledTimes(1);
+  expect(h.overview).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', { name: '启用小K助理' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+it('falls back to the unknown banner when the automatic read-back fails, and one manual refresh restores it', async () => {
+  h.overview.mockResolvedValueOnce({ ...overview, profile: { ...profile, status: 'needs_consent' } }).mockRejectedValueOnce(Error('unavailable'));
+  h.activate.mockRejectedValueOnce(Error('assistant_operation_unknown'));
+  page(); fireEvent.click(await screen.findByRole('button', { name: '启用小K助理' }));
+  await waitFor(() => expect(h.activate).toHaveBeenCalledTimes(1));
+  await screen.findByText('刚才的操作结果未能确认，自动核对也未成功。请点「刷新状态」确认后再继续。', {}, { timeout: 3000 });
+  expect(h.overview).toHaveBeenCalledTimes(2);
+  h.overview.mockResolvedValue(overview);
+  fireEvent.click(screen.getByRole('button', { name: '刷新状态' }));
+  fireEvent.click(screen.getByText('助理设置')); await screen.findByRole('button', { name: '暂停小K助理' });
+  expect(h.activate).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/刚才的操作结果未能确认/)).toBeNull();
+});
+it('keeps candidate presentation and never repeats the decision after an auto-checked accept failure', async () => {
+  h.overview.mockResolvedValue({ ...overview, pendingCandidateCount: 1, candidates: [{ id: 'candidate', runId: 'run', kind: 'memory', title: '偏好', content: '内容', scope: 'global', confidence: 0.9, evidenceRefs: [], dedupeKey: 'd', status: 'pending', createdAt: 1 }] });
+  page(); fireEvent.click(await screen.findByRole('button', { name: '1 条待确认候选' }));
+  h.accept.mockReset().mockRejectedValueOnce(Error('assistant_operation_unknown'));
+  const accept = await screen.findByRole('button', { name: '采纳：偏好' });
+  fireEvent.click(accept);
+  await waitFor(() => expect(h.accept).toHaveBeenCalledTimes(1));
+  await screen.findByText('已自动核对：暂未看到刚才的操作生效，可直接重试。', {}, { timeout: 3000 });
+  expect(h.accept).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('内容')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 it('does not commit a late page read after unmount or start a queued read on the dead owner', async () => {
   let finish!: (value: unknown) => void;

@@ -6,6 +6,7 @@ import { ChatInput } from './ChatInput';
 import { api } from '../api';
 import type { AutomationOverviewSnapshotView, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../api/types';
 import { getDesktopApi } from '../shared/desktop';
+import { AUTO_RECHECK_DELAY_MS } from '../hooks/useAssistantWorkspace';
 import { useLocale } from '../contexts/LocaleContext';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { AssistantHomeCard } from './assistant/AssistantHomeCard';
@@ -91,6 +92,8 @@ export function WelcomePage() {
   const [assistantLoadState, setAssistantLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantOperationUnknown, setAssistantOperationUnknown] = useState(false);
+  const [assistantRechecking, setAssistantRechecking] = useState(false);
+  const [assistantMutationOutcome, setAssistantMutationOutcome] = useState<'applied' | 'not_applied' | null>(null);
   const [assistantBusyCandidateId, setAssistantBusyCandidateId] = useState<string | null>(null);
   const [assistantDetailsOpen, setAssistantDetailsOpen] = useState(false);
   const [assistantKnowledgeCollections, setAssistantKnowledgeCollections] = useState<Array<{ id: string; name: string }>>([]);
@@ -107,6 +110,12 @@ export function WelcomePage() {
 
   const assistantReads=useRef({active:false,busy:false,queued:false,revision:0});
   const assistantReadRequest=useRef<()=>Promise<void>>(async()=>{});
+  const assistantMutationExpectation=useRef<((overview:AssistantOverviewDto)=>boolean)|null>(null);
+  const assistantRecheckTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const clearAssistantRecheck=useCallback(()=>{
+    if(assistantRecheckTimer.current!==null){clearTimeout(assistantRecheckTimer.current);assistantRecheckTimer.current=null;}
+    assistantMutationExpectation.current=null;
+  },[]);
   const loadAssistantOverview = useCallback(async () => {
     const owner=assistantReads.current;if(!owner.active)return;owner.revision++;
     if(owner.busy){owner.queued=true;return;}owner.busy=true;const revision=owner.revision;
@@ -115,10 +124,27 @@ export function WelcomePage() {
       const assistantApi=getAssistantDesktopApi();if(!assistantApi?.getAssistantOverview)throw Error('assistant_unavailable');
       const overview=await assistantApi.getAssistantOverview();if(!current())return;
       setAssistantSnapshot(buildAssistantHomeProjection(overview));setAssistantCandidates(overview.candidates??[]);setAssistantLoadState('ready');setAssistantOperationUnknown(false);
-    } catch {if(current()){setAssistantOperationUnknown(true);setAssistantSnapshot(null);setAssistantCandidates([]);setAssistantLoadState('unavailable');}}
+      const expectation=assistantMutationExpectation.current;
+      if(expectation){
+        if(assistantRecheckTimer.current!==null){clearTimeout(assistantRecheckTimer.current);assistantRecheckTimer.current=null;}
+        assistantMutationExpectation.current=null;setAssistantRechecking(false);
+        setAssistantMutationOutcome(expectation(overview)?'applied':'not_applied');
+      }
+    } catch {if(current()){setAssistantOperationUnknown(true);setAssistantSnapshot(null);setAssistantCandidates([]);setAssistantLoadState('unavailable');if(assistantMutationExpectation.current){clearAssistantRecheck();setAssistantRechecking(false);}}}
     finally {owner.busy=false;if(owner.active&&assistantReads.current===owner&&owner.queued){owner.queued=false;void assistantReadRequest.current();}}
-  }, []);
+  }, [clearAssistantRecheck]);
   assistantReadRequest.current=loadAssistantOverview;
+  /** One delayed read-back after an unknown mutation result; never replays the mutation. */
+  const scheduleAssistantRecheck=useCallback((expectApplied:(overview:AssistantOverviewDto)=>boolean)=>{
+    assistantMutationExpectation.current=expectApplied;
+    setAssistantRechecking(true);
+    assistantRecheckTimer.current=setTimeout(()=>{
+      assistantRecheckTimer.current=null;
+      const expectation=assistantMutationExpectation.current;
+      if(!assistantReads.current.active||expectation!==expectApplied)return;
+      void loadAssistantOverview();
+    },AUTO_RECHECK_DELAY_MS);
+  },[loadAssistantOverview]);
 
   useEffect(() => {
     let active = true;
@@ -143,7 +169,7 @@ export function WelcomePage() {
   useEffect(() => {
     const owner={active:true,busy:false,queued:false,revision:0};assistantReads.current=owner;void loadAssistantOverview();
     const stop=getDesktopApi()?.onAssistantInboxChanged?.(()=>{void loadAssistantOverview();});
-    return ()=>{owner.active=false;stop?.();};
+    return ()=>{owner.active=false;if(assistantRecheckTimer.current!==null)clearTimeout(assistantRecheckTimer.current);stop?.();};
   }, [loadAssistantOverview]);
 
   const updateAssistantStatus = async (action: 'activateAssistant' | 'pauseAssistant' | 'resumeAssistant') => {
@@ -154,13 +180,15 @@ export function WelcomePage() {
       return;
     }
     assistantReads.current.revision++;
+    clearAssistantRecheck();
     setAssistantOperationUnknown(false);
+    setAssistantMutationOutcome(null);
     setAssistantBusy(true);
     try {
       await mutation.call(assistantApi);
       await loadAssistantOverview();
     } catch {
-      setAssistantOperationUnknown(true);
+      scheduleAssistantRecheck(overview => overview.profile.status === (action === 'pauseAssistant' ? 'paused' : 'active'));
     } finally {
       setAssistantBusy(false);
     }
@@ -174,13 +202,15 @@ export function WelcomePage() {
       return;
     }
     assistantReads.current.revision++;
+    clearAssistantRecheck();
     setAssistantOperationUnknown(false);
+    setAssistantMutationOutcome(null);
     setAssistantBusyCandidateId(candidateId);
     try {
       await mutation.call(assistantApi, { candidateId, ...(collectionId ? { collectionId } : {}) });
       await loadAssistantOverview();
     } catch {
-      setAssistantOperationUnknown(true);
+      scheduleAssistantRecheck(overview => !overview.candidates.some(candidate => candidate.id === candidateId));
     } finally {
       setAssistantBusyCandidateId(null);
     }
@@ -247,10 +277,15 @@ export function WelcomePage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col px-6 pt-[clamp(4rem,12vh,6.25rem)] sm:px-8">
+      {assistantMutationOutcome && (
+        <div role="status" className="mx-auto mb-4 flex w-full max-w-[920px] items-center gap-3 text-sm text-[var(--c-text-secondary)]">
+          <span>{assistantMutationOutcome === 'applied' ? t.assistant.operationRecheckApplied : t.assistant.operationRecheckNotApplied}</span>
+        </div>
+      )}
       {assistantOperationUnknown && (
         <div role="alert" className="mx-auto mb-4 flex w-full max-w-[920px] items-center gap-3 text-sm text-[var(--c-text-secondary)]">
           <span>{t.assistant.operationUnknown}</span>
-          <button type="button" disabled={assistantBusy || assistantBusyCandidateId !== null} onClick={() => void loadAssistantOverview()} className="shrink-0 underline">
+          <button type="button" disabled={assistantBusy || assistantBusyCandidateId !== null || assistantRechecking} onClick={() => { setAssistantMutationOutcome(null); void loadAssistantOverview(); }} className="shrink-0 underline">
             {t.assistant.refreshStatus}
           </button>
         </div>
@@ -270,7 +305,8 @@ export function WelcomePage() {
         assistantSnapshot={assistantSnapshot}
         assistantCandidates={assistantCandidates}
         assistantLoadState={assistantLoadState}
-        assistantBusy={assistantBusy}
+        assistantBusy={assistantBusy || assistantRechecking}
+        assistantRechecking={assistantRechecking}
         assistantBusyCandidateId={assistantBusyCandidateId}
         assistantDetailsOpen={assistantDetailsOpen}
         assistantKnowledgeCollections={assistantKnowledgeCollections}
@@ -301,6 +337,7 @@ type HomeContentProps = {
   assistantCandidates: AssistantCandidateView[];
   assistantLoadState: 'loading' | 'ready' | 'unavailable';
   assistantBusy: boolean;
+  assistantRechecking: boolean;
   assistantBusyCandidateId: string | null;
   assistantDetailsOpen: boolean;
   assistantKnowledgeCollections: Array<{ id: string; name: string }>;
@@ -329,6 +366,7 @@ function ConversationFirstHome({
   assistantCandidates,
   assistantLoadState,
   assistantBusy,
+  assistantRechecking,
   assistantBusyCandidateId,
   assistantDetailsOpen,
   assistantKnowledgeCollections,
@@ -403,6 +441,7 @@ function ConversationFirstHome({
           candidates={assistantCandidates}
           knowledgeCollections={assistantKnowledgeCollections}
           busyCandidateId={assistantBusyCandidateId}
+          decisionsDisabled={assistantRechecking}
           onClose={onCloseAssistantDetails}
           onAcceptCandidate={onAcceptAssistantCandidate}
           onRejectCandidate={onRejectAssistantCandidate}
