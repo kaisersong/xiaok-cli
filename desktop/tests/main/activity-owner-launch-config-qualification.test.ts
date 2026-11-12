@@ -19,7 +19,7 @@ afterEach(async()=>{for(const cleanup of cleanups.splice(0))await cleanup();});
 function blankRoot(){
  const root=mkdtempSync(join(tmpdir(),'owner-launch-qualification-')),runtime=new DesktopContextContinuity(root),p=runtime.port();
  cleanups.push(async()=>{await runtime.close();rmSync(root,{recursive:true,force:true});});
- const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
+ const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileRoot:root,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
  return {root,address,config};
 }
 function assertPrivate(path:string){

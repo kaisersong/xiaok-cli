@@ -10,7 +10,7 @@ import {activityOwnerAddress,createActivityOwnerCredentials,authenticateActivity
 import {ACTIVITY_STORAGE_NAMES} from '../../../src/runtime/conversation-activity/storage-permissions.js';
 async function fixture(){
  const root=mkdtempSync(join(tmpdir(),'continuity-owner-qualification-')),runtime=new DesktopContextContinuity(root),p=runtime.port();
- const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
+ const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileRoot:root,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
  const credentials=createActivityOwnerCredentials(address),digest=activityOwnerConfigDigest(config),file=join(root,ACTIVITY_STORAGE_NAMES.config);
  writeFileSync(file,JSON.stringify(config),{mode:0o600});
  const sockets=new Set<Socket>(),received:Array<{generation:unknown;method:string}>=[];

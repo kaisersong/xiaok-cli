@@ -234,7 +234,7 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
   loadContinuityProfile(root);
   const profileId = desktopActivityProfileId(root);
   const config: ActivityOwnerConfig = {
-    schemaVersion: 1, dataRoot: address.dataRoot, profileId, actorId: `desktop-user:${profileId}`,
+    schemaVersion: 1, dataRoot: address.dataRoot, profileRoot: root, profileId, actorId: `desktop-user:${profileId}`,
     identity: { kind: 'desktop', path: join(root, 'multi-agent', 'groups.sqlite') },
     kswarm: { url: 'http://127.0.0.1:45001', brokerUrl: 'http://127.0.0.1:45002', mutationToken: 'fixture', roomToken: 'fixture' },
     managedSources: [
