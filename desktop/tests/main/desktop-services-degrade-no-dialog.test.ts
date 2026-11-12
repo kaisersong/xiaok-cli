@@ -4,7 +4,7 @@ import {createServer,type Server,type Socket} from 'node:net';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {DesktopShutdownGate} from '../../electron/shutdown-aware-ipc-main.js';
-import {reportRuntimeBridgeStartupFailure,startDesktopKSwarmServiceDegrading} from '../../electron/kswarm-service-lifetime.js';
+import {startDesktopKSwarmServiceDegrading} from '../../electron/kswarm-service-lifetime.js';
 import type {KSwarmService} from '../../electron/kswarm-service.js';
 
 // #235: a broker that listens but never answers, as on a Windows host whose
@@ -40,17 +40,12 @@ it('degrades the former Service bootstrap refused path when start itself rejects
  expect(onDegraded).toHaveBeenCalledWith('listen EADDRINUSE: address already in use 127.0.0.1:4318');
 });
 
-it('degrades the former Runtime bridge startup failed path with the same notice', () => {
- const onDegraded=vi.fn(),warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
- expect(()=>reportRuntimeBridgeStartupFailure(Error('broker_unreachable'),onDegraded)).not.toThrow();
- expect(onDegraded).toHaveBeenCalledWith('broker_unreachable');
- expect(warn).toHaveBeenCalledWith('[main] Runtime bridge startup failed:','broker_unreachable');
-});
-
+// The Runtime bridge startup failed path is exercised on Main's actual
+// startRuntimeBridge in runtime-bridge-readiness.cases.ts (warning kept, notice added).
 it('Main composes both paths through the degrade contract and opens no error dialog', () => {
  const main=readFileSync(fileURLToPath(new URL('../../electron/main.ts',import.meta.url)),'utf8');
  expect(main).not.toMatch(/showMessageBox\(\s*\{\s*type:\s*'error'/);
  expect(main).not.toContain('服务启动失败 / Service startup failed');
  expect(main).toMatch(/:\s*startDesktopKSwarmServiceDegrading\(desktopShutdownGate,\s*kswarmService,/);
- expect(main).toContain('reportRuntimeBridgeStartupFailure(error, desktopServicesDegradedNoticeOnce)');
+ expect(main).toMatch(/console\.warn\('\[main\] Runtime bridge startup failed:'[^\n]*\n\s*desktopServicesDegradedNoticeOnce\(/);
 });

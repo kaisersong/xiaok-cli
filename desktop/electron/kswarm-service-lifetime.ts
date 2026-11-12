@@ -87,10 +87,3 @@ export function startDesktopKSwarmServiceDegrading(
   });
 }
 
-/** Same degrade contract for the runtime bridge: a warning and the shared
- * non-blocking notice, never a dialog. */
-export function reportRuntimeBridgeStartupFailure(error: unknown, onDegraded: (code: string) => void): void {
-  const code = error instanceof Error ? error.message : 'runtime_bridge_startup_failed';
-  console.warn('[main] Runtime bridge startup failed:', code);
-  onDegraded(code);
-}

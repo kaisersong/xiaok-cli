@@ -60,7 +60,7 @@ import type {IpcHandleRegistrar,IpcHandlerListener} from './shutdown-aware-ipc-m
 import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
 import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
-import { createDesktopKSwarmService, startDesktopKSwarmService, startDesktopKSwarmServiceDegrading, reportRuntimeBridgeStartupFailure } from './kswarm-service-lifetime.js';
+import { createDesktopKSwarmService, startDesktopKSwarmService, startDesktopKSwarmServiceDegrading } from './kswarm-service-lifetime.js';
 import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
 import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
 import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
@@ -1966,7 +1966,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     }).catch(error => {
       if (dshSources) { debugMain('runtime-bridge:startup-unconfirmed'); return; }
       if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
-      reportRuntimeBridgeStartupFailure(error, desktopServicesDegradedNoticeOnce);
+      console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
+      desktopServicesDegradedNoticeOnce(error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
     });
   };
   const stopRuntimeReadiness = kswarmService.onStatusChange(status => {
