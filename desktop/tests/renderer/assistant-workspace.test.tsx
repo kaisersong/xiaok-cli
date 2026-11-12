@@ -128,6 +128,19 @@ it('keeps candidate presentation and never repeats the decision after an auto-ch
   expect(screen.getByText('内容')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).toBeNull();
 });
+it('reports an auto-checked accept as applied when Main returns the decided candidate with an updated status', async () => {
+  const pending = { id: 'candidate', runId: 'run', kind: 'memory', title: '偏好', content: '内容', scope: 'global', confidence: 0.9, evidenceRefs: [], dedupeKey: 'd', status: 'pending', createdAt: 1 };
+  h.overview.mockResolvedValueOnce({ ...overview, pendingCandidateCount: 1, candidates: [pending] })
+    .mockResolvedValue({ ...overview, pendingCandidateCount: 0, candidates: [{ ...pending, status: 'accepted' }] });
+  page(); fireEvent.click(await screen.findByRole('button', { name: '1 条待确认候选' }));
+  h.accept.mockReset().mockRejectedValueOnce(Error('assistant_operation_unknown'));
+  fireEvent.click(await screen.findByRole('button', { name: '采纳：偏好' }));
+  await waitFor(() => expect(h.accept).toHaveBeenCalledTimes(1));
+  await screen.findByText('已自动核对：刚才的操作已生效。', {}, { timeout: 3000 });
+  expect(h.accept).toHaveBeenCalledTimes(1);
+  expect(h.overview).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
 it('does not commit a late page read after unmount or start a queued read on the dead owner', async () => {
   let finish!: (value: unknown) => void;
   h.overview.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

@@ -7,6 +7,7 @@ import { api } from '../api';
 import type { AutomationOverviewSnapshotView, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../api/types';
 import { getDesktopApi } from '../shared/desktop';
 import { AUTO_RECHECK_DELAY_MS } from '../hooks/useAssistantWorkspace';
+import { expectAssistantStatus, expectCandidateDecided } from '../lib/assistant-recheck';
 import { useLocale } from '../contexts/LocaleContext';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { AssistantHomeCard } from './assistant/AssistantHomeCard';
@@ -109,6 +110,7 @@ export function WelcomePage() {
   const automationUnavailable = automationLoadState === 'error';
 
   const assistantReads=useRef({active:false,busy:false,queued:false,revision:0});
+  const assistantMutationLock=useRef(false);
   const assistantReadRequest=useRef<()=>Promise<void>>(async()=>{});
   const assistantMutationExpectation=useRef<((overview:AssistantOverviewDto)=>boolean)|null>(null);
   const assistantRecheckTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -118,7 +120,7 @@ export function WelcomePage() {
   },[]);
   const loadAssistantOverview = useCallback(async () => {
     const owner=assistantReads.current;if(!owner.active)return;owner.revision++;
-    if(owner.busy){owner.queued=true;return;}owner.busy=true;const revision=owner.revision;
+    if(owner.busy||assistantMutationLock.current){owner.queued=true;return;}owner.busy=true;const revision=owner.revision;
     const current=()=>owner.active&&assistantReads.current===owner&&owner.revision===revision;
     try {
       const assistantApi=getAssistantDesktopApi();if(!assistantApi?.getAssistantOverview)throw Error('assistant_unavailable');
@@ -134,16 +136,22 @@ export function WelcomePage() {
     finally {owner.busy=false;if(owner.active&&assistantReads.current===owner&&owner.queued){owner.queued=false;void assistantReadRequest.current();}}
   }, [clearAssistantRecheck]);
   assistantReadRequest.current=loadAssistantOverview;
-  /** One delayed read-back after an unknown mutation result; never replays the mutation. */
+  /** One delayed read-back after an unknown mutation result; never replays the mutation.
+   * If another read is in flight when the timer fires, the timer waits instead of
+   * queueing a second read; that read consumes the expectation or clears it. */
   const scheduleAssistantRecheck=useCallback((expectApplied:(overview:AssistantOverviewDto)=>boolean)=>{
     assistantMutationExpectation.current=expectApplied;
     setAssistantRechecking(true);
-    assistantRecheckTimer.current=setTimeout(()=>{
-      assistantRecheckTimer.current=null;
-      const expectation=assistantMutationExpectation.current;
-      if(!assistantReads.current.active||expectation!==expectApplied)return;
-      void loadAssistantOverview();
-    },AUTO_RECHECK_DELAY_MS);
+    const schedule=()=>{
+      assistantRecheckTimer.current=setTimeout(()=>{
+        assistantRecheckTimer.current=null;
+        const expectation=assistantMutationExpectation.current;
+        if(!assistantReads.current.active||expectation!==expectApplied)return;
+        if(assistantReads.current.busy||assistantMutationLock.current){schedule();return;}
+        void loadAssistantOverview();
+      },AUTO_RECHECK_DELAY_MS);
+    };
+    schedule();
   },[loadAssistantOverview]);
 
   useEffect(() => {
@@ -184,13 +192,20 @@ export function WelcomePage() {
     setAssistantOperationUnknown(false);
     setAssistantMutationOutcome(null);
     setAssistantBusy(true);
+    assistantMutationLock.current = true;
     try {
       await mutation.call(assistantApi);
-      await loadAssistantOverview();
+      if (assistantReads.current.active) await loadAssistantOverview();
     } catch {
-      scheduleAssistantRecheck(overview => overview.profile.status === (action === 'pauseAssistant' ? 'paused' : 'active'));
+      // Read-backs issued before the failure resolved must not confirm the
+      // mutation (they are queued behind the lock); only the recheck read is.
+      if (assistantReads.current.active) scheduleAssistantRecheck(expectAssistantStatus(action));
     } finally {
-      setAssistantBusy(false);
+      assistantMutationLock.current = false;
+      if (assistantReads.current.active) {
+        setAssistantBusy(false);
+        if (assistantReads.current.queued) { assistantReads.current.queued = false; void assistantReadRequest.current(); }
+      }
     }
   };
 
@@ -206,13 +221,20 @@ export function WelcomePage() {
     setAssistantOperationUnknown(false);
     setAssistantMutationOutcome(null);
     setAssistantBusyCandidateId(candidateId);
+    assistantMutationLock.current = true;
     try {
       await mutation.call(assistantApi, { candidateId, ...(collectionId ? { collectionId } : {}) });
-      await loadAssistantOverview();
+      if (assistantReads.current.active) await loadAssistantOverview();
     } catch {
-      scheduleAssistantRecheck(overview => !overview.candidates.some(candidate => candidate.id === candidateId));
+      // Read-backs issued before the failure resolved must not confirm the
+      // mutation (they are queued behind the lock); only the recheck read is.
+      if (assistantReads.current.active) scheduleAssistantRecheck(expectCandidateDecided(candidateId, decision));
     } finally {
-      setAssistantBusyCandidateId(null);
+      assistantMutationLock.current = false;
+      if (assistantReads.current.active) {
+        setAssistantBusyCandidateId(null);
+        if (assistantReads.current.queued) { assistantReads.current.queued = false; void assistantReadRequest.current(); }
+      }
     }
   };
 
