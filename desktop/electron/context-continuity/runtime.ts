@@ -84,6 +84,12 @@ export class DesktopContextContinuity {
   configureDeletionGuard(guard:()=>void):void{this.deletionGuard=guard;this.current?.service.setDeletionGuard(()=>this.assertDeletionOwnerReady());}
   requireEffectInventory():void{this.effectInventoryState='pending';}
   async auditEffectInventory(read:()=>Promise<TaskSnapshot[]>,legacyOwnerPresent:boolean):Promise<void>{
+    // Identity refused (Windows 1.6.2 profile, profile.ts): continuity is off for
+    // this whole process and nothing can record into it. Stay fail-closed for
+    // continuity deletion, but do not fail the multi-agent/owner readiness that
+    // awaits this audit; a later boot with an admitted identity re-inventories
+    // every persisted snapshot.
+    if(this.identity===null){this.effectInventoryState='failed';try{this.log?.('[context-continuity] effect inventory deferred: continuity degraded (identity refused)');}catch{/* logging never changes degradation */}return;}
     this.effectInventoryState='pending';
     try{const snapshots=await this.#sdk.invoke<TaskSnapshot[]>(read,undefined,[]);if(this.closed)throw new Error('continuity_stopping');const p=this.port();p.service.completeEffectInventory(p.actor,snapshots,legacyOwnerPresent);this.effectInventoryState='ready';}
     catch(error){this.effectInventoryState='failed';throw error;}
