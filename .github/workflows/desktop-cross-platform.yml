@@ -218,6 +218,8 @@ jobs:
           tests/renderer/chat-shell-draft-prompt.test.tsx
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
+          tests/main/copy-packaged-dependencies.test.ts
+          tests/main/active-owner-service-ports-first-start.test.ts
           tests/main/scheduled-task-delivery.test.ts
           tests/renderer/scheduled-task-delivery.test.tsx
           tests/main/scheduled-preload.test.ts
