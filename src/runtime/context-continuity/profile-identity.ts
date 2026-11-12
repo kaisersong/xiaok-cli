@@ -13,6 +13,16 @@ export function readContinuityProfile(dataRoot:string):string {
   } catch {throw Error('profile_identity_unavailable');}
 }
 
+/** The legacy digest a macOS 1.6.2 migration recorded for this root's own
+ * continuity profile; undefined without a valid alias bound to that profile. */
+export function readMigratedLegacyProfileId(dataRoot:string,continuityProfileId:string):string|undefined {
+  try {
+    const alias=readCapturedProfileJson(dataRoot,'continuity-profile-migration.json') as {version?:unknown;profileId?:unknown;legacyProfileId?:unknown};
+    if(!alias||typeof alias!=='object'||Array.isArray(alias)||alias.version!==1||alias.profileId!==continuityProfileId)return undefined;
+    return typeof alias.legacyProfileId==='string'&&/^[a-f0-9]{64}$/.test(alias.legacyProfileId)?alias.legacyProfileId:undefined;
+  } catch {return undefined;}
+}
+
 const scopeHash=createHash,scopeUpdate=Hash.prototype.update,scopeDigest=Hash.prototype.digest,scopeApply=Reflect.apply;
 /** Main's service-scope id for a profile born with a continuity UUID. Scope
  * consumers (DSH, writer control, KSwarm, dispatch) require 64 hex chars, so the

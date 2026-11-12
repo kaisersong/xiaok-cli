@@ -1,7 +1,7 @@
 import {closeSync,constants,fstatSync,lstatSync,openSync,readSync,realpathSync,type BigIntStats} from 'node:fs';
 import {join,resolve,dirname,basename} from 'node:path';
 import {readContinuityProfile} from '../context-continuity/profile-identity.js';
-import {isDesktopActivityProfile,desktopActivityProfileId} from './owner-profile-id.js';
+import {isDesktopActivityProfile,desktopActivityProfileId,hasContinuityArtifact} from './owner-profile-id.js';
 import {assertProfileDirectory} from '../context-continuity/profile-file.js';
 import {activityOwnerConfigDigest} from './owner-config.js';
 import {ACTIVITY_OWNER_GENERATION} from './owner-protocol.js';
@@ -16,7 +16,7 @@ const stable=(a:BigIntStats,b:BigIntStats)=>a.dev===b.dev&&a.ino===b.ino&&a.mode
 const unavailable=()=>Error('activity_owner_qualification_unavailable');
 function canonicalRoutingPath(path:string):string{let current=resolve(path);const tail:string[]=[];for(;;){try{return join(realpathSync(current),...tail.reverse());}catch(raw){if((raw as NodeJS.ErrnoException).code!=='ENOENT')throw raw;const parent=dirname(current);if(parent===current)throw raw;tail.push(basename(current));current=parent;}}}
 function present(path:string):boolean{try{lstatSync(path);return true;}catch(raw){if((raw as NodeJS.ErrnoException).code==='ENOENT')return false;throw raw;}}
-export function hasCanonicalActivityProfile(root:string):boolean{return ['continuity-profile.json','continuity-profile-migration.json','continuity.sqlite'].some(name=>present(join(root,name)));}
+export function hasCanonicalActivityProfile(root:string):boolean{return hasContinuityArtifact(root);}
 function readConfig(root:string):ActivityOwnerConfig{
  if(unknown.has(root))throw unavailable();const parent=assertProfileDirectory(root),path=join(root,ACTIVITY_STORAGE_NAMES.config),before=lstatSync(path,{bigint:true});
  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size<1n||before.size>262144n||typeof process.getuid==='function'&&(before.uid!==BigInt(process.getuid())||(before.mode&0o077n)!==0n))throw unavailable();

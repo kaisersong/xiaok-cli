@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {afterEach,expect,it} from 'vitest';
-import {mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -81,4 +81,24 @@ it('legacy-only exception (win32) rejects another root\'s legacy digest, as prof
  const config=mainActivityOwnerConfig(other,desktopActivityProfileId(other),{}),address=activityOwnerAddress(root);
  writeOwnerLaunchConfig(address.dataRoot,randomBytes(16).toString('hex'),{...config,profileRoot:other,dataRoot:address.dataRoot});
  expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+});
+for(const platform of ['win32','darwin'] as const){
+ it(`qualification (${platform}) rejects the root's own legacy digest on a UUID-born root with a readable continuity profile`,()=>{
+  const root=tempRoot(`scope-guard-born-sha-${platform}-`),uuid=loadContinuityProfile(root);
+  groupsWith(root,desktopContinuityScopeProfileId(uuid));
+  launch(root,desktopActivityProfileId(root));
+  expect(()=>onPlatform(platform,()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+ });
+}
+it('qualification (darwin) accepts the legacy digest of a migrated 1.6.2 root only while its migration alias records that digest',()=>{
+ const root=tempRoot('scope-guard-migrated-');groupsWith(root,desktopActivityProfileId(root));
+ const migrated=onPlatform('darwin',()=>resolveDesktopProfile(root));
+ expect(migrated.legacyProfileId).toBe(desktopActivityProfileId(root));
+ launch(root,desktopActivityProfileId(root));
+ expect(onPlatform('darwin',()=>readProtectedOwnerQualification(root))).toMatchObject({profileId:desktopActivityProfileId(root)});
+ // The same root with an alias naming another digest: the legacy digest is no longer this profile's.
+ const alias=JSON.parse(readFileSync(join(root,'continuity-profile-migration.json'),'utf8'));
+ rmSync(join(root,'continuity-profile-migration.json'));
+ writeFileSync(join(root,'continuity-profile-migration.json'),JSON.stringify({...alias,legacyProfileId:'0'.repeat(64)}),{mode:0o600});
+ expect(()=>onPlatform('darwin',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
 });
