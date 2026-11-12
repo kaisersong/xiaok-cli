@@ -336,31 +336,24 @@ export interface ActivityManagedSource {
 }
 export interface SourceReceipt { name: string; pid: number; birth: string; entryHash: string; ownerEpoch: string; external: boolean; instanceId?: string }
 
-function birthOnce(pid: number, platform: NodeJS.Platform): Promise<string> {
+/** Start deadline from spawn to a healthy receipt (unchanged 10s). */
+export const SOURCE_START_DEADLINE_MS = 10_000;
+/** Per-lookup budget for birth checks outside a spawn (restore, protectedPid). */
+const BIRTH_LOOKUP_TIMEOUT_MS = 3000;
+/** Process birth identity. A spawn passes the remaining part of its existing
+ * start deadline instead, so a cold PowerShell start on win32 does not fail a
+ * healthy launch while the total start budget stays unchanged. */
+export function readProcessBirth(pid: number, timeoutMs: number = BIRTH_LOOKUP_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = platform === 'win32'
+    const args = process.platform === 'win32'
       ? ['-NoProfile','-NonInteractive','-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`]
       : ['-p', String(pid), '-o', 'lstart='];
-    execFile(platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: 3000 }, (error, stdout) => {
-      if (error) reject(Object.assign(new Error('activity_source_birth_unavailable'), { birthTimedOut: (error as { killed?: boolean }).killed === true }));
-      else if (!stdout.trim()) reject(Object.assign(new Error('activity_source_birth_unavailable'), { birthTimedOut: false }));
-      else resolve(stdout.trim());
+    execFile(process.platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: timeoutMs }, (error, stdout) => {
+      if (error || !stdout.trim()) reject(new Error('activity_source_birth_unavailable')); else resolve(stdout.trim());
     });
   });
 }
-
-/** Process birth identity. A cold PowerShell start on win32 can exceed the
- * 3s per-lookup budget; only that case (the lookup was killed for timing out,
- * not "no such process") is retried, exactly once, with the same budget. */
-export async function readProcessBirth(pid: number, platform: NodeJS.Platform = process.platform): Promise<string> {
-  try { return await birthOnce(pid, platform); }
-  catch (error) {
-    if (platform !== 'win32' || !(error as { birthTimedOut?: boolean }).birthTimedOut) throw new Error('activity_source_birth_unavailable');
-    console.warn(JSON.stringify({ event: 'activity_source_birth_retry', pid, reason: 'lookup_timeout' }));
-    try { return await birthOnce(pid, platform); } catch { throw new Error('activity_source_birth_unavailable'); }
-  }
-}
-function birth(pid: number): Promise<string> { return readProcessBirth(pid); }
+function birth(pid: number, timeoutMs?: number): Promise<string> { return readProcessBirth(pid, timeoutMs); }
 
 /** Supervision is independent of UI lifetime. No unknown PID is killed or
  * taken over; durable receipts bind process birth and exact entry identity. */
@@ -468,10 +461,11 @@ export class ActivitySourceSupervisor {
     // receipt save, health probe, timeout) reaps the actual child first. A
     // child left running keeps its cwd and listener and becomes an orphan.
     try {
+      // One start deadline covers the birth lookup and the health wait.
+      const until = Date.now() + SOURCE_START_DEADLINE_MS;
       registerConfigTarget(this,child,source,launchEnv);
-      const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid), entryHash, ownerEpoch: this.ownerEpoch, external: false };
+      const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid, Math.max(1, until - Date.now())), entryHash, ownerEpoch: this.ownerEpoch, external: false };
       this.receipts.set(source.name, receipt); this.save();
-      const until = Date.now() + 10_000;
       while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
       // A child that never proved health is not a usable source. Leaving it
       // running orphans its listener (e.g. Broker on 4318) once the owner exits,

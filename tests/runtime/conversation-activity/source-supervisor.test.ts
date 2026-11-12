@@ -1,16 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 // Only the birth lookup (execFile) can be made to fail; spawn stays real.
-const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'timeout'|'missing'|'ok'|'real'>,calls:0}));
+const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[]}));
 vi.mock('node:child_process',async importOriginal=>{
   const real=await importOriginal<typeof import('node:child_process')>();
-  return {...real,execFile:((file:string,args:string[],options:unknown,callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
+  return {...real,execFile:((file:string,args:string[],options:{timeout?:number},callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
     const step=birthFault.plan.shift();
     if(!birthFault.fail&&(step===undefined||step==='real'))return (real.execFile as unknown as (...a:unknown[])=>unknown)(file,args,options,callback);
-    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);birthFault.calls++;
-    // Shapes match Node's execFile: a timeout kills the lookup (killed, SIGTERM).
-    if(step==='timeout')setImmediate(()=>callback(Object.assign(new Error('Command failed: lookup timed out'),{killed:true,signal:'SIGTERM',code:null}),'',''));
-    else if(step==='ok')setImmediate(()=>callback(null,'639300000000000000\r\n',''));
-    else setImmediate(()=>callback(Object.assign(new Error('injected birth lookup failure'),{killed:false,code:1}),'',''));
+    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(options.timeout??0);
+    if(step&&typeof step==='object'){
+      // A slow lookup: answers after `delay`, unless execFile's timeout kills it first.
+      const limit=options.timeout??Infinity;
+      if(step.delay<limit)setTimeout(()=>callback(null,'639300000000000000\r\n',''),step.delay);
+      else setTimeout(()=>callback(Object.assign(new Error('Command failed: lookup timed out'),{killed:true,signal:'SIGTERM',code:null}),'',''),limit);
+    }else setImmediate(()=>callback(Object.assign(new Error('injected birth lookup failure'),{killed:false,code:1}),'',''));
     return undefined;
   }) as unknown as typeof real.execFile};
 });
@@ -22,7 +24,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { ActivitySourceSupervisor, readProcessBirth } from '../../../src/runtime/conversation-activity/source-supervisor.js';
+import { ActivitySourceSupervisor, readProcessBirth, SOURCE_START_DEADLINE_MS } from '../../../src/runtime/conversation-activity/source-supervisor.js';
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'activity-supervisor-'));
@@ -110,41 +112,39 @@ describe('native source supervisor process ownership', () => {
     // The child no longer holds the root as its cwd: removal needs no retry.
     expect(()=>rmSync(f.root,{recursive:true})).not.toThrow();
   },15000);
-  it.each([
-    ['win32','timeout then success','resolves',['timeout','ok'],2],
-    ['win32','two timeouts','rejects',['timeout','timeout'],2],
-    ['win32','a non-timeout failure (no such process)','rejects',['missing'],1],
-    ['linux','a timeout','rejects',['timeout'],1],
-  ] as const)('birth lookup on %s after %s %s',async(platform,_case,outcome,plan,lookups)=>{
-    birthFault.plan=[...plan];birthFault.calls=0;
-    const result=readProcessBirth(4242,platform);
-    try{if(outcome==='resolves')await expect(result).resolves.toBe('639300000000000000');else await expect(result).rejects.toThrow('activity_source_birth_unavailable');}
-    finally{birthFault.plan=[];}
-    expect(birthFault.calls).toBe(lookups);
-  });
-  it.runIf(process.platform==='win32')('a first timed-out birth lookup on win32 is retried once and the spawned source gets a normal receipt',async()=>{
-    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-retry');let pid=0;
-    birthFault.plan=['timeout','real'];birthFault.calls=0;birthFault.pids.length=0;
+  it('a spawn whose birth lookup is slower than 3s but inside the 10s start deadline gets a normal receipt',async()=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-slow');let pid=0;
+    birthFault.plan=[{delay:5000}];birthFault.calls=0;birthFault.pids.length=0;birthFault.timeouts.length=0;const started=Date.now();
     try{
-      const receipt=await supervisor.ensure({...f.source,name:'broker'});pid=receipt.pid;
-      console.log(JSON.stringify({test:'supervisor-birth-retry',pid,birth:receipt.birth,injectedTimeouts:birthFault.calls}));
-      expect(birthFault.calls).toBe(1);expect(birthFault.pids).toEqual([pid]);expect(receipt).toMatchObject({external:false,ownerEpoch:'birth-retry'});expect(receipt.birth).toMatch(/^\d+$/);
-      expect(await supervisor.protectedPid(pid)).toBe(true);
-      await supervisor.stopOwned('broker','birth-retry');
-    }finally{birthFault.plan=[];await supervisor.sealAndDrainSpawned();if(pid)await vi.waitFor(()=>expect(()=>process.kill(pid,0)).toThrow());rmSync(f.root,{recursive:true});}
+      const receipt=await supervisor.ensure({...f.source,name:'broker'});pid=receipt.pid;const elapsed=Date.now()-started;
+      console.log(JSON.stringify({test:'supervisor-birth-slow',pid,birth:receipt.birth,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed}));
+      expect(receipt).toMatchObject({pid,birth:'639300000000000000',external:false,ownerEpoch:'birth-slow'});
+      expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeGreaterThan(5000);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
+      expect(elapsed).toBeLessThan(SOURCE_START_DEADLINE_MS);
+    }finally{
+      // The injected birth is not the child's real birth, so stopOwned would refuse it;
+      // this test's own child is signalled directly, then the spawn barrier drains.
+      birthFault.plan=[];if(pid){try{process.kill(pid,'SIGTERM');}catch{}}await supervisor.sealAndDrainSpawned();
+      if(pid)expect(()=>process.kill(pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});
+    }
   },15000);
-  it('reaps its actual child when every allowed birth lookup times out',async()=>{
-    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-timeout');
-    birthFault.plan=['timeout','timeout'];birthFault.calls=0;birthFault.pids.length=0;
+  it('a spawn whose birth lookup outlasts the remaining start deadline fails and reaps its actual child',async()=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-overdue');
+    birthFault.plan=[{delay:12_000}];birthFault.calls=0;birthFault.pids.length=0;birthFault.timeouts.length=0;const started=Date.now();
     try{await expect(supervisor.ensure({...f.source,name:'broker'})).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.plan=[];}
-    const [pid]=birthFault.pids;expect(pid).toBeGreaterThan(0);
+    const elapsed=Date.now()-started,[pid]=birthFault.pids;expect(pid).toBeGreaterThan(0);
     let afterReject='alive';try{process.kill(pid,0);}catch(error){afterReject=(error as NodeJS.ErrnoException).code??'gone';}
-    console.log(JSON.stringify({test:'supervisor-birth-timeout-reap',pid,lookups:birthFault.calls,birthError:'activity_source_birth_unavailable',afterReject}));
-    expect(birthFault.calls).toBe(process.platform==='win32'?2:1);
+    console.log(JSON.stringify({test:'supervisor-birth-overdue-reap',pid,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed,birthError:'activity_source_birth_unavailable',afterReject}));
+    expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
     try{expect(afterReject).toBe('ESRCH');}finally{try{process.kill(pid,'SIGKILL');}catch{}}
     await supervisor.sealAndDrainSpawned();
     expect(()=>rmSync(f.root,{recursive:true})).not.toThrow();
   },15000);
+  it('birth checks outside a spawn keep their own 3s lookup budget',async()=>{
+    birthFault.plan=['missing'];birthFault.calls=0;birthFault.timeouts.length=0;
+    try{await expect(readProcessBirth(4242)).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.plan=[];}
+    expect(birthFault.timeouts).toEqual([3000]);expect(SOURCE_START_DEADLINE_MS).toBe(10_000);
+  });
   it('actual KS startup with the inherited channel alone never installs a writer floor',async()=>{
     const f=await fixture(),entry=resolve('../kswarm/src/server/index.js'),data=join(f.root,'ks-data'),supervisor=new ActivitySourceSupervisor(f.root,'real-ks');let receipt:Awaited<ReturnType<typeof supervisor.ensure>>|undefined;
     try{
