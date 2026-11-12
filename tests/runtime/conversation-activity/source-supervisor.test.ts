@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { ActivitySourceSupervisor } from '../../../src/runtime/conversation-activity/source-supervisor.js';
 
@@ -27,6 +27,18 @@ async function fixture() {
   const entryPath = join(root, 'server.mjs');
   writeFileSync(entryPath, `import{createServer}from'node:http';import{readFileSync}from'node:fs';import{createHash}from'node:crypto';const server=createServer((req,res)=>res.end(JSON.stringify({ok:true,ipcConnected:process.connected===true,service:{pid:process.pid,entryPath:process.argv[1],entryHash:createHash('sha256').update(readFileSync(process.argv[1])).digest('hex')}})));server.listen(${address.port},'127.0.0.1');process.on('SIGTERM',()=>server.close(()=>process.exit(0)));`);
   return { root, source: { name: 'kswarm' as const, executable: process.execPath, entryPath, cwd: root, env: {}, healthUrl: `http://127.0.0.1:${address.port}/health`, expectedHealth: { ok: true, 'service.entryPath': entryPath, 'service.entryHash': createHash('sha256').update(readFileSync(entryPath)).digest('hex') } } };
+}
+// The real KS child needs Node >= 22.22.0 (kswarm runtime-guard). CI must name
+// it explicitly; a local run may use its own Node only when that is new enough.
+function kswarmTestNode():string{
+  const name='XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE',set=process.env[name];
+  if(!set&&process.env.GITHUB_ACTIONS)throw new Error(`kswarm_test_node_missing: ${name} is not set (KS child needs Node >= 22.22.0)`);
+  const executable=set||process.execPath;
+  const version=set?execFileSync(executable,['-p','process.versions.node'],{encoding:'utf8'}).trim():process.versions.node;
+  const [major,minor]=version.split('.').map(Number);
+  if(major<22||(major===22&&minor<22))throw new Error(`kswarm_test_node_missing: ${set?name:'process.execPath (no '+name+')'} is Node ${version}, KS child needs Node >= 22.22.0`);
+  console.log(JSON.stringify({test:'supervisor-actual-ks-node',executable,version,fromEnv:Boolean(set)}));
+  return executable;
 }
 describe('native source supervisor process ownership', () => {
   it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
@@ -96,7 +108,7 @@ describe('native source supervisor process ownership', () => {
   it('actual KS startup with the inherited channel alone never installs a writer floor',async()=>{
     const f=await fixture(),entry=resolve('../kswarm/src/server/index.js'),data=join(f.root,'ks-data'),supervisor=new ActivitySourceSupervisor(f.root,'real-ks');let receipt:Awaited<ReturnType<typeof supervisor.ensure>>|undefined;
     try{
-      receipt=await supervisor.ensure({...f.source,executable:process.env.XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE||process.execPath,entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
+      receipt=await supervisor.ensure({...f.source,executable:kswarmTestNode(),entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
       console.log(JSON.stringify({test:'supervisor-actual-ks-no-grant',pid:receipt.pid,birth:receipt.birth,ownerEpoch:receipt.ownerEpoch}));
       const db=new DatabaseSync(join(data,'state.sqlite'),{readOnly:true});try{expect(db.prepare("SELECT count(*) n FROM state_meta WHERE meta_key='writer_floor_v1'").get()?.n).toBe(0);}finally{db.close();}
     }finally{if(receipt)await supervisor.stopOwned('kswarm','real-ks');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
