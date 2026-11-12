@@ -336,16 +336,31 @@ export interface ActivityManagedSource {
 }
 export interface SourceReceipt { name: string; pid: number; birth: string; entryHash: string; ownerEpoch: string; external: boolean; instanceId?: string }
 
-function birth(pid: number): Promise<string> {
+function birthOnce(pid: number, platform: NodeJS.Platform): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args = process.platform === 'win32'
+    const args = platform === 'win32'
       ? ['-NoProfile','-NonInteractive','-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`]
       : ['-p', String(pid), '-o', 'lstart='];
-    execFile(process.platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: 3000 }, (error, stdout) => {
-      if (error || !stdout.trim()) reject(new Error('activity_source_birth_unavailable')); else resolve(stdout.trim());
+    execFile(platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: 3000 }, (error, stdout) => {
+      if (error) reject(Object.assign(new Error('activity_source_birth_unavailable'), { birthTimedOut: (error as { killed?: boolean }).killed === true }));
+      else if (!stdout.trim()) reject(Object.assign(new Error('activity_source_birth_unavailable'), { birthTimedOut: false }));
+      else resolve(stdout.trim());
     });
   });
 }
+
+/** Process birth identity. A cold PowerShell start on win32 can exceed the
+ * 3s per-lookup budget; only that case (the lookup was killed for timing out,
+ * not "no such process") is retried, exactly once, with the same budget. */
+export async function readProcessBirth(pid: number, platform: NodeJS.Platform = process.platform): Promise<string> {
+  try { return await birthOnce(pid, platform); }
+  catch (error) {
+    if (platform !== 'win32' || !(error as { birthTimedOut?: boolean }).birthTimedOut) throw new Error('activity_source_birth_unavailable');
+    console.warn(JSON.stringify({ event: 'activity_source_birth_retry', pid, reason: 'lookup_timeout' }));
+    try { return await birthOnce(pid, platform); } catch { throw new Error('activity_source_birth_unavailable'); }
+  }
+}
+function birth(pid: number): Promise<string> { return readProcessBirth(pid); }
 
 /** Supervision is independent of UI lifetime. No unknown PID is killed or
  * taken over; durable receipts bind process birth and exact entry identity. */
