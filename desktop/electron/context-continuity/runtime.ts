@@ -7,6 +7,7 @@ import type { PublicTaskInput } from '../../shared/context-continuity-types.js';
 import type { TaskCreateInput as HostTaskCreateInput } from '../../../src/runtime/task-host/types.js';
 import type { ContinuityIpcPort } from './ipc.js';
 import { resolveDesktopProfile,type DesktopProfileIdentity } from './profile.js';
+import { describeProfileFailure } from '../desktop-main-identity.js';
 import { ContinuityService } from './service.js';
 import { TaskContinuitySource } from './task-source.js';
 import { assembleOwnedHistory } from './history.js';
@@ -54,16 +55,18 @@ export class DesktopContextContinuity {
   private ownerReady=false;
   private effectInventoryState:'not_required'|'pending'|'ready'|'failed'='not_required';
   private preparedEffectRuns=new Map<string,string>();
-  constructor(private readonly dataRoot: string, private readonly inspect?: (taskId: string) => Promise<TaskSnapshot | null>,private readonly identity?:DesktopProfileIdentity|null, private readonly authOwnerTarget?:import('./ipc.js').AuthOwnerIpcTarget) {
+  constructor(private readonly dataRoot: string, private readonly inspect?: (taskId: string) => Promise<TaskSnapshot | null>,private readonly identity?:DesktopProfileIdentity|null, private readonly authOwnerTarget?:import('./ipc.js').AuthOwnerIpcTarget,private readonly log?:(line:string)=>void) {
     if(identity===null){this.initializationFailed=true;return;}
-    if (existsSync(join(dataRoot, 'continuity.sqlite'))) { try { this.port(); } catch { this.initializationFailed = true; } }
+    // Degrade exactly as before; only the inner reason is now recorded.
+    if (existsSync(join(dataRoot, 'continuity.sqlite'))) { try { this.port(); } catch(raw) { this.initializationFailed = true; this.logUnavailable('startup',raw); } }
   }
+  private logUnavailable(stage:string,raw:unknown):void{try{this.log?.(`[context-continuity] unavailable at ${stage}: ${describeProfileFailure(raw)}`);}catch{/* logging never changes degradation */}}
   port(): ContinuityIpcPort {
     if (this.closed || this.initializationFailed) throw new Error('continuity_unavailable');
     if (!this.current) {
       let profileId:string,service:ContinuityService;
       try{profileId=(this.identity??resolveDesktopProfile(this.dataRoot)).profileId;service=new ContinuityService({dbPath:join(this.dataRoot,'continuity.sqlite'),profileId});}
-      catch{this.initializationFailed=true;throw new Error('continuity_unavailable');}
+      catch(raw){this.initializationFailed=true;this.logUnavailable('open',raw);throw new Error('continuity_unavailable');}
       const actor = { requestSource: 'user' as const, profileId, actorId: `desktop-user:${profileId}` };
       this.current = { service, authOwner: this.authOwnerTarget, actor, refresh: () => this.reconcile(), ...(this.legacyInspector ? { importer: new LegacyContinuityImporter(service, actor, this.legacyInspector) } : {}) };
       this.#sourceContext=Object.freeze({service,store:service.store,actor:Object.freeze({...actor})});

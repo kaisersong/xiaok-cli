@@ -25,7 +25,7 @@ import type { MailConnectorService } from './mail-connector-service.js';
 import { createMailTools } from './mail-tools.js';
 import {createRequire as createOptionalMemoryRequire} from 'node:module';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
-import {desktopActivityProfileId} from '../../src/runtime/conversation-activity/owner-profile-id.js';
+import type {DesktopMainIdentity} from './desktop-main-identity.js';
 import {mainActivityOwnerConfig} from './activity-owner-main-config.js';
 import {readOriginalMainModelProbeEvent} from './main-dsh-control-source.js';
 import {loadOriginalMainModelProbeSource} from './main-model-probe-source-loader.js';
@@ -687,6 +687,10 @@ export function readOriginalMainModelProbeConfiguration(services:unknown,receipt
 export interface DesktopServicesOptions {
   /** Main's file logger (main-debug.log) for activity owner attach results; smoke evidence. */
   activityOwnerLog?: (line: string) => void;
+  /** Main's file logger (main-debug.log) for the inner reason continuity degrades. */
+  continuityLog?: (line: string) => void;
+  /** Identity Main resolved before any scope row was written (resolveDesktopMainIdentity). */
+  mainIdentity?: DesktopMainIdentity;
   credentialInputs?:CredentialInputPort;
   mailConnectors?: MailConnectorService;
   assistantOutbox?: { proposeMail(input: import('../shared/mail-connectors-ipc-contract.js').MailSendInput, source:'agent',taskId?:string):unknown;waitForDecision?(id:string,signal?:AbortSignal):Promise<unknown> };
@@ -1261,6 +1265,13 @@ const originalContinuityMainSources=new WeakMap<object,Readonly<OriginalDesktopC
 /** Actual same-factory membership only, never caller-supplied IO/proof/provider. */
 export function readOriginalDesktopContinuityMain(services:object):Readonly<OriginalDesktopContinuityMain>{const row=originalContinuityMainSources.get(services);if(!row)throw Error('canonical_runtime_source_unavailable');row.assertCurrent();return row;}
 
+/** Main passes the identity it resolved (resolveDesktopMainIdentity) so Main and
+ * Services share one scope. Without it (fixtures that build Services alone) the
+ * scope stays the legacy data-root digest and continuity resolves its own
+ * identity, exactly as before. */
+function desktopServicesScope(options:DesktopServicesOptions){
+  return resolveDesktopServiceScope({dataRoot:options.dataRoot,...(options.workspaceRoot===undefined?{}:{workspaceRoot:options.workspaceRoot}),...(options.mainIdentity?{profileId:options.mainIdentity.profileId}:{})});
+}
 export function createDesktopServices(options: DesktopServicesOptions) {
 
 
@@ -1269,7 +1280,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if(options.dshServiceSources!==undefined){
       if(options.runner)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
       dshLease=readOriginalMainDshPreparedSources(options.dshServiceSources);
-      const actual=resolveDesktopServiceScope(options);
+      const actual=desktopServicesScope(options);
       dshLease=claimOriginalMainDshServiceSources(options.dshServiceSources,{profileId:actual.profileId,workspaceId:actual.workspaceId});
       if(dshLease.harnessUserActor!==options.harnessOptimizationUserActor)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
     }
@@ -1303,7 +1314,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const taskSourcePopulation = createTaskSourceWriterPopulation(snapshotStore);
-  const continuityBinding=createContinuityMainBinding(options.dataRoot,snapshotStore);
+  const continuityBinding=createContinuityMainBinding(options.dataRoot,snapshotStore,options.mainIdentity,options.continuityLog);
   const contextContinuity=continuityBinding.runtime;
   workflowHostApply(workflowHostAdd,workflowHostFunctions,[runKSwarmWorkflowNode]);
   workflowHostApply(workflowHostAdd,directHostFunctions,[runKSwarmHandoffTask]);
@@ -1363,7 +1374,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     activityRoomRecoveryPending=false;
   };
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
-  const modelProbeScope=resolveDesktopServiceScope(options);
+  const modelProbeScope=desktopServicesScope(options);
   const multiAgentCwd = modelProbeScope.cwd;
   const multiAgentProfileId = modelProbeScope.profileId;
   const multiAgentWorkspaceId = modelProbeScope.workspaceId;
@@ -1371,7 +1382,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
   defaultDispatchController?.bindUserOwner(userSubmissions);
   const roomConversions=createMainRoomConversionCaptureOwner({submissions:userSubmissions,scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},gateway:options.kswarmService});
-  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
+  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,profileId:multiAgentProfileId,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
     initialPlanBootstrap:{enqueue:input=>enqueueInitialPlan(input)},
     readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),sourceSnapshots:snapshotStore,
     ...(activityEnabled ? { activityHooks: {
@@ -3666,7 +3677,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapJob,signal:AbortSignal) {
     const result = input.ownerBinding ? await executeOwnedInitialPlanBootstrap(input,{
       store:initialPlanBootstrapStore,gateway:options.kswarmService,
-      scope:{profileId:desktopActivityProfileId(options.dataRoot),workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
+      scope:{profileId:multiAgentProfileId,workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
       generateCandidate:async({job,inputs,signal:runSignal,beforeStart})=>{
         assertKSwarmTaskStart({signal:runSignal});
         const executionStart=await readKSwarmExecutionStart(options.kswarmService,job.projectId);

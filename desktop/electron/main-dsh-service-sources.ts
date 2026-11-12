@@ -92,8 +92,10 @@ export function prepareOriginalMainDshServiceSources(candidate:unknown,raw:unkno
  const row=apply(get,rows,[candidate]) as Row|undefined;
  if(!row||row.claimed||row.closing||row.failure||!row.birth||row.preparing)throw denied();
  if(!raw||typeof raw!=='object'||isProxy(raw))throw denied();
- const options=captureGithubOpaqueRecord(raw,['dataRoot','harnessUserActor',...(descriptor(raw,'workspaceRoot')?['workspaceRoot']:[])]);
+ const options=captureGithubOpaqueRecord(raw,['dataRoot','harnessUserActor',...(descriptor(raw,'workspaceRoot')?['workspaceRoot']:[]),...(descriptor(raw,'profileId')?['profileId']:[])]);
  const dataRoot=githubReadText(options.dataRoot),workspaceRoot=options.workspaceRoot===undefined?undefined:githubReadText(options.workspaceRoot);
+ // Main's resolved profile scope (resolveDesktopMainIdentity); absent means the legacy root digest.
+ const profileId=options.profileId===undefined?undefined:githubReadText(options.profileId);
  const actor=options.harnessUserActor as HarnessUserContext;
  if(!actor||typeof actor!=='object'||isProxy(actor))throw denied();
  const actorData=githubReadRecord(captureGithubReadData(actor));githubReadFields(actorData,['requestSource','principalId']);
@@ -105,7 +107,7 @@ export function prepareOriginalMainDshServiceSources(candidate:unknown,raw:unkno
  row.preparing=preparing;
  const operation=row.stock.root(async()=>{
   try{
-   const actual=resolveDesktopServiceScope({dataRoot,...(workspaceRoot===undefined?{}:{workspaceRoot})});
+   const actual=resolveDesktopServiceScope({dataRoot,...(workspaceRoot===undefined?{}:{workspaceRoot}),...(profileId===undefined?{}:{profileId})});
    if(!same(row.scope,actual))throw denied();
    readOriginalMainDshControlSourceBinding(row.user).assertLocal();
    row.coreStock=createRoomTurnCustody();

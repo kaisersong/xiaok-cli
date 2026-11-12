@@ -138,6 +138,8 @@ export class ConversationProjectService {
   constructor(private readonly options: {
     dataRoot: string;
     workspaceRoot?:string;
+    /** Main's service-scope profile id; defaults to the legacy data-root digest. */
+    profileId?:string;
     userSubmissions?:MainUserSubmissionOwner;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
     initialPlanBootstrap?:{enqueue(input:KSwarmInitialPlanBootstrapPayload):ProjectPlanningOutput};
@@ -151,7 +153,7 @@ export class ConversationProjectService {
     this.directory = join(options.dataRoot, 'conversation-projects');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.userFactDirectory = join(this.directory, 'user-inputs');
-    this.userFactProfileId = desktopActivityProfileId(options.dataRoot);
+    this.userFactProfileId = options.profileId ?? desktopActivityProfileId(options.dataRoot);
     this.userFactWorkspaceId=createHash('sha256').update(resolve(options.workspaceRoot??process.cwd())).digest('hex');
     mkdirSync(this.userFactDirectory, { recursive: true, mode: 0o700 });
     const directory = lstatSync(this.userFactDirectory);

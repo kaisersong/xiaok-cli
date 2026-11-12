@@ -89,6 +89,7 @@ import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOri
 import {createMainDshControlSource} from './main-dsh-control-source.js';
 import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import {resolveDesktopMainIdentity} from './desktop-main-identity.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -841,7 +842,11 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
-  const serviceScope=resolveDesktopServiceScope({dataRoot});
+  // #233: resolve the profile once, before Services writes any scope row; Services gets the same value.
+  const mainIdentity=resolveDesktopMainIdentity(dataRoot);
+  debugMain(`[context-continuity] profile scope ${mainIdentity.scope} (profile ${mainIdentity.profileId.slice(0,12)})`);
+  if(mainIdentity.failure!==undefined)debugMain(`[context-continuity] identity refused, continuity degrades: ${mainIdentity.failure}`);
+  const serviceScope=resolveDesktopServiceScope({dataRoot,profileId:mainIdentity.profileId});
   const mainUserControlSource=createMainDshControlSource({windowOwner:applicationWindowOwner,scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   desktopIngressOwners.push(mainUserControlSource.ingress);
   if(desktopShutdownCoordinator.isQuitting)mainUserControlSource.seal();
@@ -851,7 +856,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   let dshServicesTransferred=false;
   if(dshSources){
     desktopFinalLifetimeSteps.push({name:'main-dsh-startup-sources',async run(){if(!dshServicesTransferred)await closeOriginalMainDshStartupSources(dshSources);}});
-    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,harnessUserActor});}
+    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,profileId:serviceScope.profileId,harnessUserActor});}
     catch(raw){
       try{await closeOriginalMainDshStartupSources(dshSources,{raw});}catch{/* The original Sources retains cleanup faults and all physical tails. */}
       throw raw;
@@ -859,7 +864,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if(!desktopShutdownGate.isOpen)return window;
   }
   const dshPrepared=dshSources?readOriginalMainDshPreparedSources(dshSources):undefined;
-  const writerScope=()=>({profileId:createHash('sha256').update(resolve(getConfigDir('desktop'))).digest('hex'),workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
+  const writerScope=()=>({profileId:serviceScope.profileId,workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
   const preparationNativeSource=createDefaultDispatchPreparationNativeSource({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   const preparationOwner=createDefaultDispatchPreparationOwner(preparationNativeSource);
   desktopIngressOwners.push(preparationOwner.ingress);
@@ -939,6 +944,8 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!desktopShutdownGate.isOpen) return window;
   const services = createDesktopServices({
     activityOwnerLog: line => debugMain(line),
+    continuityLog: line => debugMain(line),
+    mainIdentity,
     credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
     mailConnectors,
     assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
