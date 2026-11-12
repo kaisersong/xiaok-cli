@@ -72,3 +72,13 @@ for(const artifact of ['continuity.sqlite','continuity-profile-migration.json','
   expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
  });
 }
+it('legacy-only exception (win32) rejects another root\'s legacy digest, as profileId alone or with that root as profileRoot',()=>{
+ const root=tempRoot('scope-guard-legacy-own-'),other=tempRoot('scope-guard-legacy-other-');
+ groupsWith(root,desktopActivityProfileId(root));groupsWith(other,desktopActivityProfileId(other));
+ launch(root,desktopActivityProfileId(other));
+ expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+ // A config whose own profileRoot/profileId pair is self-consistent but names the other root.
+ const config=mainActivityOwnerConfig(other,desktopActivityProfileId(other),{}),address=activityOwnerAddress(root);
+ writeOwnerLaunchConfig(address.dataRoot,randomBytes(16).toString('hex'),{...config,profileRoot:other,dataRoot:address.dataRoot});
+ expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+});
