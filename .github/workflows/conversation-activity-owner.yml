@@ -76,7 +76,8 @@ jobs:
             .test-dist/tests/runtime/conversation-activity/owner-host.test.js \
             .test-dist/tests/runtime/conversation-activity/owner-retire.test.js \
             .test-dist/tests/runtime/conversation-activity/readonly-compat.test.js \
-            .test-dist/tests/runtime/conversation-activity/owner-pending-tasks.test.js 2>&1 | tee owner-lifecycle.log
+            .test-dist/tests/runtime/conversation-activity/owner-pending-tasks.test.js \
+            .test-dist/tests/runtime/conversation-activity/source-supervisor.test.js 2>&1 | tee owner-lifecycle.log
       - name: Preserve actual lifecycle test results
         if: always() && hashFiles('owner-lifecycle.log') != ''
         uses: actions/upload-artifact@v4
