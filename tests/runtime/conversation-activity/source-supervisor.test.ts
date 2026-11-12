@@ -105,4 +105,25 @@ describe('native source supervisor process ownership', () => {
       await restored.stopOwned('kswarm','second');
     } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
   },15_000);
+  it('kills a spawned source that never answers health within the start budget and releases its port', async () => {
+    const f = await fixture();
+    const port = Number(new URL(f.source.healthUrl).port), pidFile = join(f.root, 'unhealthy.pid');
+    // Listens like a slow cold-start Broker but never completes a /health response.
+    const entryPath = join(f.root, 'unhealthy.mjs');
+    writeFileSync(entryPath, `import{createServer}from'node:http';import{writeFileSync}from'node:fs';createServer(()=>{}).listen(${port},'127.0.0.1',()=>writeFileSync(${JSON.stringify(pidFile)},String(process.pid)));`);
+    const source = { ...f.source, name: 'broker' as const, entryPath, expectedHealth: { ok: true } };
+    const supervisor = new ActivitySourceSupervisor(f.root, 'owner');
+    let pid: number | undefined;
+    try {
+      await expect(supervisor.ensure(source)).rejects.toThrow('activity_source_start_timeout');
+      pid = Number(readFileSync(pidFile, 'utf8'));
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid!, 0)).toThrow();
+      const ledger = JSON.parse(readFileSync(join(f.root, 'activity-source-supervision.json'), 'utf8')) as { sources: unknown[] };
+      expect(ledger.sources).toEqual([]);
+      const probe = createServer();
+      await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(port, '127.0.0.1', resolve); });
+      await new Promise<void>(resolve => probe.close(() => resolve()));
+    } finally { if (pid) { try { process.kill(pid,'SIGKILL'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+  },20_000);
 });

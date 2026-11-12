@@ -452,8 +452,21 @@ export class ActivitySourceSupervisor {
     const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid), entryHash, ownerEpoch: this.ownerEpoch, external: false };
     this.receipts.set(source.name, receipt); this.save();
     const until = Date.now() + 10_000;
-    while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
+    while (Date.now() < until) { if (failure || child.exitCode !== null) { await this.reapUnstarted(source.name, child); throw new Error('activity_source_start_failed'); } if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
+    // A child that never proved health is not a usable source. Leaving it
+    // running orphans its listener (e.g. Broker on 4318) once the owner exits,
+    // and every later launcher then fails with EADDRINUSE.
+    await this.reapUnstarted(source.name, child);
     throw new Error('activity_source_start_timeout');
+  }
+  /** Kill an actual child handle this instance spawned that never became healthy, and wait for its exit. */
+  private async reapUnstarted(name: string, child: ChildProcess): Promise<void> {
+    if(name==='kswarm'){const owner=configOwner(this);if(owner){revokeConfigTarget(owner);await owner.business?.join();}}
+    const closed = this.childCloses.get(child);
+    if (child.exitCode === null && child.signalCode === null) { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
+    if (closed) await closed;
+    if (this.children.get(name) === child) this.children.delete(name);
+    if (this.receipts.get(name)?.pid === child.pid) { this.receipts.delete(name); this.save(); }
   }
   async protectedPid(pid: number): Promise<boolean> {
     const receipt = [...this.receipts.values()].find(item => !item.external && item.pid === pid);
