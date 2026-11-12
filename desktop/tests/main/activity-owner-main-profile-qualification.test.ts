@@ -65,6 +65,12 @@ it('rejects a Main-shaped config whose profileId is not the one computed from it
  rewrite(root,{profileId:foreign,actorId:`desktop-user:${foreign}`});
  expect(()=>readProtectedOwnerQualification(root)).toThrow('activity_owner_qualification_unavailable');
 });
+it('rejects a config whose actorId is not desktop-user:<profileId>',async()=>{
+ const root=tempDir('owner-main-wrong-actor-');await openProfile(root);const {scope}=mainLaunch(root);
+ expect(readProtectedOwnerQualification(root)).toMatchObject({profileId:scope.profileId});
+ rewrite(root,{actorId:'desktop-user:someone-else'});
+ expect(()=>readProtectedOwnerQualification(root)).toThrow('activity_owner_qualification_unavailable');
+});
 it('rejects a config whose profile root does not resolve to the qualified root',async()=>{
  const root=tempDir('owner-main-wrong-root-'),other=tempDir('owner-main-other-root-');await openProfile(root);mainLaunch(root);
  // Self-consistent id for the other root: only the realpath check can refuse it.

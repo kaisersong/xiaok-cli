@@ -7,6 +7,7 @@ import { compactProjectCreationResponse } from '../../src/runtime/task-host/tool
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import {desktopActivityProfileId} from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {KSwarmInitialPlanBootstrapPayload} from './kswarm-initial-plan-bootstrap.js';
@@ -150,7 +151,7 @@ export class ConversationProjectService {
     this.directory = join(options.dataRoot, 'conversation-projects');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.userFactDirectory = join(this.directory, 'user-inputs');
-    this.userFactProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+    this.userFactProfileId = desktopActivityProfileId(options.dataRoot);
     this.userFactWorkspaceId=createHash('sha256').update(resolve(options.workspaceRoot??process.cwd())).digest('hex');
     mkdirSync(this.userFactDirectory, { recursive: true, mode: 0o700 });
     const directory = lstatSync(this.userFactDirectory);

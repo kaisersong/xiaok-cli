@@ -25,6 +25,7 @@ import type { MailConnectorService } from './mail-connector-service.js';
 import { createMailTools } from './mail-tools.js';
 import {createRequire as createOptionalMemoryRequire} from 'node:module';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import {desktopActivityProfileId} from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import {mainActivityOwnerConfig} from './activity-owner-main-config.js';
 import {readOriginalMainModelProbeEvent} from './main-dsh-control-source.js';
 import {loadOriginalMainModelProbeSource} from './main-model-probe-source-loader.js';
@@ -684,6 +685,8 @@ export function readOriginalMainModelProbeConfiguration(services:unknown,receipt
 }
 
 export interface DesktopServicesOptions {
+  /** Main's file logger (main-debug.log) for activity owner attach results; smoke evidence. */
+  activityOwnerLog?: (line: string) => void;
   credentialInputs?:CredentialInputPort;
   mailConnectors?: MailConnectorService;
   assistantOutbox?: { proposeMail(input: import('../shared/mail-connectors-ipc-contract.js').MailSendInput, source:'agent',taskId?:string):unknown;waitForDecision?(id:string,signal?:AbortSignal):Promise<unknown> };
@@ -3663,7 +3666,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapJob,signal:AbortSignal) {
     const result = input.ownerBinding ? await executeOwnedInitialPlanBootstrap(input,{
       store:initialPlanBootstrapStore,gateway:options.kswarmService,
-      scope:{profileId:createHash('sha256').update(resolve(options.dataRoot)).digest('hex'),workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
+      scope:{profileId:desktopActivityProfileId(options.dataRoot),workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
       generateCandidate:async({job,inputs,signal:runSignal,beforeStart})=>{
         assertKSwarmTaskStart({signal:runSignal});
         const executionStart=await readKSwarmExecutionStart(options.kswarmService,job.projectId);
@@ -4927,7 +4930,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       activityAttachment = attempt;
       attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined;
         // Smoke evidence: the success branch used to log nothing.
-        console.log(`[conversation-activity] owner attached (profile ${multiAgentProfileId.slice(0,12)})`);
+        const attached=`[conversation-activity] owner attached (profile ${multiAgentProfileId.slice(0,12)})`;
+        if(options.activityOwnerLog)options.activityOwnerLog(attached);else console.log(attached);
       }, error => {
         activityChangingOwner=false;
         // Do not cache the failure: allow a later retry. The in-process writers were disposed
@@ -4936,6 +4940,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         activityAttachFailure = error ?? new Error('activity_owner_unavailable');
         activityMcp = undefined; activitySources = undefined; activityService = undefined; activityStore = undefined;
         console.warn('[conversation-activity] owner attach failed:', error instanceof Error ? error.message : 'activity_owner_attach_failed');
+        options.activityOwnerLog?.(`[conversation-activity] owner attach failed: ${error instanceof Error ? error.message : 'activity_owner_attach_failed'}`);
       });
       return attempt;
     },

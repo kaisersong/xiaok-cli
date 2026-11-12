@@ -938,6 +938,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     }) : undefined;
   if (!desktopShutdownGate.isOpen) return window;
   const services = createDesktopServices({
+    activityOwnerLog: line => debugMain(line),
     credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
     mailConnectors,
     assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
@@ -1020,6 +1021,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       error => {
         const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
         console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+        debugMain(`Activity owner attach failed (${code}); starting KSwarm without it`);
         activityOwnerNoticeOnce(code);
       },
       desktopServicesDegradedNoticeOnce,
