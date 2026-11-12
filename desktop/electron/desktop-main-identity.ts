@@ -1,12 +1,20 @@
 import {desktopActivityProfileId,desktopContinuityScopeProfileId} from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import {resolveDesktopProfile,type DesktopProfileIdentity} from '../../src/runtime/context-continuity/profile.js';
+import {readProfileDomainCensus} from '../../src/runtime/context-continuity/profile-probe.js';
+import {readCapturedProfileJson} from '../../src/runtime/context-continuity/profile-file.js';
+import {existsSync} from 'node:fs';
+import {join} from 'node:path';
 
 export interface DesktopMainIdentity {
   /** Main's service-scope profile id (groups.sqlite profile_id, desktop-user:<id>, owner config). */
   readonly profileId:string;
   /** Continuity identity, or null when continuity must degrade. */
   readonly continuity:Readonly<DesktopProfileIdentity>|null;
-  readonly scope:'continuity'|'legacy';
+  /** 'unavailable': identity failed on a root without legacy data. Fail closed:
+   * this run degrades and Services writes no scope row (groups, activity,
+   * Native sessions, owner config, project facts). `profileId` is then only the
+   * in-memory 64-hex scope the startup sources require; it is never stored. */
+  readonly scope:'continuity'|'legacy'|'unavailable';
   /** Inner reason when continuity identity was refused (main-debug.log evidence). */
   readonly failure?:string;
 }
@@ -29,6 +37,26 @@ export function resolveDesktopMainIdentity(dataRoot:string):DesktopMainIdentity 
     if(continuity.legacyProfileId!==undefined)return Object.freeze({profileId:continuity.legacyProfileId,continuity,scope:'legacy'});
     return Object.freeze({profileId:desktopContinuityScopeProfileId(continuity.profileId),continuity,scope:'continuity'});
   } catch(raw) {
-    return Object.freeze({profileId:desktopActivityProfileId(dataRoot),continuity:null,scope:'legacy',failure:describeProfileFailure(raw)});
+    const failure=describeProfileFailure(raw),legacy=legacyScopeOf(dataRoot);
+    // Only a root whose data already carries the legacy digest keeps it
+    // (Windows 1.6.2, refused by profile.ts). Any other failure must not mint
+    // legacy rows that a later census would read as 1.6.2 data.
+    if(legacy!==undefined)return Object.freeze({profileId:legacy,continuity:null,scope:'legacy',failure});
+    return Object.freeze({profileId:desktopActivityProfileId(dataRoot),continuity:null,scope:'unavailable',failure});
   }
+}
+/** The legacy digest the root's own data already carries, by the same census;
+ * undefined when the census fails or finds none (fail closed). */
+function legacyScopeOf(dataRoot:string):string|undefined {
+  try {
+    if(!existsSync(dataRoot))return undefined;
+    const {domains}=readProfileDomainCensus(dataRoot),legacy=desktopActivityProfileId(dataRoot);
+    if(domains.includes(legacy))return legacy;
+    if(existsSync(join(dataRoot,'continuity-profile-migration.json'))){
+      const alias=readCapturedProfileJson(dataRoot,'continuity-profile-migration.json') as {legacyProfileId?:unknown}|null;
+      const id=alias&&typeof alias==='object'?alias.legacyProfileId:undefined;
+      if(typeof id==='string'&&/^[a-f0-9]{64}$/.test(id)&&domains.includes(id))return id;
+    }
+  } catch {/* census unavailable: not proven legacy */}
+  return undefined;
 }

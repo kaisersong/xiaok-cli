@@ -1375,6 +1375,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   };
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
   const modelProbeScope=desktopServicesScope(options);
+  const profileScopeUnavailable=options.mainIdentity?.scope==='unavailable';
   const multiAgentCwd = modelProbeScope.cwd;
   const multiAgentProfileId = modelProbeScope.profileId;
   const multiAgentWorkspaceId = modelProbeScope.workspaceId;
@@ -1382,7 +1383,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
   defaultDispatchController?.bindUserOwner(userSubmissions);
   const roomConversions=createMainRoomConversionCaptureOwner({submissions:userSubmissions,scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},gateway:options.kswarmService});
-  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,profileId:multiAgentProfileId,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
+  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,profileId:multiAgentProfileId,...(profileScopeUnavailable?{profileScopeUnavailable:true}:{}),workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
     initialPlanBootstrap:{enqueue:input=>enqueueInitialPlan(input)},
     readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),sourceSnapshots:snapshotStore,
     ...(activityEnabled ? { activityHooks: {
@@ -1478,6 +1479,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     return harnessRuntime;
   };
   const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, sourcePopulation: taskSourcePopulation,createClient:options.codexClientFactory,admitThread: async (threadId,current) => {
+    if(profileScopeUnavailable)throw Error('desktop_profile_scope_unavailable');
     await multiAgentReady;current();
     const revision=multiAgentStore?.getThread(threadId)?multiAgentService?.assertExecutionAdmission(threadId):undefined;
     await prepareMultiAgentThread(threadId,current);current();
@@ -1510,7 +1512,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     return snapshot;
   };
   // Unknown injected runners and every non-local host remain ordinary.
-  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'),dshLease?{
+  // Identity failed on a non-legacy root: no groups.sqlite scope rows this run.
+  const multiAgentStore = options.runner || profileScopeUnavailable ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'),dshLease?{
     dshAdmissionSource:dshLease.realm,dshUserControlSource:dshLease.userSource,
     dshBudgetBinding:{runtime:dshLease.runtime,exactConstructorSource:dshLease.budgetSource},
     dshOwnerBinding:{service:options.kswarmService,exactAdmission:dshLease.businessSource.admission},
@@ -4904,6 +4907,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       }else void multiAgentReady.then(restoreActivityRoomBindings).catch(error => console.warn('[conversation-activity] restore failed:', error));
     },
     async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
+      // No owner config is written under an unavailable scope; Main degrades (delegation released, one notice).
+      if (profileScopeUnavailable) throw new Error('desktop_profile_scope_unavailable');
       if (!activityEnabled || !multiAgentStore) return;
       if (activityAttachment) return activityAttachment;
       activityChangingOwner=true;
