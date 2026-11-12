@@ -1560,6 +1560,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
       await goalCoordinator.handleRecoveredHostTerminal(input);
     },
+    assertThreadDeletionAdmissible:()=>contextContinuity.assertConversationDeletionAvailable(),
     beforeThreadDeletionCommit:(threadId,operationId)=>{
       contextContinuity.assertConversationDeletionSafe(threadId);const original=observationLifecycle.beforeDelete(threadId,operationId);
       return ()=>{const errors:unknown[]=[];try{original?.();}catch(raw){errors.push(raw);}try{contextContinuity.forgetDeletedConversation(threadId);}catch(raw){errors.push(raw);}if(errors.length)throw new AggregateError(errors,'continuity_thread_deletion_unconfirmed',{cause:errors[0]});};

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {existsSync,mkdtempSync,rmSync} from 'node:fs';
-import {createHash,randomBytes} from 'node:crypto';
+import {existsSync,mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -72,6 +72,11 @@ function groupsRows(dataRoot:string){
   authorizations:db.prepare('SELECT profile_id,workspace_id,permission_revision,execution_allowed,updated_at FROM workspace_execution_authorizations ORDER BY profile_id').all().map(row=>({...row})),
   threads:db.prepare('SELECT thread_id,profile_id,workspace_id,cwd FROM thread_bindings ORDER BY thread_id').all().map(row=>({...row})),
  };}finally{db.close();}
+}
+/** A model config so a send can be admitted (the endpoint is never reachable). */
+function writeModelConfig(base:string){
+ mkdirSync(join(base,'config'),{recursive:true});
+ writeFileSync(join(base,'config','config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture-only',model:'fixture'}},defaultMode:'interactive',channels:{}}));
 }
 const migrationFile=(dataRoot:string)=>join(dataRoot,'continuity-profile-migration.json');
 
@@ -144,15 +149,29 @@ async function assertLegacyDataUsable(start:Start,legacy:string,n:number){
  expect(multi.service.assertExecutionAdmission('thread-162')).toBe(2);
 }
 
-async function readableAfterRefusal(start:Start,legacy:string,rows:unknown,dataRoot:string,n:number){
+/** #233 (c): after Main's deletion precheck refused, the session is exactly as before and still sends. */
+async function usableAfterRefusal(start:Start,legacy:string,rows:unknown,dataRoot:string,before:unknown,controlSend:unknown,n:number){
  const multi=start.services.multiAgent!;
  expect(multi.profileId).toBe(legacy);
  const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
- expect(multi.service.getSnapshot({access}),`start ${n}: session readable`).toMatchObject({threadId:'thread-162',threadDeleteState:'delete_pending'});
- expect(multi.service.readThreadDeletion({access}),`start ${n}: the refusal is readable`).toMatchObject({deleteState:'delete_pending',operation:{state:'unknown',error:'Error: continuity_unavailable'}});
+ // Start 1: exactly the pre-deletion record. Later starts: the earlier send
+ // attempt's own task may have advanced threadRevision; no deletion state exists.
+ if(before)expect(multi.service.readThreadDeletion({access}),`start ${n}: revision, deleteState and receipt unchanged`).toEqual(before);
+ else expect(multi.service.readThreadDeletion({access}),`start ${n}: no deletion state`).toMatchObject({threadId:'thread-162',deleteState:'none',operation:null});
+ expect(multi.service.getSnapshot({access}),`start ${n}: session readable`).toMatchObject({threadId:'thread-162',threadDeleteState:'none'});
  expect(groupsRows(dataRoot),`start ${n}: nothing deleted`).toEqual(rows);
  expect(multi.service.getExecutionAuthorization()).toMatchObject({permissionRevision:2,executionAllowed:true});
- expect(()=>multi.service.assertExecutionAdmission('thread-162'),`start ${n}: known 1.6.3 limitation`).toThrow('multi_agent_thread_deletion_pending');
+ expect(multi.service.assertExecutionAdmission('thread-162'),`start ${n}: Main admits execution on the session`).toBe(2);
+ // Main's real user submission entry for the session: the refused deletion
+ // leaves it exactly as on a degraded root that never attempted one.
+ expect(await realSend(start),`start ${n}: send after the refused deletion`).toEqual(controlSend);
+ expect(multi.service.readThreadDeletion({access}),`start ${n}: no deletion state after the send`).toMatchObject({deleteState:'none',operation:null});
+}
+/** Main's real user submission entry (desktop-services.ts submitUserTask) on the 1.6.2 session. */
+async function realSend(start:Start){
+ const actorId=`desktop-user:${start.services.multiAgent!.profileId}`;
+ return Promise.resolve().then(()=>start.services.submitUserTask({action:'submit_new',gestureId:randomUUID(),input:{kind:'materials',prompt:'Say hello.',materials:[],context:{threadId:'thread-162'}}} as never,{requestSource:'user',actorId} as never))
+  .then(()=>({sent:true}),raw=>({error:raw instanceof Error?raw.message:String(raw)}));
 }
 /** Main's user deletion of the 1.6.2 session; a refusal is returned, not thrown. */
 async function attemptDeletion(start:Start):Promise<unknown>{
@@ -163,22 +182,34 @@ async function attemptDeletion(start:Start):Promise<unknown>{
  catch(raw){return {thrown:raw instanceof Error?raw.message:String(raw)};}
 }
 describe('1.6.2 data upgraded, start / restart / restart',()=>{
- it('win32 degraded: a refused deletion returns at once with continuity_unavailable, the session stays readable and survives restart',async()=>{
-  // #233 PM (c), CTO: no deletion code change in 1.6.3. Characterizes what the
-  // user gets. Known limitation, asserted so a 1.6.4 fix updates it on purpose:
-  // the refused thread stays delete_pending, and Main refuses to start new
-  // execution on it (multi_agent_thread_deletion_pending), before and after restart.
+ it('win32 degraded: deletion is refused at once with continuity_unavailable before delete_pending; the session keeps Main admission and its send result, and survives restart',async()=>{
+  // #233 PM/CTO (c), 东八区 18:3x: Main's deletion entry prechecks continuity;
+  // degraded, it refuses before beginThreadDeletion and the thread is untouched.
+  // Control: the same degraded 1.6.2 root, no deletion attempted. Its send result
+  // is what the session must still give after the refusal. (On a degraded root
+  // a threaded send is refused by continuity itself, runtime.ts assembleOwnedHistory;
+  // that is not deletion state and is reported separately, #233.)
+  const control=fixture('profile-scope-162-win32-delete-control-');
+  await seed162(control.base,control.dataRoot);writeModelConfig(control.base);
+  const controlStart=await mainStart('win32',control.base,control.dataRoot);
+  expect(controlStart.services.multiAgent!.service.assertExecutionAdmission('thread-162')).toBe(2);
+  const controlSend=await realSend(controlStart);await stop(controlStart);
   const {base,dataRoot}=fixture('profile-scope-162-win32-delete-');
   const {legacy,rows}=await seed162(base,dataRoot);
+  writeModelConfig(base);
   const first=await mainStart('win32',base,dataRoot);
+  const multi=first.services.multiAgent!;
+  const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
+  const before=multi.service.readThreadDeletion({access});
+  expect(before).toEqual({threadId:'thread-162',threadRevision:0,deleteState:'none',operation:null});
   const started=performance.now(),refused=await attemptDeletion(first),elapsed=performance.now()-started;
-  expect(refused).toEqual({operationId:'delete:0:degraded',state:'unknown',error:'Error: continuity_unavailable'});
+  expect(refused,'Main refuses the deletion itself').toEqual({thrown:'continuity_unavailable'});
   expect(elapsed,'refused deletion must not hang').toBeLessThan(5000);
-  await readableAfterRefusal(first,legacy,rows,dataRoot,1);
+  await usableAfterRefusal(first,legacy,rows,dataRoot,before,controlSend,1);
   await stop(first);
   const restarted=await mainStart('win32',base,dataRoot);
   expect(restarted.identity.failure).toMatch(/^profile_identity_unavailable \(cause: /);
-  await readableAfterRefusal(restarted,legacy,rows,dataRoot,2);
+  await usableAfterRefusal(restarted,legacy,rows,dataRoot,undefined,controlSend,2);
   const owner=await attachOwner('win32',restarted,dataRoot);
   expect(owner.result,'restart after a refused deletion: owner attach').toEqual({attached:true});expect(owner.release).not.toHaveBeenCalled();
   expect(restarted.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
@@ -225,9 +256,9 @@ describe('1.6.2 data upgraded, start / restart / restart',()=>{
    expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);expect(owner.kswarmStart).toHaveBeenCalledTimes(1);
    expect(start.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
    if(n===3){
-    // Last, because a refused deletion leaves the thread delete_pending: Main's
-    // real deletion path is refused at its commit guard and deletes nothing.
-    expect(await attemptDeletion(start)).toEqual({operationId:'delete:0:degraded',state:'unknown',error:'Error: continuity_unavailable'});
+    // #233 (c): Main's real deletion path is refused at its entry precheck
+    // (before delete_pending) and deletes nothing.
+    expect(await attemptDeletion(start)).toEqual({thrown:'continuity_unavailable'});
     expect(groupsRows(dataRoot),'refused deletion removed 1.6.2 rows').toEqual(rows);
    }
    await stop(start);

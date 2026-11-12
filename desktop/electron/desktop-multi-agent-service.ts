@@ -118,6 +118,8 @@ export interface DesktopMultiAgentServiceOptions {
   onThreadDeletionDiagnostic?(fact: ThreadDeletionDiagnostic): void;
   /** Main Goal owner cancellation. Never an agent tool or renderer callback. */
   beforeThreadDeletion?(threadId: string): Promise<void>;
+  /** Synchronous admission precheck; a throw refuses the deletion before any delete_pending state is written. */
+  assertThreadDeletionAdmissible?(threadId:string):void;
   /** Synchronous journal prepared after physical cleanup; returned callback follows durable thread deletion. */
   beforeThreadDeletionCommit?(threadId:string,operationId:string):()=>void;
   /** Main Goal and host history lookup, including terminal legacy records. */
@@ -1555,6 +1557,8 @@ export class DesktopMultiAgentService {
       }
       if (thread.threadRevision !== input.expectedThreadRevision || thread.deleteState === 'deleted') throw new Error('stale thread deletion revision');
       if (this.deletionAttempts.has(threadId)) { reportDeletion('another_attempt_in_progress'); return this.readThreadDeletion({ access: input.access }).operation!; }
+      // #233 (c): refused here, the thread's revision, deleteState and receipt stay untouched.
+      this.options.assertThreadDeletionAdmissible?.(threadId);
       this.options.store.transaction((acceptedPort) => {
         acceptedPort.beginThreadDeletion(threadId, { operationId: input.operationId, actorId: scope.actorId, bootId: this.options.store.bootId,
           expectedRevision: input.expectedThreadRevision, requestHash, startedAt: Date.now(), result: { operationId: input.operationId, state: 'cleanup_pending' } });

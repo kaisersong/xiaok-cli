@@ -200,8 +200,12 @@ export class DesktopContextContinuity {
     // The current native protocol proves a parent turn, not its descendant/process closure.
     throw new Error('native_execution_gate_unavailable');
   }
-  assertConversationDeletionSafe(id:string):void{
+  /** #233 (c): the availability half of assertConversationDeletionSafe, checked by Main before a deletion is admitted. */
+  assertConversationDeletionAvailable():void{
     if(this.initializationFailed||this.closed)throw new Error('continuity_unavailable');
+  }
+  assertConversationDeletionSafe(id:string):void{
+    this.assertConversationDeletionAvailable();
     this.assertDeletionOwnerReady();
     this.current?.service.assertConversationDeletionSafe(this.current.actor,id);
   }
