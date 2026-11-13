@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const REPO = 'kaisersong/xiaok-cli';
 const ENDPOINT = 'repos/kaisersong/xiaok-cli/releases/tags/';
+const RELEASES_ENDPOINT = 'repos/kaisersong/xiaok-cli/releases?per_page=50';
 const fullSHA = /^[a-f0-9]{40}$/;
 const tagPattern = /^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 function fail(code) { throw new Error(code); }
@@ -54,17 +55,21 @@ export function assertReleaseIdentity(resolve = false) {
   freshRemote(input.tag, sha);
   return { tag: input.tag, version: input.version, sha };
 }
-// A 404 must be an actual HTTP response. Authentication/network/parser errors never mean "absent".
-export function parseReleaseResponse(result) {
+function parseHttpResponse(result) {
   let response;
   for (const stream of [result.stdout, result.stderr]) {
     if ([...(stream ?? '').matchAll(/^HTTP\/[^\s]+\s+[0-9]{3}[^\r\n]*\r?\n/gm)].length > 1) fail('release_api_ambiguous');
-    const match = /^HTTP\/[^\s]+\s+([0-9]{3})[^\r\n]*\r?\n[\s\S]*?\r?\n\r?\n([\s\S]*)$/m.exec(stream ?? '');
+    const match = /^HTTP\/[^\s]+\s+([0-9]{3})[^\r\n]*\r?\n([\s\S]*?)\r?\n\r?\n([\s\S]*)$/m.exec(stream ?? '');
     if (!match) continue;
     if (response) fail('release_api_ambiguous');
-    response = { status: Number(match[1]), body: match[2] };
+    response = { status: Number(match[1]), headers: match[2], body: match[3] };
   }
   if (!response) fail('release_api_status_unconfirmed');
+  return response;
+}
+// A 404 must be an actual HTTP response. Authentication/network/parser errors never mean "absent".
+export function parseReleaseResponse(result) {
+  const response = parseHttpResponse(result);
   if (response.status === 404 && result.status !== 0) return null;
   if (response.status !== 200 || result.status !== 0) fail('release_api_failed');
   let value; try { value = JSON.parse(response.body); } catch { fail('release_api_json_unconfirmed'); }
@@ -72,9 +77,42 @@ export function parseReleaseResponse(result) {
     || typeof value.draft !== 'boolean' || typeof value.prerelease !== 'boolean') fail('release_api_shape_unconfirmed');
   return value;
 }
+function nextLinkPage(headers) {
+  const match = /^link:\s*(.+)$/im.exec(headers ?? '');
+  if (!match) return null;
+  const next = match[1].split(',').find(part => /;\s*rel=["']?next["']?/i.test(part));
+  const page = next?.match(/[?&]page=([0-9]+)/)?.[1];
+  return page ? Number(page) : null;
+}
+export function parseReleaseListResponse(result, tag) {
+  const response = parseHttpResponse(result);
+  if (response.status !== 200 || result.status !== 0) fail('release_api_failed');
+  let list; try { list = JSON.parse(response.body); } catch { fail('release_api_json_unconfirmed'); }
+  if (!Array.isArray(list)) fail('release_api_shape_unconfirmed');
+  const matches = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail('release_api_shape_unconfirmed');
+    if (item.tag_name === tag) {
+      if (typeof item.draft !== 'boolean' || typeof item.prerelease !== 'boolean') fail('release_api_shape_unconfirmed');
+      matches.push(item);
+    }
+  }
+  return { matches, nextPage: nextLinkPage(response.headers) };
+}
 function releaseState(tag) {
   const file = process.platform === 'win32' ? 'gh.exe' : 'gh';
-  return parseReleaseResponse(command(file, ['api', '--hostname', 'github.com', '--include', '--method', 'GET', ENDPOINT + encodeURIComponent(tag)]));
+  const direct = parseReleaseResponse(command(file, ['api', '--hostname', 'github.com', '--include', '--method', 'GET', ENDPOINT + encodeURIComponent(tag)]));
+  if (direct !== null) return direct;
+  // GitHub /releases/tags/{tag} returns HTTP 404 for draft releases; scan /releases before assuming absence.
+  const matches = [];
+  let page = 1;
+  for (let i = 0; i < 20 && page !== null; i += 1) {
+    const parsed = parseReleaseListResponse(command(file, ['api', '--hostname', 'github.com', '--include', '--method', 'GET', RELEASES_ENDPOINT + '&page=' + page]), tag);
+    matches.push(...parsed.matches);
+    page = parsed.nextPage;
+  }
+  if (page !== null || matches.length > 1) fail('release_api_ambiguous');
+  return matches[0] ?? null;
 }
 function assertDraft(tag, release) {
   if (!release || release.tag_name !== tag || release.draft !== true || release.prerelease !== false) fail('release_draft_required');

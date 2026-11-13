@@ -34,7 +34,20 @@ export function fixture({ annotated = false, tag = 'desktop-v1.6.3' } = {}) {
 const fs=require('node:fs');const a=process.argv.slice(2),p=process.env.RELEASE_FAKE_GH_STATE;
 fs.appendFileSync(process.env.RELEASE_FAKE_GH_LOG,JSON.stringify(a)+'\n');const s=JSON.parse(fs.readFileSync(p,'utf8'));
 if(a[0]==='api'){
- const status=s.httpStatus??(s.exists?200:404);process.stdout.write('HTTP/2.0 '+status+' Fixture\r\nContent-Type: application/json\r\n\r\n');
+ const target=a[a.length-1];
+ if(target.includes('/releases?')){
+  const status=s.listHttpStatus??s.httpStatus??200;
+  const page=Number(target.match(/[?&]page=(\d+)/)?.[1]??1);
+  const pages=Array.isArray(s.listPages)?s.listPages:null;
+  const link=pages&&page<pages.length?'Link: <https://api.github.com/repos/kaisersong/xiaok-cli/releases?per_page=50&page='+(page+1)+'>; rel="next"\r\n':'';
+  process.stdout.write('HTTP/2.0 '+status+' Fixture\r\nContent-Type: application/json\r\n'+link+'\r\n');
+  const payload=pages?(pages[page-1]??[]):(s.exists?[{tag_name:s.tag,draft:s.draft,prerelease:false}]:[]);
+  process.stdout.write(s.malformed?'not json':JSON.stringify(status===200?payload:{message:'fixture failure'}));process.exit(status===200?0:1);
+ }
+ const reqTag=decodeURIComponent(target.split('/releases/tags/')[1]??'');
+ const directVisible=s.exists&&(!s.draft||s.tag!==reqTag);
+ const status=s.httpStatus??(s.malformed||Object.hasOwn(s,'body')?200:(directVisible?200:404));
+ process.stdout.write('HTTP/2.0 '+status+' Fixture\r\nContent-Type: application/json\r\n\r\n');
  process.stdout.write(s.malformed?'not json':JSON.stringify(status===200?(Object.hasOwn(s,'body')?s.body:{tag_name:s.tag,draft:s.draft,prerelease:false}):{message:'fixture failure'}));process.exit(status===200?0:1);
 }
 if(a[0]==='release'&&a[1]==='view'){
