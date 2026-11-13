@@ -1,13 +1,30 @@
 import { describe, it, expect, vi } from 'vitest';
+// Only the birth lookup (execFile) can be made to fail; spawn stays real.
+const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[]}));
+vi.mock('node:child_process',async importOriginal=>{
+  const real=await importOriginal<typeof import('node:child_process')>();
+  return {...real,execFile:((file:string,args:string[],options:{timeout?:number},callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
+    const step=birthFault.plan.shift();
+    if(!birthFault.fail&&(step===undefined||step==='real'))return (real.execFile as unknown as (...a:unknown[])=>unknown)(file,args,options,callback);
+    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(options.timeout??0);
+    if(step&&typeof step==='object'){
+      // A slow lookup: answers after `delay`, unless execFile's timeout kills it first.
+      const limit=options.timeout??Infinity;
+      if(step.delay<limit)setTimeout(()=>callback(null,'639300000000000000\r\n',''),step.delay);
+      else setTimeout(()=>callback(Object.assign(new Error('Command failed: lookup timed out'),{killed:true,signal:'SIGTERM',code:null}),'',''),limit);
+    }else setImmediate(()=>callback(Object.assign(new Error('injected birth lookup failure'),{killed:false,code:1}),'',''));
+    return undefined;
+  }) as unknown as typeof real.execFile};
+});
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { ActivitySourceSupervisor } from '../../../src/runtime/conversation-activity/source-supervisor.js';
+import { ActivitySourceSupervisor, readProcessBirth, SOURCE_START_DEADLINE_MS } from '../../../src/runtime/conversation-activity/source-supervisor.js';
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'activity-supervisor-'));
@@ -17,6 +34,18 @@ async function fixture() {
   const entryPath = join(root, 'server.mjs');
   writeFileSync(entryPath, `import{createServer}from'node:http';import{readFileSync}from'node:fs';import{createHash}from'node:crypto';const server=createServer((req,res)=>res.end(JSON.stringify({ok:true,ipcConnected:process.connected===true,service:{pid:process.pid,entryPath:process.argv[1],entryHash:createHash('sha256').update(readFileSync(process.argv[1])).digest('hex')}})));server.listen(${address.port},'127.0.0.1');process.on('SIGTERM',()=>server.close(()=>process.exit(0)));`);
   return { root, source: { name: 'kswarm' as const, executable: process.execPath, entryPath, cwd: root, env: {}, healthUrl: `http://127.0.0.1:${address.port}/health`, expectedHealth: { ok: true, 'service.entryPath': entryPath, 'service.entryHash': createHash('sha256').update(readFileSync(entryPath)).digest('hex') } } };
+}
+// The real KS child needs Node >= 22.22.0 (kswarm runtime-guard). CI must name
+// it explicitly; a local run may use its own Node only when that is new enough.
+function kswarmTestNode():string{
+  const name='XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE',set=process.env[name];
+  if(!set&&process.env.GITHUB_ACTIONS)throw new Error(`kswarm_test_node_missing: ${name} is not set (KS child needs Node >= 22.22.0)`);
+  const executable=set||process.execPath;
+  const version=set?execFileSync(executable,['-p','process.versions.node'],{encoding:'utf8'}).trim():process.versions.node;
+  const [major,minor]=version.split('.').map(Number);
+  if(major<22||(major===22&&minor<22))throw new Error(`kswarm_test_node_missing: ${set?name:'process.execPath (no '+name+')'} is Node ${version}, KS child needs Node >= 22.22.0`);
+  console.log(JSON.stringify({test:'supervisor-actual-ks-node',executable,version,fromEnv:Boolean(set)}));
+  return executable;
 }
 describe('native source supervisor process ownership', () => {
   it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
@@ -71,10 +100,55 @@ describe('native source supervisor process ownership', () => {
     }finally{if(receipt)await supervisor.stopOwned(name,'original');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
   },15000);
 
+  it.each(['kswarm','broker'] as const)('reaps its actual %s child when the birth lookup fails after spawn',async name=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-fault');
+    birthFault.fail=true;birthFault.pids.length=0;
+    try{await expect(supervisor.ensure({...f.source,name})).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.fail=false;}
+    const [pid]=birthFault.pids;expect(pid).toBeGreaterThan(0);
+    let exitCode='alive';try{process.kill(pid,0);}catch(error){exitCode=(error as NodeJS.ErrnoException).code??'gone';}
+    console.log(JSON.stringify({test:'supervisor-birth-fault-reap',name,pid,birthError:'activity_source_birth_unavailable',afterReject:exitCode}));
+    try{expect(exitCode).toBe('ESRCH');}finally{try{process.kill(pid,'SIGKILL');}catch{}}
+    await supervisor.sealAndDrainSpawned();
+    // The child no longer holds the root as its cwd: removal needs no retry.
+    expect(()=>rmSync(f.root,{recursive:true})).not.toThrow();
+  },15000);
+  it('a spawn whose birth lookup is slower than 3s but inside the 10s start deadline gets a normal receipt',async()=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-slow');let pid=0;
+    birthFault.plan=[{delay:5000}];birthFault.calls=0;birthFault.pids.length=0;birthFault.timeouts.length=0;const started=Date.now();
+    try{
+      const receipt=await supervisor.ensure({...f.source,name:'broker'});pid=receipt.pid;const elapsed=Date.now()-started;
+      console.log(JSON.stringify({test:'supervisor-birth-slow',pid,birth:receipt.birth,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed}));
+      expect(receipt).toMatchObject({pid,birth:'639300000000000000',external:false,ownerEpoch:'birth-slow'});
+      expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeGreaterThan(5000);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
+      expect(elapsed).toBeLessThan(SOURCE_START_DEADLINE_MS);
+    }finally{
+      // The injected birth is not the child's real birth, so stopOwned would refuse it;
+      // this test's own child is signalled directly, then the spawn barrier drains.
+      birthFault.plan=[];if(pid){try{process.kill(pid,'SIGTERM');}catch{}}await supervisor.sealAndDrainSpawned();
+      if(pid)expect(()=>process.kill(pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});
+    }
+  },15000);
+  it('a spawn whose birth lookup outlasts the remaining start deadline fails and reaps its actual child',async()=>{
+    const f=await fixture(),supervisor=new ActivitySourceSupervisor(f.root,'birth-overdue');
+    birthFault.plan=[{delay:12_000}];birthFault.calls=0;birthFault.pids.length=0;birthFault.timeouts.length=0;const started=Date.now();
+    try{await expect(supervisor.ensure({...f.source,name:'broker'})).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.plan=[];}
+    const elapsed=Date.now()-started,[pid]=birthFault.pids;expect(pid).toBeGreaterThan(0);
+    let afterReject='alive';try{process.kill(pid,0);}catch(error){afterReject=(error as NodeJS.ErrnoException).code??'gone';}
+    console.log(JSON.stringify({test:'supervisor-birth-overdue-reap',pid,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed,birthError:'activity_source_birth_unavailable',afterReject}));
+    expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
+    try{expect(afterReject).toBe('ESRCH');}finally{try{process.kill(pid,'SIGKILL');}catch{}}
+    await supervisor.sealAndDrainSpawned();
+    expect(()=>rmSync(f.root,{recursive:true})).not.toThrow();
+  },15000);
+  it('birth checks outside a spawn keep their own 3s lookup budget',async()=>{
+    birthFault.plan=['missing'];birthFault.calls=0;birthFault.timeouts.length=0;
+    try{await expect(readProcessBirth(4242)).rejects.toThrow('activity_source_birth_unavailable');}finally{birthFault.plan=[];}
+    expect(birthFault.timeouts).toEqual([3000]);expect(SOURCE_START_DEADLINE_MS).toBe(10_000);
+  });
   it('actual KS startup with the inherited channel alone never installs a writer floor',async()=>{
     const f=await fixture(),entry=resolve('../kswarm/src/server/index.js'),data=join(f.root,'ks-data'),supervisor=new ActivitySourceSupervisor(f.root,'real-ks');let receipt:Awaited<ReturnType<typeof supervisor.ensure>>|undefined;
     try{
-      receipt=await supervisor.ensure({...f.source,entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
+      receipt=await supervisor.ensure({...f.source,executable:kswarmTestNode(),entryPath:entry,cwd:dirname(dirname(dirname(entry))),env:{HOME:f.root,USERPROFILE:f.root,KSWARM_DATA_ROOT:data,KSWARM_PORT:new URL(f.source.healthUrl).port,BROKER_URL:'http://127.0.0.1:1',KSWARM_DESKTOP_PROFILE_ID:'a'.repeat(64),KSWARM_DESKTOP_WORKSPACE_ID:'b'.repeat(64)},expectedHealth:{ok:true,'service.entryPath':entry,'service.entryHash':createHash('sha256').update(readFileSync(entry)).digest('hex')}});
       console.log(JSON.stringify({test:'supervisor-actual-ks-no-grant',pid:receipt.pid,birth:receipt.birth,ownerEpoch:receipt.ownerEpoch}));
       const db=new DatabaseSync(join(data,'state.sqlite'),{readOnly:true});try{expect(db.prepare("SELECT count(*) n FROM state_meta WHERE meta_key='writer_floor_v1'").get()?.n).toBe(0);}finally{db.close();}
     }finally{if(receipt)await supervisor.stopOwned('kswarm','real-ks');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
@@ -105,4 +179,25 @@ describe('native source supervisor process ownership', () => {
       await restored.stopOwned('kswarm','second');
     } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
   },15_000);
+  it('kills a spawned source that never answers health within the start budget and releases its port', async () => {
+    const f = await fixture();
+    const port = Number(new URL(f.source.healthUrl).port), pidFile = join(f.root, 'unhealthy.pid');
+    // Listens like a slow cold-start Broker but never completes a /health response.
+    const entryPath = join(f.root, 'unhealthy.mjs');
+    writeFileSync(entryPath, `import{createServer}from'node:http';import{writeFileSync}from'node:fs';createServer(()=>{}).listen(${port},'127.0.0.1',()=>writeFileSync(${JSON.stringify(pidFile)},String(process.pid)));`);
+    const source = { ...f.source, name: 'broker' as const, entryPath, expectedHealth: { ok: true } };
+    const supervisor = new ActivitySourceSupervisor(f.root, 'owner');
+    let pid: number | undefined;
+    try {
+      await expect(supervisor.ensure(source)).rejects.toThrow('activity_source_start_timeout');
+      pid = Number(readFileSync(pidFile, 'utf8'));
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid!, 0)).toThrow();
+      const ledger = JSON.parse(readFileSync(join(f.root, 'activity-source-supervision.json'), 'utf8')) as { sources: unknown[] };
+      expect(ledger.sources).toEqual([]);
+      const probe = createServer();
+      await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(port, '127.0.0.1', resolve); });
+      await new Promise<void>(resolve => probe.close(() => resolve()));
+    } finally { if (pid) { try { process.kill(pid,'SIGKILL'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+  },20_000);
 });

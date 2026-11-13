@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {DesktopContextContinuity} from './runtime.js';
 import {DesktopInputQueue} from './input-queue.js';
 import {resolveDesktopProfile,type DesktopProfileIdentity} from './profile.js';
+import {describeProfileFailure} from '../desktop-main-identity.js';
 import {InProcessTaskRuntimeHost,type TaskIdentityReservation} from '../../../src/runtime/task-host/task-runtime-host.js';
 import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-store.js';
 import type {MaterialRegistry} from '../../../src/runtime/task-host/material-registry.js';
@@ -12,9 +13,12 @@ import type {NativeActor} from '../codex-native-service.js';
 interface Claim{inputId:string;reservation?:TaskIdentityReservation;entered:boolean;active:boolean}
 /** One canonical journal and one queue owned by the existing DesktopServices.
  * Empty ALS tokens retain no callable context or Native authority. */
-export function createContinuityMainBinding(dataRoot:string,snapshotStore:FileTaskSnapshotStore){
- let identity:DesktopProfileIdentity|null=null;try{identity=resolveDesktopProfile(dataRoot);}catch{/* Profile failure grants no continuity access. */}
- const runtime=new DesktopContextContinuity(dataRoot,id=>FileTaskSnapshotStore.prototype.inspectPersistedTask.call(snapshotStore,id),identity);
+export function createContinuityMainBinding(dataRoot:string,snapshotStore:FileTaskSnapshotStore,resolved?:{continuity:DesktopProfileIdentity|null;failure?:string},log?:(line:string)=>void){
+ // Main resolves the identity once (resolveDesktopMainIdentity) before any scope row is written.
+ let identity:DesktopProfileIdentity|null=null;
+ if(resolved){identity=resolved.continuity;if(identity===null)log?.(`[context-continuity] unavailable at identity: ${resolved.failure??'profile_identity_unavailable'}`);}
+ else try{identity=resolveDesktopProfile(dataRoot);}catch(raw){/* Profile failure grants no continuity access. */log?.(`[context-continuity] unavailable at identity: ${describeProfileFailure(raw)}`);}
+ const runtime=new DesktopContextContinuity(dataRoot,id=>FileTaskSnapshotStore.prototype.inspectPersistedTask.call(snapshotStore,id),identity,undefined,log);
  const scope=new AsyncLocalStorage<object>(),claims=new WeakMap<object,Claim>();let queue:DesktopInputQueue|undefined;
  let closed=false;const sdk=new ContinuitySdkCustody();
  function currentClaim(){const token=scope.getStore(),claim=token&&claims.get(token);if(claim&&!claim.active)throw Error('input_execution_authority_unavailable');return claim;}

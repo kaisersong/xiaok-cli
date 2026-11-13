@@ -218,6 +218,16 @@ jobs:
           tests/renderer/chat-shell-draft-prompt.test.tsx
           tests/main/conversation-activity-ipc.test.ts
           tests/main/artifact-export-package.test.ts
+          tests/main/copy-packaged-dependencies.test.ts
+          tests/main/active-owner-service-ports-first-start.test.ts
+          tests/main/active-owner-service-ports-legacy-symlink.test.ts
+          tests/main/activity-owner-launch-config-qualification.test.ts
+          tests/main/desktop-services-degrade-no-dialog.test.ts
+          tests/main/activity-owner-main-profile-qualification.test.ts
+          tests/main/desktop-profile-scope-restarts.test.ts
+          tests/main/desktop-profile-scope-guards.test.ts
+          tests/main/desktop-profile-scope-identity-failure.test.ts
+          tests/renderer/thread-deletion-continuity-unavailable.test.ts
           tests/main/scheduled-task-delivery.test.ts
           tests/renderer/scheduled-task-delivery.test.tsx
           tests/main/scheduled-preload.test.ts
@@ -227,6 +237,14 @@ jobs:
           tests/renderer/chat-approval-scroll.test.tsx
           tests/renderer/channel-mcp-mutation-ui.test.tsx
           tests/renderer/channel-mcp-mutation-ui-followup.test.tsx
+
+      - name: Continuity owner qualification retained-config tests (#233)
+        working-directory: desktop
+        shell: bash
+        run: >-
+          node node_modules/vitest/vitest.mjs run
+          tests/main/context-continuity-owner-qualification.test.ts
+          -t "does not downgrade a retained Desktop configuration"
 
       - name: Desktop services and model recommendation tests
         run: >-

@@ -25,6 +25,8 @@ import type { MailConnectorService } from './mail-connector-service.js';
 import { createMailTools } from './mail-tools.js';
 import {createRequire as createOptionalMemoryRequire} from 'node:module';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import type {DesktopMainIdentity} from './desktop-main-identity.js';
+import {mainActivityOwnerConfig} from './activity-owner-main-config.js';
 import {readOriginalMainModelProbeEvent} from './main-dsh-control-source.js';
 import {loadOriginalMainModelProbeSource} from './main-model-probe-source-loader.js';
 import {hasOriginalMainSdkBridgeInstallation} from '../../src/runtime/verification/original-main-sdk-bridge.js';
@@ -683,6 +685,12 @@ export function readOriginalMainModelProbeConfiguration(services:unknown,receipt
 }
 
 export interface DesktopServicesOptions {
+  /** Main's file logger (main-debug.log) for activity owner attach results; smoke evidence. */
+  activityOwnerLog?: (line: string) => void;
+  /** Main's file logger (main-debug.log) for the inner reason continuity degrades. */
+  continuityLog?: (line: string) => void;
+  /** Identity Main resolved before any scope row was written (resolveDesktopMainIdentity). */
+  mainIdentity?: DesktopMainIdentity;
   credentialInputs?:CredentialInputPort;
   mailConnectors?: MailConnectorService;
   assistantOutbox?: { proposeMail(input: import('../shared/mail-connectors-ipc-contract.js').MailSendInput, source:'agent',taskId?:string):unknown;waitForDecision?(id:string,signal?:AbortSignal):Promise<unknown> };
@@ -1257,6 +1265,13 @@ const originalContinuityMainSources=new WeakMap<object,Readonly<OriginalDesktopC
 /** Actual same-factory membership only, never caller-supplied IO/proof/provider. */
 export function readOriginalDesktopContinuityMain(services:object):Readonly<OriginalDesktopContinuityMain>{const row=originalContinuityMainSources.get(services);if(!row)throw Error('canonical_runtime_source_unavailable');row.assertCurrent();return row;}
 
+/** Main passes the identity it resolved (resolveDesktopMainIdentity) so Main and
+ * Services share one scope. Without it (fixtures that build Services alone) the
+ * scope stays the legacy data-root digest and continuity resolves its own
+ * identity, exactly as before. */
+function desktopServicesScope(options:DesktopServicesOptions){
+  return resolveDesktopServiceScope({dataRoot:options.dataRoot,...(options.workspaceRoot===undefined?{}:{workspaceRoot:options.workspaceRoot}),...(options.mainIdentity?{profileId:options.mainIdentity.profileId}:{})});
+}
 export function createDesktopServices(options: DesktopServicesOptions) {
 
 
@@ -1265,7 +1280,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if(options.dshServiceSources!==undefined){
       if(options.runner)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
       dshLease=readOriginalMainDshPreparedSources(options.dshServiceSources);
-      const actual=resolveDesktopServiceScope(options);
+      const actual=desktopServicesScope(options);
       dshLease=claimOriginalMainDshServiceSources(options.dshServiceSources,{profileId:actual.profileId,workspaceId:actual.workspaceId});
       if(dshLease.harnessUserActor!==options.harnessOptimizationUserActor)throw Error('DSH_MAIN_SERVICE_SOURCES_REQUIRED');
     }
@@ -1299,7 +1314,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const taskSourcePopulation = createTaskSourceWriterPopulation(snapshotStore);
-  const continuityBinding=createContinuityMainBinding(options.dataRoot,snapshotStore);
+  const continuityBinding=createContinuityMainBinding(options.dataRoot,snapshotStore,options.mainIdentity,options.continuityLog);
   const contextContinuity=continuityBinding.runtime;
   workflowHostApply(workflowHostAdd,workflowHostFunctions,[runKSwarmWorkflowNode]);
   workflowHostApply(workflowHostAdd,directHostFunctions,[runKSwarmHandoffTask]);
@@ -1359,15 +1374,16 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     activityRoomRecoveryPending=false;
   };
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
-  const modelProbeScope=resolveDesktopServiceScope(options);
+  const modelProbeScope=desktopServicesScope(options);
+  const profileScopeUnavailable=options.mainIdentity?.scope==='unavailable';
   const multiAgentCwd = modelProbeScope.cwd;
   const multiAgentProfileId = modelProbeScope.profileId;
   const multiAgentWorkspaceId = modelProbeScope.workspaceId;
   const defaultDispatchController=options.defaultDispatchBootstrap?.controller;
-  const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
+  const userSubmissions = new MainUserSubmissionOwner({dataRoot:options.dataRoot,profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId,...(profileScopeUnavailable?{profileScopeUnavailable:true}:{}),...(defaultDispatchController?{defaultDispatchSource:defaultDispatchController.observationSource,defaultDispatchUserAdmission:defaultDispatchController.userAdmission}:{})});
   defaultDispatchController?.bindUserOwner(userSubmissions);
   const roomConversions=createMainRoomConversionCaptureOwner({submissions:userSubmissions,scope:{profileId:multiAgentProfileId,workspaceId:multiAgentWorkspaceId},gateway:options.kswarmService});
-  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
+  const conversationProjects:ConversationProjectService = new ConversationProjectService({ userSubmissions,dataRoot: options.dataRoot,profileId:multiAgentProfileId,...(profileScopeUnavailable?{profileScopeUnavailable:true}:{}),workspaceRoot:options.workspaceRoot ?? process.cwd(), kswarmService: options.kswarmService,
     initialPlanBootstrap:{enqueue:input=>enqueueInitialPlan(input)},
     readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),sourceSnapshots:snapshotStore,
     ...(activityEnabled ? { activityHooks: {
@@ -1455,6 +1471,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   };
   const getHarnessRuntime = () => {
     if (harnessDisposed) throw new Error('optimization_unavailable');
+    // #233: no profile-scoped optimization store while Main's scope is unavailable.
+    if (profileScopeUnavailable) throw new Error('desktop_profile_scope_unavailable');
     harnessRuntime ??= createHarnessOptimizationRuntime({ dataRoot: options.dataRoot, profileId: multiAgentProfileId,
       workspaceId: multiAgentWorkspaceId, now: options.now,
       authorizeUser: actor => actor === options.harnessOptimizationUserActor,
@@ -1463,6 +1481,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     return harnessRuntime;
   };
   const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, sourcePopulation: taskSourcePopulation,createClient:options.codexClientFactory,admitThread: async (threadId,current) => {
+    if(profileScopeUnavailable)throw Error('desktop_profile_scope_unavailable');
     await multiAgentReady;current();
     const revision=multiAgentStore?.getThread(threadId)?multiAgentService?.assertExecutionAdmission(threadId):undefined;
     await prepareMultiAgentThread(threadId,current);current();
@@ -1495,7 +1514,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     return snapshot;
   };
   // Unknown injected runners and every non-local host remain ordinary.
-  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'),dshLease?{
+  // Identity failed on a non-legacy root: no groups.sqlite scope rows this run.
+  const multiAgentStore = options.runner || profileScopeUnavailable ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'),dshLease?{
     dshAdmissionSource:dshLease.realm,dshUserControlSource:dshLease.userSource,
     dshBudgetBinding:{runtime:dshLease.runtime,exactConstructorSource:dshLease.budgetSource},
     dshOwnerBinding:{service:options.kswarmService,exactAdmission:dshLease.businessSource.admission},
@@ -1540,6 +1560,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
       await goalCoordinator.handleRecoveredHostTerminal(input);
     },
+    assertThreadDeletionAdmissible:()=>contextContinuity.assertConversationDeletionAvailable(),
     beforeThreadDeletionCommit:(threadId,operationId)=>{
       contextContinuity.assertConversationDeletionSafe(threadId);const original=observationLifecycle.beforeDelete(threadId,operationId);
       return ()=>{const errors:unknown[]=[];try{original?.();}catch(raw){errors.push(raw);}try{contextContinuity.forgetDeletedConversation(threadId);}catch(raw){errors.push(raw);}if(errors.length)throw new AggregateError(errors,'continuity_thread_deletion_unconfirmed',{cause:errors[0]});};
@@ -3662,7 +3683,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   async function bootstrapKSwarmInitialPlan(input: KSwarmInitialPlanBootstrapJob,signal:AbortSignal) {
     const result = input.ownerBinding ? await executeOwnedInitialPlanBootstrap(input,{
       store:initialPlanBootstrapStore,gateway:options.kswarmService,
-      scope:{profileId:createHash('sha256').update(resolve(options.dataRoot)).digest('hex'),workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
+      scope:{profileId:multiAgentProfileId,workspaceId:createHash('sha256').update(resolve(options.workspaceRoot ?? process.cwd())).digest('hex')},
       generateCandidate:async({job,inputs,signal:runSignal,beforeStart})=>{
         assertKSwarmTaskStart({signal:runSignal});
         const executionStart=await readKSwarmExecutionStart(options.kswarmService,job.projectId);
@@ -4889,6 +4910,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       }else void multiAgentReady.then(restoreActivityRoomBindings).catch(error => console.warn('[conversation-activity] restore failed:', error));
     },
     async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
+      // No owner config is written under an unavailable scope; Main degrades (delegation released, one notice).
+      if (profileScopeUnavailable) throw new Error('desktop_profile_scope_unavailable');
       if (!activityEnabled || !multiAgentStore) return;
       if (activityAttachment) return activityAttachment;
       activityChangingOwner=true;
@@ -4899,7 +4922,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         // daemon lock. Native executors keep their original ownership.
         await closeConversationActivity({mcp:activityMcp,sources:activitySources,service:activityService,store:activityStore});
         activityStore = undefined;
-        const ownerConfig:ActivityOwnerConfig={schemaVersion:1,dataRoot:options.dataRoot,profileId:multiAgentProfileId,actorId:`desktop-user:${multiAgentProfileId}`,identity:{kind:'desktop',path:join(options.dataRoot,'multi-agent','groups.sqlite')},...sourceConfig};
+        const ownerConfig:ActivityOwnerConfig=mainActivityOwnerConfig(options.dataRoot,multiAgentProfileId,sourceConfig);
         const client=options.writerControlBootstrap
           ?await ensureDesktopConversationActivityOwner(ownerConfig,{...options.writerControlBootstrap,service:options.kswarmService,...(options.defaultDispatchBootstrap?{businessBootstrap:options.defaultDispatchBootstrap}:{}),...(preparationBootstrap?{preparationBootstrap}:{})})
           :await ensureConversationActivityOwner(ownerConfig,{nativeSource:true,onNativeSourceUnavailable:error=>console.warn('[conversation-activity] Native source unavailable:',error)});
@@ -4924,7 +4947,11 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         installActivityGroupSubscription();
       })();
       activityAttachment = attempt;
-      attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined; }, error => {
+      attempt.then(() => { activityChangingOwner=false;activityAttachFailure = undefined;
+        // Smoke evidence: the success branch used to log nothing.
+        const attached=`[conversation-activity] owner attached (profile ${multiAgentProfileId.slice(0,12)})`;
+        if(options.activityOwnerLog)options.activityOwnerLog(attached);else console.log(attached);
+      }, error => {
         activityChangingOwner=false;
         // Do not cache the failure: allow a later retry. The in-process writers were disposed
         // before the owner was contacted, so drop them rather than keep dead handles.
@@ -4932,6 +4959,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         activityAttachFailure = error ?? new Error('activity_owner_unavailable');
         activityMcp = undefined; activitySources = undefined; activityService = undefined; activityStore = undefined;
         console.warn('[conversation-activity] owner attach failed:', error instanceof Error ? error.message : 'activity_owner_attach_failed');
+        options.activityOwnerLog?.(`[conversation-activity] owner attach failed: ${error instanceof Error ? error.message : 'activity_owner_attach_failed'}`);
       });
       return attempt;
     },

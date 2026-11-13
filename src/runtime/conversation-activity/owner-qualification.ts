@@ -1,6 +1,7 @@
 import {closeSync,constants,fstatSync,lstatSync,openSync,readSync,realpathSync,type BigIntStats} from 'node:fs';
 import {join,resolve,dirname,basename} from 'node:path';
 import {readContinuityProfile} from '../context-continuity/profile-identity.js';
+import {isDesktopActivityProfile,desktopActivityProfileId} from './owner-profile-id.js';
 import {assertProfileDirectory} from '../context-continuity/profile-file.js';
 import {activityOwnerConfigDigest} from './owner-config.js';
 import {ACTIVITY_OWNER_GENERATION} from './owner-protocol.js';
@@ -41,7 +42,16 @@ export function readProtectedOwnerQualification(root:string):ActivityOwnerQualif
  if(!protectedRoot&&!configPresent)return undefined;if(!configPresent)throw unavailable();
  const config=readConfig(root);if(config.schemaVersion!==1)throw unavailable();
  if(!protectedRoot&&config.identity?.kind==='cli')return undefined;
- const profileId=readContinuityProfile(root);
- if(config.profileId!==profileId||config.actorId!==`desktop-user:${profileId}`||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
- return Object.freeze({profileId,configDigest:activityOwnerConfigDigest(config),generation:ACTIVITY_OWNER_GENERATION});
+ // Main writes its service-scope profile id (desktop-service-scope.ts): the
+ // continuity-UUID scope digest, or the legacy data-root digest for a root
+ // whose data already carries it. A root with any continuity artifact still
+ // needs a readable continuity profile (authority files lost -> unavailable).
+ // The one exception is a pure legacy root continuity never adopted (Windows
+ // 1.6.2 upgrade, refused by profile.ts): Windows only (macOS migrates and so
+ // always has the migration file), no continuity artifact at all, and a config
+ // bound to the legacy digest of its own profile root.
+ const legacyOnly=process.platform==='win32'&&!hasCanonicalActivityProfile(root)&&typeof config.profileId==='string'&&typeof (config.profileRoot??config.dataRoot)==='string'&&config.profileId===desktopActivityProfileId((config.profileRoot??config.dataRoot) as string);
+ if(!legacyOnly)try{readContinuityProfile(root);}catch{throw unavailable();}
+ if(!isDesktopActivityProfile(config,root)||typeof config.dataRoot!=='string'||realpathSync(config.dataRoot)!==root||config.identity?.kind!=='desktop'||canonicalRoutingPath(config.identity.path)!==join(root,'multi-agent','groups.sqlite'))throw unavailable();
+ return Object.freeze({profileId:config.profileId,configDigest:activityOwnerConfigDigest(config),generation:ACTIVITY_OWNER_GENERATION});
 }

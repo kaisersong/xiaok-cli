@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {resolve,dirname,basename} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import ts from 'typescript';
-export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='edc36cdbac5f8198c9f36891b19238ac856b4d08b1c61c305cccec86bb1d7f2e';
+export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='64b1365c59a30d781f898f5abc5be58e406cdfb3286b8485bf401ba998cffb65';
 const alias='__fixedOriginalCandidateObservation';
 const targets=[['runKSwarmHandoffTask','kswarm_direct'],['runWorkspaceProjectTask','room_project']];
 function prefix(url){

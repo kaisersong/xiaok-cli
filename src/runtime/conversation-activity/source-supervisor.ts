@@ -336,16 +336,24 @@ export interface ActivityManagedSource {
 }
 export interface SourceReceipt { name: string; pid: number; birth: string; entryHash: string; ownerEpoch: string; external: boolean; instanceId?: string }
 
-function birth(pid: number): Promise<string> {
+/** Start deadline from spawn to a healthy receipt (unchanged 10s). */
+export const SOURCE_START_DEADLINE_MS = 10_000;
+/** Per-lookup budget for birth checks outside a spawn (restore, protectedPid). */
+const BIRTH_LOOKUP_TIMEOUT_MS = 3000;
+/** Process birth identity. A spawn passes the remaining part of its existing
+ * start deadline instead, so a cold PowerShell start on win32 does not fail a
+ * healthy launch while the total start budget stays unchanged. */
+export function readProcessBirth(pid: number, timeoutMs: number = BIRTH_LOOKUP_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = process.platform === 'win32'
       ? ['-NoProfile','-NonInteractive','-Command', `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`]
       : ['-p', String(pid), '-o', 'lstart='];
-    execFile(process.platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: 3000 }, (error, stdout) => {
+    execFile(process.platform === 'win32' ? 'powershell.exe' : '/bin/ps', args, { timeout: timeoutMs }, (error, stdout) => {
       if (error || !stdout.trim()) reject(new Error('activity_source_birth_unavailable')); else resolve(stdout.trim());
     });
   });
 }
+function birth(pid: number, timeoutMs?: number): Promise<string> { return readProcessBirth(pid, timeoutMs); }
 
 /** Supervision is independent of UI lifetime. No unknown PID is killed or
  * taken over; durable receipts bind process birth and exact entry identity. */
@@ -448,12 +456,34 @@ export class ActivitySourceSupervisor {
     // Preserve the original idle-parent lifetime; unref is not a drain receipt.
     if (source.name === 'kswarm') child.channel?.unref();
     if (!child.pid) throw new Error('activity_source_spawn_failed');
-    this.children.set(source.name, child);registerConfigTarget(this,child,source,launchEnv);
-    const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid), entryHash, ownerEpoch: this.ownerEpoch, external: false };
-    this.receipts.set(source.name, receipt); this.save();
-    const until = Date.now() + 10_000;
-    while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
-    throw new Error('activity_source_start_timeout');
+    this.children.set(source.name, child);
+    // From spawn until a receipt is returned, any failure (birth lookup,
+    // receipt save, health probe, timeout) reaps the actual child first. A
+    // child left running keeps its cwd and listener and becomes an orphan.
+    try {
+      // One start deadline covers the birth lookup and the health wait.
+      const until = Date.now() + SOURCE_START_DEADLINE_MS;
+      registerConfigTarget(this,child,source,launchEnv);
+      const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid, Math.max(1, until - Date.now())), entryHash, ownerEpoch: this.ownerEpoch, external: false };
+      this.receipts.set(source.name, receipt); this.save();
+      while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
+      // A child that never proved health is not a usable source. Leaving it
+      // running orphans its listener (e.g. Broker on 4318) once the owner exits,
+      // and every later launcher then fails with EADDRINUSE.
+      throw new Error('activity_source_start_timeout');
+    } catch (error) {
+      await this.reapUnstarted(source.name, child);
+      throw error;
+    }
+  }
+  /** Kill an actual child handle this instance spawned that never became healthy, and wait for its exit. */
+  private async reapUnstarted(name: string, child: ChildProcess): Promise<void> {
+    if(name==='kswarm'){const owner=configOwner(this);if(owner){revokeConfigTarget(owner);await owner.business?.join();}}
+    const closed = this.childCloses.get(child);
+    if (child.exitCode === null && child.signalCode === null) { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
+    if (closed) await closed;
+    if (this.children.get(name) === child) this.children.delete(name);
+    if (this.receipts.get(name)?.pid === child.pid) { this.receipts.delete(name); this.save(); }
   }
   async protectedPid(pid: number): Promise<boolean> {
     const receipt = [...this.receipts.values()].find(item => !item.external && item.pid === pid);

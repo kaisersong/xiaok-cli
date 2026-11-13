@@ -51,12 +51,37 @@ jobs:
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Prepare the fixed KSwarm test child Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - name: Retain the absolute KSwarm test child executable
+        id: ks_test_node
+        run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'executable=' + process.execPath + '\n')"
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Keep client Node and KSwarm test child Node separate
+        env:
+          KS_TEST_NODE_EXECUTABLE: ${{ steps.ks_test_node.outputs.executable }}
+        run: node -e "const fs=require('node:fs'),path=require('node:path');const child=process.env.KS_TEST_NODE_EXECUTABLE;if(!child||!path.isAbsolute(child))throw Error('ks_test_node_missing');fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE='+child+'\n');console.log(JSON.stringify({clientNode:process.versions.node,clientExecutable:process.execPath,ksChildExecutable:child}));"
       - name: Install locked dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
+      - name: Check out pinned KSwarm for the real KS startup case
+        uses: actions/checkout@v4
+        with:
+          repository: kaisersong/kswarm
+          ref: fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          path: .kswarm-sibling
+          persist-credentials: false
+      - name: Place pinned KSwarm as the repository sibling
+        shell: bash
+        run: |
+          test ! -e ../kswarm
+          mv .kswarm-sibling ../kswarm
+          test "$(git -C ../kswarm rev-parse HEAD)" = fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          bash .github/scripts/retry.sh npm ci --ignore-scripts --omit=dev --prefix ../kswarm
       - name: Compile original test graph and copy its assets
         run: npm run test:sandbox:build
         env:
@@ -76,7 +101,8 @@ jobs:
             .test-dist/tests/runtime/conversation-activity/owner-host.test.js \
             .test-dist/tests/runtime/conversation-activity/owner-retire.test.js \
             .test-dist/tests/runtime/conversation-activity/readonly-compat.test.js \
-            .test-dist/tests/runtime/conversation-activity/owner-pending-tasks.test.js 2>&1 | tee owner-lifecycle.log
+            .test-dist/tests/runtime/conversation-activity/owner-pending-tasks.test.js \
+            .test-dist/tests/runtime/conversation-activity/source-supervisor.test.js 2>&1 | tee owner-lifecycle.log
       - name: Preserve actual lifecycle test results
         if: always() && hashFiles('owner-lifecycle.log') != ''
         uses: actions/upload-artifact@v4

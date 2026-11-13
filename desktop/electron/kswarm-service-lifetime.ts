@@ -65,3 +65,25 @@ export function startDesktopKSwarmService(
     await service.start();
   });
 }
+
+/** 1.6.2 parity (#235): when the services cannot start (for example a Windows
+ * host whose loopback to the bundled runtime is filtered), Main keeps the
+ * window and degrades. This never rejects and never opens a blocking dialog;
+ * the caller only gets one code for a non-blocking notice. */
+export function startDesktopKSwarmServiceDegrading(
+  gate: DesktopShutdownGate,
+  service: KSwarmService,
+  attachOwner: Parameters<typeof startDesktopKSwarmService>[2],
+  onOwnerUnavailable: Parameters<typeof startDesktopKSwarmService>[3],
+  onDegraded: (code: string) => void,
+): Promise<void> {
+  return startDesktopKSwarmService(gate, service, attachOwner, onOwnerUnavailable).then(() => {
+    const status = service.getStatus();
+    if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
+  }).catch(error => {
+    const code = error instanceof Error ? error.message : 'service_bootstrap_failed';
+    console.error('[main] Service bootstrap refused:', code);
+    onDegraded(code);
+  });
+}
+

@@ -7,6 +7,7 @@ import type { PublicTaskInput } from '../../shared/context-continuity-types.js';
 import type { TaskCreateInput as HostTaskCreateInput } from '../../../src/runtime/task-host/types.js';
 import type { ContinuityIpcPort } from './ipc.js';
 import { resolveDesktopProfile,type DesktopProfileIdentity } from './profile.js';
+import { describeProfileFailure } from '../desktop-main-identity.js';
 import { ContinuityService } from './service.js';
 import { TaskContinuitySource } from './task-source.js';
 import { assembleOwnedHistory } from './history.js';
@@ -54,16 +55,18 @@ export class DesktopContextContinuity {
   private ownerReady=false;
   private effectInventoryState:'not_required'|'pending'|'ready'|'failed'='not_required';
   private preparedEffectRuns=new Map<string,string>();
-  constructor(private readonly dataRoot: string, private readonly inspect?: (taskId: string) => Promise<TaskSnapshot | null>,private readonly identity?:DesktopProfileIdentity|null, private readonly authOwnerTarget?:import('./ipc.js').AuthOwnerIpcTarget) {
+  constructor(private readonly dataRoot: string, private readonly inspect?: (taskId: string) => Promise<TaskSnapshot | null>,private readonly identity?:DesktopProfileIdentity|null, private readonly authOwnerTarget?:import('./ipc.js').AuthOwnerIpcTarget,private readonly log?:(line:string)=>void) {
     if(identity===null){this.initializationFailed=true;return;}
-    if (existsSync(join(dataRoot, 'continuity.sqlite'))) { try { this.port(); } catch { this.initializationFailed = true; } }
+    // Degrade exactly as before; only the inner reason is now recorded.
+    if (existsSync(join(dataRoot, 'continuity.sqlite'))) { try { this.port(); } catch(raw) { this.initializationFailed = true; this.logUnavailable('startup',raw); } }
   }
+  private logUnavailable(stage:string,raw:unknown):void{try{this.log?.(`[context-continuity] unavailable at ${stage}: ${describeProfileFailure(raw)}`);}catch{/* logging never changes degradation */}}
   port(): ContinuityIpcPort {
     if (this.closed || this.initializationFailed) throw new Error('continuity_unavailable');
     if (!this.current) {
       let profileId:string,service:ContinuityService;
       try{profileId=(this.identity??resolveDesktopProfile(this.dataRoot)).profileId;service=new ContinuityService({dbPath:join(this.dataRoot,'continuity.sqlite'),profileId});}
-      catch{this.initializationFailed=true;throw new Error('continuity_unavailable');}
+      catch(raw){this.initializationFailed=true;this.logUnavailable('open',raw);throw new Error('continuity_unavailable');}
       const actor = { requestSource: 'user' as const, profileId, actorId: `desktop-user:${profileId}` };
       this.current = { service, authOwner: this.authOwnerTarget, actor, refresh: () => this.reconcile(), ...(this.legacyInspector ? { importer: new LegacyContinuityImporter(service, actor, this.legacyInspector) } : {}) };
       this.#sourceContext=Object.freeze({service,store:service.store,actor:Object.freeze({...actor})});
@@ -81,6 +84,12 @@ export class DesktopContextContinuity {
   configureDeletionGuard(guard:()=>void):void{this.deletionGuard=guard;this.current?.service.setDeletionGuard(()=>this.assertDeletionOwnerReady());}
   requireEffectInventory():void{this.effectInventoryState='pending';}
   async auditEffectInventory(read:()=>Promise<TaskSnapshot[]>,legacyOwnerPresent:boolean):Promise<void>{
+    // Identity refused (Windows 1.6.2 profile, profile.ts): continuity is off for
+    // this whole process and nothing can record into it. Stay fail-closed for
+    // continuity deletion, but do not fail the multi-agent/owner readiness that
+    // awaits this audit; a later boot with an admitted identity re-inventories
+    // every persisted snapshot.
+    if(this.identity===null){this.effectInventoryState='failed';try{this.log?.('[context-continuity] effect inventory deferred: continuity degraded (identity refused)');}catch{/* logging never changes degradation */}return;}
     this.effectInventoryState='pending';
     try{const snapshots=await this.#sdk.invoke<TaskSnapshot[]>(read,undefined,[]);if(this.closed)throw new Error('continuity_stopping');const p=this.port();p.service.completeEffectInventory(p.actor,snapshots,legacyOwnerPresent);this.effectInventoryState='ready';}
     catch(error){this.effectInventoryState='failed';throw error;}
@@ -191,8 +200,12 @@ export class DesktopContextContinuity {
     // The current native protocol proves a parent turn, not its descendant/process closure.
     throw new Error('native_execution_gate_unavailable');
   }
-  assertConversationDeletionSafe(id:string):void{
+  /** #233 (c): the availability half of assertConversationDeletionSafe, checked by Main before a deletion is admitted. */
+  assertConversationDeletionAvailable():void{
     if(this.initializationFailed||this.closed)throw new Error('continuity_unavailable');
+  }
+  assertConversationDeletionSafe(id:string):void{
+    this.assertConversationDeletionAvailable();
     this.assertDeletionOwnerReady();
     this.current?.service.assertConversationDeletionSafe(this.current.actor,id);
   }

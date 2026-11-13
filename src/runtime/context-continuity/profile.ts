@@ -1,4 +1,4 @@
-import {readContinuityProfile} from './profile-identity.js';
+import {readContinuityProfile,desktopContinuityScopeProfileId} from './profile-identity.js';
 export {readContinuityProfile} from './profile-identity.js';
 import {assertProfileDirectory,readCapturedProfileJson} from './profile-file.js';
 import {readProfileDomainCensus} from './profile-probe.js';
@@ -27,13 +27,15 @@ export function resolveDesktopProfile(dataRoot:string):DesktopProfileIdentity {
     // Username equality is never SID/ACL proof for legacy adoption.
     if(process.platform==='win32'&&(alias!==undefined||domains.has(legacyProfileId)))throw Error();
     const profileId=loadContinuityProfile(dataRoot,{requireExisting});
-    if(alias&&alias.profileId!==profileId||[...domains].some(id=>id!==legacyProfileId&&id!==profileId))throw Error();
+    // Main's own scope rows for this UUID (desktopContinuityScopeProfileId) are this profile, not a foreign domain.
+    const ownScope=desktopContinuityScopeProfileId(profileId);
+    if(alias&&alias.profileId!==profileId||[...domains].some(id=>id!==legacyProfileId&&id!==profileId&&id!==ownScope))throw Error();
     if(!alias&&domains.has(legacy)){
       const fd=openSync(aliasFile,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
       try{writeFileSync(fd,JSON.stringify({version:1,profileId,legacyProfileId:legacy,osOwner:String(userInfo().uid)}));fsyncSync(fd);}finally{closeSync(fd);}
     }
     return {profileId,...(alias!==undefined||domains.has(legacyProfileId)?{legacyProfileId}:{})};
-  } catch {throw Error('profile_identity_unavailable');}
+  } catch(raw) {throw Error('profile_identity_unavailable',{cause:raw});}
 }
 
 /** A moved data root retains identity. Corruption never triggers adoption. */

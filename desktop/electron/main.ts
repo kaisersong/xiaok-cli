@@ -60,7 +60,7 @@ import type {IpcHandleRegistrar,IpcHandlerListener} from './shutdown-aware-ipc-m
 import { registerThreadMetadataIpc } from './thread-metadata-typed-ipc.js';
 import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.js';
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
-import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import { createDesktopKSwarmService, startDesktopKSwarmService, startDesktopKSwarmServiceDegrading } from './kswarm-service-lifetime.js';
 import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
 import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
 import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
@@ -89,6 +89,7 @@ import {composeOriginalMainDshRuntime,readOriginalMainDshRuntimeBinding,startOri
 import {createMainDshControlSource} from './main-dsh-control-source.js';
 import {createMainMaterialSource,sealAndDrainMainMaterialSource} from './main-material-source.js';
 import {resolveDesktopServiceScope} from './desktop-service-scope.js';
+import {resolveDesktopMainIdentity,mainDshScopeAvailable} from './desktop-main-identity.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, safeStorage, BrowserWindow, dialog, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -841,17 +842,21 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const harnessUserActor = Object.freeze({ requestSource: 'user' as const, principalId: 'desktop-main-window' });
-  const serviceScope=resolveDesktopServiceScope({dataRoot});
+  // #233: resolve the profile once, before Services writes any scope row; Services gets the same value.
+  const mainIdentity=resolveDesktopMainIdentity(dataRoot);
+  debugMain(`[context-continuity] profile scope ${mainIdentity.scope} (profile ${mainIdentity.profileId.slice(0,12)})`);
+  if(mainIdentity.failure!==undefined)debugMain(`[context-continuity] identity refused, continuity degrades: ${mainIdentity.failure}`);
+  const serviceScope=resolveDesktopServiceScope({dataRoot,profileId:mainIdentity.profileId});
   const mainUserControlSource=createMainDshControlSource({windowOwner:applicationWindowOwner,scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   desktopIngressOwners.push(mainUserControlSource.ingress);
   if(desktopShutdownCoordinator.isQuitting)mainUserControlSource.seal();
   // Only the original installed profile may enter. There is no env/UI opt-in.
   const dshQualification=readOriginalProductionRootResourceQualification();
-  const dshSources=dshQualification.qualified?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
+  const dshSources=dshQualification.qualified&&mainDshScopeAvailable(mainIdentity)?createOriginalMainDshServiceSources({scope:{profileId:serviceScope.profileId,workspaceId:serviceScope.workspaceId},userSource:mainUserControlSource}):undefined;
   let dshServicesTransferred=false;
   if(dshSources){
     desktopFinalLifetimeSteps.push({name:'main-dsh-startup-sources',async run(){if(!dshServicesTransferred)await closeOriginalMainDshStartupSources(dshSources);}});
-    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,harnessUserActor});}
+    try{await prepareOriginalMainDshServiceSources(dshSources,{dataRoot,profileId:serviceScope.profileId,harnessUserActor});}
     catch(raw){
       try{await closeOriginalMainDshStartupSources(dshSources,{raw});}catch{/* The original Sources retains cleanup faults and all physical tails. */}
       throw raw;
@@ -859,7 +864,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if(!desktopShutdownGate.isOpen)return window;
   }
   const dshPrepared=dshSources?readOriginalMainDshPreparedSources(dshSources):undefined;
-  const writerScope=()=>({profileId:createHash('sha256').update(resolve(getConfigDir('desktop'))).digest('hex'),workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
+  const writerScope=()=>({profileId:serviceScope.profileId,workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
   const preparationNativeSource=createDefaultDispatchPreparationNativeSource({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
   const preparationOwner=createDefaultDispatchPreparationOwner(preparationNativeSource);
   desktopIngressOwners.push(preparationOwner.ingress);
@@ -938,6 +943,9 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     }) : undefined;
   if (!desktopShutdownGate.isOpen) return window;
   const services = createDesktopServices({
+    activityOwnerLog: line => debugMain(line),
+    continuityLog: line => debugMain(line),
+    mainIdentity,
     credentialInputs:{targets:()=>credentialInputs?.targets()??[],request:(targetId,context,source)=>{if(!credentialInputs)return Promise.reject(Error('credential_not_ready'));return credentialInputs.request(targetId,context,source);}},
     mailConnectors,
     assistantOutbox: {proposeMail(input,source,taskId) { if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.proposeMail(input,source,taskId); },waitForDecision(id,signal){if(!assistantInbox)throw Error('assistant_not_ready');return assistantInbox.outbox.waitForDecision(id,signal);}},
@@ -1001,22 +1009,30 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
   });
-  const startMainKSwarm = () => startDesktopKSwarmService(desktopShutdownGate, kswarmService,
-    !dshSources && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
-    dshSources?undefined:error => {
-      const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
-      console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
-      activityOwnerNoticeOnce(code);
-    },
-  ).then(() => {
-    const status = kswarmService.getStatus();
-    if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
-  }).catch(error => {
-    if (dshSources) throw error;
-    const message = error instanceof Error ? error.message : 'service_bootstrap_failed';
-    console.error('[main] Service bootstrap refused:', message);
-    dialog.showErrorBox('xiaok — 服务启动失败 / Service startup failed', message);
-  });
+  let desktopServicesDegradedNoticeShown = false;
+  const desktopServicesDegradedNoticeOnce = (code: string) => {
+    if (desktopServicesDegradedNoticeShown) return;
+    desktopServicesDegradedNoticeShown = true;
+    try { void Promise.resolve(createElectronDesktopNotificationPort().show({ title: 'xiaok', body: `后台服务未能启动，已降级运行 / Background services unavailable, running in limited mode (${code})`, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } })).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
+  };
+  // DSH keeps its own rejection path. Ordinary Main keeps 1.6.2 parity (#235):
+  // services that cannot start degrade the window with one non-blocking
+  // notice and never a blocking error dialog.
+  const startMainKSwarm = () => dshSources
+    ? startDesktopKSwarmService(desktopShutdownGate, kswarmService).then(() => {
+      const status = kswarmService.getStatus();
+      if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
+    })
+    : startDesktopKSwarmServiceDegrading(desktopShutdownGate, kswarmService,
+      process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+      error => {
+        const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
+        console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);
+        debugMain(`Activity owner attach failed (${code}); starting KSwarm without it`);
+        activityOwnerNoticeOnce(code);
+      },
+      desktopServicesDegradedNoticeOnce,
+    );
   if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
   if(!dshSources)registerLifetimeDisposerStep('multi-agent-runtime', async () => { await services.disposeMultiAgent(); });
@@ -1960,6 +1976,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       if (dshSources) { debugMain('runtime-bridge:startup-unconfirmed'); return; }
       if (startEpoch === runtimeBridgeStartEpoch) runtimeBridgeStarted = false;
       console.warn('[main] Runtime bridge startup failed:', error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
+      desktopServicesDegradedNoticeOnce(error instanceof Error ? error.message : 'runtime_bridge_startup_failed');
     });
   };
   const stopRuntimeReadiness = kswarmService.onStatusChange(status => {

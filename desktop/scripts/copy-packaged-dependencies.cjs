@@ -91,12 +91,23 @@ async function copyPackagedDependencies({ asarPath, projectDir, platform = proce
   const manifest = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'));
   edges(projectDir, '', manifest);
   if (!copied.length) return { copied };
+  // @electron/asar never records `executable` for unpacked entries, so the
+  // header alone would rebuild every unpacked file as 0644 and the cpSync below
+  // would overwrite the original 0755 binaries. Unpacked files keep the exact
+  // permission bits already on disk; packed files keep the header's flag.
+  const unpackedRoot = asarPath + '.unpacked';
+  function existingMode(key, info) {
+    if (!info.unpacked) return info.executable ? 0o755 : 0o644;
+    const stat = fs.lstatSync(path.join(unpackedRoot, ...key.split('/')));
+    if (!stat.isFile()) throw new Error(`unpacked entry is not a regular file: ${key}`);
+    return stat.mode & 0o7777;
+  }
   const streams = [];
   for (const [key, info] of entries) {
     if (info.files) streams.push({ path: key, type: 'directory', unpacked: !!info.unpacked });
     else if (info.link) streams.push({ path: key, type: 'link', unpacked: !!info.unpacked, symlink: path.posix.relative(path.posix.dirname(key), info.link), stat: { mode: 0o777, size: 0 } });
     else streams.push({ path: key, type: 'file', unpacked: !!info.unpacked,
-      stat: { size: info.size, mode: info.executable ? 0o755 : 0o644 }, streamGenerator: () => Readable.from(asar.extractFile(asarPath, path.normalize(key))) });
+      stat: { size: info.size, mode: existingMode(key, info) }, streamGenerator: () => Readable.from(asar.extractFile(asarPath, path.normalize(key))) });
   }
   const directories = new Set([...entries].filter(([, info]) => info.files).map(([key]) => key));
   for (const [key, item] of additions) {

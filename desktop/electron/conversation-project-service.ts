@@ -7,6 +7,7 @@ import { compactProjectCreationResponse } from '../../src/runtime/task-host/tool
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import {desktopActivityProfileId} from '../../src/runtime/conversation-activity/owner-profile-id.js';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {KSwarmInitialPlanBootstrapPayload} from './kswarm-initial-plan-bootstrap.js';
@@ -137,6 +138,10 @@ export class ConversationProjectService {
   constructor(private readonly options: {
     dataRoot: string;
     workspaceRoot?:string;
+    /** Main's service-scope profile id; defaults to the legacy data-root digest. */
+    profileId?:string;
+    /** Identity failed on a non-legacy root: record no user facts or projects under the in-memory scope. */
+    profileScopeUnavailable?:boolean;
     userSubmissions?:MainUserSubmissionOwner;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
     initialPlanBootstrap?:{enqueue(input:KSwarmInitialPlanBootstrapPayload):ProjectPlanningOutput};
@@ -150,7 +155,7 @@ export class ConversationProjectService {
     this.directory = join(options.dataRoot, 'conversation-projects');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.userFactDirectory = join(this.directory, 'user-inputs');
-    this.userFactProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+    this.userFactProfileId = options.profileId ?? desktopActivityProfileId(options.dataRoot);
     this.userFactWorkspaceId=createHash('sha256').update(resolve(options.workspaceRoot??process.cwd())).digest('hex');
     mkdirSync(this.userFactDirectory, { recursive: true, mode: 0o700 });
     const directory = lstatSync(this.userFactDirectory);
@@ -168,6 +173,7 @@ export class ConversationProjectService {
   /** Main-only: caller passes host.inspectTask(actualPrepared.taskId), never a DTO.
    * The existing ALS supplies origin; this fact alone never authorizes creation. */
   recordPreparedUserTask(snapshot: TaskSnapshot, context: { requestSource: Source;preparedSource?:TaskPreparedSourceReceipt;submissionSource?:PreparedSubmissionProof }): boolean {
+    if(this.options.profileScopeUnavailable)return false;
     const admitted = this.admission.getStore();
     if (context.requestSource !== 'user' || !admitted) return false;
     const refuse=()=>{if(text(snapshot.taskId))this.refusedPreparations.add(snapshot.taskId);return false;};
@@ -458,6 +464,7 @@ export class ConversationProjectService {
 
 
   async create(proposal: RecordValue, context: { requestSource: Source; taskId: string; signal?: AbortSignal }): Promise<RecordValue> {
+    if(this.options.profileScopeUnavailable)throw new Error('desktop_profile_scope_unavailable');
     context.signal?.throwIfAborted();
     const operation = this.read(context.taskId);
     if (!operation || !['user', 'agent'].includes(context.requestSource)) return { ok: false, error: 'conversation_project_user_authorization_required' };
