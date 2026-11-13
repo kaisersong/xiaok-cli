@@ -107,3 +107,16 @@ test('multiple HTTP status blocks never turn an unknown 404-first response into 
  assert.throws(()=>parseReleaseResponse({status:1,stdout:rows[1].stdout+'\n'+rows[0].stdout,stderr:''}),/ambiguous/);
  assert.throws(()=>parseReleaseResponse({status:0,stdout:rows[0].stdout+'\n'+rows[0].stdout,stderr:''}),/ambiguous/);
 });
+
+test('list fallback handles paginated GitHub releases, detects duplicate drafts, and rejects non-200 /releases errors',posixOnly,()=>withRepo(f=>{
+ f.update({listPages:[[{tag_name:'desktop-v1.6.2',draft:false,prerelease:false}],[{tag_name:f.tag,draft:true,prerelease:false}]]});
+ requireSuccess(f.invoke('draft'));
+ assert.equal(f.calls().some(a=>a[0]==='release'&&a[1]==='create'),false);
+ assert.equal(f.calls().filter(a=>a[0]==='api'&&a.at(-1).includes('/releases?')).length,2);
+
+ f.update({listPages:[[{tag_name:f.tag,draft:true,prerelease:false},{tag_name:f.tag,draft:true,prerelease:false}]]});
+ const dup=f.invoke('draft');requireFailure(dup);assert.match(dup.stderr,/release_api_ambiguous/);
+
+ f.update({listPages:null,listHttpStatus:404});
+ const err404=f.invoke('draft');requireFailure(err404);assert.match(err404.stderr,/release_api_failed/);
+}));
