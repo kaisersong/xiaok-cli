@@ -52,7 +52,10 @@ export class ProtectedJsonFile {
     const paths=[...refs.map(r=>r.path),...plaintext.filter(r=>Boolean(r.value)).map(r=>r.path)];
     if(value){delete value[META];for(const path of paths)setAt(value,path,undefined);}
     const current=()=>{this.check(this.file);if(protectedJsonDigest(this.file)!==digest||protectedJsonDigest(this.file+'.bak')!==backupDigest)throw Error('credential_config_changed');};
-    return {value,get digest(){return digest;},credentialPaths:paths,resolve:(path:string[]):unknown=>{
+    return {value,get digest(){return digest;},credentialPaths:paths,credentialVersion:(path:string[]):string=>{
+      const ref=this.refs(raw??{}).find(r=>JSON.stringify(r.path)===JSON.stringify(path));
+      return hash(JSON.stringify(ref??{path,value:getAt(raw,path)??null}));
+    },resolve:(path:string[]):unknown=>{
       current();
       if(!paths.some(p=>JSON.stringify(p)===JSON.stringify(path)))return undefined;
       const backup=this.raw(this.file+'.bak');
