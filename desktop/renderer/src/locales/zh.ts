@@ -2974,7 +2974,7 @@ export const zh: LocaleStrings = {
       important_email: { title: '重点邮件', description: '聚焦待决策、待回复和临近截止时间的邮件。', cadence: '每 2 小时', requirement: '需要已连接的邮箱' },
     },
 
-    operationUnknown: "刚才的操作结果未能确认，自动核对也未成功。请点「刷新状态」确认后再继续。",
+    operationUnknown: "刚才的操作结果未能确认，自动核对后仍无法确认。请点「刷新状态」确认后再继续。",
     operationRecheckApplied: "已自动核对：刚才的操作已生效。",
     operationRecheckNotApplied: "已自动核对：暂未看到刚才的操作生效，可直接重试。",
     refreshStatus: "刷新状态",

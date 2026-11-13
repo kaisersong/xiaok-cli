@@ -108,7 +108,7 @@ it('falls back to the unknown banner when the automatic read-back fails, and one
   h.activate.mockRejectedValueOnce(Error('assistant_operation_unknown'));
   page(); fireEvent.click(await screen.findByRole('button', { name: '启用小K助理' }));
   await waitFor(() => expect(h.activate).toHaveBeenCalledTimes(1));
-  await screen.findByText('刚才的操作结果未能确认，自动核对也未成功。请点「刷新状态」确认后再继续。', {}, { timeout: 3000 });
+  await screen.findByText('刚才的操作结果未能确认，自动核对后仍无法确认。请点「刷新状态」确认后再继续。', {}, { timeout: 3000 });
   expect(h.overview).toHaveBeenCalledTimes(2);
   h.overview.mockResolvedValue(overview);
   fireEvent.click(screen.getByRole('button', { name: '刷新状态' }));
@@ -149,7 +149,7 @@ it('keeps an accepting candidate undetermined instead of inviting a retry', asyn
   h.accept.mockReset().mockRejectedValueOnce(Error('assistant_operation_unknown'));
   fireEvent.click(await screen.findByRole('button', { name: '采纳：偏好' }));
   await waitFor(() => expect(h.accept).toHaveBeenCalledTimes(1));
-  await screen.findByText('刚才的操作结果未能确认，自动核对也未成功。请点「刷新状态」确认后再继续。', {}, { timeout: 3000 });
+  await screen.findByText('刚才的操作结果未能确认，自动核对后仍无法确认。请点「刷新状态」确认后再继续。', {}, { timeout: 3000 });
   expect(h.accept).toHaveBeenCalledTimes(1);
   expect(screen.queryByText('已自动核对：暂未看到刚才的操作生效，可直接重试。')).toBeNull();
   expect(screen.getByText('内容')).toBeInTheDocument();
