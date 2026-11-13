@@ -7,7 +7,7 @@ import { api } from '../api';
 import type { AutomationOverviewSnapshotView, AssistantProfileDto, AssistantCandidateDto, AssistantAcceptResultDto, AssistantOverviewDto } from '../api/types';
 import { getDesktopApi } from '../shared/desktop';
 import { AUTO_RECHECK_DELAY_MS } from '../hooks/useAssistantWorkspace';
-import { expectAssistantStatus, expectCandidateDecided } from '../lib/assistant-recheck';
+import { expectAssistantStatus, readCandidateDecision, type RecheckVerdict } from '../lib/assistant-recheck';
 import { useLocale } from '../contexts/LocaleContext';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { AssistantHomeCard } from './assistant/AssistantHomeCard';
@@ -112,7 +112,7 @@ export function WelcomePage() {
   const assistantReads=useRef({active:false,busy:false,queued:false,revision:0});
   const assistantMutationLock=useRef(false);
   const assistantReadRequest=useRef<()=>Promise<void>>(async()=>{});
-  const assistantMutationExpectation=useRef<((overview:AssistantOverviewDto)=>boolean)|null>(null);
+  const assistantMutationExpectation=useRef<((overview:AssistantOverviewDto)=>RecheckVerdict)|null>(null);
   const assistantRecheckTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const clearAssistantRecheck=useCallback(()=>{
     if(assistantRecheckTimer.current!==null){clearTimeout(assistantRecheckTimer.current);assistantRecheckTimer.current=null;}
@@ -130,7 +130,8 @@ export function WelcomePage() {
       if(expectation){
         if(assistantRecheckTimer.current!==null){clearTimeout(assistantRecheckTimer.current);assistantRecheckTimer.current=null;}
         assistantMutationExpectation.current=null;setAssistantRechecking(false);
-        setAssistantMutationOutcome(expectation(overview)?'applied':'not_applied');
+        const verdict=expectation(overview);
+        if(verdict==='undetermined')setAssistantOperationUnknown(true);else setAssistantMutationOutcome(verdict);
       }
     } catch {if(current()){setAssistantOperationUnknown(true);setAssistantSnapshot(null);setAssistantCandidates([]);setAssistantLoadState('unavailable');if(assistantMutationExpectation.current){clearAssistantRecheck();setAssistantRechecking(false);}}}
     finally {owner.busy=false;if(owner.active&&assistantReads.current===owner&&owner.queued){owner.queued=false;void assistantReadRequest.current();}}
@@ -139,7 +140,7 @@ export function WelcomePage() {
   /** One delayed read-back after an unknown mutation result; never replays the mutation.
    * If another read is in flight when the timer fires, the timer waits instead of
    * queueing a second read; that read consumes the expectation or clears it. */
-  const scheduleAssistantRecheck=useCallback((expectApplied:(overview:AssistantOverviewDto)=>boolean)=>{
+  const scheduleAssistantRecheck=useCallback((expectApplied:(overview:AssistantOverviewDto)=>RecheckVerdict)=>{
     assistantMutationExpectation.current=expectApplied;
     setAssistantRechecking(true);
     const schedule=()=>{
@@ -228,7 +229,7 @@ export function WelcomePage() {
     } catch {
       // Read-backs issued before the failure resolved must not confirm the
       // mutation (they are queued behind the lock); only the recheck read is.
-      if (assistantReads.current.active) scheduleAssistantRecheck(expectCandidateDecided(candidateId, decision));
+      if (assistantReads.current.active) scheduleAssistantRecheck(readCandidateDecision(candidateId));
     } finally {
       assistantMutationLock.current = false;
       if (assistantReads.current.active) {

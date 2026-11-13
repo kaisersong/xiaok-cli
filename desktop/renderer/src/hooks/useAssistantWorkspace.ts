@@ -5,10 +5,11 @@ import { SCHEDULED_TASK_SCHEMA, type ScheduledTaskDto } from '../../../shared/sc
 import { AUTOMATION_RUN_HISTORY_SCHEMA, type AutomationRunHistoryDto } from '../../../shared/loop-current-view-ipc-contract';
 import { AUTOMATION_OVERVIEW_SCHEMA, type AutomationOverviewDto } from '../../../shared/automation-config-ipc-contract';
 import { getDesktopApi } from '../shared/desktop';
+import type { RecheckVerdict } from '../lib/assistant-recheck';
 
 type Source = 'product' | 'assistant' | 'schedules' | 'history' | 'automation';
 interface Owner { active: boolean; busy: boolean; queued: boolean; revision: number }
-export type MutationExpectation = (overview: AssistantOverviewDto) => boolean;
+export type MutationExpectation = (overview: AssistantOverviewDto) => RecheckVerdict;
 /** Delay before the single automatic read-back after an unknown mutation result. */
 export const AUTO_RECHECK_DELAY_MS = 600;
 
@@ -54,7 +55,8 @@ export function useAssistantWorkspace() {
             if (recheckTimer.current !== null) { clearTimeout(recheckTimer.current); recheckTimer.current = null; }
             pendingExpectation.current = null; setRechecking(false);
             // The 'assistant' source is only ever read with AssistantOverviewDto.
-            setMutationOutcome(expectation(value as AssistantOverviewDto) ? 'applied' : 'not_applied');
+            const verdict = expectation(value as AssistantOverviewDto);
+            if (verdict === 'undetermined') setOperationUnknown(true); else setMutationOutcome(verdict);
           }
         }
       } catch {

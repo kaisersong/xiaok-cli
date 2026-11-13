@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useAssistantWorkspace } from '../../hooks/useAssistantWorkspace';
 import { ASSISTANT_WATCH_IDS, assistantWatchCreateRoute } from '../../lib/assistant-watch-presets';
-import { expectAssistantStatus, expectCandidateDecided } from '../../lib/assistant-recheck';
+import { expectAssistantStatus, readCandidateDecision } from '../../lib/assistant-recheck';
 import { getAssistantScheduleDisplayName } from '../../lib/assistant-schedule-display';
 import { getDesktopApi } from '../../shared/desktop';
 import { ASSISTANT_ACCEPT_RESULT_SCHEMA, ASSISTANT_CANDIDATE_SCHEMA, ASSISTANT_PROFILE_SCHEMA } from '../../../../shared/assistant-ipc-contract';
@@ -63,7 +63,7 @@ export function AssistantWorkspaceContent({ data, onPrepareSuggestion, iconOnly 
       const desktop = getDesktopApi()!;
       if (decision === 'accept') ASSISTANT_ACCEPT_RESULT_SCHEMA.parse(await desktop.acceptAssistantCandidate({ candidateId, ...(collectionId ? { collectionId } : {}) }));
       else ASSISTANT_CANDIDATE_SCHEMA.parse(await desktop.rejectAssistantCandidate({ candidateId }));
-    }, expectCandidateDecided(candidateId, decision));
+    }, readCandidateDecision(candidateId));
     if (life.current.active) setBusyCandidateId(null);
   };
   const startFollowUp=(candidateId:string)=>{if(data.mutationBusy||data.operationUnknown||data.rechecking)return;void data.mutate(async()=>{const next=ASSISTANT_LAUNCH_DRAFT_SCHEMA.parse(await getDesktopApi()!.prepareAssistantFollowUpLaunch({candidateId}));if(life.current.active)setFollowUpDraft(next);});};
