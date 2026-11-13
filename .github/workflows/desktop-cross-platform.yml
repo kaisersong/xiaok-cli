@@ -239,8 +239,10 @@ jobs:
           tests/renderer/channel-mcp-mutation-ui-followup.test.tsx
 
       - name: Continuity owner qualification retained-config tests (#233)
+        working-directory: desktop
+        shell: bash
         run: >-
-          cd desktop && npm run test -- --run
+          node node_modules/vitest/vitest.mjs run
           tests/main/context-continuity-owner-qualification.test.ts
           -t "does not downgrade a retained Desktop configuration"
 
