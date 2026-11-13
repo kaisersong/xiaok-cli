@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {createDesktopServices} from '../../electron/desktop-services.js';
+import {captureArtifactWorkspaceStores,closeCreatedDesktopServices} from '../support/desktop-services-fixture-close.js';
 import {resolveDesktopMainIdentity,type DesktopMainIdentity} from '../../electron/desktop-main-identity.js';
 import {mainActivityOwnerConfig} from '../../electron/activity-owner-main-config.js';
 import {writeOwnerLaunchConfig} from '../../electron/activity-owner-writer-launcher.js';
@@ -44,9 +45,9 @@ async function mainStart(platform:Platform,base:string,dataRoot:string,identity?
  const logs:string[]=[];
  const resolved=identity??onPlatform(platform,()=>resolveDesktopMainIdentity(dataRoot));
  if(resolved.failure!==undefined)logs.push(`[context-continuity] identity refused, continuity degrades: ${resolved.failure}`);
- const services=createDesktopServices({dataRoot,workspaceRoot:base,knowledgeDbPath:join(base,'knowledge.sqlite'),pluginRootDir:join(base,'plugins'),pluginDependencies:[],
-  kswarmService:mockKSwarmService(),mainIdentity:resolved,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)});
- let closed=false;const close=async()=>{if(closed)return;closed=true;const result=await services.disposeMultiAgent();if(!result.drained)throw Error('fixture_close_unconfirmed');};
+ const {value:services,stores:artifactStores}=captureArtifactWorkspaceStores(()=>createDesktopServices({dataRoot,workspaceRoot:base,knowledgeDbPath:join(base,'knowledge.sqlite'),pluginRootDir:join(base,'plugins'),pluginDependencies:[],
+  kswarmService:mockKSwarmService(),mainIdentity:resolved,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)}));
+ let closed=false;const close=async()=>{if(closed)return;closed=true;await closeCreatedDesktopServices(services,artifactStores,base);};
  cleanups.push(close);
  await services.multiAgent!.ready;
  return {identity:resolved,services,logs,close} as Start&{close:()=>Promise<void>};

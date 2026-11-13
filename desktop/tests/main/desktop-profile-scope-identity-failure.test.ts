@@ -14,6 +14,7 @@ vi.mock('../../../src/runtime/context-continuity/profile-probe.js',async importO
  return {...actual,readProfileDomainCensus:(dataRoot:string)=>{probe.calls++;if(probe.fail)throw Error('profile_identity_unavailable');return actual.readProfileDomainCensus(dataRoot);}};
 });
 import {createDesktopServices} from '../../electron/desktop-services.js';
+import {captureArtifactWorkspaceStores,closeCreatedDesktopServices,toPosixRelative} from '../support/desktop-services-fixture-close.js';
 import {resolveDesktopMainIdentity,mainDshScopeAvailable,type DesktopMainIdentity} from '../../electron/desktop-main-identity.js';
 import {mainActivityOwnerConfig} from '../../electron/activity-owner-main-config.js';
 import {writeOwnerLaunchConfig} from '../../electron/activity-owner-writer-launcher.js';
@@ -78,7 +79,7 @@ function populatedTables(root:string):string[]{
   if(st.isDirectory()){walk(path);continue;}if(!st.isFile()||readFileSync(path).subarray(0,16).toString('latin1')!=='SQLite format 3\0')continue;
   const db=new DatabaseSync(path,{readOnly:true});
   try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>){
-   const {c}=db.prepare(`SELECT count(*) AS c FROM "${table.replaceAll('"','""')}"`).get() as {c:number};if(c>0)out.push(`${path.slice(root.length+1)} ${table}=${c}`);}
+   const {c}=db.prepare(`SELECT count(*) AS c FROM "${table.replaceAll('"','""')}"`).get() as {c:number};if(c>0)out.push(`${toPosixRelative(root,path)} ${table}=${c}`);}
   }finally{db.close();}
  }};
  walk(root);return out.sort();
@@ -86,7 +87,7 @@ function populatedTables(root:string):string[]{
 /** Regular files under `dir` (relative), recursively; [] when absent. */
 function filesUnder(dir:string):string[]{
  if(!existsSync(dir))return [];const out:string[]=[];
- const walk=(d:string)=>{for(const name of readdirSync(d)){const path=join(d,name),st=lstatSync(path);if(st.isDirectory())walk(path);else out.push(path.slice(dir.length+1));}};
+ const walk=(d:string)=>{for(const name of readdirSync(d)){const path=join(d,name),st=lstatSync(path);if(st.isDirectory())walk(path);else out.push(toPosixRelative(dir,path));}};
  walk(dir);return out.sort();
 }
 async function mainStart(platform:Platform,base:string,dataRoot:string){
@@ -96,9 +97,9 @@ async function mainStart(platform:Platform,base:string,dataRoot:string){
  // Every KSwarm business request Services makes (delegation, room, dispatch traffic).
  const kswarmRequests:string[]=[],kswarmService=mockKSwarmService(),request=kswarmService.request.bind(kswarmService);
  kswarmService.request=async(path,init)=>{kswarmRequests.push(String(path));return request(path,init);};
- const services=createDesktopServices({dataRoot,workspaceRoot:base,knowledgeDbPath:join(base,'knowledge.sqlite'),pluginRootDir:join(base,'plugins'),pluginDependencies:[],
-  kswarmService,mainIdentity:identity,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)});
- let closed=false;const close=async()=>{if(closed)return;closed=true;const result=await services.disposeMultiAgent();if(!result.drained)throw Error('fixture_close_unconfirmed');};
+ const {value:services,stores:artifactStores}=captureArtifactWorkspaceStores(()=>createDesktopServices({dataRoot,workspaceRoot:base,knowledgeDbPath:join(base,'knowledge.sqlite'),pluginRootDir:join(base,'plugins'),pluginDependencies:[],
+  kswarmService,mainIdentity:identity,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)}));
+ let closed=false;const close=async()=>{if(closed)return;closed=true;await closeCreatedDesktopServices(services,artifactStores,base);};
  cleanups.push(close);
  await services.multiAgent?.ready;
  return {identity,services,logs,close,kswarmRequests};
@@ -201,4 +202,9 @@ describe.each(['win32','darwin'] as const)('fresh install whose first identity f
   // Nothing persisted by starts 2 and 3 names the failed round's scope or the legacy digest.
   expect.soft(filesContaining(base,[legacy,failed.identity.profileId]),'later starts persisted a stale scope').toEqual([]);
  },120_000);
+});
+
+it('toPosixRelative normalizes Windows separators so populatedTables/filesUnder stay posix',()=>{
+ expect(toPosixRelative('C:\\tmp\\base','C:\\tmp\\base\\data\\artifact-workspace\\workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
+ expect(toPosixRelative('/tmp/base','/tmp/base/data/artifact-workspace/workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
 });
