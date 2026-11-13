@@ -34,16 +34,23 @@ export function fixture({ annotated = false, tag = 'desktop-v1.6.3' } = {}) {
 const fs=require('node:fs');const a=process.argv.slice(2),p=process.env.RELEASE_FAKE_GH_STATE;
 fs.appendFileSync(process.env.RELEASE_FAKE_GH_LOG,JSON.stringify(a)+'\n');const s=JSON.parse(fs.readFileSync(p,'utf8'));
 if(a[0]==='api'){
- const target=a[a.length-1];
- if(target.includes('/releases?')){
-  const status=s.listHttpStatus??s.httpStatus??200;
-  const page=Number(target.match(/[?&]page=(\d+)/)?.[1]??1);
-  const pages=Array.isArray(s.listPages)?s.listPages:null;
-  const link=pages&&page<pages.length?'Link: <https://api.github.com/repos/kaisersong/xiaok-cli/releases?per_page=50&page='+(page+1)+'>; rel="next"\r\n':'';
-  process.stdout.write('HTTP/2.0 '+status+' Fixture\r\nContent-Type: application/json\r\n'+link+'\r\n');
-  const payload=pages?(pages[page-1]??[]):(s.exists?[{tag_name:s.tag,draft:s.draft,prerelease:false}]:[]);
-  process.stdout.write(s.malformed?'not json':JSON.stringify(status===200?payload:{message:'fixture failure'}));process.exit(status===200?0:1);
+ if(a.includes('graphql')){
+  const status=s.graphqlHttpStatus??s.httpStatus??200;
+  process.stdout.write('HTTP/2.0 '+status+' Fixture\r\nContent-Type: application/json\r\n\r\n');
+  let payload;
+  if(status!==200)payload={message:'fixture failure'};
+  else if(s.graphqlPayload!==undefined)payload=s.graphqlPayload;
+  else if(s.postCreateLag&&s.created&&s.postCreateLag>0){
+   s.postCreateLag-=1;fs.writeFileSync(p,JSON.stringify(s));
+   payload={data:{repository:{release:null}}};
+  }else{
+   const reqTag=(a.find(x=>x.startsWith('tag='))||'').slice(4);
+   const match=s.exists&&(!reqTag||s.tag===reqTag);
+   payload={data:{repository:{release:match?{tagName:s.tag,isDraft:s.draft,isPrerelease:false}:null}}};
+  }
+  process.stdout.write(s.malformed?'not json':JSON.stringify(payload));process.exit(status===200?0:1);
  }
+ const target=a[a.length-1];
  const reqTag=decodeURIComponent(target.split('/releases/tags/')[1]??'');
  const directVisible=s.exists&&(!s.draft||s.tag!==reqTag);
  const status=s.httpStatus??(s.malformed||Object.hasOwn(s,'body')?200:(directVisible?200:404));
@@ -60,7 +67,7 @@ if(a[0]==='release'&&a[1]==='download'){
  fs.writeFileSync(require('node:path').join(dest,name),'version: '+version+'\nfiles:\n  - url: '+url+'\n');
  if(s.publishDuringDownload){s.draft=false;fs.writeFileSync(p,JSON.stringify(s));}process.exit(0);
 }
-if(a[0]==='release'&&a[1]==='create'){s.exists=true;s.draft=a.includes('--draft');s.tag=a[2];fs.writeFileSync(p,JSON.stringify(s));process.exit(0);}
+if(a[0]==='release'&&a[1]==='create'){s.exists=true;s.created=true;s.draft=a.includes('--draft');s.tag=a[2];fs.writeFileSync(p,JSON.stringify(s));process.exit(0);}
 if(a[0]==='release'&&a[1]==='upload'){
  if(s.publishDuringUpload)s.draft=false;
  if(s.moveTagDuringUpload){const m=s.moveTagDuringUpload;const r=require('node:child_process').spawnSync('git',['--git-dir',m.origin,'update-ref','refs/tags/'+s.tag,m.sha],{encoding:'utf8'});s.moveChild={pid:r.pid,status:r.status,signal:r.signal};if(r.status!==0){process.stderr.write(r.stderr);process.exit(79);}}

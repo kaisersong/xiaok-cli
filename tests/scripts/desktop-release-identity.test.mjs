@@ -108,15 +108,33 @@ test('multiple HTTP status blocks never turn an unknown 404-first response into 
  assert.throws(()=>parseReleaseResponse({status:0,stdout:rows[0].stdout+'\n'+rows[0].stdout,stderr:''}),/ambiguous/);
 });
 
-test('list fallback handles paginated GitHub releases, detects duplicate drafts, and rejects non-200 /releases errors',posixOnly,()=>withRepo(f=>{
- f.update({listPages:[[{tag_name:'desktop-v1.6.2',draft:false,prerelease:false}],[{tag_name:f.tag,draft:true,prerelease:false}]]});
+test('GraphQL fallback finds draft after 404, retries brief post-create lag, and rejects GraphQL errors or bad shapes',posixOnly,()=>withRepo(f=>{
  requireSuccess(f.invoke('draft'));
  assert.equal(f.calls().some(a=>a[0]==='release'&&a[1]==='create'),false);
- assert.equal(f.calls().filter(a=>a[0]==='api'&&a.at(-1).includes('/releases?')).length,2);
+ assert.ok(f.calls().some(a=>a[0]==='api'&&a.includes('graphql')));
 
- f.update({listPages:[[{tag_name:f.tag,draft:true,prerelease:false},{tag_name:f.tag,draft:true,prerelease:false}]]});
- const dup=f.invoke('draft');requireFailure(dup);assert.match(dup.stderr,/release_api_ambiguous/);
+ f.update({exists:false,postCreateLag:1});
+ requireSuccess(f.invoke('draft'));
+ assert.equal(f.calls().filter(a=>a[0]==='release'&&a[1]==='create').length,1);
 
- f.update({listPages:null,listHttpStatus:404});
- const err404=f.invoke('draft');requireFailure(err404);assert.match(err404.stderr,/release_api_failed/);
+ for(const patch of [
+  {graphqlHttpStatus:403},
+  {graphqlPayload:{errors:[{message:'forbidden'}],data:{repository:{release:null}}}},
+  {graphqlPayload:{data:{repository:null}}},
+  {graphqlPayload:{data:{repository:{release:{tagName:f.tag}}}}},
+ ]){
+  f.update(patch);
+  const res=f.invoke('draft');
+  requireFailure(res);
+  assert.equal(f.calls().filter(a=>a[0]==='release'&&a[1]==='create').length,1);
+ }
 }));
+
+test('parseGraphqlReleaseResponse handles draft, null, errors, and malformed payloads',async()=>{
+ const {parseGraphqlReleaseResponse}=await import('../../scripts/desktop-release-identity.mjs');
+ const ok=body=>({status:0,stdout:'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n'+JSON.stringify(body),stderr:''});
+ assert.deepEqual(parseGraphqlReleaseResponse(ok({data:{repository:{release:{tagName:'desktop-v1.6.3',isDraft:true,isPrerelease:false}}}})),{tag_name:'desktop-v1.6.3',draft:true,prerelease:false});
+ assert.equal(parseGraphqlReleaseResponse(ok({data:{repository:{release:null}}})),null);
+ assert.throws(()=>parseGraphqlReleaseResponse(ok({errors:[{message:'boom'}],data:{repository:{release:null}}})),/release_api_failed/);
+ assert.throws(()=>parseGraphqlReleaseResponse(ok({data:{repository:{}}})),/release_api_shape_unconfirmed/);
+});
