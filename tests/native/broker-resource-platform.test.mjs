@@ -80,6 +80,14 @@ test('the packaged service contract fails when the Broker Windows absence helper
     writeFileSync(join(dir, 'node.exe'), 'not the pinned node'); writeFileSync(join(dir, 'LICENSE'), 'x');
     assert.throws(() => contracts.serviceLaunch('intent-broker', resources, probeEnv, 'win32', 'x64'), /packaged Broker Node runtime is invalid for win32-x64/);
   });
+  for (const target of ['darwin-arm64', 'win32-x64']) test(`pack gate refuses a ${target} Broker runtime whose manifest does not match the lock`, t => {
+    const [platform, arch] = target.split('-');
+    const resources = tempResources(t), dir = join(resources, 'services/intent-broker/runtime', target);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ ...brokerRuntime.expectedManifest(target), node: '22.23.4' }));
+    writeFileSync(join(dir, platform === 'win32' ? 'node.exe' : 'node'), 'x'); writeFileSync(join(dir, 'LICENSE'), 'x');
+    assert.throws(() => contracts.serviceLaunch('intent-broker', resources, probeEnv, platform, arch), new RegExp(`packaged Broker Node runtime (is invalid|was not selected) for ${target}`));
+  });
   test('only unsupported Broker targets and KSwarm keep the host Node launcher', t => {
     const resources = tempResources(t);
     for (const [name, platform, arch] of [['intent-broker', 'linux', 'x64'], ['intent-broker', 'win32', 'ia32'], ['kswarm', 'darwin', 'arm64'], ['kswarm', 'win32', 'x64']]) {
