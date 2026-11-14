@@ -1,8 +1,9 @@
 import {request} from 'node:http';
 import {z} from 'zod/v3';
-import {KIM_MODEL,KIM_SCORES_SCHEMA,type KimScores,type KimWindow} from './contracts.js';
+import {KIM_MODEL,type KimScores,type KimWindow} from './contracts.js';
 import {canonicalKimOrigin} from './config.js';
 import {renderKimWindow} from './window.js';
+import {KIM_WIRE_SCORES_SCHEMA} from './wire-scores.js';
 const LIMIT=256000;
 /** Native direct HTTP to literal loopback: no proxy env, redirects or remote fallback. */
 export class KimDecisionClient {
@@ -27,7 +28,7 @@ export class KimDecisionClient {
  async judge(windows:KimWindow[],origin:string,signal:AbortSignal):Promise<KimScores[]>{
   if(this.busy)throw Error('kim_busy');if(windows.length>100)throw Error('kim_input_limit');signal.throwIfAborted();this.busy=true;
   try{const results:KimScores[]=[];for(let i=0;i<windows.length;i+=8){signal.throwIfAborted();const texts=windows.slice(i,i+8).map(renderKimWindow);let parsed;
-    try{parsed=z.object({results:z.array(KIM_SCORES_SCHEMA).max(8)}).strict().parse(await this.call(origin,'/decide_batch',{texts},signal));}
+    try{parsed=z.object({results:z.array(KIM_WIRE_SCORES_SCHEMA).max(8)}).strict().parse(await this.call(origin,'/decide_batch',{texts},signal));}
     catch(e){if(e instanceof z.ZodError)throw Error('kim_invalid_response');throw e;}
     if(parsed.results.length!==texts.length)throw Error('kim_invalid_response');results.push(...parsed.results);
    }return results;

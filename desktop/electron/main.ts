@@ -1,3 +1,4 @@
+import {readAssistantAutomationContext} from './assistant-automation-context.js';
 import {DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
 import {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
 import {bootstrapDesktopAssistantAnalysisProvider,checkDesktopAssistantAnalysisProviderSupport} from './assistant-analysis-provider.js';
@@ -1533,6 +1534,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     canLaunch:()=>services.assertAssistantExecutor(),
     reminders:{create:(item,at)=>timedActionService.createReminder(item.title,at,undefined,{requestSource:'user',ownerKind:'user',ownerId:'desktop-user'}).reminderId,cancel:id=>{timedActionService.cancelReminder(id,{requestSource:'user'});}},
     changed:()=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('desktop:assistantInbox:changed');},
+    automations:()=>readAssistantAutomationContext({canRead:()=>{const profile=loopRuntime.loopStore.getAssistantProfile('default-personal-assistant');return profile?.status==='active'&&['automations','tasks'].every(scope=>(profile.dataScopes??[]).includes(scope as never));},listActions:()=>timedActionService.getActions(),listRuns:id=>timedActionStore.listRuns(id),readTask:id=>services.readScheduledTaskSnapshot(id)}),
     internal:()=>assistantContextReader.listMorningSuggestions(),
     facts:()=>readRecentTaskSnapshots(dataRoot,2000).map(snapshot=>({...snapshot,status:snapshot.executionProtected?'unknown':snapshot.status})),
   });
