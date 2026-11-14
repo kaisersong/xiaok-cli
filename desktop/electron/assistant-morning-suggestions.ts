@@ -2,6 +2,8 @@ import {parseAssistantActionRecommendation} from '../../src/runtime/assistant/ac
 interface MorningSuggestionRun {
   id: string;
   status: string;
+  finishedAt?: number;
+  updatedAt?: number;
 }
 
 interface MorningSuggestionEvidence {
@@ -12,13 +14,14 @@ export interface MorningSuggestionView {
   id: string;
   title: string;
   summary: string;
+  observedAt?: number;
 }
 
 export function listLatestMorningSuggestions(input: {
   listRuns(): MorningSuggestionRun[];
   listEvidence(runId: string): MorningSuggestionEvidence[];
 }): MorningSuggestionView[] {
-  const run = input.listRuns().find(candidate => candidate.status === 'success');
+  const run = input.listRuns().filter(candidate => candidate.status === 'success').sort((a,b)=>(b.finishedAt??b.updatedAt??0)-(a.finishedAt??a.updatedAt??0))[0];
   if (!run) return [];
   for (const evidence of input.listEvidence(run.id)) {
     if (evidence.metadata.assistantKind !== 'morning') continue;
@@ -30,8 +33,8 @@ export function listLatestMorningSuggestions(input: {
       const title = readString(recommendation.title);
       const reasonCode = readString(recommendation.reasonCode);
       if (!title || !reasonCode || !hasEvidenceRefs(recommendation.evidenceRefs)) return [];
-      if(output.schemaVersion===2){try{const action=parseAssistantActionRecommendation(recommendation);return [{id:`${run.id}:${index}`,title:action.title,summary:action.action.reason}];}catch{return [];}}
-      return [{ id: `${run.id}:${index}`, title, summary: reasonCode }];
+      if(output.schemaVersion===2){try{const action=parseAssistantActionRecommendation(recommendation);return [{id:`${run.id}:${index}`,title:action.title,summary:action.action.reason,...(run.finishedAt!==undefined?{observedAt:run.finishedAt}:{})}];}catch{return [];}}
+      return [{ id: `${run.id}:${index}`, title, summary: reasonCode, ...(run.finishedAt!==undefined?{observedAt:run.finishedAt}:{}) }];
     });
   }
   return [];

@@ -1,0 +1,13 @@
+// @vitest-environment node
+import {it,expect} from 'vitest';
+import {readAssistantAutomationContext} from '../../electron/assistant-automation-context.js';
+const action={id:'daily',title:'AI日报',ownerKind:'user',executor:{kind:'agent_task'},status:'active',updatedAt:300,nextDueAt:500} as any;
+const run={runId:'run-new',actionId:'daily',status:'success',runtimeTaskId:'task-new',startedAt:200};
+const read=(snapshot:any)=>readAssistantAutomationContext({listActions:()=>[action],listRuns:()=>[run],readTask:()=>snapshot},400);
+it('reads latest completed report body and settlement',async()=>{expect((await read({taskId:'task-new',status:'completed',result:{summary:'Today https://example.test'},hostDelivery:{hostSettlement:'committed'}})).items[0]).toMatchObject({runtimeTaskId:'task-new',runtimeStatus:'completed',summary:'Today https://example.test',hostSettlement:'committed'});});
+it('keeps dispatch distinct and suppresses protected and mismatched snapshot bodies',async()=>{expect((await read({taskId:'task-new',status:'failed'})).items[0].runtimeStatus).toBe('failed');for(const snapshot of [{taskId:'task-new',executionProtected:true,status:'completed',result:{summary:'private'}},{taskId:'wrong',status:'completed',result:{summary:'wrong'}}])expect((await read(snapshot)).items[0]).not.toHaveProperty('summary');});
+it('reports read failures and respects owner and output limits',async()=>{expect((await readAssistantAutomationContext({listActions:()=>[action],listRuns:()=>[run],readTask:()=>{throw Error('disk');}},400)).items[0].runtimeStatus).toBe('unavailable');expect((await readAssistantAutomationContext({listActions:()=>[{...action,ownerKind:'agent_task'}],listRuns:()=>[run],readTask:()=>undefined},400)).items).toEqual([]);expect((await read({taskId:'task-new',status:'completed',result:{summary:'x'.repeat(40000)}})).items[0].summaryTruncated).toBe(true);});
+
+it('does not open stores when scopes are unavailable',async()=>{const result=await readAssistantAutomationContext({canRead:()=>false,listActions:()=>{throw Error('must not read');},listRuns:()=>[],readTask:()=>undefined},400);expect(result.state).toBe('unavailable');expect(result.items).toEqual([]);});
+
+it('omits bodies explicitly when the shared output budget is exhausted',async()=>{const result=await readAssistantAutomationContext({listActions:()=>[action,{...action,id:'second'},{...action,id:'third'}],listRuns:id=>[{...run,actionId:id}],readTask:()=>({taskId:'task-new',status:'completed',result:{summary:'x'.repeat(40000)}} as any)},400);expect(result.items[2]).toMatchObject({summaryOmitted:true,summaryTruncated:true});expect(result.items[2]).not.toHaveProperty('summary');});

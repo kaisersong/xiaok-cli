@@ -1,0 +1,5 @@
+// @vitest-environment node
+import {it,expect,vi} from 'vitest';
+import {createAssistantReadSourcesTool} from '../../electron/assistant-read-sources-tool.js';
+it('reads the current report without refreshing unrelated external sources',async()=>{const refresh=vi.fn(),state=vi.fn(()=>({items:[],coverage:[]}));const tool=createAssistantReadSourcesTool({refresh,state,automations:async()=>({state:'available',asOf:100,limited:false,items:[{actionId:'daily',title:'Daily',scheduleStatus:'active',runtimeStatus:'completed',summary:'Current report'}]})});const result=JSON.parse(await tool.execute({scope:'automations'}) as string);expect(refresh).not.toHaveBeenCalled();expect(state).not.toHaveBeenCalled();expect(result.automations.items[0].summary).toBe('Current report');});
+it('preserves the default refresh path and fails closed on unknown input',async()=>{const refresh=vi.fn(async()=>{}),state=()=>({items:[],coverage:[]});const tool=createAssistantReadSourcesTool({refresh,state});await tool.execute({});expect(refresh).toHaveBeenCalledOnce();await expect(tool.execute({scope:'all',path:'/private'})).rejects.toThrow();});
