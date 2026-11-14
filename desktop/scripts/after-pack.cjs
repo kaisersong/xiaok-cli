@@ -21,8 +21,10 @@ module.exports = async function afterPack(context) {
   await verifyPackagedRuntimeDependencies(context);
   await verifyPackagedContinuitySource(context);
   await verifyPackagedYzjCli(context);
-  await verifyPackagedServiceContracts(context);
   await packBundledRuntimes(context);
   await packBrokerRuntime(context);
+  // The service gate probes the Broker with the pinned packaged Node runtime
+  // that production uses, so that runtime must be shipped before the probe.
+  await verifyPackagedServiceContracts(context);
   await packArtifactExportHelper(context);
 };

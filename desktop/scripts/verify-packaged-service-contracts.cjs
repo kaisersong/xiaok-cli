@@ -54,7 +54,30 @@ async function stop(child) {
   const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
   try { await exited; } finally { clearTimeout(timer); }
 }
-async function serviceProbe(name, resources, root, timeoutMs, workflowSupport) {
+// Production starts the Broker with its own pinned packaged Node runtime
+// (resolvePackagedBrokerRuntime), never the packaging host's Node. Probe the
+// same executable and sanitized environment so a host Node version cannot
+// decide the release; a supported target without a verified runtime fails.
+function packagedBrokerRuntime(resources, platform, arch, env) {
+  if (platform === undefined && arch === undefined) return null;
+  const { resolvePackagedBrokerRuntime, targetEntry } = require('../electron/broker-runtime-package.cjs');
+  if (!targetEntry(`${platform}-${arch}`)) return null;
+  let runtime;
+  try { runtime = resolvePackagedBrokerRuntime({ isPackaged: true, resourcesPath: resources, platform, arch, env }); }
+  catch (error) { fail('intent-broker runtime', `packaged Broker Node runtime is invalid for ${platform}-${arch}: ${error.message}`); }
+  if (!runtime) fail('intent-broker runtime', `packaged Broker Node runtime was not selected for ${platform}-${arch}`);
+  return runtime;
+}
+function serviceLaunch(name, resources, env, platform, arch) {
+  const runtime = name === 'intent-broker' ? packagedBrokerRuntime(resources, platform, arch, env) : null;
+  return runtime ? { command: runtime.command, env: { ...runtime.env }, runtime } : { command: process.execPath, env, runtime: null };
+}
+function assertBrokerRuntimeHealth(label, health, runtime) {
+  if (!runtime) return;
+  const { brokerRuntimeMatchesHealth } = require('../electron/broker-runtime-package.cjs');
+  if (!brokerRuntimeMatchesHealth(health, runtime)) fail(label, 'health does not report the pinned packaged Broker Node runtime');
+}
+async function serviceProbe(name, resources, root, timeoutMs, workflowSupport, platform, arch) {
   const serviceRoot = path.join(resources, 'services', name);
   const manifest = JSON.parse(readFileSync(file(serviceRoot, 'package.json', name), 'utf8'));
   const label = `${name}@${manifest.version}`;
@@ -64,7 +87,8 @@ async function serviceProbe(name, resources, root, timeoutMs, workflowSupport) {
   const env = { ...environment(cwd), PORT: String(selectedPort), KSWARM_PORT: String(selectedPort), KSWARM_DATA_ROOT: cwd,
     BROKER_URL: 'http://127.0.0.1:1', INTENT_BROKER_SOCKET_PATH: '', INTENT_BROKER_DB: path.join(cwd, 'broker.sqlite'),
     INTENT_BROKER_CONFIG: path.join(cwd, 'absent.json'), INTENT_BROKER_LOCAL_CONFIG: path.join(cwd, 'absent-local.json') };
-  const child = spawn(process.execPath, ['--experimental-sqlite', entry], { cwd, env, stdio: ['ignore','pipe','pipe'], windowsHide: true });
+  const launch = serviceLaunch(name, resources, env, platform, arch);
+  const child = spawn(launch.command, ['--experimental-sqlite', entry], { cwd, env: launch.env, stdio: ['ignore','pipe','pipe'], windowsHide: true });
   let output = '', spawnError;
   child.on('error', error => { spawnError = error; });
   for (const stream of [child.stdout,child.stderr]) stream.on('data', data => { output = (output + String(data)).slice(-4096); });
@@ -81,6 +105,7 @@ async function serviceProbe(name, resources, root, timeoutMs, workflowSupport) {
     }
     if (!health) fail(label, `health timeout after ${timeoutMs}ms: ${output}`);
     validateHealth(name, health, child, entry, label, workflowSupport);
+    assertBrokerRuntimeHealth(label, health, launch.runtime);
     if (name === 'kswarm') for (const route of ['activity','activity-identity']) {
       const response = await fetch(`http://127.0.0.1:${selectedPort}/projects/__pack_probe__/${route}`, { signal: AbortSignal.timeout(1000) });
       if (response.status !== 401) fail(label, `${route} must exist and reject an unauthenticated read (got ${response.status})`);
@@ -144,7 +169,7 @@ async function verify({ resources, projectDir, timeoutMs = 10000, platform, arch
     const contractPath = file(projectDir, 'dist/main/desktop/shared/kswarm-health-contract.js', 'Desktop health contract');
     const { hasDynamicWorkflowSupport } = await import(pathToFileURL(contractPath).href);
     const services = [];
-    for (const name of ['kswarm','intent-broker']) services.push(await serviceProbe(name, resources, root, timeoutMs, hasDynamicWorkflowSupport));
+    for (const name of ['kswarm','intent-broker']) services.push(await serviceProbe(name, resources, root, timeoutMs, hasDynamicWorkflowSupport, platform, arch));
     await reportProbe(resources, projectDir, root, timeoutMs);
     return [...services, ...helpers, ...plugins];
   } catch (error) {
@@ -164,3 +189,5 @@ module.exports.verify = verify;
 module.exports.validateHealth = validateHealth;
 module.exports.pluginFiles = pluginFiles;
 module.exports.brokerWindowsAbsenceHelper = brokerWindowsAbsenceHelper;
+module.exports.serviceLaunch = serviceLaunch;
+module.exports.assertBrokerRuntimeHealth = assertBrokerRuntimeHealth;
