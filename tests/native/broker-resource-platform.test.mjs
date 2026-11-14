@@ -57,3 +57,57 @@ test('the packaged service contract fails when the Broker Windows absence helper
   assert.deepEqual(brokerWindowsAbsenceHelper(resources, 'x64'), { component: 'intent-broker-windows-absence', version: 'win32-x64' });
   assert.throws(() => brokerWindowsAbsenceHelper(resources, 'arm64'), /missing or escaping packaged file/);
 });
+// 1.6.3 pack blocker: the afterPack service gate spawned the Broker with the
+// packaging host's Node (CI 22.x), whose DatabaseSync[Symbol.dispose] is a JS
+// function the source custody holds as unknown, so the gate failed closed with
+// broker_sqlite_sdk_unconfirmed while production runs the pinned Node 24 runtime.
+// The gate must probe the exact pinned runtime production resolves, and refuse
+// a release target whose runtime is absent, tampered or not reported by health.
+{
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const contracts = req('../../desktop/scripts/verify-packaged-service-contracts.cjs');
+  const brokerRuntime = req('../../desktop/electron/broker-runtime-package.cjs');
+  const probeEnv = { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', PORT: '1', INTENT_BROKER_DB: 'x.sqlite' };
+  const tempResources = t => { const root = realpathSync(mkdtempSync(join(tmpdir(), 'broker-pack-gate-'))); t.after(() => rmSync(root, { recursive: true, force: true })); return root; };
+  for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64']]) test(`pack gate refuses a ${platform}-${arch} package without its pinned Broker runtime`, t => {
+    assert.throws(() => contracts.serviceLaunch('intent-broker', tempResources(t), probeEnv, platform, arch), /packaged service contract: intent-broker runtime: packaged Broker Node runtime/);
+  });
+  test('pack gate refuses a tampered pinned Broker runtime instead of falling back to host Node', t => {
+    const resources = tempResources(t), dir = join(resources, 'services/intent-broker/runtime/win32-x64');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(brokerRuntime.expectedManifest('win32-x64')));
+    writeFileSync(join(dir, 'node.exe'), 'not the pinned node'); writeFileSync(join(dir, 'LICENSE'), 'x');
+    assert.throws(() => contracts.serviceLaunch('intent-broker', resources, probeEnv, 'win32', 'x64'), /packaged Broker Node runtime is invalid for win32-x64/);
+  });
+  test('only unsupported Broker targets and KSwarm keep the host Node launcher', t => {
+    const resources = tempResources(t);
+    for (const [name, platform, arch] of [['intent-broker', 'linux', 'x64'], ['intent-broker', 'win32', 'ia32'], ['kswarm', 'darwin', 'arm64'], ['kswarm', 'win32', 'x64']]) {
+      const launch = contracts.serviceLaunch(name, resources, probeEnv, platform, arch);
+      assert.equal(launch.command, process.execPath); assert.equal(launch.runtime, null); assert.equal(launch.env, probeEnv);
+    }
+  });
+  test('the Broker probe launches the resolved pinned runtime with its sanitized environment', t => {
+    const root = tempResources(t);
+    mkdirSync(join(root, 'scripts')); mkdirSync(join(root, 'electron'));
+    copyFileSync(join(repo, 'desktop/scripts/verify-packaged-service-contracts.cjs'), join(root, 'scripts/verify.cjs'));
+    const command = join(root, 'pinned', 'node');
+    writeFileSync(join(root, 'electron/broker-runtime-package.cjs'), `const seen=[];module.exports={seen,targetEntry:t=>t==='darwin-arm64'?{}:null,
+      resolvePackagedBrokerRuntime:o=>{seen.push(o);const env={...o.env};delete env.ELECTRON_RUN_AS_NODE;delete env.NODE_OPTIONS;return Object.freeze({command:${JSON.stringify(command)},env:Object.freeze(env),expected:{}});}};`);
+    const isolated = req(join(root, 'scripts/verify.cjs'));
+    const launch = isolated.serviceLaunch('intent-broker', '/pkg/Resources', probeEnv, 'darwin', 'arm64');
+    assert.equal(launch.command, command);
+    assert.deepEqual(launch.env, { PORT: '1', INTENT_BROKER_DB: 'x.sqlite' });
+    const [options] = req(join(root, 'electron/broker-runtime-package.cjs')).seen;
+    assert.deepEqual({ isPackaged: options.isPackaged, resourcesPath: options.resourcesPath, platform: options.platform, arch: options.arch }, { isPackaged: true, resourcesPath: '/pkg/Resources', platform: 'darwin', arch: 'arm64' });
+  });
+  test('Broker health must report the pinned runtime the pack gate launched', t => {
+    const command = join(tempResources(t), 'node');
+    const runtime = { command, expected: { node: '24.19.0', sqlite: '3.53.3', executableSha256: 'a'.repeat(64) } };
+    const healthy = { service: { runtime: { node: '24.19.0', sqlite: '3.53.3', executableSha256: 'a'.repeat(64), execPath: command } } };
+    assert.doesNotThrow(() => contracts.assertBrokerRuntimeHealth('intent-broker@0.3.9', healthy, runtime));
+    for (const runtimeReport of [undefined, { ...healthy.service.runtime, node: '22.23.4' }, { ...healthy.service.runtime, execPath: process.execPath }, { ...healthy.service.runtime, executableSha256: 'b'.repeat(64) }])
+      assert.throws(() => contracts.assertBrokerRuntimeHealth('intent-broker@0.3.9', { service: { runtime: runtimeReport } }, runtime), /health does not report the pinned packaged Broker Node runtime/);
+    assert.doesNotThrow(() => contracts.assertBrokerRuntimeHealth('kswarm@0.9.3', { ok: true }, null));
+  });
+}
