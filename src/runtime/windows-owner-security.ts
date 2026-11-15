@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 export interface WindowsOwnerFacts {
   readonly currentSid: string; readonly ownerSid: string; readonly allowSids: readonly string[];
   readonly protected: boolean; readonly directory: boolean; readonly identity: string; readonly sddl: string;
-  readonly protectionOwnerEligible: boolean;
+  readonly protectionOwnerEligible: boolean; readonly currentUserInheritableFullControl: boolean;
 }
 export interface WindowsProfileCustody {readonly currentSid:string;readonly rootIdentity:string;assertCurrent():void;close():void}
 type NativeSecurity = {holdProfile(root:string,initialize:boolean,observeDatabases:boolean):WindowsProfileCustody;publishProfileFile(source:string,destination:string):boolean;protectDirectory(path:string):WindowsOwnerFacts;createPrivateDirectory(path:string):boolean;inspect(path:string):WindowsOwnerFacts;protectFile(path:string):WindowsOwnerFacts;processBirth(pid:number):string;writePrivateFile(path:string,content:string,exclusive:boolean):boolean};
@@ -34,7 +34,7 @@ function native():NativeSecurity {
 }
 function captured(value:WindowsOwnerFacts):WindowsOwnerFacts {
   const sid=/^S-1-\d+(?:-\d+)+$/;
-  if(!value||!sid.test(value.currentSid)||!sid.test(value.ownerSid)||!Array.isArray(value.allowSids)||value.allowSids.length>1024||!value.allowSids.every(item=>typeof item==='string'&&sid.test(item))||typeof value.protected!=='boolean'||typeof value.directory!=='boolean'||typeof value.protectionOwnerEligible!=='boolean'||typeof value.identity!=='string'||!/^\d+:\d+:\d+:\d+$/.test(value.identity)||typeof value.sddl!=='string'||value.sddl.length>65536)unavailable();
+  if(!value||!sid.test(value.currentSid)||!sid.test(value.ownerSid)||!Array.isArray(value.allowSids)||value.allowSids.length>1024||!value.allowSids.every(item=>typeof item==='string'&&sid.test(item))||typeof value.protected!=='boolean'||typeof value.directory!=='boolean'||typeof value.currentUserInheritableFullControl!=='boolean'||typeof value.protectionOwnerEligible!=='boolean'||typeof value.identity!=='string'||!/^\d+:\d+:\d+:\d+$/.test(value.identity)||typeof value.sddl!=='string'||value.sddl.length>65536)unavailable();
   return Object.freeze({...value,allowSids:Object.freeze([...value.allowSids])});
 }
 /** Ordinary OS metadata; never a Native authority or a caller-supplied SID proof. */
@@ -98,7 +98,7 @@ export function prepareWindowsOwnedDatabase(path:string):void {
  }
  for(const directory of missing.reverse())createExclusiveWindowsPrivateDirectory(directory);
  const parent=inspectWindowsOwnerPath(dirname(path));
- if(!parent.directory||!parent.protectionOwnerEligible||parent.allowSids.length===0||parent.allowSids.some(sid=>![parent.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid))||!parent.sddl.split('(').some(ace=>{const parts=ace.split(';');return parts[0]==='A'&&parts[1]?.includes('OI')&&parts[1]?.includes('CI')&&!parts[1]?.includes('IO')&&parts[2]==='FA'&&parts[5]===parent.currentSid+')';}))unavailable();
+ if(!parent.directory||!parent.protectionOwnerEligible||parent.allowSids.length===0||parent.allowSids.some(sid=>![parent.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid))||!parent.currentUserInheritableFullControl)unavailable();
  if(!existsSync(path)){writeWindowsPrivateFile(path,'',true);return;}
  const file=inspectWindowsOwnerPath(path);
  if(file.directory||!file.protectionOwnerEligible||file.allowSids.length===0||file.allowSids.some(sid=>![file.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid)))unavailable();

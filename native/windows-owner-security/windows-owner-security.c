@@ -80,22 +80,25 @@ static napi_value inspect_handle(napi_env env,HANDLE handle,TOKEN_USER *user,int
   if(!GetSecurityDescriptorControl(descriptor,&control,&revision))goto done;
   napi_value allows,protected_value,directory_value,owner_eligible;
   if(napi_create_object(env,&result)!=napi_ok||napi_create_array(env,&allows)!=napi_ok)goto invalid;
-  uint32_t allow_count=0;
+  uint32_t allow_count=0;int current_user_inheritable_full_control=0;
   for(DWORD i=0;i<acl->AceCount;i++){
     void *raw=NULL;if(!GetAce(acl,i,&raw))goto invalid;ACE_HEADER *header=(ACE_HEADER*)raw;
     if(header->AceType==ACCESS_DENIED_ACE_TYPE)continue;
     if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE||header->AceSize<sizeof(ACCESS_ALLOWED_ACE))goto invalid;
     ACCESS_ALLOWED_ACE *entry=(ACCESS_ALLOWED_ACE*)raw;PSID principal=(PSID)&entry->SidStart;
     if(header->AceSize<16||GetSidLengthRequired(((SID*)principal)->SubAuthorityCount)>(DWORD)header->AceSize-8||!IsValidSid(principal))goto invalid;
+    /* Binary ACL facts, not SDDL presentation aliases. Denied access still fails at open. */
+    if(entry->Mask==FILE_ALL_ACCESS&&(header->AceFlags&(OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE|INHERIT_ONLY_ACE))==(OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE)&&EqualSid(principal,user->User.Sid))current_user_inheritable_full_control=1;
     napi_value name=sid(env,principal);if(!name||napi_set_element(env,allows,allow_count++,name)!=napi_ok)goto invalid;
   }
   LPWSTR sddl=NULL;
   if(!ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor,SDDL_REVISION_1,OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&sddl,NULL))goto invalid;
   napi_value descriptor_text=wide(env,sddl);LocalFree(sddl);if(!descriptor_text)goto invalid;
   char identity[96];snprintf(identity,sizeof(identity),"%lu:%lu:%lu:%lu",(unsigned long)file.dwVolumeSerialNumber,(unsigned long)file.nFileIndexHigh,(unsigned long)file.nFileIndexLow,(unsigned long)file.nNumberOfLinks);
-  napi_value owner_text=sid(env,owner),current_text=sid(env,user->User.Sid);
+  napi_value owner_text=sid(env,owner),current_text=sid(env,user->User.Sid),inheritable_full_control;
+  if(napi_get_boolean(env,current_user_inheritable_full_control,&inheritable_full_control)!=napi_ok)goto invalid;
   if(!owner_text||!current_text||napi_get_boolean(env,(control&SE_DACL_PROTECTED)!=0,&protected_value)!=napi_ok||napi_get_boolean(env,(file.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0,&directory_value)!=napi_ok||napi_get_boolean(env,protection_owner(owner,user),&owner_eligible)!=napi_ok)goto invalid;
-  if(!set(env,result,"ownerSid",owner_text)||!set(env,result,"currentSid",current_text)||!set(env,result,"allowSids",allows)||!set(env,result,"protected",protected_value)||!set(env,result,"directory",directory_value)||!set(env,result,"protectionOwnerEligible",owner_eligible)||!set(env,result,"identity",text(env,identity))||!set(env,result,"sddl",descriptor_text))goto invalid;
+  if(!set(env,result,"ownerSid",owner_text)||!set(env,result,"currentSid",current_text)||!set(env,result,"allowSids",allows)||!set(env,result,"protected",protected_value)||!set(env,result,"directory",directory_value)||!set(env,result,"protectionOwnerEligible",owner_eligible)||!set(env,result,"identity",text(env,identity))||!set(env,result,"sddl",descriptor_text)||!set(env,result,"currentUserInheritableFullControl",inheritable_full_control))goto invalid;
   goto done;
 invalid: result=NULL;
 done: if(descriptor)LocalFree(descriptor);return result;

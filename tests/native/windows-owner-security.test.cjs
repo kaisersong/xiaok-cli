@@ -74,3 +74,20 @@ test('private directories give SQLite-created children only the current SID', wi
     assert.throws(()=>api.protectDirectory(file),/windows_security/);
   }finally{fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
 });
+test('native ACL facts distinguish current-user inheritable full control without parsing SDDL', windows, () => {
+  const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-inheritable-acl-')),root=path.join(base,'private');
+  const quote=s=>s.replace(/'/g,"''");
+  try {
+    assert.equal(api.createPrivateDirectory(root),true);
+    const facts=api.inspect(root);
+    const actual=JSON.parse(ps(`$a=[IO.Directory]::GetAccessControl('${quote(root)}');@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])|ForEach-Object {@{sid=$_.IdentityReference.Value;rights=[int]$_.FileSystemRights;inheritance=[int]$_.InheritanceFlags;propagation=[int]$_.PropagationFlags;allow=($_.AccessControlType -eq 'Allow')}})|ConvertTo-Json -Compress`));
+    const rules=Array.isArray(actual)?actual:[actual];
+    assert(rules.some(rule=>rule.allow&&rule.sid===facts.currentSid&&rule.rights===2032127&&rule.inheritance===3&&rule.propagation===0));
+    assert.equal(facts.currentUserInheritableFullControl,true);
+    for(const [rights,inheritance] of [['Read',3],['FullControl',0],['FullControl',1],['FullControl',2]]) {
+      ps(`$p='${quote(root)}';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User;$a=New-Object Security.AccessControl.DirectorySecurity;$a.SetOwner($sid);$a.SetAccessRuleProtection($true,$false);$r=New-Object Security.AccessControl.FileSystemAccessRule($sid,[Security.AccessControl.FileSystemRights]::${rights},[Security.AccessControl.InheritanceFlags]${inheritance},[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);$a.AddAccessRule($r);[IO.Directory]::SetAccessControl($p,$a)`);
+      assert.equal(api.inspect(root).currentUserInheritableFullControl,false,`${rights}/${inheritance} is insufficient`);
+      api.protectDirectory(root);
+    }
+  }finally{api.protectDirectory(root);fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+});

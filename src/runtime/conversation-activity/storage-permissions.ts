@@ -117,5 +117,5 @@ export function createPrivateActivityDirectory(root: string): void {
  * OS principals; never tighten the shared config root or accept ordinary users. */
 export function assertWindowsPrivateActivityParent(file:string):void {
   const facts=inspectWindowsOwnerPath(dirname(file));
-  if(!facts.directory||!facts.protectionOwnerEligible||facts.allowSids.length===0||facts.allowSids.some(sid=>![facts.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid))||!facts.sddl.split('(').some(ace=>{const parts=ace.split(';');return parts[0]==='A'&&parts[1]?.includes('OI')&&parts[1]?.includes('CI')&&!parts[1]?.includes('IO')&&parts[2]==='FA'&&parts[5]===facts.currentSid+')';}))throw Error('activity_storage_not_private');
+  if(!facts.directory||!facts.protectionOwnerEligible||facts.allowSids.length===0||facts.allowSids.some(sid=>![facts.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid))||!facts.currentUserInheritableFullControl)throw Error('activity_storage_not_private');
 }
