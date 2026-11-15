@@ -27,7 +27,7 @@ describe('Desktop startup when the activity owner cannot be attached', () => {
     expect(show).toHaveBeenCalledTimes(1);
     await startKSwarmWithActivityOwner(deps(async () => { throw new Error('activity_owner_start_timeout'); }) as never, once);
     expect(show).toHaveBeenCalledTimes(2);
-    expect(show.mock.calls.every(([text]) => text === ACTIVITY_OWNER_UNAVAILABLE_NOTICE)).toBe(true);
+    expect(show.mock.calls[1]![0]).toBe(ACTIVITY_OWNER_UNAVAILABLE_NOTICE);
   });
 
   it('a throwing notice presenter cannot stop KSwarm from starting', async () => {
@@ -58,4 +58,19 @@ describe('Desktop startup when the activity owner cannot be attached', () => {
     }
     expect(en.conversationActivity.ownerUnavailable.length).toBeGreaterThan(20);
   });
+});
+
+ it.each(['zh','en'] as const)('a local connection timeout shows actionable %s guidance and still starts the service',async locale=>{
+  const show=vi.fn(),d=deps(async()=>{throw Error('activity_source_start_timeout:local_connection_unavailable');});
+  const once=createOnceNotice(show,locale);
+  await expect(startKSwarmWithActivityOwner(d as never,once)).resolves.toEqual({attached:false});
+  await startKSwarmWithActivityOwner(d as never,once);expect(show).toHaveBeenCalledTimes(1);expect(d.kswarmService.start).toHaveBeenCalledTimes(2);
+  const text=locale==='zh'?zh.conversationActivity.localConnectionUnavailable:en.conversationActivity.localConnectionUnavailable;
+  expect(show).toHaveBeenCalledWith(text);expect(text).not.toMatch(/activity_source|_unavailable|firewall|防火墙|版本不一致|does not match/);
+  expect(text).toMatch(locale==='zh'?/联系管理员/:/administrator/);
+ });
+
+it.each(['activity_owner_disconnected','activity_owner_start_timeout'])('an owner exit preserves actionable guidance without diagnosing a version conflict (%s)',async code=>{
+ const show=vi.fn(),d=deps(async()=>{throw Error(code);});await startKSwarmWithActivityOwner(d as never,createOnceNotice(show));
+ expect(show).toHaveBeenCalledWith(ACTIVITY_OWNER_UNAVAILABLE_NOTICE);expect(ACTIVITY_OWNER_UNAVAILABLE_NOTICE).toContain('联系管理员');expect(ACTIVITY_OWNER_UNAVAILABLE_NOTICE).not.toContain('版本不一致');
 });

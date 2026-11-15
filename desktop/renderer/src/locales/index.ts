@@ -3343,7 +3343,7 @@ followUpAcceptedDraft:string;
     nativeApprove:string;nativeDeny:string;nativeSubmitting:string;nativeAnswered:string;nativeAnswerUnconfirmed:string;nativeRefresh:string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
-    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string; localConnectionUnavailable: string;
     report: (state: string, ago: string) => string; noReport: string;
     unread: (count: number) => string;
     sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;

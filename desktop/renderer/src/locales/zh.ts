@@ -1,3 +1,4 @@
+import {activityOwnerStartupLabels} from '../../../shared/activity-owner-startup-labels.js';
 import { localDecisionModelsZh } from './local-decision-models';
 import {kimDecisionZh} from './kim-decision';
 import {secureCredentialsZh} from './secure-credentials';
@@ -3485,6 +3486,7 @@ followUpAcceptedDraft:'已采纳，尚未关联任务',
 
   // chatView
   conversationActivity: {
+    localConnectionUnavailable:activityOwnerStartupLabels.zh.localConnectionUnavailable,
     readyForAcceptance:'待验收',
     nativeApprove:'允许一次',nativeDeny:'拒绝',nativeSubmitting:'正在提交选择…',nativeAnswered:'已提交选择，等待问题状态更新。',nativeAnswerUnconfirmed:'选择是否已生效尚未确认。请刷新问题状态，勿重复提交。',nativeRefresh:'刷新问题状态',
     attentionUnavailable: '综合状态暂不可确认',
@@ -3515,7 +3517,7 @@ followUpAcceptedDraft:'已采纳，尚未关联任务',
     historyGap: '部分历史进展已合并或过期；当前状态按来源确认',
     lastProgress: '最近进展',
     title: '工作跟进', stopped: '已停止跟进', unavailable: '状态暂不可确认', details: '查看项目', lastUpdate: '最近同步', nextReport: '下次汇报',
-    frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。', ownerUnavailable: 'xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。',
+    frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。', ownerUnavailable: activityOwnerStartupLabels.zh.unavailable,
     unread: (count) => `${count} 条未读工作更新`,
     report: (state, ago) => `最近汇报：${state} · ${ago}`, noReport: '还没有汇报',
     sources: { kswarm: '项目', task_host: '后台任务', agent_group: 'Agent 协作', mcp: '插件任务' },

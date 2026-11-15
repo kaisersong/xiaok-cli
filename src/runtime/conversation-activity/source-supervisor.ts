@@ -131,9 +131,12 @@ export class ActivitySourceSupervisor {
     const file = join(this.root, ACTIVITY_STORAGE_NAMES.supervision), temporary = `${file}.${process.pid}.tmp`;
     writePrivateActivityFile(temporary, JSON.stringify({ version: 1, sources: [...this.receipts.values()] })); renameSync(temporary, file);
   }
+  private readonly connectionFailures=new Set<string>();
   private async healthy(source: ActivityManagedSource, pid?: number): Promise<boolean> {
+    let connected=false;
     try {
       const response = await fetch(source.healthUrl, { headers: source.healthHeaders, signal: AbortSignal.timeout(1000) });
+      connected=true;this.connectionFailures.delete(source.name);
       if (!response.ok || !Object.keys(source.expectedHealth).length) return false;
       const payload = await response.json() as unknown;
       if (pid !== undefined && (payload as { service?: { pid?: number } })?.service?.pid !== pid) return false;
@@ -143,7 +146,7 @@ export class ActivitySourceSupervisor {
         return actual === expected;
       });
     }
-    catch { return false; }
+    catch { if(!connected)this.connectionFailures.add(source.name);return false; }
   }
   private alive(pid: number): boolean {
     try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw new Error('activity_source_liveness_unconfirmed'); }
@@ -196,11 +199,12 @@ export class ActivitySourceSupervisor {
       registerConfigTarget(this,child,source,launchEnv);
       const receipt: SourceReceipt = { name: source.name, pid: child.pid, birth: await birth(child.pid, Math.max(1, until - Date.now())), entryHash, ownerEpoch: this.ownerEpoch, external: false };
       this.receipts.set(source.name, receipt); this.save();
+      this.connectionFailures.delete(source.name);
       while (Date.now() < until) { if (failure || child.exitCode !== null) throw new Error('activity_source_start_failed'); if (await this.healthy(source, child.pid)) return receipt; await new Promise(resolve => setTimeout(resolve, 100)); }
       // A child that never proved health is not a usable source. Leaving it
       // running orphans its listener (e.g. Broker on 4318) once the owner exits,
       // and every later launcher then fails with EADDRINUSE.
-      throw new Error('activity_source_start_timeout');
+      throw new Error(process.platform==='win32'&&this.connectionFailures.has(source.name)?'activity_source_start_timeout:local_connection_unavailable':'activity_source_start_timeout');
     } catch (error) {
       await this.reapUnstarted(source.name, child);
       throw error;

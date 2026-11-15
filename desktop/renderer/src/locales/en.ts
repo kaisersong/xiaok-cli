@@ -1,3 +1,4 @@
+import {activityOwnerStartupLabels} from '../../../shared/activity-owner-startup-labels.js';
 import { localDecisionModelsEn } from './local-decision-models';
 import {kimDecisionEn} from './kim-decision';
 import {secureCredentialsEn} from './secure-credentials';
@@ -3502,6 +3503,7 @@ followUpAcceptedDraft:'Accepted; no task linked',
 
   // chatView
   conversationActivity: {
+    localConnectionUnavailable:activityOwnerStartupLabels.en.localConnectionUnavailable,
     readyForAcceptance:'Ready for acceptance',
     nativeApprove:'Allow once',nativeDeny:'Deny',nativeSubmitting:'Submitting your choice…',nativeAnswered:'Choice submitted; waiting for the question status to update.',nativeAnswerUnconfirmed:'The answer has not been confirmed. Refresh the questions before taking another action.',nativeRefresh:'Refresh questions',
     attentionUnavailable: 'Combined status unconfirmed',
@@ -3532,7 +3534,7 @@ followUpAcceptedDraft:'Accepted; no task linked',
     historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',
     lastProgress: 'Last progress',
     title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
-    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.', ownerUnavailable: "xiaoK's background component does not match this version, so some features cannot start yet. Quit all xiaok windows and open it again.",
+    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.', ownerUnavailable: activityOwnerStartupLabels.en.unavailable,
     unread: (count) => `${count} unread work updates`,
     report: (state, ago) => `Latest report: ${state} · ${ago}`, noReport: 'No report yet',
     sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },

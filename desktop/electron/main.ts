@@ -1002,7 +1002,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   }
   const activityOwnerNoticeOnce = createOnceNotice(text => {
     void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
-  });
+  },app.getLocale().toLowerCase().startsWith('zh')?'zh':'en');
   let desktopServicesDegradedNoticeShown = false;
   const desktopServicesDegradedNoticeOnce = (code: string) => {
     if (desktopServicesDegradedNoticeShown) return;
