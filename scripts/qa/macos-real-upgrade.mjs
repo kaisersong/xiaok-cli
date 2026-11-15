@@ -21,9 +21,13 @@ const OLD14 = Object.freeze({ tag: 'desktop-v1.5.14', version: '1.5.14', release
 const OLD15 = Object.freeze({ tag: 'desktop-v1.5.15', version: '1.5.15', release: 419987808,
   sha: '6770092945a42fb0e45ef0d68d0971bfc01b51a8', bytes: 231833178,
   zipSHA256: '1e6e73ca880994d6c7f23ef4919b020099e350702581040113beeb43779cc3c9' });
+const OLD163 = Object.freeze({ tag: 'desktop-v1.6.3', version: '1.6.3', release: 444569883,
+  sha: 'c453f03691cd5d10e07c486d3338b2fd810e30ae', bytes: 283759026,
+  zipSHA256: '9d5713a2489ec9fb7c4fc85ee0fb874a64590e08882897ec8d2fb5b4c8d698ff' });
 function selectOldPreset(version = '1.5.14') {
   if (version === '1.5.14') return OLD14;
   if (version === '1.5.15') return OLD15;
+  if (version === '1.6.3') return OLD163;
   assert.fail('old_version_not_allowed');
 }
 const OLD = selectOldPreset(process.env.QA_OLD_VERSION);
@@ -777,6 +781,14 @@ async function pureControls() {
       sha: '6770092945a42fb0e45ef0d68d0971bfc01b51a8', bytes: 231833178,
       zipSHA256: '1e6e73ca880994d6c7f23ef4919b020099e350702581040113beeb43779cc3c9' });
     assert.throws(() => { selected.release = 1; }, TypeError);
+  });
+  check('published 1.6.3 preset is immutable and 1.6.4 is newer', () => {
+    const selected=selectOldPreset('1.6.3');assert(Object.isFrozen(selected));
+    assert.deepEqual(selected,{tag:'desktop-v1.6.3',version:'1.6.3',release:444569883,
+      sha:'c453f03691cd5d10e07c486d3338b2fd810e30ae',bytes:283759026,
+      zipSHA256:'9d5713a2489ec9fb7c4fc85ee0fb874a64590e08882897ec8d2fb5b4c8d698ff'});
+    assert.doesNotThrow(()=>assertNewerVersion('1.6.4',selected.version));
+    assert.throws(()=>assertNewerVersion('1.6.3',selected.version),/new_version_must_follow_selected_old/);
   });
   check('unknown old versions cannot select or override a preset', () => {
     for (const version of ['1.5.13', '1.5.16', '', '__proto__']) assert.throws(() => selectOldPreset(version), /old_version_not_allowed/);

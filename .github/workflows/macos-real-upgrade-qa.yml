@@ -13,12 +13,13 @@ on:
         options:
           - '1.5.14'
           - '1.5.15'
+          - '1.6.3'
         default: '1.5.14'
         required: true
       new_tag:
         description: Published desktop tag approved by the coordinator
         type: string
-        default: desktop-v1.5.16
+        default: desktop-v1.6.4
         required: true
       new_sha:
         description: Exact full source SHA of that published tag
