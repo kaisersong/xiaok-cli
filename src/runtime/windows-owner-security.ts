@@ -10,7 +10,8 @@ export interface WindowsOwnerFacts {
   readonly protectionOwnerEligible: boolean; readonly currentUserInheritableFullControl: boolean;
 }
 export interface WindowsProfileCustody {readonly currentSid:string;readonly rootIdentity:string;assertCurrent():void;close():void}
-type NativeSecurity = {holdProfile(root:string,initialize:boolean,observeDatabases:boolean):WindowsProfileCustody;publishProfileFile(source:string,destination:string):boolean;protectDirectory(path:string):WindowsOwnerFacts;createPrivateDirectory(path:string):boolean;inspect(path:string):WindowsOwnerFacts;protectFile(path:string):WindowsOwnerFacts;processBirth(pid:number):string;writePrivateFile(path:string,content:string,exclusive:boolean):boolean};
+export interface WindowsActivityPermissions {verify():boolean;close():void}
+type NativeSecurity = {createActivityPermissions(file:string):WindowsActivityPermissions;holdProfile(root:string,initialize:boolean,observeDatabases:boolean):WindowsProfileCustody;publishProfileFile(source:string,destination:string):boolean;protectDirectory(path:string):WindowsOwnerFacts;createPrivateDirectory(path:string):boolean;inspect(path:string):WindowsOwnerFacts;protectFile(path:string):WindowsOwnerFacts;processBirth(pid:number):string;writePrivateFile(path:string,content:string,exclusive:boolean):boolean};
 const requireNative=createRequire(import.meta.url);
 let api:NativeSecurity|undefined;
 function unavailable():never {throw Error('windows_security_unavailable');}
@@ -28,9 +29,17 @@ function native():NativeSecurity {
   const bytes=readFile(file,4*1024*1024);
   if(!manifest||Object.keys(manifest).sort().join(',')!=='napi,sha256,sourceSha256,target,version'||manifest.version!==1||manifest.napi!==8||manifest.target!=='win32-x64'||!/^[a-f0-9]{64}$/.test(manifest.sourceSha256)||manifest.sha256!==createHash('sha256').update(bytes).digest('hex'))unavailable();
   const loaded=requireNative(file) as NativeSecurity;
-  const methods=['inspect','protectFile','processBirth','writePrivateFile','protectDirectory','createPrivateDirectory','holdProfile','publishProfileFile'] as const;
+  const methods=['inspect','protectFile','createActivityPermissions','processBirth','writePrivateFile','protectDirectory','createPrivateDirectory','holdProfile','publishProfileFile'] as const;
   for(const key of methods){const field=Object.getOwnPropertyDescriptor(loaded,key);if(!field||!('value'in field)||typeof field.value!=='function')unavailable();}
-  api=Object.freeze({holdProfile:loaded.holdProfile,publishProfileFile:loaded.publishProfileFile,protectDirectory:loaded.protectDirectory,createPrivateDirectory:loaded.createPrivateDirectory,inspect:loaded.inspect,protectFile:loaded.protectFile,processBirth:loaded.processBirth,writePrivateFile:loaded.writePrivateFile});return api;
+  api=Object.freeze({createActivityPermissions:loaded.createActivityPermissions,holdProfile:loaded.holdProfile,publishProfileFile:loaded.publishProfileFile,protectDirectory:loaded.protectDirectory,createPrivateDirectory:loaded.createPrivateDirectory,inspect:loaded.inspect,protectFile:loaded.protectFile,processBirth:loaded.processBirth,writePrivateFile:loaded.writePrivateFile});return api;
+}
+/** Own the opaque context before its first verify can open any OS resource. */
+export function createWindowsActivityPermissions(file:string):WindowsActivityPermissions {
+ const value=native().createActivityPermissions(file);
+ const verify=Object.getOwnPropertyDescriptor(value,'verify'),close=Object.getOwnPropertyDescriptor(value,'close');
+ if(!verify||!('value'in verify)||typeof verify.value!=='function'||!close||!('value'in close)||typeof close.value!=='function')unavailable();
+ Object.freeze(value);
+ return Object.freeze({verify(){const result:unknown=Reflect.apply(verify.value,value,[]);if(typeof result!=='boolean')unavailable();return result;},close(){if(Reflect.apply(close.value,value,[])!==undefined)unavailable();}});
 }
 function captured(value:WindowsOwnerFacts):WindowsOwnerFacts {
   const sid=/^S-1-\d+(?:-\d+)+$/;

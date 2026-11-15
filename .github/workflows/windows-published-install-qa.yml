@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 6ae36d1f08789706dd8c0ab94e6cfc906f061e27
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -22,6 +22,9 @@ jobs:
       - name: Install original Desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+      - name: Compile source-bound ordinary Windows permission addon
+        shell: bash
+        run: node scripts/verification/prepare-windows-owner-security.mjs source
       - name: Run original storm with its unchanged 5 second limit
         shell: bash
         run: cd desktop && npm test -- --run --maxWorkers=1 tests/main/conversation-activity-store.test.ts -t 'bounds a 10000-progress storm'

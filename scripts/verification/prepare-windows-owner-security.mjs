@@ -8,7 +8,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const source=join(root,'native/windows-owner-security'),cache=join(root,'.artifacts/windows-owner-security/win32-x64');
 const binary='windows_owner_security.node',json='windows_owner_security.json';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
-const sourceHash=()=>hash(Buffer.concat(['binding.gyp','windows-owner-security.c','windows-profile-custody.c'].map(name=>Buffer.concat([Buffer.from(name+'\0'),readFileSync(join(source,name))]))));
+const sourceHash=()=>hash(Buffer.concat(['binding.gyp','windows-owner-security.c','windows-profile-custody.c','windows-activity-permissions.h'].map(name=>Buffer.concat([Buffer.from(name+'\0'),readFileSync(join(source,name))]))));
 function read(path,limit){const s=lstatSync(path);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.size>limit)throw Error('windows_security_build_file');return readFileSync(path);}
 function validate(directory){
  const bytes=read(join(directory,binary),4*1024*1024),manifest=JSON.parse(read(join(directory,json),4096));

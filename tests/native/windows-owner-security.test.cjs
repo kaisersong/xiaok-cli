@@ -91,3 +91,53 @@ test('native ACL facts distinguish current-user inheritable full control without
     }
   }finally{api.protectDirectory(root);fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
 });
+test('activity permission context captures before opening and checks fresh ACLs through held handles', windows, () => {
+ const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-activity-permissions-')),root=path.join(base,'root'),file=path.join(root,'a.sqlite');let context;
+ try {
+  assert.equal(typeof api.createActivityPermissions,'function');
+  context=api.createActivityPermissions(file);assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;
+  assert.equal(api.createPrivateDirectory(root),true);
+  for(const suffix of ['', '.owner.sqlite','-wal','-shm'])assert.equal(api.writePrivateFile(file+suffix,'private',true),true);
+  const before=api.inspect(file);context=api.createActivityPermissions(file);assert.equal(context.verify(),true);
+  assert.throws(()=>context.verify.call({}),/windows_security/);
+  assert.throws(()=>fs.renameSync(file,file+'.moved'));
+  const q=file.replace(/'/g,"''");ps(`$p='${q}';$a=[IO.File]::GetAccessControl($p);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));[IO.File]::SetAccessControl($p,$a)`);
+  assert(api.inspect(file).allowSids.includes('S-1-1-0'));assert.equal(context.verify(),true);
+  const after=api.inspect(file);assert.equal(after.identity,before.identity);assert.deepEqual(after.allowSids,[after.currentSid]);
+  context.close();assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;
+  fs.renameSync(file,file+'.moved');assert.equal(fs.readFileSync(file+'.moved','utf8'),'private');
+ }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+});
+test('activity permission context distinguishes absent sidecars from an invalid required file', windows,()=>{
+ const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-activity-permission-absent-')),root=path.join(base,'root'),file=path.join(root,'a.sqlite');let context;
+ try{
+  assert.equal(api.createPrivateDirectory(root),true);for(const suffix of ['', '.owner.sqlite'])assert.equal(api.writePrivateFile(file+suffix,'private',true),true);
+  context=api.createActivityPermissions(file);assert.equal(context.verify(),false);assert.throws(()=>fs.renameSync(root,root+'.moved'));context.close();context=undefined;
+  fs.renameSync(root,root+'.moved');fs.renameSync(root+'.moved',root);
+  const link=path.join(root,'link');fs.linkSync(file,link);context=api.createActivityPermissions(file);assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;fs.unlinkSync(link);
+ }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+});
+
+test('activity context accepts the existing inherited private-parent predicate', windows,()=>{
+ const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-context-inherited-')),parent=path.join(base,'private'),root=path.join(parent,'inherited'),file=path.join(root,'a.sqlite');let context;
+ try{
+  assert.equal(api.createPrivateDirectory(parent),true);fs.mkdirSync(root);
+  const facts=api.inspect(root);assert.equal(facts.protected,false);assert.equal(facts.protectionOwnerEligible,true);assert.equal(facts.currentUserInheritableFullControl,true);assert.deepEqual(facts.allowSids,[facts.currentSid]);
+  for(const suffix of ['', '.owner.sqlite','-wal','-shm'])assert.equal(api.writePrivateFile(file+suffix,'private',true),true);
+  context=api.createActivityPermissions(file);assert.equal(context.verify(),true);context.close();context=undefined;
+ }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+});
+test('held activity context rejects a broadened parent or loss of inheritable full control',windows,()=>{
+ const api=addon();
+ for(const alteration of ['everyone','no-inheritance','inherit-only']){
+  const base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-context-parent-negative-')),root=path.join(base,'root'),file=path.join(root,'a.sqlite');let context;
+  try{
+   api.createPrivateDirectory(root);for(const suffix of ['', '.owner.sqlite','-wal','-shm'])api.writePrivateFile(file+suffix,'private',true);
+   context=api.createActivityPermissions(file);assert.equal(context.verify(),true);
+   const q=root.replace(/'/g,"''");
+   if(alteration==='everyone')ps(`$p='${q}';$a=[IO.Directory]::GetAccessControl($p);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));[IO.Directory]::SetAccessControl($p,$a)`);
+   else ps(`$p='${q}';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User;$a=New-Object Security.AccessControl.DirectorySecurity;$a.SetOwner($sid);$a.SetAccessRuleProtection($true,$false);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl',[Security.AccessControl.InheritanceFlags]0,[Security.AccessControl.PropagationFlags]0,'Allow')));${alteration==='inherit-only'?"$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl',[Security.AccessControl.InheritanceFlags]3,[Security.AccessControl.PropagationFlags]2,'Allow')));":''}[IO.Directory]::SetAccessControl($p,$a)`);
+   assert.throws(()=>context.verify(),/windows_security/,alteration);api.protectDirectory(root);assert.throws(()=>context.verify(),/windows_security/,'failure remains latched');context.close();context=undefined;
+  }finally{context?.close();api.protectDirectory(root);fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+ }
+});

@@ -130,6 +130,7 @@ done:
   free(acl);if(descriptor)LocalFree(descriptor);if(handle!=INVALID_HANDLE_VALUE&&!CloseHandle(handle))result=NULL;free(user);
   return result?result:fail(env);
 }
+#include "windows-activity-permissions.h"
 static napi_value protect(napi_env env,napi_callback_info info){return protect_path(env,info,0);}
 static napi_value protect_directory(napi_env env,napi_callback_info info){return protect_path(env,info,1);}
 static napi_value create_directory(napi_env env,napi_callback_info info){
@@ -183,6 +184,7 @@ static napi_value init(napi_env env,napi_value exports) {
   napi_property_descriptor methods[]={
     {"inspect",NULL,inspect,NULL,NULL,NULL,napi_default,NULL},
     {"protectFile",NULL,protect,NULL,NULL,NULL,napi_default,NULL},
+    {"createActivityPermissions",NULL,create_activity_permissions,NULL,NULL,NULL,napi_default,NULL},
     {"protectDirectory",NULL,protect_directory,NULL,NULL,NULL,napi_default,NULL},
     {"createPrivateDirectory",NULL,create_directory,NULL,NULL,NULL,napi_default,NULL},
     {"processBirth",NULL,birth,NULL,NULL,NULL,napi_default,NULL},

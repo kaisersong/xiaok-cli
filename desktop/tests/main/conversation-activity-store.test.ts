@@ -1,3 +1,4 @@
+import {inspectWindowsOwnerPath} from '../../../src/runtime/windows-owner-security.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,13 @@ describe('durable conversation activity', () => {
   beforeEach(() => { now = 1000; root = mkdtempSync(join(tmpdir(), 'xiaok-activity-')); store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now }); });
   afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
+  it.skipIf(process.platform!=='win32')('creates fresh SQLite WAL and SHM with the actual current SID owner',()=>{
+    for(const suffix of ['-wal','-shm']){
+      const facts=inspectWindowsOwnerPath(join(root,'activity.sqlite')+suffix);
+      expect(facts.ownerSid).toBe(facts.currentSid);expect(facts.protected).toBe(true);
+      expect(facts.allowSids).toEqual([facts.currentSid]);
+    }
+  });
   it('does not invent an unread activity or move the read cursor on heartbeat/freshness-only updates', () => {
     bind(); store.ingest('watch', event(1, 'started'));
     const through = store.listActivities('profile', 'thread').at(-1)!.localSeq; store.markRead('profile', 'thread', through);
