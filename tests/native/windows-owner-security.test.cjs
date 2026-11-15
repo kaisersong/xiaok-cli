@@ -164,3 +164,19 @@ test('activity context observes newly created transient files and rejects actual
   fs.linkSync(file,journal);assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;fs.unlinkSync(journal);
  }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
 });
+test('activity context holds an early or late owner journal and rejects a late hardlink',windows,()=>{
+ const api=addon();
+ for(const mode of ['early','late','late-hardlink']){
+  const base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-context-owner-journal-')),root=path.join(base,'root'),file=path.join(root,'a.sqlite'),journal=file+'.owner.sqlite-journal';let context;
+  try{
+   api.createPrivateDirectory(root);for(const suffix of ['', '.owner.sqlite','-wal','-shm'])api.writePrivateFile(file+suffix,'private',true);
+   if(mode==='early')api.writePrivateFile(journal,'actual owner journal',true);
+   context=api.createActivityPermissions(file);assert.equal(context.verify(),true);
+   if(mode==='late-hardlink'){fs.linkSync(file,journal);assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;fs.unlinkSync(journal);continue;}
+   if(mode==='late')fs.writeFileSync(journal,'actual owner journal');
+   const q=journal.replace(/'/g,"''");ps(`$p='${q}';$a=[IO.File]::GetAccessControl($p);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));[IO.File]::SetAccessControl($p,$a)`);
+   assert(api.inspect(journal).allowSids.includes('S-1-1-0'));assert.equal(context.verify(),true);assert.deepEqual(api.inspect(journal).allowSids,[api.inspect(journal).currentSid]);assert.equal(fs.readFileSync(journal,'utf8'),'actual owner journal');
+   assert.throws(()=>fs.renameSync(journal,journal+'.moved'));context.close();context=undefined;fs.renameSync(journal,journal+'.moved');
+  }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+ }
+});

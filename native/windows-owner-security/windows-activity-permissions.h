@@ -6,7 +6,7 @@ typedef LONG (NTAPI *ActivityQueryAttributes)(POBJECT_ATTRIBUTES,ActivityBasicIn
 typedef LONG (NTAPI *ActivityQuerySecurity)(HANDLE,SECURITY_INFORMATION,PSECURITY_DESCRIPTOR,ULONG,PULONG);
 static const napi_type_tag activity_permission_tag={UINT64_C(0xb013dc585e4348a2),UINT64_C(0xa09e26fa7e371bbc)};
 typedef struct ActivityPermissions {
-  wchar_t *paths[8],*parent,*expected,*actual;HANDLE root,files[4],scratch;BY_HANDLE_FILE_INFORMATION root_id,ids[4];TOKEN_USER *user;
+  wchar_t *paths[8],*parent,*expected,*actual;HANDLE root,files[5],scratch;BY_HANDLE_FILE_INFORMATION root_id,ids[5];TOKEN_USER *user;
   UNICODE_STRING transient_names[4];ActivityQueryAttributes query_attributes;ActivityQuerySecurity query_security;PSECURITY_DESCRIPTOR descriptor;
   int started,ready,failed,close_attempted,closed,scratch_unknown;struct ActivityPermissions *retained_next;
 } ActivityPermissions;
@@ -79,20 +79,27 @@ static napi_value activity_permissions_verify(napi_env env,napi_callback_info in
   if(!ctx->started){
     ctx->started=1;ctx->user=user;temporary=0;ctx->root=open_path(ctx->parent,0);
     if(ctx->root==INVALID_HANDLE_VALUE||!GetFileInformationByHandle(ctx->root,&ctx->root_id)||!activity_parent_private(ctx,user))goto done;
-    for(size_t i=0;i<4;i++){
+    for(size_t i=0;i<5;i++){
       ctx->files[i]=open_path(ctx->paths[i],1);
-      if(ctx->files[i]==INVALID_HANDLE_VALUE){DWORD error=GetLastError();if(i>=2&&error==ERROR_FILE_NOT_FOUND){missing=1;goto done;}goto done;}
+      if(ctx->files[i]==INVALID_HANDLE_VALUE){DWORD error=GetLastError();if(i==4&&error==ERROR_FILE_NOT_FOUND)continue;if(i>=2&&error==ERROR_FILE_NOT_FOUND){missing=1;goto done;}goto done;}
       if(!GetFileInformationByHandle(ctx->files[i],&ctx->ids[i])||!activity_file_current(ctx,ctx->files[i],user,&ctx->ids[i]))goto done;
     }
     ctx->ready=1;
   }
   if(!ctx->ready||!EqualSid(user->User.Sid,ctx->user->User.Sid))goto done;
-  for(size_t i=0;i<4;i++)if(!activity_file_current(ctx,ctx->files[i],user,&ctx->ids[i]))goto done;
+  for(size_t i=0;i<5;i++)if(ctx->files[i]!=INVALID_HANDLE_VALUE&&!activity_file_current(ctx,ctx->files[i],user,&ctx->ids[i]))goto done;
   for(size_t i=4;i<8;i++){
+    if(i==4&&ctx->files[4]!=INVALID_HANDLE_VALUE)continue;
     OBJECT_ATTRIBUTES attributes={0};ActivityBasicInformation basic={0};attributes.Length=sizeof(attributes);attributes.RootDirectory=ctx->root;attributes.ObjectName=&ctx->transient_names[i-4];attributes.Attributes=0x40;/* OBJ_CASE_INSENSITIVE */
     LONG status=ctx->query_attributes(&attributes,&basic);
     if(status==(LONG)0xC0000034L)continue;/* STATUS_OBJECT_NAME_NOT_FOUND only. */
     if(status!=0)goto done;
+    if(i==4){
+      /* Owner holds one rollback transaction until close; pin its journal too. */
+      ctx->files[4]=open_path(ctx->paths[4],1);
+      if(ctx->files[4]==INVALID_HANDLE_VALUE||!GetFileInformationByHandle(ctx->files[4],&ctx->ids[4])||!activity_file_current(ctx,ctx->files[4],user,&ctx->ids[4]))goto done;
+      continue;
+    }
     ctx->scratch=open_path(ctx->paths[i],1);if(ctx->scratch==INVALID_HANDLE_VALUE||!activity_file_current(ctx,ctx->scratch,user,NULL))goto done;
     if(!CloseHandle(ctx->scratch)){ctx->scratch_unknown=1;goto done;}ctx->scratch=INVALID_HANDLE_VALUE;
   }
@@ -105,7 +112,7 @@ done:
 static int activity_permissions_close_handles(ActivityPermissions *ctx){
   if(ctx->closed)return 1;if(ctx->close_attempted)return 0;ctx->close_attempted=1;int valid=!ctx->scratch_unknown;
   if(ctx->scratch!=INVALID_HANDLE_VALUE&&!ctx->scratch_unknown){if(CloseHandle(ctx->scratch))ctx->scratch=INVALID_HANDLE_VALUE;else valid=0;}
-  for(size_t i=4;i>0;i--)if(ctx->files[i-1]!=INVALID_HANDLE_VALUE){if(CloseHandle(ctx->files[i-1]))ctx->files[i-1]=INVALID_HANDLE_VALUE;else valid=0;}
+  for(size_t i=5;i>0;i--)if(ctx->files[i-1]!=INVALID_HANDLE_VALUE){if(CloseHandle(ctx->files[i-1]))ctx->files[i-1]=INVALID_HANDLE_VALUE;else valid=0;}
   if(ctx->root!=INVALID_HANDLE_VALUE){if(CloseHandle(ctx->root))ctx->root=INVALID_HANDLE_VALUE;else valid=0;}
   if(valid)ctx->closed=1;else ctx->failed=1;return valid;
 }
@@ -123,8 +130,8 @@ static napi_value create_activity_permissions(napi_env env,napi_callback_info in
   /* Capture object ownership before the first OS handle is ever opened. */
   wchar_t *base=argument_path(env,info);if(!base)return fail(env);size_t length=wcslen(base);
   ActivityPermissions *ctx=(ActivityPermissions*)calloc(1,sizeof(ActivityPermissions));if(!ctx){free(base);return fail(env);}
-  ctx->root=ctx->scratch=INVALID_HANDLE_VALUE;for(size_t i=0;i<4;i++)ctx->files[i]=INVALID_HANDLE_VALUE;
-  const wchar_t *suffixes[]={L"",L".owner.sqlite",L"-wal",L"-shm",L"-journal",L".owner.sqlite-wal",L".owner.sqlite-shm",L".owner.sqlite-journal"};
+  ctx->root=ctx->scratch=INVALID_HANDLE_VALUE;for(size_t i=0;i<5;i++)ctx->files[i]=INVALID_HANDLE_VALUE;
+  const wchar_t *suffixes[]={L"",L".owner.sqlite",L"-wal",L"-shm",L".owner.sqlite-journal",L"-journal",L".owner.sqlite-wal",L".owner.sqlite-shm"};
   if(length+22>32767)goto bad;
   for(size_t i=0;i<length;i++)if(base[i]==L'/')base[i]=L'\\';
   wchar_t *last=wcsrchr(base,L'\\');if(!last||!last[1])goto bad;size_t parent_length=(size_t)(last-base);if(parent_length==2&&base[1]==L':')parent_length++;
