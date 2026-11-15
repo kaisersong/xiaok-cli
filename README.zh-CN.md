@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**1.6.4 发布候选。** 当前源码包含 Windows 配置恢复、Kimi 公开上下文续接和启动修复；已验证变化及保留限制见[发布说明](release-notes/1.6.4.md)。已发布 Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest)，已发布 CLI 可通过 `npm install -g xiaokcode` 安装。
+**1.6.4。** 当前源码包含 Windows 配置恢复、Kimi 公开上下文续接和启动修复；已验证变化及保留限制见[发布说明](release-notes/1.6.4.md)。已发布 Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest)，已发布 CLI 可通过 `npm install -g xiaokcode` 安装。
 
 ---
 
@@ -597,9 +597,9 @@ npm run test --prefix desktop -- --run \
 
 ## 版本日志
 
-### v1.6.4 — 发布候选
+### v1.6.4
 
-Windows SID/ACL 配置恢复、Kimi 公开上下文续接、Windows 私有状态创建、本机服务诊断、连接测试、终端输入与 Linux 会话锁修复。macOS 最低为 13.5。详见[1.6.4 发布说明](release-notes/1.6.4.md)。
+Windows SID/ACL 配置恢复、Kimi 公开上下文续接、固定 Node 子进程与 Electron fuse 加固、Windows 私有状态创建、本机服务诊断、连接测试、终端输入与 Linux 会话锁修复。macOS 最低为 13.5。详见[1.6.4 发布说明](release-notes/1.6.4.md)。
 
 ### 主干更新（尚未包含在 1.6.2）
 
