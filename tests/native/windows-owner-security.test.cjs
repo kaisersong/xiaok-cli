@@ -152,3 +152,15 @@ test('activity context normalizes pathname input and refuses an actual ancestor 
   context.close();context=undefined;
  }finally{context?.close();fs.rmSync(moved?base+'.moved':base,{recursive:true,force:true,maxRetries:3});}
 });
+test('activity context observes newly created transient files and rejects actual transient hardlinks',windows,()=>{
+ const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-context-transient-')),root=path.join(base,'root'),file=path.join(root,'a.sqlite'),journal=file+'-journal';let context;
+ try{
+  api.createPrivateDirectory(root);for(const suffix of ['', '.owner.sqlite','-wal','-shm'])api.writePrivateFile(file+suffix,'private',true);
+  context=api.createActivityPermissions(file);assert.equal(context.verify(),true);
+  fs.writeFileSync(journal,'actual journal');const q=journal.replace(/'/g,"''");
+  ps(`$p='${q}';$a=[IO.File]::GetAccessControl($p);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));[IO.File]::SetAccessControl($p,$a)`);
+  assert(api.inspect(journal).allowSids.includes('S-1-1-0'));assert.equal(context.verify(),true);assert.deepEqual(api.inspect(journal).allowSids,[api.inspect(journal).currentSid]);assert.equal(fs.readFileSync(journal,'utf8'),'actual journal');
+  fs.unlinkSync(journal);assert.equal(context.verify(),true);
+  fs.linkSync(file,journal);assert.throws(()=>context.verify(),/windows_security/);context.close();context=undefined;fs.unlinkSync(journal);
+ }finally{context?.close();fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
+});
