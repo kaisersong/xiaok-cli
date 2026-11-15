@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Latest release: 1.6.2 (November 5, 2026).** Get Desktop installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2), or install the CLI with `npm install -g xiaokcode@1.6.2`. This release improves Chinese segmentation initialization and memory-store shutdown, and fixes a conversation cleanup crash. Post-release source changes are listed separately in [Version History](#version-history).
+**1.6.4 release candidate.** This source version includes Windows profile recovery, public-context Kimi resume and startup fixes. See the [release notes](release-notes/1.6.4.md) for verified changes and remaining limits. Published Desktop downloads remain available from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest); the published CLI can be installed with `npm install -g xiaokcode`.
 
 ---
 
@@ -600,6 +600,10 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.6.4 — Release candidate
+
+Windows SID/ACL profile recovery, Kimi public-context resume, private Windows state creation, local-service diagnostics, connection probes, terminal input and Linux session locks. macOS requires 13.5 or later. See [1.6.4 details](release-notes/1.6.4.md).
 
 ### Main-branch changes (not included in 1.6.2)
 
