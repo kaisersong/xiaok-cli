@@ -1,11 +1,8 @@
-name: Intent RPC15 timing and emit diagnostic — do-not-use-for-release
+name: Receiver bounded-work diagnostic — do-not-use-for-release
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
-concurrency:
-  group: intent-rpc15-resource-diagnostic-${{ github.run_id }}
-  cancel-in-progress: false
 jobs:
   diagnostic:
     strategy:
@@ -13,118 +10,67 @@ jobs:
       matrix:
         node: ['22.14.0', '24']
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           repository: kaisersong/xiaok-cli
           ref: 63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334
           persist-credentials: false
-      - name: Require exact unmodified product source
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = 63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - uses: ./.github/actions/node-headers
-      - name: Install the original CI dependency closure
-        id: deps
+      - name: Original dependency closure
         shell: bash
         run: |
           bash .github/scripts/retry.sh npm ci --ignore-scripts
           bash .github/scripts/retry.sh npm rebuild better-sqlite3
-      - name: Prepare equally observed source and emitted diagnostic paths
+      - name: Observe original whole case with an explicitly experimental receiver budget
         shell: bash
         run: |
           python3 - <<'PY'
-          import pathlib,hashlib,json,subprocess,os
-          p=pathlib.Path('src/runtime/verification/receiver-transport.ts')
-          s=p.read_text()
-          a='async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc('
-          b='async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){const diagnosticStarted=process.hrtime.bigint();try{return await callControllerIpc('
-          assert s.count(a)==1
-          s2=s.replace(a,b)
-          a2=' }});}'
-          b2=' }});}finally{try{console.error(JSON.stringify({diagnosticOnly:true,kind:"rpc-settled",method:JSON.parse(bytes.toString()).method??"upload-register",elapsedMs:Number(process.hrtime.bigint()-diagnosticStarted)/1e6}));}catch{console.error("rpc-diagnostic-log-unavailable");}}}'
-          assert s2.count(a2)==1
-          s2=s2.replace(a2,b2)
-          p.write_text(s2)
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'intent-rpc15-diagnostic'
-          root.mkdir()
-          (root/'source-patch.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'path':str(p),'originalSHA256':hashlib.sha256(s.encode()).hexdigest(),'observedSHA256':hashlib.sha256(s2.encode()).hexdigest()},indent=2))
-          config=r"""import original from './vitest.config.ts';
-          export default {...original,test:{...original.test,include:['.test-dist/tests/**/*.test.js'],setupFiles:original.test.setupFiles.map(p=>p.endsWith('.ts')?'./.test-dist/'+p.replace(/^\.\//,'').replace(/\.ts$/,'.js'):p)}};
-          """
-          pathlib.Path('vitest.rpc-emitted-qa.config.mjs').write_text(config)
-          subprocess.run(['node','--max-old-space-size=4096','node_modules/typescript/bin/tsc','-p','tsconfig.tests.json'],check=True)
-          assert pathlib.Path('.test-dist/tests/runtime/verification/intent-completion-dependencies.test.js').is_file()
+          import pathlib,subprocess,os,json,time,hashlib,sys
+          SHA='63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334'
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==SHA
+          assert not subprocess.check_output(['git','diff','--name-only'],text=True).strip()
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'receiver30-diagnostic';root.mkdir()
+          patches=[]
+          def patch(name,items):
+           p=pathlib.Path(name);original=p.read_text();s=original
+           for a,b in items:
+            assert s.count(a)==1,(name,a,s.count(a));s=s.replace(a,b)
+           p.write_text(s)
+           patches.append({'path':name,'originalSHA256':hashlib.sha256(original.encode()).hexdigest(),'diagnosticSHA256':hashlib.sha256(s.encode()).hexdigest(),'changes':len(items)})
+          patch('src/runtime/verification/receiver-transport.ts',[
+           ('async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc(socketPath,bytes,{signal,verifyServerPeer(socket){',
+            'async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){const diagnosticStarted=process.hrtime.bigint();try{return await callControllerIpc(socketPath,bytes,{timeoutMs:30000,signal,verifyServerPeer(socket){'),
+           ('if(beforeSend){const result:unknown=beforeSend();',
+            'if(beforeSend){const diagnosticBefore=process.hrtime.bigint();const result:unknown=beforeSend();try{console.error(JSON.stringify({diagnosticOnly:true,kind:"before-send",enteredMs:Number(diagnosticBefore-diagnosticStarted)/1e6,elapsedMs:Number(process.hrtime.bigint()-diagnosticBefore)/1e6}));}catch{}'),
+           (' }});}',
+            ' }});}finally{try{console.error(JSON.stringify({diagnosticOnly:true,kind:"rpc-settled",method:JSON.parse(bytes.toString()).method??"upload-register",elapsedMs:Number(process.hrtime.bigint()-diagnosticStarted)/1e6}));}catch{}}}')])
+          patch('src/runtime/verification/receiver-service.ts',[
+           ('startControllerIpc({socketPath,publicPeerAuthenticated:true,','startControllerIpc({socketPath,requestTimeoutMs:30000,publicPeerAuthenticated:true,')])
+          (root/'patches.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'sourceSHA':SHA,'patches':patches},indent=2)+'\n')
+          env=os.environ.copy();env.pop('NODE_OPTIONS',None)
+          probe=json.loads(subprocess.check_output(['node','-e',"const os=require('node:os'),v8=require('node:v8');console.log(JSON.stringify({node:process.version,arch:process.arch,platform:process.platform,memory:os.totalmem(),heapLimit:v8.getHeapStatistics().heap_size_limit,nodeOptions:process.env.NODE_OPTIONS??null}))"],env=env,text=True))
+          (root/'probe.json').write_text(json.dumps(probe,indent=2)+'\n')
+          args=['node','node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(root/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
+          started=time.monotonic();code=None;unknown=False
+          with (root/'test.log').open('wb') as out:
+           try:code=subprocess.run(args,env=env,stdout=out,stderr=subprocess.STDOUT,timeout=600).returncode
+           except subprocess.TimeoutExpired:unknown=True
+          receipt={'diagnosticOnly':True,'notNativeOrReleaseQualification':True,'sourceSHA':SHA,'receiverExperimentalBudgetMs':30000,'generalRPCDefaultUnchanged':True,'authorityClocksUnchanged':True,'material105000Unchanged':True,'originalCaseAssertionsUnchanged':True,'physicalUnknownUnchanged':True,'exitCode':code,'outerTimedOut':unknown,'elapsedSeconds':time.monotonic()-started,'command':args}
+          (root/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          print(json.dumps(receipt));print((root/'test.log').read_text(errors='replace')[-40000:])
+          sys.exit(code if isinstance(code,int) and code>=0 else 1)
           PY
-      - name: Prepare metadata-only diagnostic driver outside source
-        id: driver
-        shell: bash
-        run: |
-          cat > "$RUNNER_TEMP/intent-rpc15-resource-driver.py" <<'PY'
-          import os, pathlib, subprocess, json, sys, time, re
-          SHA = '63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334'
-          mode = sys.argv[1]
-          assert mode in ('default', 'emitted')
-          assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == SHA
-          assert subprocess.check_output(['git','diff','--name-only'], text=True).strip() == 'src/runtime/verification/receiver-transport.ts'
-          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'intent-rpc15-diagnostic'
-          folder = root / mode
-          folder.mkdir(parents=True, exist_ok=False)
-          env = os.environ.copy()
-          env.pop('NODE_OPTIONS', None)
-          if mode == 'emitted':
-              first = json.loads((root/'default'/'receipt.json').read_text())
-              if first.get('outerTimedOut'):
-                  (folder/'uncomparable.json').write_text(json.dumps({'reason':'prior outer timeout, physical cleanup unknown; no comparison'}))
-                  raise SystemExit(1)
-          probe_code = "const v8=require('node:v8'),os=require('node:os');console.log(JSON.stringify({node:process.version,arch:process.arch,platform:process.platform,totalMemory:os.totalmem(),freeMemory:os.freemem(),heapLimit:v8.getHeapStatistics().heap_size_limit,nodeOptions:process.env.NODE_OPTIONS??null}))"
-          probe = json.loads(subprocess.check_output(['node','-e',probe_code], env=env, text=True))
-          assert re.fullmatch(r'v(?:22\.14\.0|24\.\d+\.\d+)',probe['node'])
-          probe['sysctl'] = {}
-          for key in ['hw.memsize','hw.ncpu','machdep.cpu.brand_string']:
-              q = subprocess.run(['/usr/sbin/sysctl','-n',key], capture_output=True, text=True)
-              probe['sysctl'][key] = {'exitCode':q.returncode,'value':q.stdout.strip()}
-          (folder/'probe.json').write_text(json.dumps(probe,indent=2)+'\n')
-          print(json.dumps({'diagnosticOnly':True,'mode':mode,'probe':probe}),flush=True)
-          profile = folder/'cpu'
-          profile.mkdir()
-          args = ['node','--cpu-prof','--cpu-prof-dir='+str(profile),'node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(folder/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
-          if mode == 'emitted':
-              args[args.index('vitest.config.ts')] = 'vitest.rpc-emitted-qa.config.mjs'
-              args[args.index('tests/runtime/verification/intent-completion-dependencies.test.ts')] = '.test-dist/tests/runtime/verification/intent-completion-dependencies.test.js'
-          started = time.monotonic()
-          timed_out = False
-          code = None
-          with (folder/'test.log').open('xb') as log:
-              try:
-                  q = subprocess.run(args,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=600)
-                  code = q.returncode
-              except subprocess.TimeoutExpired:
-                  timed_out = True
-          receipt = {'sourceSHA':SHA,'diagnosticOnly':True,'notNativeOrReleaseQualification':True,'mode':mode,'actualNode':probe['node'],'seconds':round(time.monotonic()-started,3),'exitCode':code,'outerTimedOut':timed_out,'productionRPC15Changed':False,'caseAssertionsChanged':False,'caseRunner300Changed':False,'material105000Changed':False,'command':args}
-          (folder/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
-          print(json.dumps(receipt),flush=True)
-          text = (folder/'test.log').read_text(errors='replace')
-          print(text[-24000:],flush=True)
-          raise SystemExit(code if isinstance(code,int) and code>=0 else 1)
-          PY
-      - name: Observe original default-heap case without changing the 15s RPC
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
-        shell: bash
-        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" default
-      - name: Observe the same complete case through TSC emit with identical setup order
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
-        shell: bash
-        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" emitted
-      - name: Preserve ephemeral-host diagnostic measurements and real failures
+      - name: Preserve real bounded-work results including failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: intent-rpc15-diagnostic-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/intent-rpc15-diagnostic/
+          name: receiver30-diagnostic-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/receiver30-diagnostic/
           retention-days: 7
           if-no-files-found: error
