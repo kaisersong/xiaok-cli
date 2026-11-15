@@ -1,5 +1,6 @@
+import {inspectWindowsOwnerPath} from '../../../src/runtime/windows-owner-security.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -22,6 +23,24 @@ describe('durable conversation activity', () => {
   beforeEach(() => { now = 1000; root = mkdtempSync(join(tmpdir(), 'xiaok-activity-')); store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now }); });
   afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
+  it.skipIf(process.platform!=='win32')('creates fresh SQLite WAL and SHM with the actual current SID owner',()=>{
+    for(const suffix of ['-wal','-shm']){
+      const facts=inspectWindowsOwnerPath(join(root,'activity.sqlite')+suffix);
+      expect(facts.ownerSid).toBe(facts.currentSid);expect(facts.protected).toBe(true);
+      expect(facts.allowSids).toEqual([facts.currentSid]);
+    }
+  });
+  it.skipIf(process.platform!=='win32')('keeps the actual owner journal identity through writes and releases it before SQLite rollback cleanup',()=>{
+    const journal=join(root,'activity.sqlite.owner.sqlite-journal');expect(existsSync(journal)).toBe(true);
+    const before=inspectWindowsOwnerPath(journal);bind();
+    for(let sequence=1;sequence<=100;sequence++)store.ingest('watch',event(sequence));
+    store.ingest('watch',event(101,'completed'));
+    expect(inspectWindowsOwnerPath(journal).identity).toBe(before.identity);
+    store.close();expect(existsSync(journal)).toBe(false);
+    store=new ConversationActivityStore(join(root,'activity.sqlite'),{now:()=>now});
+    expect(store.getProjection('watch')?.sourceSequence).toBe(101);
+    expect(store.getProjection('watch')?.executionState).toBe('completed');
+  });
   it('does not invent an unread activity or move the read cursor on heartbeat/freshness-only updates', () => {
     bind(); store.ingest('watch', event(1, 'started'));
     const through = store.listActivities('profile', 'thread').at(-1)!.localSeq; store.markRead('profile', 'thread', through);
@@ -123,6 +142,8 @@ describe('durable conversation activity', () => {
     expect(store.getDiagnostics().sourceEvents).toBe(2);
   });
 
+  // Release-plan quality review: Windows includes real per-commit ACL/identity IO.
+  // This runner budget changes no product clock, population, or assertion.
   it('bounds a 10000-progress storm while retaining the critical terminal and replay cursor', () => {
     bind();
     for (let sequence = 1; sequence <= 10_000; sequence++) store.ingest('watch', event(sequence));
@@ -133,7 +154,7 @@ describe('durable conversation activity', () => {
     expect(store.ingest('watch', event(1))).toMatchObject({ duplicate: true });
     expect(store.getProjection('watch')?.sourceSequence).toBe(10_001);
     expect(store.getProjection('watch')?.executionState).toBe('completed');
-  });
+  },process.platform==='win32'?12_000:5_000);
 
   it('retains the exact mixed progress window and rebuilds its indexed compaction plan on reopen', () => {
     bind();

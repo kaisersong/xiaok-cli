@@ -1,6 +1,6 @@
 import { chmodSync, lstatSync, readdirSync, mkdirSync, writeFileSync,openSync,closeSync } from 'node:fs';
 import { basename, dirname, resolve, parse, join } from 'node:path';
-import {inspectWindowsOwnerPath,protectWindowsOwnerDirectory,createWindowsPrivateDirectory,protectWindowsOwnerFile,writeWindowsPrivateFile,ensureWindowsPrivateFile} from '../windows-owner-security.js';
+import {inspectWindowsOwnerPath,protectWindowsOwnerDirectory,createWindowsPrivateDirectory,protectWindowsOwnerFile,createWindowsActivityPermissions,type WindowsActivityPermissions,writeWindowsPrivateFile,ensureWindowsPrivateFile} from '../windows-owner-security.js';
 
 export const ACTIVITY_STORAGE_NAMES = {
   database: 'conversation-activity.sqlite', ownerPrefix: 'activity-owner.',
@@ -23,6 +23,11 @@ export function chmodPrivateActivityFile(path: string): void {
     if (!state.isFile() || state.isSymbolicLink() || state.uid !== process.getuid?.()) throw new Error();
     chmodSync(path, 0o600);
   } catch { throw new Error('activity_storage_not_private'); }
+}
+/** An ordinary, owned permission context; it grants no Source or authority. */
+export function createActivityFilePermissions(file:string):WindowsActivityPermissions {
+  const context=createWindowsActivityPermissions(file);
+  return Object.freeze({verify(){try{return context.verify();}catch(cause){throw new Error('activity_storage_not_private',{cause});}},close(){context.close();}});
 }
 export function writePrivateActivityFile(path:string,content:string,exclusive=false):void {
   if(process.platform==='win32'){writeWindowsPrivateFile(path,content,exclusive);return;}

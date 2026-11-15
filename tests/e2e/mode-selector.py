@@ -13,7 +13,7 @@ import time
 def run(entry):
     spec = importlib.util.spec_from_file_location('helpers', Path(__file__).with_name('tmux-e2e.py'))
     h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
-    root = Path(tempfile.mkdtemp(prefix='xiaok-mode-selector-'))
+    root = Path(os.path.realpath(tempfile.mkdtemp(prefix='xiaok-mode-selector-')))
     work, config, home = root / 'project', root / 'config', root / 'home'
     work.mkdir(); home.mkdir()
     written, denied = work / 'selected-yolo.txt', work / 'selected-plan.txt'
@@ -31,6 +31,9 @@ def run(entry):
     owned = []
     def wait_for(predicate):
         screen = tty.wait_for(predicate, timeout=20)
+        if not predicate(screen):
+            (root / 'failed-screen.txt').write_text(screen)
+            (root / 'model-requests.json').write_text(json.dumps(server.requests, ensure_ascii=False, indent=2))
         assert predicate(screen), f'Inspect {root}'
         return screen
     def open_mode(current):
@@ -47,7 +50,10 @@ def run(entry):
         screen = wait_for(lambda s: '/models' in s and '/mode' in s)
         assert len([line for line in screen.splitlines() if re.search(r'/mode(?:\s|$)', line)]) == 1
         assert not any('/mode ' + mode in screen for mode in ['default', 'auto', 'plan', 'yolo'])
-        tty.send_key('C-u'); wait_for(h.has_ready_input_prompt)
+        tty.send_key('C-u')
+        wait_for(lambda s: h.has_ready_input_prompt(s) and re.search(r'(?m)^\s*❯\s*$', s)
+                 and '/models' not in s and '/mode' not in s)
+        assert not server.requests, 'slash completion was submitted to the model'
         open_mode('auto')
         tty.tmux('resize-window', '-t', tty.session, '-x', '40', '-y', '12')
         wait_for(lambda s: '❯ 2. auto' in s)

@@ -17,6 +17,9 @@ vi.mock('../../../src/runtime/conversation-activity/storage-permissions.js', asy
   return { ...actual, chmodPrivateActivityFile(path: string) {
     if (fsSeam.armed) { fsSeam.failures.push(path); throw fsSeam.error; }
     return actual.chmodPrivateActivityFile(path);
+  },createActivityFilePermissions(file:string){
+    const context=actual.createActivityFilePermissions(file);
+    return {verify(){if(fsSeam.armed){fsSeam.failures.push(file);throw fsSeam.error;}return context.verify();},close(){context.close();}};
   } };
 });
 import { ConversationActivityStore } from '../../../src/runtime/conversation-activity/store.js';

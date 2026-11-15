@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 if(process.platform!=='win32')throw Error('Windows diagnostic only');
 const root=mkdtempSync(join(tmpdir(),'xiaok-profile-diagnostic-'));
-for(const name of ['binding.gyp','windows-owner-security.c','windows-profile-custody.c'])copyFileSync(resolve('native/windows-owner-security',name),join(root,name));
+for(const name of ['binding.gyp','windows-owner-security.c','windows-profile-custody.c','windows-activity-permissions.h'])copyFileSync(resolve('native/windows-owner-security',name),join(root,name));
 const source=join(root,'windows-profile-custody.c');let text=readFileSync(source,'utf8');
 const start=text.indexOf('static napi_value publish_profile_file('),end=text.indexOf('\nnapi_value init_windows_profile_custody',start);
 if(start<0||end<0)throw Error('diagnostic source shape');
