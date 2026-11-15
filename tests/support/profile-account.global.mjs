@@ -29,6 +29,7 @@ export default async function setup(project){
  });
  const root=realpathSync(mkdtempSync(join(tmpdir(),'xiaok-vitest-accounts-')));
  const ownership=createProfileAccountOwnership(root);
+ project.provide('profileTestTempRoot',privateTemp??null);
  project.provide('profileTestAccountRoot',root);
  project.provide('profileTestAccountOwnership',ownership);
  return async()=>{
