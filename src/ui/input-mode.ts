@@ -3,9 +3,9 @@ import { stdin } from 'node:process';
 let owners = 0;
 let originalRawMode = false;
 
-/** Windows ReadConsole can retain a cooked read across a rapid raw-mode toggle. */
+/** Keep internal reader handoffs raw: cooked reads can translate or lose Enter. */
 export function retainRawInputModeForSession(): () => void {
-  if (process.platform !== 'win32' || !stdin.isTTY) return () => {};
+  if (!stdin.isTTY) return () => {};
   if (owners++ === 0) originalRawMode = Boolean(stdin.isRaw);
   let released = false;
   return () => {
