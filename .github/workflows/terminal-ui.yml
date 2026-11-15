@@ -169,6 +169,9 @@ jobs:
           .test-dist/tests/commands/version.test.js
           .test-dist/tests/commands/registry.test.js
           .test-dist/tests/runtime/conversation-activity/activity-owner-teardown.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-teardown-budgets.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-teardown-cleanup.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-status-events.test.js
           .test-dist/tests/runtime/conversation-activity/owner-replacement-probe.test.js
           .test-dist/tests/ui/image-input.test.js
           .test-dist/tests/ui/transcript-buffer.test.js
