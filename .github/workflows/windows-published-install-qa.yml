@@ -1,4 +1,4 @@
-name: Intent RPC15 resource diagnostic — do-not-use-for-release
+name: Intent RPC15 timing and emit diagnostic — do-not-use-for-release
 on:
   workflow_dispatch: {}
 permissions:
@@ -34,6 +34,32 @@ jobs:
         run: |
           bash .github/scripts/retry.sh npm ci --ignore-scripts
           bash .github/scripts/retry.sh npm rebuild better-sqlite3
+      - name: Prepare equally observed source and emitted diagnostic paths
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,hashlib,json,subprocess,os
+          p=pathlib.Path('src/runtime/verification/receiver-transport.ts')
+          s=p.read_text()
+          a='async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc('
+          b='async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){const diagnosticStarted=process.hrtime.bigint();try{return await callControllerIpc('
+          assert s.count(a)==1
+          s2=s.replace(a,b)
+          a2=' }});}'
+          b2=' }});}finally{try{console.error(JSON.stringify({diagnosticOnly:true,kind:"rpc-settled",method:JSON.parse(bytes.toString()).method??"upload-register",elapsedMs:Number(process.hrtime.bigint()-diagnosticStarted)/1e6}));}catch{console.error("rpc-diagnostic-log-unavailable");}}}'
+          assert s2.count(a2)==1
+          s2=s2.replace(a2,b2)
+          p.write_text(s2)
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'intent-rpc15-diagnostic'
+          root.mkdir()
+          (root/'source-patch.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'path':str(p),'originalSHA256':hashlib.sha256(s.encode()).hexdigest(),'observedSHA256':hashlib.sha256(s2.encode()).hexdigest()},indent=2))
+          config="""import original from './vitest.config.ts';
+          export default {...original,test:{...original.test,include:['.test-dist/tests/**/*.test.js'],setupFiles:original.test.setupFiles.map(p=>p.endsWith('.ts')?'./.test-dist/'+p.replace(/^\.\//,'').replace(/\.ts$/,'.js'):p)}};
+          """
+          pathlib.Path('vitest.rpc-emitted-qa.config.mjs').write_text(config)
+          subprocess.run(['node','node_modules/typescript/bin/tsc','-p','tsconfig.tests.json'],check=True)
+          assert pathlib.Path('.test-dist/tests/runtime/verification/intent-completion-dependencies.test.js').is_file()
+          PY
       - name: Prepare metadata-only diagnostic driver outside source
         id: driver
         shell: bash
@@ -42,20 +68,19 @@ jobs:
           import os, pathlib, subprocess, json, sys, time, re
           SHA = '63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334'
           mode = sys.argv[1]
-          assert mode in ('default', 'heap4096')
+          assert mode in ('default', 'emitted')
           assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == SHA
-          assert subprocess.check_output(['git','diff','--name-only'], text=True).strip() == ''
+          assert subprocess.check_output(['git','diff','--name-only'], text=True).strip() == 'src/runtime/verification/receiver-transport.ts'
           root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'intent-rpc15-diagnostic'
           folder = root / mode
           folder.mkdir(parents=True, exist_ok=False)
           env = os.environ.copy()
           env.pop('NODE_OPTIONS', None)
-          if mode == 'heap4096':
+          if mode == 'emitted':
               first = json.loads((root/'default'/'receipt.json').read_text())
               if first.get('outerTimedOut'):
                   (folder/'uncomparable.json').write_text(json.dumps({'reason':'prior outer timeout, physical cleanup unknown; no comparison'}))
                   raise SystemExit(1)
-              env['NODE_OPTIONS'] = '--max-old-space-size=4096'
           probe_code = "const v8=require('node:v8'),os=require('node:os');console.log(JSON.stringify({node:process.version,arch:process.arch,platform:process.platform,totalMemory:os.totalmem(),freeMemory:os.freemem(),heapLimit:v8.getHeapStatistics().heap_size_limit,nodeOptions:process.env.NODE_OPTIONS??null}))"
           probe = json.loads(subprocess.check_output(['node','-e',probe_code], env=env, text=True))
           assert re.fullmatch(r'v(?:22\.14\.0|24\.\d+\.\d+)',probe['node'])
@@ -68,6 +93,9 @@ jobs:
           profile = folder/'cpu'
           profile.mkdir()
           args = ['node','--cpu-prof','--cpu-prof-dir='+str(profile),'node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(folder/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
+          if mode == 'emitted':
+              args[args.index('vitest.config.ts')] = 'vitest.rpc-emitted-qa.config.mjs'
+              args[args.index('tests/runtime/verification/intent-completion-dependencies.test.ts')] = '.test-dist/tests/runtime/verification/intent-completion-dependencies.test.js'
           started = time.monotonic()
           timed_out = False
           code = None
@@ -88,10 +116,10 @@ jobs:
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
         shell: bash
         run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" default
-      - name: Observe the same complete case with 4GB worker old-space
+      - name: Observe the same complete case through TSC emit with identical setup order
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
         shell: bash
-        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" heap4096
+        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" emitted
       - name: Preserve ephemeral-host diagnostic measurements and real failures
         if: always()
         uses: actions/upload-artifact@v4
