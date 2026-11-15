@@ -1,3 +1,4 @@
+import {createWindowsPrivateDirectory,ensureWindowsPrivateFile} from '../windows-owner-security.js';
 import { DatabaseSync } from 'node:sqlite';
 import {
   constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync,
@@ -118,8 +119,10 @@ export function createActivityReadonlySnapshot(
     // mkdtemp creates a new private directory, without chmod of any shared root.
     try { root.directory = mkdtempSync(join(tmpdir(), 'xiaok-activity-readonly-')); }
     catch (error) { root.unknown = true; throw error; }
+    if(process.platform==='win32')createWindowsPrivateDirectory(root.directory);
     const destination = join(root.directory, 'activity.sqlite');
-    try { root.copyFd = openSync(destination, 'wx+', 0o600); }
+    if(process.platform==='win32')ensureWindowsPrivateFile(destination);
+    try { root.copyFd = openSync(destination, process.platform==='win32'?'r+':'wx+', 0o600); }
     catch (error) { root.unknown = true; throw error; }
     const buffer = Buffer.alloc(64 * 1024), size = Number(before.size);
     const sourceHash = createHash('sha256');

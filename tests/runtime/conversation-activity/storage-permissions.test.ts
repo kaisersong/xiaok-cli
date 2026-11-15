@@ -120,8 +120,8 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
   });
 });
 
-it('Windows permission guard is a no-op', () => {
-  expect(() => secureActivityStorage('fake-nonexistent-directory', { platform: 'win32', chmodSync() { throw new Error('fake'); } })).not.toThrow();
+it('Windows permission guard refuses unavailable storage', () => {
+  expect(() => secureActivityStorage('fake-nonexistent-directory', { platform: 'win32', chmodSync() { throw new Error('fake'); } })).toThrow('activity_storage_not_private');
 });
 
 it.skipIf(process.platform === 'win32')('real owner creates private files under inherited strict umask', async () => {

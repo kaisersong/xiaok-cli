@@ -1,7 +1,8 @@
+import {assertWindowsPrivateActivityParent} from './storage-permissions.js';
 import {migrateAssistantDigestReceipts,getAssistantDigestReceipt,claimAssistantDigest,finishAssistantDigest} from '../assistant/digest-receipts.js';
 import { pathToFileURL } from 'node:url';
 import { activityReadonlyNeedsSnapshot, createActivityReadonlySnapshot } from './readonly-snapshot.js';
-import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
+import { chmodPrivateActivityFile, createPrivateActivityDirectory,ensurePrivateActivityFile } from './storage-permissions.js';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
@@ -151,10 +152,12 @@ export class ConversationActivityStore {
     }
     try {
       for (const target of [file, `${file}.owner.sqlite`]) {
-        if (!existsSync(target)) closeSync(openSync(target, 'a', 0o600));
+        if(process.platform==='win32')ensurePrivateActivityFile(target);
+        else if (!existsSync(target)) closeSync(openSync(target, 'a', 0o600));
         if (process.platform !== 'win32') chmodSync(target, 0o600);
       }
     } catch { throw new Error('activity_storage_not_private'); }
+    if(process.platform==='win32')assertWindowsPrivateActivityParent(file);
     this.owner = new DatabaseSync(`${file}.owner.sqlite`);
     try {
       // A separate rollback-journal database supplies an OS-managed exclusive lock.

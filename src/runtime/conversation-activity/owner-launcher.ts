@@ -1,8 +1,8 @@
-import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { chmodPrivateActivityFile,writePrivateActivityFile,ensurePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { writeFileSync, renameSync, openSync, closeSync } from 'node:fs';
+import { renameSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -56,7 +56,8 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   catch (error) { if (error instanceof Error && ['activity_owner_profile_mismatch','activity_owner_config_mismatch'].includes(error.message)) throw error; }
   const configFile = join(address.dataRoot, ACTIVITY_STORAGE_NAMES.config);
   const temporary = `${configFile}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); chmodPrivateActivityFile(temporary); renameSync(temporary, configFile);
+  writePrivateActivityFile(temporary, JSON.stringify(normalized),true); renameSync(temporary, configFile);
+  ensurePrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
   const logFile = openSync(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log), 'a', 0o600);
   let child: ReturnType<typeof spawn>;
   try {

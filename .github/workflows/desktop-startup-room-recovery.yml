@@ -118,6 +118,9 @@ jobs:
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+      - name: Prepare ordinary Windows owner security
+        if: runner.os == 'Windows'
+        run: node scripts/verification/prepare-windows-owner-security.mjs source
       - name: Prepare current client Node headers for Native components (macOS)
         if: runner.os == 'macOS'
         id: dsh_client_headers
@@ -312,6 +315,9 @@ jobs:
       - name: Install the locked Electron runtime for real module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
+      - name: Prepare ordinary Windows owner security
+        if: runner.os == 'Windows'
+        run: node scripts/verification/prepare-windows-owner-security.mjs source
       - name: Prepare pinned workflow issuer and broker
         shell: bash
         run: |

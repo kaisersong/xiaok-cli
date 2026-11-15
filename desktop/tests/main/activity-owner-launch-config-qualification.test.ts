@@ -24,13 +24,10 @@ function blankRoot(){
 }
 function assertPrivate(path:string){
  if(process.platform!=='win32'){expect(statSync(path).mode&0o777).toBe(0o600);return;}
- // win32: chmodPrivateActivityFile is a no-op (as in 1.6.2 for every activity
- // file); the file keeps the profile's inherited ACL. Assert it is not exposed
- // to Everyone, BUILTIN\Users or Authenticated Users.
+ // The product writes the DACL at file birth, before writing capability bytes.
  const env={...process.env};delete env.PSModulePath;
- const out=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$a=[IO.File]::GetAccessControl('${path.replace(/'/g,"''")}');foreach($x in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){"sid=$($x.IdentityReference.Value) type=$($x.AccessControlType)"}`],{env,encoding:'utf8'});
- expect(out).toContain('sid=');
- for(const broad of ['S-1-1-0','S-1-5-32-545','S-1-5-11'])expect(out).not.toMatch(new RegExp(`sid=${broad} type=Allow`));
+ const out=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$a=[IO.File]::GetAccessControl('${path.replace(/'/g,"''")}');@{protected=$a.AreAccessRulesProtected;current=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;rules=@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])|ForEach-Object {@{sid=$_.IdentityReference.Value;type=$_.AccessControlType.ToString()}})}|ConvertTo-Json -Compress`],{env,encoding:'utf8'});
+ const actual=JSON.parse(out);expect(actual.protected).toBe(true);expect(actual.rules).toEqual([{sid:actual.current,type:'Allow'}]);
 }
 it('a Desktop owner launch config is qualifiable by Main on a blank protected root',async()=>{
  const {address,config}=blankRoot();

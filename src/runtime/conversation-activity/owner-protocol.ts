@@ -1,4 +1,4 @@
-import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { chmodPrivateActivityFile,writePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -44,11 +44,13 @@ export function readActivityOwnerCredentials(address: ActivityOwnerAddress): Act
  * silently and are never overwritten by a competing startup. */
 export function createActivityOwnerCredentials(address: ActivityOwnerAddress): ActivityOwnerCredentials {
   const temporary = `${address.credentialsPath}.${randomBytes(12).toString('hex')}.tmp`;
-  const fd = openSync(temporary, 'wx', 0o600);
   const value: ActivityOwnerCredentials = { version: 1, rootHash: address.rootHash, user: randomBytes(32).toString('hex'), producer: randomBytes(32).toString('hex') };
-  try {
-    chmodPrivateActivityFile(temporary); writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd);
-  } finally { closeSync(fd); }
+  if(process.platform==='win32')writePrivateActivityFile(temporary,JSON.stringify(value),true);
+  else {
+    const fd = openSync(temporary, 'wx', 0o600);
+    try {chmodPrivateActivityFile(temporary); writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd);}
+    finally {closeSync(fd);}
+  }
   try { linkSync(temporary, address.credentialsPath); return value; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return readActivityOwnerCredentials(address); throw error; }
   finally { unlinkSync(temporary); }
