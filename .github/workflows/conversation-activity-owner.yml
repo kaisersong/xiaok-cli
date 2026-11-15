@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: kaisersong/kswarm
-          ref: fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          ref: 27660cbeb11fa6e41514966575f49ea7097e7676
           path: .kswarm-sibling
           persist-credentials: false
       - name: Place pinned KSwarm as the repository sibling
@@ -80,7 +80,7 @@ jobs:
         run: |
           test ! -e ../kswarm
           mv .kswarm-sibling ../kswarm
-          test "$(git -C ../kswarm rev-parse HEAD)" = fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          test "$(git -C ../kswarm rev-parse HEAD)" = 27660cbeb11fa6e41514966575f49ea7097e7676
           bash .github/scripts/retry.sh npm ci --ignore-scripts --omit=dev --prefix ../kswarm
       - name: Compile original test graph and copy its assets
         run: npm run test:sandbox:build

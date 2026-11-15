@@ -102,7 +102,7 @@ jobs:
           git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          git -C ../kswarm fetch --depth 1 origin 27660cbeb11fa6e41514966575f49ea7097e7676
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
@@ -112,21 +112,11 @@ jobs:
 
       - name: Build report-renderer bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
-          bash "$retry" npm ci
-          npm run build
-          npm run build:bundle
+        run: bash .github/scripts/build-report-renderer.sh
 
       - name: Build canvas frontend and MCP bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
-          npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+        run: bash .github/scripts/build-canvas-bundles.sh
 
       - name: Download Python wheels (macOS)
         run: |
@@ -336,7 +326,7 @@ jobs:
           git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          git -C ../kswarm fetch --depth 1 origin 27660cbeb11fa6e41514966575f49ea7097e7676
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
@@ -346,38 +336,14 @@ jobs:
 
       - name: Build report-renderer bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
-          bash "$retry" npm ci
-          npm run build
-          npm run build:bundle
+        run: bash .github/scripts/build-report-renderer.sh
 
       - name: Build canvas frontend and MCP bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
-          npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+        run: bash .github/scripts/build-canvas-bundles.sh
 
       - name: Download Python wheels (Windows)
-        run: |
-          $wheelDir = Join-Path (Resolve-Path ..\kai-xiaok-plugins\plugins\kai-slide-creator).Path 'bundled-wheels'
-          Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $wheelDir | Out-Null
-          foreach ($py in @('311', '312', '313', '314')) {
-            python -m pip download mcp==2.3.0 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
-              -d $wheelDir `
-              --only-binary=:all: `
-              --platform win_amd64 `
-              --implementation cp `
-              --python-version $py `
-              --abi "cp$py" `
-              --abi abi3 `
-              --abi none
-          }
+        run: ./.github/scripts/download-windows-slide-wheels.ps1
 
       - name: Vendor self-contained provider runtimes (Windows)
         run: |
