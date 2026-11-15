@@ -42,3 +42,16 @@ test('existing UUID observation permits a writer and trusted elevated sidecars b
  fd=fs.openSync(file,'r+');observer=f.api.holdProfile(f.root,false,true);observer.assertCurrent();assert.throws(()=>fs.openSync(profile,'r+'));assert.throws(()=>fs.renameSync(profile,profile+'.moved'));assert.throws(()=>f.api.holdProfile(f.root,true),/windows_profile/);
  }finally{observer?.close();if(fd!==undefined)fs.closeSync(fd);f.cleanup();}
 });
+test('atomic private publication preserves exact destination across allocation lengths without overwrite',windows,()=>{
+ const f=fixture();
+ try{
+  for(let length=1;length<=48;length++){
+   const root=path.join(f.root,'p'.repeat(length));assert.equal(f.api.createPrivateDirectory(root),true);
+   const temporary=path.join(root,'.identity.tmp'),target=path.join(root,'continuity-profile.json'),bytes='fixture-'+length;
+   f.api.writePrivateFile(temporary,bytes,true);assert.equal(f.api.publishProfileFile(temporary,target),true);
+   assert.equal(fs.readFileSync(target,'utf8'),bytes);assert.deepEqual(fs.readdirSync(root),['continuity-profile.json']);
+   f.api.writePrivateFile(temporary,'replacement',true);assert.throws(()=>f.api.publishProfileFile(temporary,target));
+   assert.equal(fs.readFileSync(target,'utf8'),bytes);assert.equal(fs.readFileSync(temporary,'utf8'),'replacement');
+  }
+ }finally{f.cleanup();}
+});

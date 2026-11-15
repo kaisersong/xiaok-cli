@@ -1,1 +1,1 @@
-{"version": 1, "target": "win32-x64", "napi": 8, "sha256": "edfafff1235527e195832056098ca8bb17bbceaf33bc79e4d9e9c041625e25a6", "sourceSha256": "b603cc0308f08df6d841ecd1691070deee6ab68c119299ac2f72f65cd9cf76cd"}
+{"version":1,"target":"win32-x64","napi":8,"sha256":"6bb3b5bca5c271f7a9818e3e84593c67afe7253db9e425b1f4a8363a847477ba","sourceSha256":"20cf15dabadb8f019182fcd5928c399dac399ec2a2537bd837532988b11fe5ae"}
