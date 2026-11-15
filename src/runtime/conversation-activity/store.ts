@@ -190,8 +190,11 @@ export class ConversationActivityStore {
         CREATE TABLE IF NOT EXISTS work_projections(watch_id TEXT PRIMARY KEY REFERENCES work_watches(watch_id), data_json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS source_events(event_key TEXT PRIMARY KEY, watch_id TEXT NOT NULL REFERENCES work_watches(watch_id), content_json TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS source_event_watch ON source_events(watch_id);
+        CREATE INDEX IF NOT EXISTS source_progress_sequence ON source_events(watch_id,json_extract(content_json,'$.sourceSequence'))
+          WHERE json_extract(content_json,'$.kind') IN ('progress','heartbeat');
         CREATE TABLE IF NOT EXISTS source_event_retention(event_key TEXT PRIMARY KEY REFERENCES source_events(event_key) ON DELETE CASCADE, received_at INTEGER NOT NULL,kind TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS watch_event_receipts(watch_id TEXT NOT NULL REFERENCES work_watches(watch_id),event_key TEXT NOT NULL,PRIMARY KEY(watch_id,event_key));
+        CREATE INDEX IF NOT EXISTS watch_event_receipt_event ON watch_event_receipts(event_key);
         CREATE TABLE IF NOT EXISTS source_cursors(watch_id TEXT PRIMARY KEY REFERENCES work_watches(watch_id), sequence INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS conversation_activities(local_seq INTEGER PRIMARY KEY AUTOINCREMENT, activity_id TEXT NOT NULL UNIQUE, watch_id TEXT NOT NULL REFERENCES work_watches(watch_id), profile_id TEXT NOT NULL, thread_id TEXT NOT NULL, data_json TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS activity_thread_page ON conversation_activities(profile_id,thread_id,local_seq);

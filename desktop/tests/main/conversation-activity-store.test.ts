@@ -135,6 +135,32 @@ describe('durable conversation activity', () => {
     expect(store.getProjection('watch')?.executionState).toBe('completed');
   });
 
+  it('retains the exact mixed progress window and rebuilds its indexed compaction plan on reopen', () => {
+    bind();
+    store.ingest('watch', event(1, 'input_required'));
+    for (let sequence = 2; sequence <= 301; sequence++) {
+      store.ingest('watch', event(sequence, sequence % 2 ? 'heartbeat' : 'progress'));
+    }
+    let db = new DatabaseSync(join(root, 'activity.sqlite'));
+    try {
+      const retained = db.prepare("SELECT json_extract(content_json,'$.sourceSequence') AS sequence FROM source_events WHERE json_extract(content_json,'$.kind') IN ('progress','heartbeat') ORDER BY sequence").all();
+      expect(retained.map(row => row.sequence)).toEqual(Array.from({length: 256}, (_, i) => i + 46));
+      expect(db.prepare("SELECT COUNT(*) AS count FROM source_events WHERE json_extract(content_json,'$.kind')='input_required'").get()?.count).toBe(1);
+      const compact = "EXPLAIN QUERY PLAN SELECT event_key FROM source_events WHERE watch_id=? AND json_extract(content_json,'$.kind') IN ('progress','heartbeat') ORDER BY json_extract(content_json,'$.sourceSequence') DESC,rowid DESC LIMIT -1 OFFSET ?";
+      const plan = () => db.prepare(compact).all('watch', 255).map(row => row.detail).join('\n');
+      expect(plan()).toContain('source_progress_sequence');
+      expect(plan()).not.toContain('TEMP B-TREE');
+      db.exec('DROP INDEX source_progress_sequence');
+      expect(plan()).toContain('TEMP B-TREE');
+      store.close();
+      db.close();
+      store = new ConversationActivityStore(join(root, 'activity.sqlite'), {now: () => now});
+      db = new DatabaseSync(join(root, 'activity.sqlite'));
+      expect(plan()).toContain('source_progress_sequence');
+      expect(plan()).not.toContain('TEMP B-TREE');
+    } finally { db.close(); }
+  });
+
   it('rejects saturated critical capacity without acknowledging or advancing the source cursor', () => {
     store.close(); store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now, maxSourceEvents: 3 });
     bind();
