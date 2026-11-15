@@ -53,11 +53,11 @@ jobs:
           root=pathlib.Path(os.environ['RUNNER_TEMP'])/'intent-rpc15-diagnostic'
           root.mkdir()
           (root/'source-patch.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'path':str(p),'originalSHA256':hashlib.sha256(s.encode()).hexdigest(),'observedSHA256':hashlib.sha256(s2.encode()).hexdigest()},indent=2))
-          config="""import original from './vitest.config.ts';
+          config=r"""import original from './vitest.config.ts';
           export default {...original,test:{...original.test,include:['.test-dist/tests/**/*.test.js'],setupFiles:original.test.setupFiles.map(p=>p.endsWith('.ts')?'./.test-dist/'+p.replace(/^\.\//,'').replace(/\.ts$/,'.js'):p)}};
           """
           pathlib.Path('vitest.rpc-emitted-qa.config.mjs').write_text(config)
-          subprocess.run(['node','node_modules/typescript/bin/tsc','-p','tsconfig.tests.json'],check=True)
+          subprocess.run(['node','--max-old-space-size=4096','node_modules/typescript/bin/tsc','-p','tsconfig.tests.json'],check=True)
           assert pathlib.Path('.test-dist/tests/runtime/verification/intent-completion-dependencies.test.js').is_file()
           PY
       - name: Prepare metadata-only diagnostic driver outside source
