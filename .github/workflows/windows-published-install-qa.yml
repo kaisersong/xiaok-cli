@@ -1,50 +1,27 @@
-name: Published Windows installed-path QA
+name: Manual Windows activity storm diagnostic
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        required: true
-        default: '1.5.15'
-        type: string
-      tag:
-        required: true
-        default: 'desktop-v1.5.15'
-        type: string
-      fullSHA:
-        required: true
-        default: '6770092945a42fb0e45ef0d68d0971bfc01b51a8'
-        type: string
-      expectedInstallerSHA256:
-        default: 'b98433d1ea78b5076eb3bbf4afdfcf444fa34515e7b8618405eb804ea2cb57a2'
-        required: true
-        type: string
 permissions:
   contents: read
 jobs:
-  installed-path-qa:
-    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch'
+  original-storm:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: kaisersong/xiaok-cli
-          ref: ${{ github.sha }}
+          ref: 6ae36d1f08789706dd8c0ab94e6cfc906f061e27
           persist-credentials: false
-      - name: Verify published installer and exercise installed Kimi smoke
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          QA_VERSION: ${{ inputs.version }}
-          QA_TAG: ${{ inputs.tag }}
-          QA_RELEASE_SHA: ${{ inputs.fullSHA }}
-          QA_INSTALLER_SHA256: ${{ inputs.expectedInstallerSHA256 }}
-        run: |
-          & ./scripts/qa/windows-published-install.ps1 -Version $env:QA_VERSION -Tag $env:QA_TAG -FullSHA $env:QA_RELEASE_SHA -ExpectedInstallerSHA256 $env:QA_INSTALLER_SHA256
-      - name: Preserve actual QA receipts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: published-windows-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/xiaok-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
-          if-no-files-found: warn
+          node-version: '22.14.0'
+          cache: npm
+      - name: Install original dependencies
+        shell: bash
+        run: bash .github/scripts/retry.sh npm ci
+      - name: Install original Desktop dependencies
+        shell: bash
+        run: cd desktop && bash ../.github/scripts/retry.sh npm ci --ignore-scripts
+      - name: Run original storm with its unchanged 5 second limit
+        shell: bash
+        run: cd desktop && npm test -- --run --maxWorkers=1 tests/main/conversation-activity-store.test.ts -t 'bounds a 10000-progress storm'
