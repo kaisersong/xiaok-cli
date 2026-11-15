@@ -2,13 +2,14 @@
 // plumbing and fuse behavior; it never claims original Native Main authority.
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {createRequire}=require('node:module'),{spawnSync}=require('node:child_process');
+const {createRequire}=require('node:module'),{spawnSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
 const repo=path.resolve(__dirname,'../..'),desktop=path.join(repo,'desktop');
 const desktopRequire=createRequire(path.join(desktop,'package.json'));
 const supported=['darwin','win32','linux'].includes(process.platform);
 test('fused real Electron Main launches fixed Node physical entries and closes actual IPC children',{skip:!supported,timeout:90000},async()=>{
  const root=fs.realpathSync(fs.mkdtempSync(path.join(process.platform==='darwin'?'/tmp':os.tmpdir(),'xf164-fuse-')));
- const mac=process.platform==='darwin',electron=desktopRequire('electron');
+ const mac=process.platform==='darwin';
+ const electron=mac?await (await import(pathToFileURL(path.join(repo,'tests/native/helpers/electron-executable.mjs')).href)).getNativeTestElectronExecutable(repo):desktopRequire('electron');
  const source=mac?path.resolve(electron,'../../..'):path.dirname(electron);
  const app=path.join(root,mac?'Fixture.app':'app');
  fs.cpSync(source,app,{recursive:true,verbatimSymlinks:true});

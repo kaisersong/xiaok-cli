@@ -36,7 +36,7 @@ function prepareBrokerRuntime({archive, cacheRoot, target}) {
       if(!selected||selected.isDirectory||selected.entryName!==member||selected.header.size!==size)throw Error('broker_runtime_archive_member');
       return selected.getData();
     }
-    return execFileSync('tar', ['-xOf', '-', member], {input:data.bytes,maxBuffer:size+1024,timeout:120000,windowsHide:true});
+    return execFileSync('tar', ['-xzOf', '-', member], {input:data.bytes,maxBuffer:size+1024,timeout:120000,windowsHide:true});
   };
   const binary = extract(entry.member, entry.executableSize);
   const license = extract(entry.license, entry.licenseSize);
