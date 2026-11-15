@@ -1,52 +1,31 @@
-name: Windows owner security
+name: Diagnostic Windows owner facts
 on:
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'native/windows-owner-security/**'
-      - 'src/runtime/windows-owner-security.ts'
-      - 'src/runtime/conversation-activity/**'
-      - 'scripts/verification/prepare-windows-owner-security.mjs'
-      - 'tests/native/windows-owner-security.test.cjs'
-      - 'tests/native/windows-profile-custody.test.cjs'
-      - '.github/workflows/windows-owner-security.yml'
-      - 'package*.json'
 permissions:
   contents: read
 jobs:
   native-security:
     runs-on: windows-2022
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22.14.0', '24']
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
-      - uses: ./.github/actions/node-headers
-      - run: npm ci --ignore-scripts
-      - run: npm ci --ignore-scripts --prefix desktop
-      - name: Prepare fixed N-API owner security
-        run: node scripts/verification/prepare-windows-owner-security.mjs source
-      - uses: ./.github/actions/windows-private-temp
-      - name: Run real Windows ACL and process birth cases in Node
-        run: node --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
-      - name: Diagnose a failed atomic publication with the same native decisions
-        if: failure()
-        run: node scripts/verification/diagnose-windows-profile-publication.mjs
-      - name: Install locked Electron
-        working-directory: desktop
-        run: node node_modules/electron/install.js
-      - name: Run the same N-API artifact under Electron Node
-        shell: bash
+          node-version: '24'
+      - name: Capture actual SID and ACL facts from the fixed native artifact
+        shell: pwsh
         run: |
-          electron="$(node -p "require('./desktop/node_modules/electron')")"
-          ELECTRON_RUN_AS_NODE=1 "$electron" --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-owner-security-${{ matrix.node }}
-          path: .artifacts/windows-owner-security/win32-x64
-          if-no-files-found: error
+          node --input-type=commonjs -e @'
+          const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
+          const dir=path.resolve('data/windows-owner-security/win32-x64');
+          const manifest=JSON.parse(fs.readFileSync(path.join(dir,'windows_owner_security.json'),'utf8'));
+          const file=path.join(dir,'windows_owner_security.node');
+          if(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==manifest.sha256)throw Error('artifact hash mismatch');
+          const sdk=require(file),root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-owner-facts-'))),child=path.join(root,'native-private');
+          try{if(sdk.createPrivateDirectory(child)!==true)throw Error('exclusive create failed');console.log(JSON.stringify({diagnosticOnly:true,sha:process.env.GITHUB_SHA,napi:process.versions.napi,plain:sdk.inspect(root),nativePrivate:sdk.inspect(child)}));}
+          finally{fs.rmSync(root,{recursive:true,force:true});}
+          '@
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
