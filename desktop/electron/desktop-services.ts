@@ -5446,6 +5446,10 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         if(event.storageScope.profileId!==binding.storageScope.profileId||event.storageScope.workspaceId!==binding.storageScope.workspaceId||event.principalId!==binding.principalId||event.body.providerId!==captured.providerId||event.body.modelId!==(captured.modelId??null))throw Error('MAIN_MODEL_PROBE_OPERATION_CONFLICT');
         event.assertCurrent();event.assertLocal();
         const path=binding.configPath!;if(modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
+        // Normalize legacy plaintext credentials before freezing the probe snapshot.
+        // The guarded second read still rejects real concurrent config changes.
+        await op.configSdk.sdk<Awaited<ReturnType<typeof loadConfig>>>(loadConfig,undefined,[]);
+        event.assertCurrent();event.assertLocal();
         const before=modelProbeConfigBytes(op.configSdk,path),config=await op.configSdk.sdk<Awaited<ReturnType<typeof loadConfig>>>(loadConfig,undefined,[]);
         const after=modelProbeConfigBytes(op.configSdk,path);if(before!==after||modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
         const providerId=normalizeProviderId(captured.providerId),provider=config.providers[providerId];if(!provider?.apiKey)throw Error('MAIN_MODEL_PROBE_CONFIG_REQUIRED');
