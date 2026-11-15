@@ -11,28 +11,28 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 for (const drift of ['head', 'test-bytes']) {
- test(`original CI runner rejects ${drift} drift after collection`, { timeout: 60000 }, () => {
+ test(`original CI runner rejects ${drift} drift after collection`, { timeout: process.platform === 'win32' ? 120000 : 60000 }, () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-ci-epoch-')));
   const commands = [];
   mkdirSync(join(root, 'config'), { mode: 0o700 });
   const env = { ...process.env, XIAOK_CONFIG_DIR: join(root, 'config') };
-  const run = (file, args) => {
-   const result = spawnSync(file, args, { cwd: root, env, encoding: 'utf8', timeout: 30000 });
-   commands.push({ file, args, pid: result.pid, status: result.status, signal: result.signal });
+  const run = (file, args, timeout = 30000) => {
+   const result = spawnSync(file, args, { cwd: root, env, encoding: 'utf8', timeout });
+   commands.push({ file, args, pid: result.pid, timeout, status: result.status, signal: result.signal });
    if (result.error) throw result.error;
    return result;
   };
   const git = (...args) => { const result=run('git',args);assert.equal(result.status,0,result.stderr);return result.stdout.trim(); };
   try {
    const privateDependencies = join(root, 'node_modules');
-   // Preserve the complete private dependency tree and the original 30s child
-   // boundary. Windows bulk-copy avoids serial JS traversal of every file.
+   // Preserve the full private tree. Quality-reviewed Windows copy setup gets
+   // 60s; actual collector, runner and Git children retain their 30s boundary.
    assert.equal(existsSync(privateDependencies), false, 'dependency copy requires a fresh destination');
    const copied = process.platform === 'win32'
     ? run(join(process.env.SystemRoot, 'System32', 'robocopy.exe'), [
       join(repository, 'node_modules'), privateDependencies,
       '/E', '/COPY:DAT', '/DCOPY:DAT', '/MT:8', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
-     ])
+     ], 60000)
     : run(process.execPath, ['--input-type=commonjs', '-e',
       "const fs=require('node:fs');fs.cpSync(process.argv[1],process.argv[2],{recursive:true,dereference:true,force:false,errorOnExist:true,mode:fs.constants.COPYFILE_FICLONE});",
       join(repository, 'node_modules'), privateDependencies]);

@@ -48,6 +48,18 @@ function kswarmTestNode():string{
   console.log(JSON.stringify({test:'supervisor-actual-ks-node',executable,version,fromEnv:Boolean(set)}));
   return executable;
 }
+async function closeFixtureSupervisors(root:string,owners:ActivitySourceSupervisor[],primary?:{raw:unknown}):Promise<void>{
+  try{
+    const outcomes=await Promise.allSettled(owners.map(owner=>owner.sealAndDrainSpawned()));
+    const failure=outcomes.find(row=>row.status==='rejected');
+    if(failure?.status==='rejected')throw failure.reason;
+    cleanupPrivateTestTempDir(root);
+  }catch(raw){
+    if(!primary)throw raw;
+    // Preserve the body failure; unknown cleanup never becomes a passing test.
+    try{console.error('supervisor_fixture_cleanup_failed');}catch{}
+  }
+}
 describe('native source supervisor process ownership', () => {
   it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
     const f = await fixture();
@@ -154,30 +166,30 @@ describe('native source supervisor process ownership', () => {
     }finally{if(receipt)await supervisor.stopOwned('kswarm','real-ks');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
   },15000);
   it('single-flights launch, persists birth and entry identity, transfers only verified ownership and rejects an old stop lease', async () => {
-    const f = await fixture(); let pid: number | undefined;
+    const f = await fixture(); let pid: number | undefined,primary:{raw:unknown}|undefined;const owners:ActivitySourceSupervisor[]=[];
     try {
-      const first = new ActivitySourceSupervisor(f.root, 'first');
+      const first = new ActivitySourceSupervisor(f.root, 'first');owners.push(first);
       const [a,b] = await Promise.all([first.ensure(f.source), first.ensure(f.source)]); pid = a.pid;
       expect(a).toEqual(b); expect(a.external).toBe(false); expect(await first.protectedPid(a.pid)).toBe(true);
-      const restored = new ActivitySourceSupervisor(f.root, 'second');
+      const restored = new ActivitySourceSupervisor(f.root, 'second');owners.push(restored);
       expect(await restored.ensure(f.source)).toMatchObject({ pid: a.pid, birth: a.birth, ownerEpoch: 'second' });
       await expect(first.stopOwned('kswarm','first')).rejects.toThrow('activity_source_stale_lease');
       await expect(restored.stopOwned('kswarm','first')).rejects.toThrow('activity_source_stale_lease');
       await restored.stopOwned('kswarm','second');
       expect(() => process.kill(a.pid,0)).toThrow();
-    } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+    } catch(raw){primary={raw};throw raw;} finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } await closeFixtureSupervisors(f.root,owners,primary); }
   },15_000);
   it('restarts a confirmed dead owned source without treating a reused PID or altered entry as takeover permission', async () => {
-    const f = await fixture(); let pid: number | undefined;
+    const f = await fixture(); let pid: number | undefined,primary:{raw:unknown}|undefined;const owners:ActivitySourceSupervisor[]=[];
     try {
-      const first = new ActivitySourceSupervisor(f.root,'first'); const a = await first.ensure(f.source); pid = a.pid;
+      const first = new ActivitySourceSupervisor(f.root,'first');owners.push(first); const a = await first.ensure(f.source); pid = a.pid;
       process.kill(a.pid,'SIGTERM'); await vi.waitFor(() => expect(() => process.kill(a.pid,0)).toThrow());
-      const restored = new ActivitySourceSupervisor(f.root,'second'); await new ActivitySourceSupervisor(f.root,'first').stopOwned('kswarm','first'); const b = await restored.ensure(f.source); pid = b.pid;
+      const restored = new ActivitySourceSupervisor(f.root,'second');owners.push(restored); await new ActivitySourceSupervisor(f.root,'first').stopOwned('kswarm','first'); const b = await restored.ensure(f.source); pid = b.pid;
       expect(b.pid).not.toBe(a.pid); expect(b.external).toBe(false);
       writeFileSync(f.source.entryPath,readFileSync(f.source.entryPath,'utf8')+'\n// changed');
       await expect(restored.ensure(f.source)).rejects.toThrow('activity_source_identity_mismatch');
       await restored.stopOwned('kswarm','second');
-    } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+    } catch(raw){primary={raw};throw raw;} finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } await closeFixtureSupervisors(f.root,owners,primary); }
   },15_000);
   it.each(['response-stall','response-invalid','transport-failure'] as const)('kills an unhealthy source and releases its port (%s)', async mode => {
     const f = await fixture();
