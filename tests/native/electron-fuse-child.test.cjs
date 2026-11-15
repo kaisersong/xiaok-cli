@@ -2,6 +2,7 @@
 // plumbing and fuse behavior; it never claims original Native Main authority.
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+const {finished}=require('node:stream/promises');
 const {createRequire}=require('node:module'),{spawnSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
 const repo=path.resolve(__dirname,'../..'),desktop=path.join(repo,'desktop');
 const desktopRequire=createRequire(path.join(desktop,'package.json'));
@@ -22,7 +23,8 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
   const update=spawnSync('plutil',['-replace','CFBundleExecutable','-string','Fixture',plist],{encoding:'utf8'});assert.equal(update.status,0,update.stderr);
  }
  const staging=path.join(root,'source');fs.mkdirSync(staging);
- function write(relative,content){const file=path.join(staging,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,content);}
+ const expectedFiles=new Map();
+ function write(relative,content){const bytes=Buffer.from(content);expectedFiles.set(relative,bytes);const file=path.join(staging,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}
  write('package.json',JSON.stringify({name:'xiaok-fuse-runtime-fixture',version:'1.0.0',type:'module',main:'main.cjs'}));
  write('main.cjs',`const {app}=require('electron');app.setPath('userData',process.argv.find(arg=>arg.startsWith('--profile-dir=')).slice('--profile-dir='.length));process.on('uncaughtException',error=>{console.error(error);app.exit(1);});import('./main.mjs').catch(error=>{console.error(error);app.exit(1);});`);
  const ts=desktopRequire('typescript');
@@ -40,10 +42,15 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
  let message,stderr='';child.on('message',value=>message=value);child.stderr.on('data',chunk=>stderr+=String(chunk));child.stdout.resume();
  child.once('error',error=>{console.error(error);app.exit(1);});child.once('close',(code,signal)=>{assertNodeChildRuntimeFilesKnown();writeFileSync(option('--report'),JSON.stringify({isPackaged:app.isPackaged,mainPid:process.pid,childPid:child.pid,code,signal,message,stderr,closed:true}));window.destroy();app.quit();});}).catch(error=>{console.error(error);app.exit(1);});`);
  const asar=desktopRequire('@electron/asar');
- const archive=path.join(resources,'app.asar');fs.rmSync(archive,{force:true});await asar.createPackage(staging,archive);
+ const archive=path.join(resources,'app.asar');fs.rmSync(archive,{force:true});
+ // asar 3 returns its WriteStream before the last write completes. Never read
+ // or extract the fixture until the producer has finished (including errors).
+ await finished(await asar.createPackage(staging,archive),{cleanup:true});
+ for(const [relative,bytes] of expectedFiles)assert.deepEqual(asar.extractFile(archive,relative),bytes,'fixture ASAR bytes: '+relative);
  const {shipBrokerRuntime}=require('../../desktop/scripts/pack-broker-runtime.cjs');
  shipBrokerRuntime({cacheRoot:path.join(repo,'.artifacts/broker-runtimes'),resources,target:process.platform+'-'+process.arch});
- require('../../desktop/scripts/pack-node-child.cjs').packNodeChild(archive);
+ const physicalApp=require('../../desktop/scripts/pack-node-child.cjs').packNodeChild(archive);
+ for(const [relative,bytes] of expectedFiles)assert.deepEqual(fs.readFileSync(path.join(physicalApp,relative)),bytes,'fixture physical bytes: '+relative);
  const preload=path.join(root,'preload.cjs'),preloadCanary=path.join(root,'preloaded'),evalCanary=path.join(root,'evaluated'),report=path.join(root,'report.json');
  fs.writeFileSync(preload,'require("node:fs").writeFileSync('+JSON.stringify(preloadCanary)+',"forbidden")');
  const env={...process.env,ELECTRON_RUN_AS_NODE:'1',NODE_OPTIONS:'--require='+JSON.stringify(preload),XIAOK_NODE_CMD:path.join(root,'forbidden-node')};
