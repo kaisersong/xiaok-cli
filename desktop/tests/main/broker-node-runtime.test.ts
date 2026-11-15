@@ -34,7 +34,13 @@ describe('pinned ordinary broker Node runtime',()=>{
  });
  it('development and targets outside the pinned compatibility profiles leave the existing resolver in control',()=>{
   expect(resolvePackagedBrokerRuntime({isPackaged:false,resourcesPath:'/unused',env:{}})).toBeNull();
-  expect(resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'linux',arch:'x64',env:{}})).toBeNull();
+  expect(resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'freebsd',arch:'x64',env:{}})).toBeNull();
+  // Linux is now a pinned fuse-migration target; the original input must fail
+  // closed on its missing package instead of selecting the legacy executable.
+  for(const arch of ['x64','arm64']){
+   try{resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'linux',arch,env:{}});throw Error('missing package accepted');}
+   catch(error){expect(error).toMatchObject({code:'ENOENT'});expect(String((error as NodeJS.ErrnoException).path).replaceAll('\\','/')).toMatch(/\/unused$/);}
+  }
  });
  it('missing runtime fails closed, with no environment fallback',()=>{
   const root=mkdtempSync(join(tmpdir(),'broker-runtime-missing-'));roots.push(root);

@@ -647,12 +647,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     );
     persistedSession = await sessionStore.fork(opts.forkSession);
   }
-  if (persistedSession) {
-    assertKimiK3TargetResumeSupported(
-      resolveRegisteredStrictKimiK3Profile(adapter) !== undefined,
-      persistedSession,
-    );
-  }
 
   const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
   const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
@@ -1715,7 +1709,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   if (persistedSession) {
-    commandAgent.restoreSession(persistedSession);
+    if(commandAgent.restoreSession(persistedSession))process.stderr.write(getUiCopy().kimiPublicHistoryRecovered+'\n');
   }
 
   const startupSnapshot = commandAgent.exportSession();

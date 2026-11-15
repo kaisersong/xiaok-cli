@@ -27,6 +27,43 @@
       "executableSize": 92825416,
       "licenseSha256": "d9c4eeda951d6d08f4aa1316b61aafcf67e6da5f79b18f8edeb56fa6abdc038c",
       "licenseSize": 160552
+    },
+    "darwin-x64": {
+      "archive": "node-v24.19.0-darwin-x64.tar.gz",
+      "archiveSha256": "d1b5e999db158c62fe8f7267a4476b035d8bd93b1a605bac24a3f0dd166e3316",
+      "archiveSize": 53439583,
+      "executable": "node",
+      "member": "node-v24.19.0-darwin-x64/bin/node",
+      "license": "node-v24.19.0-darwin-x64/LICENSE",
+      "executableSha256": "1052eb9c7d6c60a79b968e09f75af55a73462b0f6dff0964336d63b5e13eb63c",
+      "executableSize": 123666640,
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5",
+      "licenseSize": 157606,
+      "minimumDarwinRelease": "22.6.0"
+    },
+    "linux-x64": {
+      "archive": "node-v24.19.0-linux-x64.tar.gz",
+      "archiveSha256": "f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4",
+      "archiveSize": 57409532,
+      "executable": "node",
+      "member": "node-v24.19.0-linux-x64/bin/node",
+      "license": "node-v24.19.0-linux-x64/LICENSE",
+      "executableSha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12",
+      "executableSize": 125989464,
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5",
+      "licenseSize": 157606
+    },
+    "linux-arm64": {
+      "archive": "node-v24.19.0-linux-arm64.tar.gz",
+      "archiveSha256": "d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f",
+      "archiveSize": 57128466,
+      "executable": "node",
+      "member": "node-v24.19.0-linux-arm64/bin/node",
+      "license": "node-v24.19.0-linux-arm64/LICENSE",
+      "executableSha256": "3e53e5ff5eaa922f1b4308312d50da9091db62d40b87716ad36c60b347e7f984",
+      "executableSize": 122077656,
+      "licenseSha256": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5",
+      "licenseSize": 157606
     }
   }
 }

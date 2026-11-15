@@ -1,5 +1,6 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, symlinkSync, statSync, unlinkSync } from 'node:fs';
+import {  rmSync, symlinkSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { activityOwnerAddress, authenticateActivityClient, createActivityOwnerCredentials, ACTIVITY_OWNER_PROTOCOL } from '../../../src/runtime/conversation-activity/owner-protocol.js';
@@ -7,7 +8,7 @@ import { activityOwnerAddress, authenticateActivityClient, createActivityOwnerCr
 describe('activity owner namespace and authenticated role', () => {
   const roots: string[] = [];
   afterEach(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); roots.length = 0; });
-  function root() { const path = mkdtempSync(join(tmpdir(), 'activity-protocol-')); roots.push(path); return path; }
+  function root() { const path = makePrivateTestTempDir(join(tmpdir(), 'activity-protocol-')); roots.push(path); return path; }
   it('rejects POSIX symlink aliases while keeping distinct roots in distinct socket namespaces', () => {
     const first = root(), second = root(), alias = join(second, 'alias'); symlinkSync(first, alias);
     if (process.platform === 'win32') expect(activityOwnerAddress(alias).rootHash).toBe(activityOwnerAddress(first).rootHash);

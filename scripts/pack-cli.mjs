@@ -117,6 +117,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const index = process.argv.indexOf('--output');
     try {
       execFileSync(process.execPath, [join(root, 'scripts', 'verification', 'copy-windows-absence.mjs'), 'cli', '--require-all'], { stdio: 'inherit' });
+      execFileSync(process.execPath, [join(root, 'scripts', 'verification', 'prepare-windows-owner-security.mjs'), 'cli', '--require-all'], { stdio: 'inherit' });
       console.log(await packCli({ output: index < 0 ? root : process.argv[index + 1] }));
     } catch (error) {
       console.error(error.message);

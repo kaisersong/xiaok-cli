@@ -69,7 +69,7 @@ function packagedBrokerRuntime(resources, platform, arch, env) {
   return runtime;
 }
 function serviceLaunch(name, resources, env, platform, arch) {
-  const runtime = name === 'intent-broker' ? packagedBrokerRuntime(resources, platform, arch, env) : null;
+  const runtime = packagedBrokerRuntime(resources, platform, arch, env);
   return runtime ? { command: runtime.command, env: { ...runtime.env }, runtime } : { command: process.execPath, env, runtime: null };
 }
 function assertBrokerRuntimeHealth(label, health, runtime) {
@@ -105,7 +105,7 @@ async function serviceProbe(name, resources, root, timeoutMs, workflowSupport, p
     }
     if (!health) fail(label, `health timeout after ${timeoutMs}ms: ${output}`);
     validateHealth(name, health, child, entry, label, workflowSupport);
-    assertBrokerRuntimeHealth(label, health, launch.runtime);
+    if(name==='intent-broker')assertBrokerRuntimeHealth(label, health, launch.runtime);
     if (name === 'kswarm') for (const route of ['activity','activity-identity']) {
       const response = await fetch(`http://127.0.0.1:${selectedPort}/projects/__pack_probe__/${route}`, { signal: AbortSignal.timeout(1000) });
       if (response.status !== 401) fail(label, `${route} must exist and reject an unauthenticated read (got ${response.status})`);

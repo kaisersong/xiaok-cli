@@ -70,7 +70,7 @@ test('the packaged service contract fails when the Broker Windows absence helper
   const brokerRuntime = req('../../desktop/electron/broker-runtime-package.cjs');
   const probeEnv = { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', PORT: '1', INTENT_BROKER_DB: 'x.sqlite' };
   const tempResources = t => { const root = realpathSync(mkdtempSync(join(tmpdir(), 'broker-pack-gate-'))); t.after(() => rmSync(root, { recursive: true, force: true })); return root; };
-  for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64']]) test(`pack gate refuses a ${platform}-${arch} package without its pinned Broker runtime`, t => {
+  for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64'], ['linux', 'x64'], ['linux', 'arm64']]) test(`pack gate refuses a ${platform}-${arch} package without its pinned Broker runtime`, t => {
     assert.throws(() => contracts.serviceLaunch('intent-broker', tempResources(t), probeEnv, platform, arch), /packaged service contract: intent-broker runtime: packaged Broker Node runtime/);
   });
   test('pack gate refuses a tampered pinned Broker runtime instead of falling back to host Node', t => {
@@ -88,11 +88,14 @@ test('the packaged service contract fails when the Broker Windows absence helper
     writeFileSync(join(dir, platform === 'win32' ? 'node.exe' : 'node'), 'x'); writeFileSync(join(dir, 'LICENSE'), 'x');
     assert.throws(() => contracts.serviceLaunch('intent-broker', resources, probeEnv, platform, arch), new RegExp(`packaged Broker Node runtime (is invalid|was not selected) for ${target}`));
   });
-  test('only unsupported Broker targets and KSwarm keep the host Node launcher', t => {
+  test('only unsupported targets keep the host Node launcher; supported KSwarm targets require the pinned runtime', t => {
     const resources = tempResources(t);
-    for (const [name, platform, arch] of [['intent-broker', 'linux', 'x64'], ['intent-broker', 'win32', 'ia32'], ['kswarm', 'darwin', 'arm64'], ['kswarm', 'win32', 'x64']]) {
+    for (const [name, platform, arch] of [['intent-broker', 'freebsd', 'x64'], ['intent-broker', 'win32', 'ia32']]) {
       const launch = contracts.serviceLaunch(name, resources, probeEnv, platform, arch);
       assert.equal(launch.command, process.execPath); assert.equal(launch.runtime, null); assert.equal(launch.env, probeEnv);
+    }
+    for (const [platform, arch] of [['darwin', 'arm64'], ['win32', 'x64']]) {
+      assert.throws(() => contracts.serviceLaunch('kswarm', resources, probeEnv, platform, arch), /packaged service contract: intent-broker runtime: packaged Broker Node runtime/);
     }
   });
   test('the Broker probe launches the resolved pinned runtime with its sanitized environment', t => {

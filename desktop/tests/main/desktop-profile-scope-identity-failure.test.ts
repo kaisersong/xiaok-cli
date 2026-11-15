@@ -1,6 +1,8 @@
+import {ownedProfileTempDir as mkdtempSync} from '../support/profile-storage-fixture.js';
+import {ownedProfileDirectory,seedProfileGroups,openProfileDatabaseSnapshot} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {existsSync,lstatSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {existsSync,symlinkSync,lstatSync,mkdirSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -46,10 +48,10 @@ function scopeValues(dataRoot:string):string[]{
  const values=new Set<string>();
  for(const [file,columns] of tables){
   const path=join(dataRoot,file);if(!existsSync(path))continue;
-  const db=new DatabaseSync(path,{readOnly:true});
+  const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
   try{const names=new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row=>String(row.name)));
    for(const [table,column] of columns)if(names.has(table))for(const row of db.prepare(`SELECT DISTINCT ${column} AS v FROM ${table}`).all())values.add(String(row.v).replace(/^desktop-user:/,''));
-  }finally{db.close();}
+  }finally{snapshot.close();}
  }
  return [...values].sort();
 }
@@ -62,12 +64,12 @@ function filesContaining(root:string,needles:readonly string[]):string[]{
   const bytes=readFileSync(path);
   for(const needle of needles)if(bytes.includes(Buffer.from(needle))||bytes.includes(Buffer.from(needle.toUpperCase())))hits.push(`${path} (bytes)`);
   if(bytes.subarray(0,16).toString('latin1')==='SQLite format 3\0'){
-   const db=new DatabaseSync(path,{readOnly:true});
+   const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
    try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>)
     for(const row of db.prepare(`SELECT * FROM "${table.replaceAll('"','""')}"`).all() as Array<Record<string,unknown>>)
      for(const [column,value] of Object.entries(row)){const text=value instanceof Uint8Array?Buffer.from(value).toString('latin1'):String(value);
       for(const needle of needles)if(text.toLowerCase().includes(needle))hits.push(`${path} ${table}.${column}`);}
-   }finally{db.close();}
+   }finally{snapshot.close();}
   }
  }};
  walk(root);return [...new Set(hits)].sort();
@@ -77,10 +79,10 @@ function populatedTables(root:string):string[]{
  const out:string[]=[];
  const walk=(dir:string)=>{for(const name of readdirSync(dir)){const path=join(dir,name),st=lstatSync(path);
   if(st.isDirectory()){walk(path);continue;}if(!st.isFile()||readFileSync(path).subarray(0,16).toString('latin1')!=='SQLite format 3\0')continue;
-  const db=new DatabaseSync(path,{readOnly:true});
+  const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
   try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>){
    const {c}=db.prepare(`SELECT count(*) AS c FROM "${table.replaceAll('"','""')}"`).get() as {c:number};if(c>0)out.push(`${toPosixRelative(root,path)} ${table}=${c}`);}
-  }finally{db.close();}
+  }finally{snapshot.close();}
  }};
  walk(root);return out.sort();
 }
@@ -118,11 +120,11 @@ async function attach(platform:Platform,start:Awaited<ReturnType<typeof mainStar
  return {result,release,notices};
 }
 
-describe.each(['win32','darwin'] as const)('fresh install whose first identity fails, then start / restart on %s',platform=>{
+describe.each([process.platform==='win32'?'win32':'darwin'] as const)('fresh install whose first identity fails, then start / restart on %s',platform=>{
  it('the failed start writes no legacy-scoped row; the next two starts attach, never hit profile.ts:28 and write no migration file',async()=>{
   const base=mkdtempSync(join(tmpdir(),`profile-scope-idfail-${platform}-`));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
   vi.stubEnv('XIAOK_CONFIG_DIR',join(base,'config'));vi.stubEnv('XIAOK_DISABLE_GLOBAL_PLUGINS','1');
-  const dataRoot=join(base,'data');mkdirSync(dataRoot,{recursive:true,mode:0o700});mkdirSync(join(base,'config'),{recursive:true});
+  const dataRoot=join(base,'data');ownedProfileDirectory(dataRoot);mkdirSync(join(base,'config'),{recursive:true});
   writeFileSync(join(base,'config','config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture-only',model:'fixture'}},defaultMode:'interactive',channels:{}}));
   const legacy=legacyOf(dataRoot);
 
@@ -207,4 +209,20 @@ describe.each(['win32','darwin'] as const)('fresh install whose first identity f
 it('toPosixRelative normalizes Windows separators so populatedTables/filesUnder stay posix',()=>{
  expect(toPosixRelative('C:\\tmp\\base','C:\\tmp\\base\\data\\artifact-workspace\\workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
  expect(toPosixRelative('/tmp/base','/tmp/base/data/artifact-workspace/workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
+});
+
+it.skipIf(process.platform==='win32')('an emulated Windows name cannot replace actual SID/ACL proof or poison the next POSIX start',()=>{
+ const base=mkdtempSync(join(tmpdir(),'profile-no-fake-sid-'));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
+ const dataRoot=join(base,'data');mkdirSync(dataRoot,{mode:0o700});
+ const unavailable=onPlatform('win32',()=>resolveDesktopMainIdentity(dataRoot));
+ expect(unavailable.scope).toBe('unavailable');expect(mainDshScopeAvailable(unavailable)).toBe(false);
+ expect(existsSync(join(dataRoot,'continuity-profile.json'))).toBe(false);
+ const actual=resolveDesktopMainIdentity(dataRoot);expect(actual.failure).toBeUndefined();expect(actual.scope).toBe('continuity');
+});
+
+it.runIf(process.platform!=='win32')('a dangling canonical artifact cannot fall back to a legacy scope',()=>{
+ const base=mkdtempSync(join(tmpdir(),'profile-dangling-'));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
+ const root=join(base,'data');ownedProfileDirectory(root);seedProfileGroups(root,legacyOf(root));
+ symlinkSync(join(base,'missing-profile.json'),join(root,'continuity-profile.json'));
+ const identity=resolveDesktopMainIdentity(root);expect(identity.scope).toBe('unavailable');expect(identity.continuity).toBeNull();
 });

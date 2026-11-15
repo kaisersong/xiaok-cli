@@ -95,13 +95,17 @@ it('actual afterPack rejects unsupported targets before package access',async()=
  await expect(packHelper({electronPlatformName:'win32',arch:Arch.ia32})).rejects.toThrow('unsupported');
 });
 it('the single afterPack entry retains every verification gate before the helper gate',async()=>{
- const entry=require.resolve('../../scripts/after-pack.cjs');const names=['copy-packaged-dependencies','verify-packaged-main-freshness','verify-packaged-runtime-dependencies','verify-packaged-continuity-source','verify-packaged-yzj-cli','pack-bundled-runtimes','pack-broker-runtime','verify-packaged-service-contracts','pack-artifact-export-helper'];const calls:string[]=[];
+ const entry=require.resolve('../../scripts/after-pack.cjs');const names=['copy-packaged-dependencies','verify-packaged-main-freshness','pack-broker-runtime','pack-node-child','verify-packaged-runtime-dependencies','verify-packaged-continuity-source','verify-packaged-yzj-cli','verify-packaged-node-children','pack-bundled-runtimes','verify-packaged-service-contracts','pack-artifact-export-helper','flip-packaged-fuses'];const calls:string[]=[];
  const modules=names.map(name=>require.resolve(`../../scripts/${name}.cjs`));const originals=modules.map(file=>require.cache[file]);const originalEntry=require.cache[entry];
  const stub=(index:number)=>{const exports:any=async()=>{calls.push(names[index]);};if(names[index]==='verify-packaged-runtime-dependencies')exports.packagedRuntimePaths=()=>({});return exports;};
  try{modules.forEach((file,index)=>{require.cache[file]={id:file,filename:file,loaded:true,exports:stub(index)} as NodeJS.Module;});delete require.cache[entry];await require(entry)({});expect(calls).toEqual(names);
- // A failure in an earlier gate must prevent the helper mutation.
- calls.length=0;require.cache[modules[1]]!.exports=async()=>{throw new Error('old gate refused');};delete require.cache[entry];await expect(require(entry)({})).rejects.toThrow('old gate refused');expect(calls).toEqual([names[0]]);
- calls.length=0;require.cache[modules[1]]!.exports=async()=>{calls.push(names[1]);};const serviceIndex=names.indexOf('verify-packaged-service-contracts');require.cache[modules[serviceIndex]]!.exports=async()=>{throw new Error('service gate refused');};delete require.cache[entry];await expect(require(entry)({})).rejects.toThrow('service gate refused');expect(calls).toEqual(names.slice(0,serviceIndex));
+ // Every failed gate must stop every later mutation, including fuse flipping.
+ for(let failed=0;failed<names.length;failed++){
+  calls.length=0;modules.forEach((file,index)=>{require.cache[file]!.exports=stub(index);});
+  require.cache[modules[failed]]!.exports=async()=>{throw new Error('gate refused: '+names[failed]);};
+  delete require.cache[entry];await expect(require(entry)({})).rejects.toThrow('gate refused: '+names[failed]);
+  expect(calls).toEqual(names.slice(0,failed));
+ }
  }finally{modules.forEach((file,index)=>{if(originals[index])require.cache[file]=originals[index];else delete require.cache[file];});if(originalEntry)require.cache[entry]=originalEntry;else delete require.cache[entry];}
 });
 it.each(['linux-other','.staging-crashed'])('rejects an occupied helper parent containing %s',name=>{

@@ -10,7 +10,7 @@ import ts from 'typescript';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/task7-factory', getLocale: () => 'en' },
   BrowserWindow: { getAllWindows: () => [], fromWebContents: (sender: unknown) => ({ webContents: sender, isDestroyed: () => false }) },
-  clipboard: {}, dialog: {}, shell: {} }));
+  webContents: undefined, clipboard: {}, dialog: {}, shell: {} }));
 import { registerDesktopIpc } from '../../electron/ipc.js';
 import { createDesktopServices } from '../../electron/desktop-services.js';
 import { isTrustedDesktopRendererUrl } from '../../electron/security.js';
@@ -132,7 +132,8 @@ export async function task7FactoryFixture(seedFields: Record<string, unknown> = 
   const authority = mainAuthority(service, sender, recorder);
   const listeners = new Map<string, IpcHandlerListener>(), gate = new DesktopShutdownGate();
   const ipc = new ShutdownAwareIpcMain({ handle(channel, handler) { expect(listeners.has(channel)).toBe(false); listeners.set(channel, handler); } }, gate, authority.coarse);
-  await registerDesktopIpc(ipc, { webContents: sender, isDestroyed: () => destroyed } as never, service,
+  const window=Object.assign(new EventEmitter(),{webContents:sender,isDestroyed:()=>destroyed});
+  await registerDesktopIpc(ipc, window as never, service,
     { multiAgentAuthorize: authority.finer, registerLifetimeDisposer: dispose => lifetime.push(dispose) });
   // Cold historical input is committed through the existing production store;
   // no task creation, DTO projection, ownership or cancellation logic is reimplemented.

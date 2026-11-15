@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import {ownedProfileTempDir as mkdtempSync} from '../support/profile-storage-fixture.js';
+import {cleanupPrivateTestTempDir} from '../../../tests/support/private-temp.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDesktopServices } from '../../electron/desktop-services.js';
@@ -27,14 +29,7 @@ describe('desktop services model catalog', () => {
       await current.disposeMultiAgent();
     }
     try {
-      try {
-        rmSync(rootDir, { recursive: true, force: true, maxRetries: 3 });
-      } catch (error) {
-        // The services API has no close for the artifact-workspace sqlite handle (#198), and
-        // Windows refuses to unlink an open file (EBUSY). The dir is a unique mkdtemp dir, so a
-        // leftover on win32 cannot leak into another test. Other platforms must still clean up.
-        if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
-      }
+      cleanupPrivateTestTempDir(rootDir);
     } finally {
       if (previousConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR;
       else process.env.XIAOK_CONFIG_DIR = previousConfigDir;

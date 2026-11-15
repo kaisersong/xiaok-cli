@@ -22,6 +22,8 @@ const ALLOWED_TGZ_ONLY = [/^runtime\/verification\/native\/win32-[^/]+\//];
 // 必须不再出现 / 必须存在的关键内容（授权修复的代表性证据）。
 const FORBIDDEN = [{ file: 'commands/chat.js', text: 'onPromptOverride: async () => true', why: '云之家工具确认自动批准（P0-1）' }];
 const REQUIRED_FILES = [
+  {file:'runtime/native/win32-x64/windows_owner_security.node',why:'Windows活动存储ACL和进程身份原生模块'},
+  {file:'runtime/native/win32-x64/windows_owner_security.json',why:'Windows原生模块来源与产物哈希'},
   { file: 'commands/project-rule-adoption.js', why: '项目放行规则需本机采纳（P0-3）' },
   { file: 'channels/turn-origin.js', why: '确认归属：回合来源（P0-1b）' },
   { file: 'channels/sender-allowlist.js', why: '云之家发送人白名单（P0-5）' },

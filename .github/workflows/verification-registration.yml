@@ -69,8 +69,8 @@ jobs:
         node: ['22.14.0', '24']
         shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
-    # Job ceiling only; original per-case/config deadlines are unchanged.
-    timeout-minutes: 25
+    # Includes both complete Intent inventories and the nine source suites.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -110,19 +110,39 @@ jobs:
           tests/runtime/verification/registration-statement-mode.test.ts
           --maxWorkers=1 --reporter=verbose --reporter=json
           --outputFile=verification-registration-source-wholes.json
+      - name: Require real receiver liveness and cancellation controls
+        if: matrix.shard == 1
+        run: >-
+          npm run test:full -- --config vitest.config.ts
+          tests/runtime/verification/receiver-liveness.test.ts
+          --maxWorkers=1 --reporter=verbose --reporter=json
+          --outputFile=verification-receiver-liveness.json
       - name: Collect complete original Intent publication inventory
+        id: publication-inventory
         run: >-
           node .github/scripts/ci-plan.mjs collect vitest.config.ts
           tests/runtime/verification/intent-publication-dependencies.test.ts
-          ci-shard-reports/registration ${{ matrix.os }}-node-${{ matrix.node }} ${{ matrix.shard }} 3
-      - name: Run the original Intent publication cases on this shard
-        # Original known failures remain non-blocking; collection/audit failures do not.
-        continue-on-error: true
-        timeout-minutes: 15
-        run: node .github/scripts/ci-plan.mjs run ci-shard-reports/registration
-      - name: Require actual Intent case coverage, preserving original natural skips
+          ci-shard-reports/registration/publication ${{ matrix.os }}-node-${{ matrix.node }}-publication ${{ matrix.shard }} 3
+      - name: Collect complete original Intent completion inventory
+        id: completion-inventory
+        run: >-
+          node .github/scripts/ci-plan.mjs collect vitest.config.ts
+          tests/runtime/verification/intent-completion-dependencies.test.ts
+          ci-shard-reports/registration/completion ${{ matrix.os }}-node-${{ matrix.node }}-completion ${{ matrix.shard }} 3
+      - name: Run original Intent publication cases and require success
+        if: always() && steps.publication-inventory.outcome == 'success'
+        timeout-minutes: 30
+        run: node .github/scripts/ci-plan.mjs run ci-shard-reports/registration/publication
+      - name: Run original Intent completion cases and require success
+        if: always() && steps.completion-inventory.outcome == 'success'
+        timeout-minutes: 30
+        run: node .github/scripts/ci-plan.mjs run ci-shard-reports/registration/completion
+      - name: Audit actual publication case coverage and original natural skips
         if: always()
-        run: node .github/scripts/ci-plan.mjs audit ci-shard-reports/registration
+        run: node .github/scripts/ci-plan.mjs audit ci-shard-reports/registration/publication
+      - name: Audit actual completion case coverage
+        if: always()
+        run: node .github/scripts/ci-plan.mjs audit ci-shard-reports/registration/completion
       - name: Preserve Intent shard identities and results
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,6 +158,7 @@ jobs:
           name: verification-registration-${{ matrix.os }}-node-${{ matrix.node }}-shard-${{ matrix.shard }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             verification-registration-source-wholes.json
+            verification-receiver-liveness.json
             verification-registration-intent-publication.json
           if-no-files-found: warn
 
@@ -160,7 +181,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
           ${{ github.event.pull_request.head.sha || github.sha }}
-          ubuntu-latest-node-22.14.0:3,ubuntu-latest-node-24:3,macos-15-node-22.14.0:3,macos-15-node-24:3 3
+          ubuntu-latest-node-22.14.0-publication:3,ubuntu-latest-node-22.14.0-completion:3,ubuntu-latest-node-24-publication:3,ubuntu-latest-node-24-completion:3,macos-15-node-22.14.0-publication:3,macos-15-node-22.14.0-completion:3,macos-15-node-24-publication:3,macos-15-node-24-completion:3 3
       - name: Preserve original nine blocking suites and evidence gates
         shell: bash
         env:

@@ -102,6 +102,7 @@ export class Agent {
 
   forceCompact(): CompactionRecord | null {
     this.assertHistoryMutationAllowed();
+    this.runtime.assertCompactionAllowed();
     return this.session.forceCompact();
   }
 
@@ -113,9 +114,10 @@ export class Agent {
     return this.session.exportSnapshot();
   }
 
-  restoreSession(snapshot: AgentSessionSnapshot): void {
+  restoreSession(snapshot: AgentSessionSnapshot): boolean {
     this.assertHistoryMutationAllowed();
     this.session.restoreSnapshot(snapshot);
+    return this.runtime.captureRestoredProviderHistory();
   }
 
   getSessionState(): AgentSessionState {

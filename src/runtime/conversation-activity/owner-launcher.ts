@@ -1,8 +1,9 @@
-import { chmodPrivateActivityFile } from './storage-permissions.js';
+import {resolveNodeChildRuntime,nodeChildArgs} from '../node-child-runtime.js';
+import { chmodPrivateActivityFile,writePrivateActivityFile,ensurePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { writeFileSync, renameSync, openSync, closeSync } from 'node:fs';
+import { renameSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -56,13 +57,15 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   catch (error) { if (error instanceof Error && ['activity_owner_profile_mismatch','activity_owner_config_mismatch'].includes(error.message)) throw error; }
   const configFile = join(address.dataRoot, ACTIVITY_STORAGE_NAMES.config);
   const temporary = `${configFile}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); chmodPrivateActivityFile(temporary); renameSync(temporary, configFile);
+  writePrivateActivityFile(temporary, JSON.stringify(normalized),true); renameSync(temporary, configFile);
+  ensurePrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
   const logFile = openSync(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log), 'a', 0o600);
   let child: ReturnType<typeof spawn>;
   try {
     chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
-    child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {
-      detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env: { ...buildActivityOwnerEnv(process.env), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+    const runtime=resolveNodeChildRuntime(buildActivityOwnerEnv(process.env));
+    child = (options.spawn ?? spawn)(options.executable ?? runtime.command, nodeChildArgs(runtime,[options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile]), {
+      detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env:runtime.env,
     });
   } finally { closeSync(logFile); }
   let spawnError: unknown; child.once('error', error => { spawnError = error; });

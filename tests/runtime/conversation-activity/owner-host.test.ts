@@ -1,5 +1,6 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import {  rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConversationActivityOwnerHost } from '../../../src/runtime/conversation-activity/owner-host.js';
@@ -10,7 +11,7 @@ describe('real authenticated owner socket and single writer', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
   afterEach(async () => { for (const stop of cleanup.splice(0).reverse()) await stop(); });
   async function fixture() {
-    const root = mkdtempSync(join(tmpdir(), 'activity-host-')); cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+    const root = makePrivateTestTempDir(join(tmpdir(), 'activity-host-')); cleanup.push(() => rmSync(root, { recursive: true, force: true }));
     const options = { dataRoot: root, profileId: 'profile', actorId: 'user', getThread: (threadId: string) => threadId === 'thread' ? { threadId, profileId: 'profile', workspaceId: 'workspace', deleteState: 'none' as const } : null,
       canObserveWork: () => true, authorizeProducer: (threadId: string) => threadId === 'thread' };
     const host = new ConversationActivityOwnerHost(options); await host.start(); cleanup.push(() => host.stop());

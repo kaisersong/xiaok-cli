@@ -36,7 +36,7 @@ function prepareBrokerRuntime({archive, cacheRoot, target}) {
       if(!selected||selected.isDirectory||selected.entryName!==member||selected.header.size!==size)throw Error('broker_runtime_archive_member');
       return selected.getData();
     }
-    return execFileSync('tar', ['-xOf', '-', member], {input:data.bytes,maxBuffer:size+1024,timeout:120000,windowsHide:true});
+    return execFileSync('tar', ['-xzOf', '-', member], {input:data.bytes,maxBuffer:size+1024,timeout:120000,windowsHide:true});
   };
   const binary = extract(entry.member, entry.executableSize);
   const license = extract(entry.license, entry.licenseSize);
@@ -79,6 +79,7 @@ function shipBrokerRuntime({cacheRoot, resources, target}) {
 async function afterPack(context) {
   const {Arch} = require('electron-builder');
   const target = context.electronPlatformName + '-' + Arch[context.arch];
+  if(!targetEntry(target))throw Error('node_child_runtime_unsupported_target');
   const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, context.packager.appInfo.productFilename + '.app', 'Contents', 'Resources') : join(context.appOutDir, 'resources');
   return shipBrokerRuntime({cacheRoot: resolve(context.packager.projectDir, '..', '.artifacts', 'broker-runtimes'), resources, target});
 }

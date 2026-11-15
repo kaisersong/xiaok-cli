@@ -30,7 +30,8 @@
     "dist/main/desktop/electron/office-parser-worker.mjs",
     "**/node_modules/@firecrawl/anydoc/**",
     "**/node_modules/@firecrawl/anydoc-*/**",
-    "dist/main/src/runtime/verification/native/**"
+    "dist/main/src/runtime/verification/native/**",
+    "dist/main/src/runtime/native/**"
   ],
   "extraResources": [
     {
@@ -259,6 +260,7 @@
     "releaseType": "release"
   },
   "mac": {
+    "minimumSystemVersion": "13.5",
     "target": [
       "dir",
       "dmg",
@@ -304,7 +306,7 @@
       }
     ],
     "signIgnore": [
-      "Contents/Resources/services/intent-broker/runtime/darwin-arm64/node$"
+      "Contents/Resources/services/intent-broker/runtime/darwin-(arm64|x64)/node$"
     ]
   },
   "win": {

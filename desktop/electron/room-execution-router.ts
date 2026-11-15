@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import { realpath, stat } from 'node:fs/promises';
 import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { extname, isAbsolute } from 'node:path';
@@ -43,8 +44,9 @@ export function createRoomExecutionRouter(options: {
         const entry = value.runtimes?.find(item => item.type === runtime);
         if (!entry?.path) throw new Error('not_installed');
         const path = await canonical(entry.path);
+        const node=resolveNodeChildRuntime();
         const profile: Profile = ['.js', '.mjs', '.cjs'].includes(extname(path))
-          ? { executable: process.execPath, argsPrefix: [path] } : { executable: path };
+          ? { executable: node.command, argsPrefix: nodeChildArgs(node,[path]) } : { executable: path };
         return { path, adapter: options.makeAdapter({ profiles: { [runtime]: profile } }) };
       })().catch(error => { installations.delete(runtime); throw error; });
       installations.set(runtime, pending);

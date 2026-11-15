@@ -1,7 +1,9 @@
+import type {WindowsActivityPermissions} from '../windows-owner-security.js';
+import {assertWindowsPrivateActivityParent} from './storage-permissions.js';
 import {migrateAssistantDigestReceipts,getAssistantDigestReceipt,claimAssistantDigest,finishAssistantDigest} from '../assistant/digest-receipts.js';
 import { pathToFileURL } from 'node:url';
 import { activityReadonlyNeedsSnapshot, createActivityReadonlySnapshot } from './readonly-snapshot.js';
-import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
+import { chmodPrivateActivityFile,createActivityFilePermissions, createPrivateActivityDirectory,ensurePrivateActivityFile } from './storage-permissions.js';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
@@ -43,12 +45,12 @@ const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(
 // Host-private diagnostics only. Never serialize raw errors through IPC/preload.
 interface ActivityStoreCleanupDiagnostic {
   readonly sequence: number;
-  readonly phase: 'begin' | 'commit' | 'rollback' | 'secure-sidecars' | 'readonly-close' | 'data-close' | 'owner-close';
-  readonly stage: 'constructor-cleanup' | 'begin-threw' | 'body-failed' | 'commit-threw' | 'commit-returned' | 'readonly-cleanup';
+  readonly phase: 'begin' | 'commit' | 'rollback' | 'secure-sidecars' | 'readonly-close' | 'data-close' | 'owner-close' | 'permissions-close';
+  readonly stage: 'constructor-cleanup' | 'store-close' | 'begin-threw' | 'body-failed' | 'commit-threw' | 'commit-returned' | 'readonly-cleanup';
   readonly relation: 'secondary' | 'primary-after-commit' | 'primary-state-unknown';
 }
 const activityStoreCleanupDiagnostics: Readonly<ActivityStoreCleanupDiagnostic>[] = [];
-const retainedActivityStoreConstructions = new Set<Readonly<{ data?: DatabaseSync; owner?: DatabaseSync }>>();
+const retainedActivityStoreConstructions = new Set<Readonly<{ data?: DatabaseSync; owner?: DatabaseSync; permissions?:WindowsActivityPermissions }>>();
 let cleanupSequence = 0, cleanupDiagnosticsDropped = 0, cleanupDiagnosticLogFailures = 0;
 function recordActivityStoreCleanupFailure(
   phase: ActivityStoreCleanupDiagnostic['phase'], stage: ActivityStoreCleanupDiagnostic['stage'],
@@ -66,21 +68,16 @@ function recordActivityStoreCleanupFailure(
 function closeFailedActivityStoreConstruction(
   data: DatabaseSync | undefined, owner: DatabaseSync | undefined,
   dataPhase: 'readonly-close' | 'data-close' = 'data-close',
-): void {
-  const retained = Object.freeze({ data, owner });
-  retainedActivityStoreConstructions.add(retained); // Keep actual handles, never PID-derived replacements.
-  let dataClosed = data === undefined, ownerClosed = owner === undefined;
-  if (data) {
-    try { data.close(); dataClosed = true; }
-    catch { recordActivityStoreCleanupFailure(dataPhase, 'constructor-cleanup'); }
-  }
-  // The owner lock is dependent on actual writer close, not an independent disposer.
-  if (dataClosed && owner) {
-    try { owner.close(); ownerClosed = true; }
-    catch { recordActivityStoreCleanupFailure('owner-close', 'constructor-cleanup'); }
-  }
-  if (dataClosed && ownerClosed) retainedActivityStoreConstructions.delete(retained);
-  // No retry, forced release, public handle, or false physical-close ACK.
+  permissions?:WindowsActivityPermissions,stage:'constructor-cleanup'|'store-close'='constructor-cleanup',
+): {raw:unknown}|undefined {
+  const retained=Object.freeze({data,owner,permissions});retainedActivityStoreConstructions.add(retained);
+  let dataClosed=data===undefined,ownerClosed=owner===undefined,permissionsClosed=permissions===undefined,first:{raw:unknown}|undefined;
+  if(permissions)try{permissions.close();permissionsClosed=true;}catch(raw){first??={raw};recordActivityStoreCleanupFailure('permissions-close',stage);}
+  if(data)try{data.close();dataClosed=true;}catch(raw){first??={raw};recordActivityStoreCleanupFailure(dataPhase,stage);}
+  // Never release the owner lock while either real resource owner is unknown.
+  if(dataClosed&&permissionsClosed&&owner)try{owner.close();ownerClosed=true;}catch(raw){first??={raw};recordActivityStoreCleanupFailure('owner-close',stage);}
+  if(dataClosed&&permissionsClosed&&ownerClosed)retainedActivityStoreConstructions.delete(retained);
+  return first;
 }
 
 /** Single host owner. IPC and source admission belong to the service above this store. */
@@ -92,6 +89,8 @@ export class ConversationActivityStore {
   private readonly now: () => number;
   private readonly maxSourceEvents: number;
   private closed = false;
+  private closeFailure?:{raw:unknown};
+  private filePermissions?:WindowsActivityPermissions;
   // Failure-derived latch; no reset/force/grant API. Reads remain available.
   private writeState: 'writable' | 'unconfirmed' | 'committed-unverified' = 'writable';
   private file!: string;
@@ -108,6 +107,7 @@ export class ConversationActivityStore {
 
   private secureSidecars(): void {
     if (this.readOnly) return;
+    if(this.filePermissions){if(this.filePermissions.verify()!==true)throw new Error('activity_storage_not_private');return;}
     for (const base of [this.file, `${this.file}.owner.sqlite`]) for (const suffix of ['', '-wal', '-shm', '-journal']) {
       const path = base + suffix;
       if (existsSync(path)) chmodPrivateActivityFile(path);
@@ -151,10 +151,12 @@ export class ConversationActivityStore {
     }
     try {
       for (const target of [file, `${file}.owner.sqlite`]) {
-        if (!existsSync(target)) closeSync(openSync(target, 'a', 0o600));
+        if(process.platform==='win32')ensurePrivateActivityFile(target);
+        else if (!existsSync(target)) closeSync(openSync(target, 'a', 0o600));
         if (process.platform !== 'win32') chmodSync(target, 0o600);
       }
     } catch { throw new Error('activity_storage_not_private'); }
+    if(process.platform==='win32')assertWindowsPrivateActivityParent(file);
     this.owner = new DatabaseSync(`${file}.owner.sqlite`);
     try {
       // A separate rollback-journal database supplies an OS-managed exclusive lock.
@@ -172,6 +174,10 @@ export class ConversationActivityStore {
     }
     let opened: DatabaseSync | undefined;
     try {
+      // Never alter an existing recovery pair; only own previously absent files.
+      if(process.platform==='win32'&&!existsSync(file+'-wal')&&!existsSync(file+'-shm')){
+        ensurePrivateActivityFile(file+'-wal');ensurePrivateActivityFile(file+'-shm');
+      }
       this.db = opened = cachePreparedStatements(new DatabaseSync(file));
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
       assertWriterDurabilityMode(this.db);
@@ -190,8 +196,11 @@ export class ConversationActivityStore {
         CREATE TABLE IF NOT EXISTS work_projections(watch_id TEXT PRIMARY KEY REFERENCES work_watches(watch_id), data_json TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS source_events(event_key TEXT PRIMARY KEY, watch_id TEXT NOT NULL REFERENCES work_watches(watch_id), content_json TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS source_event_watch ON source_events(watch_id);
+        CREATE INDEX IF NOT EXISTS source_progress_sequence ON source_events(watch_id,json_extract(content_json,'$.sourceSequence'))
+          WHERE json_extract(content_json,'$.kind') IN ('progress','heartbeat');
         CREATE TABLE IF NOT EXISTS source_event_retention(event_key TEXT PRIMARY KEY REFERENCES source_events(event_key) ON DELETE CASCADE, received_at INTEGER NOT NULL,kind TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS watch_event_receipts(watch_id TEXT NOT NULL REFERENCES work_watches(watch_id),event_key TEXT NOT NULL,PRIMARY KEY(watch_id,event_key));
+        CREATE INDEX IF NOT EXISTS watch_event_receipt_event ON watch_event_receipts(event_key);
         CREATE TABLE IF NOT EXISTS source_cursors(watch_id TEXT PRIMARY KEY REFERENCES work_watches(watch_id), sequence INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS conversation_activities(local_seq INTEGER PRIMARY KEY AUTOINCREMENT, activity_id TEXT NOT NULL UNIQUE, watch_id TEXT NOT NULL REFERENCES work_watches(watch_id), profile_id TEXT NOT NULL, thread_id TEXT NOT NULL, data_json TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS activity_thread_page ON conversation_activities(profile_id,thread_id,local_seq);
@@ -213,8 +222,13 @@ export class ConversationActivityStore {
       migrateAssistantDigestReceipts(this.db);
       this.db.prepare(`INSERT OR IGNORE INTO source_event_retention SELECT event_key,COALESCE(json_extract(content_json,'$.occurredAt'),?),json_extract(content_json,'$.kind') FROM source_events`).run(this.now());
       this.secureSidecars();
+      if(process.platform==='win32'){
+        // Install ownership before verify can perform its first OS open.
+        this.filePermissions=createActivityFilePermissions(file);
+        if(!this.filePermissions.verify()){this.filePermissions.close();this.filePermissions=undefined;}
+      }
     } catch (error) {
-      closeFailedActivityStoreConstruction(opened, this.owner);
+      closeFailedActivityStoreConstruction(opened, this.owner,'data-close',this.filePermissions);
       throw error;
     }
   }
@@ -974,11 +988,12 @@ export class ConversationActivityStore {
   }
 
   close(): void {
-    if (this.closed) { this.readonlySnapshot?.close(); return; }
-    this.closed = true;
-    this.nativeDeliveries=new WeakMap();
-    if (this.readonlySnapshot) { this.readonlySnapshot.close(); return; }
-    releaseCachedStatements(this.db); this.db.close(); this.owner?.close();
+    if(this.closed){if(this.closeFailure)throw this.closeFailure.raw;this.readonlySnapshot?.close();return;}
+    this.closed=true;this.nativeDeliveries=new WeakMap();
+    if(this.readonlySnapshot){try{this.readonlySnapshot.close();}catch(raw){this.closeFailure={raw};throw raw;}return;}
+    releaseCachedStatements(this.db);
+    this.closeFailure=closeFailedActivityStoreConstruction(this.db,this.owner,'data-close',this.filePermissions,'store-close');
+    if(this.closeFailure)throw this.closeFailure.raw;
   }
 
   /**

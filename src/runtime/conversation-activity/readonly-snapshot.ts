@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto';
+import {createExclusiveWindowsPrivateDirectory,ensureWindowsPrivateFile} from '../windows-owner-security.js';
 import { DatabaseSync } from 'node:sqlite';
 import {
   constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync,
@@ -116,10 +118,12 @@ export function createActivityReadonlySnapshot(
       throw Error('conversation_activity_readonly_snapshot_invalid');
     }
     // mkdtemp creates a new private directory, without chmod of any shared root.
-    try { root.directory = mkdtempSync(join(tmpdir(), 'xiaok-activity-readonly-')); }
+    try { root.directory = process.platform==='win32'?join(tmpdir(),'xiaok-activity-readonly-'+randomUUID()):mkdtempSync(join(tmpdir(), 'xiaok-activity-readonly-'));if(process.platform==='win32')createExclusiveWindowsPrivateDirectory(root.directory); }
     catch (error) { root.unknown = true; throw error; }
+
     const destination = join(root.directory, 'activity.sqlite');
-    try { root.copyFd = openSync(destination, 'wx+', 0o600); }
+    if(process.platform==='win32')ensureWindowsPrivateFile(destination);
+    try { root.copyFd = openSync(destination, process.platform==='win32'?'r+':'wx+', 0o600); }
     catch (error) { root.unknown = true; throw error; }
     const buffer = Buffer.alloc(64 * 1024), size = Number(before.size);
     const sourceHash = createHash('sha256');

@@ -3,12 +3,13 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),asse
 const {pathToFileURL}=require('node:url'),{spawn}=require('node:child_process'),{types}=require('node:util');
 const [bundle,domain,result,userData,repo,kind]=process.argv.slice(2);
 process.env.XIAOK_CONFIG_DIR=path.join(domain,'config');fs.mkdirSync(process.env.XIAOK_CONFIG_DIR,{recursive:true,mode:0o700});
+const discoveryFile=path.join(process.env.XIAOK_CONFIG_DIR,'desktop-services.json');process.env.XIAOK_DESKTOP_DISCOVERY_FILE=discoveryFile;
 const homeEnvironment={HOME:process.env.HOME,USERPROFILE:process.env.USERPROFILE},account=os.userInfo();
 const accountHome=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'workflow-real-get-')));
 process.env.XIAOK_WORKFLOW_FIXTURE_HOME=accountHome;
 const originalFetch=globalThis.fetch;
 const {app,BrowserWindow}=require('electron');app.setPath('userData',userData);app.disableHardwareAcceleration();
-const failures=[];let api,network,service,services,runtime,localStore,population,source,owner,echo,echoClosed,proof,heldRelease;
+const failures=[];let api,network,service,services,runtime,localStore,population,source,owner,echo,echoClosed,broker,brokerClosed,proof,heldRelease;
 let runnerPhase='control',runnerEntered,runnerRelease,hostCalls=0,retainedFirst,bodyPassed=false;
 let actualAccount,obs,networkClosed,ownerState,resourceRows=[],outcome;
 const own=Object.getOwnPropertyDescriptor;
@@ -38,12 +39,31 @@ async function run(){
  const scope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)},forbidden=async()=>{throw Error('fixture_unintended_sdk');};
  process.env.KSWARM_SERVER_PATH=path.resolve(repo,'../kswarm/src/server/index.js');process.env.XIAOK_DISABLE_GLOBAL_PLUGINS='1';process.env.ELECTRON_RUN_AS_NODE='1';process.env.XIAOK_WORKFLOW_TEST_REPO_ROOT=repo;
  service=api.createKSwarmService({desktopProjectScope:scope,findPortOwner:async()=>null,killStalePortOwner:forbidden,spawnProcess:(_exe,_args,opts)=>{
+  // The same injected spawn now covers the ordinary Broker as well as KSwarm.
+  // Delegate that original real process; only the original KSwarm child is echo.
+  if(_args.length===2&&_args[0]==='--experimental-sqlite'&&_args[1]===path.resolve(repo,'../intent-broker/src/cli.js')){
+   assert.equal(broker,undefined);broker=spawn(_exe,_args,opts);
+   brokerClosed=new Promise(yes=>broker.once('close',(code,signal)=>yes({pid:broker.pid,code,signal})));
+   return broker;
+  }
+  assert.deepEqual(_args,[path.resolve(repo,'../kswarm/src/server/index.js')]);
   assert.equal(echo,undefined);echo=spawn(process.execPath,['--input-type=module','-e',"process.on('message',()=>{});process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},10000);"],{...opts,env:{...opts.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['ignore','pipe','pipe','ipc']});echoClosed=new Promise(yes=>echo.once('close',(code,signal)=>yes({pid:echo.pid,code,signal})));return echo;
  }});
  const module=await import(pathToFileURL(path.join(repo,'desktop/tests/support/owned-workflow-network-fixture.mjs')).href);
  network=await module.createOwnedWorkflowNetworkFixture(null,{project:{id:'project',name:'Candidate identity',goal:'Metadata only'},desktopProjectScope:scope,desktopMutationToken:service.getDesktopMutationToken()});
  const nativeFetch=globalThis.fetch;
- globalThis.fetch=async(input,init)=>{const url=new URL(String(input));if(url.port==='4400'&&url.pathname==='/health'&&!echo)return new Response('{"ok":false}',{status:503});return network.forwardedFetch(input,init);};
+ globalThis.fetch=async(input,init)=>{
+  const url=new URL(String(input)),selected=JSON.parse(fs.readFileSync(discoveryFile,'utf8'));
+  assert.deepEqual(Object.keys(selected).sort(),['broker','kswarm']);
+  assert.ok(['broker','kswarm'].every(key=>Number.isSafeInteger(selected[key])&&selected[key]>0&&selected[key]<=65535));
+  if(!['127.0.0.1','localhost'].includes(url.hostname))throw Error('fixture_unowned_fetch_target_denied');
+  if(url.port===String(selected.kswarm)){
+   if(url.pathname==='/health'&&!echo)return new Response('{"ok":false}',{status:503});
+   url.port='4400';
+  }else if(url.port===String(selected.broker))url.port='4318';
+  else throw Error('fixture_unowned_fetch_target_denied');
+  return network.forwardedFetch(url,init);
+ };
  services=api.createDesktopServices({dataRoot:path.join(domain,'desktop'),kswarmService:service,runner:async input=>{
   hostCalls++;if(runnerPhase==='positive'){runnerEntered();await runnerRelease;}
   if(input.emitRuntimeEvent)await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:'turn',intentId:'intent',stepId:'step',note:JSON.stringify({output:{summary:'Original candidate invocation',artifacts:[]}})});
@@ -61,6 +81,9 @@ async function run(){
  const host=population.createHost({materialRegistry:new api.MaterialRegistry({workspaceRoot:path.join(domain,'host-workspace'),maxBytes:1024}),runner:forbidden});await api.readOriginalTaskHostIdentityIO(host,store).initialize();
  owner=api.createOriginalMainRootAdmissionOwner({roomSource:source,host,store});
  await service.start();assert.equal(api.readOriginalKSwarmServiceIdentity(service).ownedChild,true);
+ const selectedPorts=JSON.parse(fs.readFileSync(discoveryFile,'utf8'));console.log(JSON.stringify({fixture:'candidate-selected-ports',selectedPorts}));
+ await assert.rejects(globalThis.fetch('http://127.0.0.1:1/health'),/fixture_unowned_fetch_target_denied/);
+ await assert.rejects(globalThis.fetch('http://example.invalid:'+selectedPorts.broker+'/health'),/fixture_unowned_fetch_target_denied/);
  const handoff={kind:'kswarm_task_handoff_v1',runId:'control-run',project:{id:'project',name:'Project',goal:'Metadata',workFolder:network.workspace.path},task:{id:'control-task',title:'Control'}};
  const controlPath=path.join(domain,'control.json');fs.writeFileSync(controlPath,JSON.stringify(handoff));
  const directOptions={kswarmService:service,allowedRoots:[domain],runDesktopTask:services.runKSwarmHandoffTask,submitResult:async()=>new Response('{}')};
@@ -103,9 +126,9 @@ async function run(){
  ownerState=negativeStates.find(r=>r.name==='owner');
  globalThis.fetch=originalFetch;
  if(network){try{await network.close({retainRoot:negativeStates.some(s=>s.state!=='fulfilled')});networkClosed=network.getOwnedServerState();}catch(raw){failures.push({name:'network',raw});}}
- if(echoClosed)await echoClosed;if(localStore)try{localStore.close();}catch(raw){failures.push({name:'local-store',raw});}
+ if(echoClosed)await echoClosed;if(brokerClosed)await brokerClosed;if(localStore)try{localStore.close();}catch(raw){failures.push({name:'local-store',raw});}
  const unknown=negativeStates.some(s=>s.state!=='fulfilled')||failures.length>0;
  if(!unknown)fs.rmSync(accountHome,{recursive:true,force:true});
- const facts={ok:bodyPassed&&!failed,kind,actualMain:process.type==='browser',pid:process.pid,productionQualified:false,candidateOnly:true,noBinderValidCandidates:0,observerRetainsProof:!!proof,hostCalls,negative:negativeStates,resourceRows,physicalClosureConfirmed:!unknown,explicitExitWithHeld:unknown,error:failed?describe(failed.raw):null,cleanupErrors:failures.map(f=>({name:f.name,error:describe(f.raw)})),ownedChild:echoClosed?await echoClosed:null,networkChild:networkClosed,account:{realUid:account.uid,observedUid:actualAccount?.uid,homeIsPrivate:actualAccount?.homedir===accountHome,environmentUnchanged:process.env.HOME===homeEnvironment.HOME&&process.env.USERPROFILE===homeEnvironment.USERPROFILE},windows:BrowserWindow.getAllWindows().length,dockVisible:app.dock?.isVisible()??false};
+ const facts={ok:bodyPassed&&!failed,kind,actualMain:process.type==='browser',pid:process.pid,productionQualified:false,candidateOnly:true,noBinderValidCandidates:0,observerRetainsProof:!!proof,hostCalls,negative:negativeStates,resourceRows,physicalClosureConfirmed:!unknown,explicitExitWithHeld:unknown,error:failed?describe(failed.raw):null,cleanupErrors:failures.map(f=>({name:f.name,error:describe(f.raw)})),ownedChild:echoClosed?await echoClosed:null,brokerChild:brokerClosed?await brokerClosed:null,networkChild:networkClosed,account:{realUid:account.uid,observedUid:actualAccount?.uid,homeIsPrivate:actualAccount?.homedir===accountHome,environmentUnchanged:process.env.HOME===homeEnvironment.HOME&&process.env.USERPROFILE===homeEnvironment.USERPROFILE},windows:BrowserWindow.getAllWindows().length,dockVisible:app.dock?.isVisible()??false};
  fs.writeFileSync(result,JSON.stringify(facts));app.exit(facts.ok?0:1);
 })().catch(raw=>{retainedFirst??={raw};fs.writeFileSync(result,JSON.stringify({ok:false,pid:process.pid,error:describe(retainedFirst.raw)}));app.exit(1);});

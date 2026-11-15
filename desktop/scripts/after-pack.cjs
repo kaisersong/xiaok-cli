@@ -10,6 +10,9 @@ const verifyPackagedMainFreshness = require('./verify-packaged-main-freshness.cj
 const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dependencies.cjs');
 const verifyPackagedContinuitySource = require('./verify-packaged-continuity-source.cjs');
 const verifyPackagedYzjCli = require('./verify-packaged-yzj-cli.cjs');
+const packNodeChild=require('./pack-node-child.cjs');
+const verifyPackagedNodeChildren=require('./verify-packaged-node-children.cjs');
+const flipPackagedFuses=require('./flip-packaged-fuses.cjs');
 const packBrokerRuntime = require('./pack-broker-runtime.cjs');
 const packBundledRuntimes = require('./pack-bundled-runtimes.cjs');
 const packArtifactExportHelper = require('./pack-artifact-export-helper.cjs');
@@ -18,13 +21,16 @@ const verifyPackagedServiceContracts = require('./verify-packaged-service-contra
 module.exports = async function afterPack(context) {
   await copyPackagedDependencies(context);
   await verifyPackagedMainFreshness(context);
+  await packBrokerRuntime(context);
+  await packNodeChild(context);
   await verifyPackagedRuntimeDependencies(context);
   await verifyPackagedContinuitySource(context);
   await verifyPackagedYzjCli(context);
+  await verifyPackagedNodeChildren(context);
   await packBundledRuntimes(context);
-  await packBrokerRuntime(context);
   // The service gate probes the Broker with the pinned packaged Node runtime
   // that production uses, so that runtime must be shipped before the probe.
   await verifyPackagedServiceContracts(context);
   await packArtifactExportHelper(context);
+  await flipPackagedFuses(context);
 };

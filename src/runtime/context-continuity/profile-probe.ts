@@ -1,3 +1,6 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../node-child-runtime.js';
+import {createExclusiveWindowsPrivateDirectory,assertWindowsSecurityAvailable} from '../windows-owner-security.js';
+import {randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {lstatSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -104,21 +107,24 @@ process.stdout.write(JSON.stringify({version:1,domains:[...domains],migrated}));
 
 /** Metadata census only, never an execution, source or Native qualification. */
 export function readProfileDomainCensus(dataRoot: string): ProfileDomainCensus {
+  if(process.platform==='win32')assertWindowsSecurityAvailable();
   // Reserve before even mkdtemp can reenter/throw after creating a resource.
   // An unknown fate blocks further allocations for this process lifetime.
   if(pendingProfileProbe)throw Error('profile_identity_unavailable');
   const reservation={directory:undefined as string|undefined};
   pendingProfileProbe=reservation;
-  const snapshotRoot=mkdtempSync(join(tmpdir(),'xiaok-profile-census-'));
+  const snapshotRoot=process.platform==='win32'?join(tmpdir(),'xiaok-profile-census-'+randomUUID()):mkdtempSync(join(tmpdir(),'xiaok-profile-census-'));
+  if(process.platform==='win32')createExclusiveWindowsPrivateDirectory(snapshotRoot);
   reservation.directory=snapshotRoot;
   const before=lstatSync(snapshotRoot,{bigint:true});
-  const env:NodeJS.ProcessEnv={ELECTRON_RUN_AS_NODE:'1'};
+  const env:NodeJS.ProcessEnv={};
   for(const key of ['SystemRoot','SYSTEMROOT','windir','TEMP','TMP','TMPDIR','LANG','LC_ALL','LC_CTYPE'])if(process.env[key]!==undefined)env[key]=process.env[key];
   let childReturned=false;
   let failed=false,firstError:unknown;
   let census:ProfileDomainCensus|undefined;
   try {
-    const result=spawnSync(process.execPath,['--input-type=module','--eval',PROFILE_DOMAIN_PROBE_PROGRAM,JSON.stringify({dataRoot,snapshotRoot})],{env,stdio:['ignore','pipe','pipe'],encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:8192});
+    const runtime=resolveNodeChildRuntime(env);
+    const result=spawnSync(runtime.command,nodeChildArgs(runtime,['--input-type=module','--eval',PROFILE_DOMAIN_PROBE_PROGRAM,JSON.stringify({dataRoot,snapshotRoot})]),{env:runtime.env,stdio:['ignore','pipe','pipe'],encoding:'utf8',windowsHide:true,timeout:8000,maxBuffer:8192});
     childReturned=true;
     if(result.error||result.status!==0||result.signal)throw Error('profile_identity_unavailable');
     const data:unknown=JSON.parse(result.stdout);

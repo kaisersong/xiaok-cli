@@ -28,3 +28,26 @@ it('preserves bound credentials through model selection while the keychain is lo
 it.each(['',null])('rejects clearing unresolved credential slots with %s',async value=>{const {file}=await fixture();const runtime=loadRuntimeConfig();const incomplete=structuredClone(runtime.config);incomplete.providers.anthropic.apiKey=value as string;const before=readFileSync(file,'utf8');await expect(saveConfig(incomplete)).rejects.toThrow('credential_snapshot_incomplete');expect(readFileSync(file,'utf8')).toBe(before);});
 it('allows a first model selection with only an environment key and no saved file',()=>{const root=mkdtempSync(join(tmpdir(),'runtime-env-first-'));roots.push(root);process.env.XIAOK_CONFIG_DIR=root;process.env.XIAOK_ANTHROPIC_API_KEY='env-secret';const runtime=loadRuntimeConfig();const selected=runtime.selectModel({...runtime.config,defaultModelId:runtime.config.defaultModelId});expect(selected.config.defaultProvider).toBe('anthropic');expect(selected.resolveTransport().apiKey).toBe('env-secret');});
 it('does not confuse unrelated credential bindings with configured model authentication',async()=>{const {file}=await fixture();const strict=await loadConfig();strict.providers.anthropic.apiKey='';await saveConfig(strict);const runtime=loadRuntimeConfig();expect(runtime.hasCredentials).toBe(true);expect(runtime.hasModelCredentials).toBe(false);expect(readFileSync(file,'utf8')).not.toContain('unrelated');});
+it('continues with the same selected transport after unrelated config and credential additions',async()=>{
+ await fixture();const runtime=loadRuntimeConfig();const next=await loadConfig();next.skillDebug=!next.skillDebug;next.providers.added={type:'custom',protocol:'openai_legacy',baseUrl:'https://other.invalid',apiKey:'added-secret'};next.models.added={provider:'added',model:'added'};await saveConfig(next);
+ expect(runtime.resolveTransport().apiKey).toBe('stored-secret');
+ expect(()=>runtime.selectModel({...runtime.config})).toThrow('credential_config_changed');
+});
+it.each(['revoke','replace','header','model','selection'] as const)('rejects selected transport %s changes before fetch',async change=>{
+ await fixture();const runtime=loadRuntimeConfig(),adapter=createRuntimeAdapter(runtime);const next=await loadConfig();
+ if(change==='revoke')next.providers.anthropic.apiKey='';
+ if(change==='replace')next.providers.anthropic.apiKey='replacement-secret';
+ if(change==='header')next.providers.anthropic.headers={'X-Auth':'new-secret'};
+ if(change==='model')next.models[next.defaultModelId].model='changed-model';
+ if(change==='selection'){next.defaultProvider='other';next.defaultModelId='other-model';next.models['other-model']={provider:'other',model:'other'};}
+ await saveConfig(next);const fetchMock=vi.spyOn(globalThis,'fetch');await expect(drain(adapter)).rejects.toThrow('credential_config_changed');expect(fetchMock).not.toHaveBeenCalled();
+});
+it('keeps endpoint checks even when an environment key bypasses stored key resolution',async()=>{
+ await fixture();process.env.XIAOK_ANTHROPIC_API_KEY='env-secret';const runtime=loadRuntimeConfig();const next=await loadConfig();next.providers.anthropic.baseUrl='https://changed.invalid';await saveConfig(next);expect(()=>runtime.resolveTransport()).toThrow('credential_config_changed');
+});
+it('refuses a revision changed during credential resolution',async()=>{
+ const {file}=await fixture();const source=systemCredentialBackend();const fs=await import('node:fs');vi.spyOn(await import('../../src/utils/system-credentials.js'),'systemCredentialBackend').mockReturnValue({put:source.put,get:(id:string)=>{const value=source.get(id);const raw=JSON.parse(readFileSync(file,'utf8'));raw.skillDebug=!raw.skillDebug;fs.writeFileSync(file,JSON.stringify(raw));return value;}});const runtime=loadRuntimeConfig();expect(()=>runtime.resolveTransport()).toThrow('credential_config_changed');
+});
+it('continues through its own legacy plaintext migration on consecutive requests',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'runtime-legacy-'));roots.push(root);process.env.XIAOK_CONFIG_DIR=root;const config=structuredClone(DEFAULT_CONFIG);config.providers.anthropic.apiKey='legacy-secret';const fs=await import('node:fs');fs.writeFileSync(join(root,'config.json'),JSON.stringify(config));const runtime=loadRuntimeConfig();expect(runtime.resolveTransport().apiKey).toBe('legacy-secret');expect(runtime.resolveTransport().apiKey).toBe('legacy-secret');
+});

@@ -1,9 +1,12 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../node-child-runtime.js';
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 
 export async function spawnXiaokDaemonDetached(socketPath: string): Promise<void> {
   const args = resolveCurrentCliInvocationArgs(socketPath);
-  const child = spawn(process.execPath, args, {
+  const runtime=resolveNodeChildRuntime();
+  const child = spawn(runtime.command, nodeChildArgs(runtime,args), {
+    env:runtime.env,
     detached: true,
     stdio: 'ignore',
     windowsHide: true,

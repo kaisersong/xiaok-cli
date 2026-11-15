@@ -2090,6 +2090,26 @@ export interface LocaleStrings {
     connectorCancelEdit: string;
     connectorTestConnection: string;
     connectorTestSaveFirst: string;
+    // tools pane zero-config summaries
+    toolsAdvancedToggle: string;
+    toolsFreeAvailable: string;
+    toolsSummaryNoConfig: string;
+    toolsSummaryFreeNoKey: string;
+    toolsSummaryKeyRecommended: string;
+    toolsSummaryKeyConfigured: string;
+    toolsSummaryKeyRequired: string;
+    toolsSummaryKeyFromModel: string;
+    // computer use section (tools pane)
+    computerUseTitle: string;
+    computerUseDesc: string;
+    computerUseUnavailable: string;
+    computerUseRefresh: string;
+    computerUseUnsupported: string;
+    computerUseInstall: string;
+    computerUseDriverMissing: (name: string) => string;
+    computerUseCustomPath: (path: string) => string;
+    computerUseExternalUpdateBlocked: string;
+    computerUseTaskRunning: string;
     // System One decision model (tools pane)
     systemOneTitle: string;
     systemOneDesc: string;
@@ -2842,6 +2862,8 @@ export interface LocaleStrings {
     watches: Record<'ai_news' | 'yzj_messages' | 'yzj_calendar' | 'important_email', { title: string; description: string; cadence: string; requirement: string }>;
 
     operationUnknown: string;
+    operationRecheckApplied: string;
+    operationRecheckNotApplied: string;
     refreshStatus: string;
     title: string;
     morningScheduleName: string;
@@ -3321,7 +3343,7 @@ followUpAcceptedDraft:string;
     nativeApprove:string;nativeDeny:string;nativeSubmitting:string;nativeAnswered:string;nativeAnswerUnconfirmed:string;nativeRefresh:string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
-    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string; localConnectionUnavailable: string;
     report: (state: string, ago: string) => string; noReport: string;
     unread: (count: number) => string;
     sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;

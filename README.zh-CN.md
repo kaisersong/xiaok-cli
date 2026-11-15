@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**最新正式版：1.6.2（2026-11-05）。** Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2)，CLI 可通过 `npm install -g xiaokcode@1.6.2` 安装。本版改善中文分词初始化与记忆库关闭流程，并修复会话收尾崩溃。主干后续改动与正式版分别说明，详见[版本日志](#版本日志)。
+**1.6.4。** 当前源码包含 Windows 配置恢复、Kimi 公开上下文续接和启动修复；已验证变化及保留限制见[发布说明](release-notes/1.6.4.md)。已发布 Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest)，已发布 CLI 可通过 `npm install -g xiaokcode` 安装。
 
 ---
 
@@ -130,6 +130,7 @@ CLI 记忆区分 `user`、`feedback`、`project`、`reference`。Desktop 还提�
 - **完整源码栈**：Node.js **22.22 或更高版本**，满足 KSwarm 的 engine 要求。
 - **已发布 Desktop 安装包**：macOS Apple Silicon 与 Windows x64。正常使用安装版无需单独安装 Node.js。
 - Computer Use 需要 macOS 及对应辅助功能/屏幕权限。模型和外部服务凭据按实际使用能力配置。
+- CLI 凭据默认存入配置目录的私有文件 `credentials/store.json`，文件模式不宣称加密；macOS/Linux 目录为 0700、文件为 0600。可运行 `xiaok config set credential-store keychain` 显式选择系统凭据存储，旧钥匙串条目按需导入后保留。
 
 ### npm 安装
 
@@ -578,7 +579,7 @@ npm run test --prefix desktop -- --run \
 
 | 平台 | CLI | 已发布 Desktop | Computer Use |
 |---|---|---|---|
-| macOS Apple Silicon | 支持 | DMG / ZIP | 授权后支持 |
+| macOS Apple Silicon（13.5 及以上） | 支持 | DMG / ZIP | 授权后支持 |
 | macOS Intel | CLI / 源码使用 | 本次核实的最新 release 无 Intel 产物 | 仍需满足 macOS runtime 要求 |
 | Windows x64 | 支持，终端/hook 细节有差异 | 安装程序 | 不支持 |
 | Linux | CLI / 源码使用 | 有 build target，本次核实的最新 release 无安装包 | 不支持 |
@@ -595,6 +596,10 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.6.4
+
+Windows SID/ACL 配置恢复、Kimi 公开上下文续接、固定 Node 子进程与 Electron fuse 加固、Windows 私有状态创建、本机服务诊断、连接测试、终端输入与 Linux 会话锁修复。macOS 最低为 13.5。详见[1.6.4 发布说明](release-notes/1.6.4.md)。
 
 ### 主干更新（尚未包含在 1.6.2）
 

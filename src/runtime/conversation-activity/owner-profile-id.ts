@@ -1,3 +1,5 @@
+import {readDesktopLegacyProfileAlias} from '../context-continuity/profile-alias.js';
+import {hasWindowsLegacyProfile} from '../context-continuity/windows-profile.js';
 import {createHash,Hash} from 'node:crypto';
 import {realpathSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -25,8 +27,9 @@ export function isDesktopActivityProfile(config:{dataRoot?:unknown;profileRoot?:
   if(typeof profileRoot!=='string'||typeof config.profileId!=='string')return false;
   let real:string;try{real=realpathSync(profileRoot);}catch{return false;}
   if(real!==root||config.actorId!==`desktop-user:${config.profileId}`)return false;
-  if(config.profileId===desktopActivityProfileId(profileRoot))return true;
+
   // A UUID-born profile: the id must be the digest of this root's own
   // continuity profile, re-read here (never taken from the config).
-  try{return config.profileId===desktopContinuityScopeProfileId(readContinuityProfile(root));}catch{return false;}
+  try{const uuid=readContinuityProfile(root);return config.profileId===desktopContinuityScopeProfileId(uuid)||config.profileId===readDesktopLegacyProfileAlias(root,uuid);}
+  catch{return process.platform==='win32'&&config.profileId===desktopActivityProfileId(profileRoot)&&hasWindowsLegacyProfile(root,config.profileId,profileRoot);}
 }

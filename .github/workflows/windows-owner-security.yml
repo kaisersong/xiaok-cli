@@ -1,0 +1,52 @@
+name: Windows owner security
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'native/windows-owner-security/**'
+      - 'src/runtime/windows-owner-security.ts'
+      - 'src/runtime/conversation-activity/**'
+      - 'scripts/verification/prepare-windows-owner-security.mjs'
+      - 'tests/native/windows-owner-security.test.cjs'
+      - 'tests/native/windows-profile-custody.test.cjs'
+      - '.github/workflows/windows-owner-security.yml'
+      - 'package*.json'
+permissions:
+  contents: read
+jobs:
+  native-security:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: ./.github/actions/node-headers
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Prepare fixed N-API owner security
+        run: node scripts/verification/prepare-windows-owner-security.mjs source
+      - uses: ./.github/actions/windows-private-temp
+      - name: Run real Windows ACL and process birth cases in Node
+        run: node --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
+      - name: Diagnose a failed atomic publication with the same native decisions
+        if: failure()
+        run: node scripts/verification/diagnose-windows-profile-publication.mjs
+      - name: Install locked Electron
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+      - name: Run the same N-API artifact under Electron Node
+        shell: bash
+        run: |
+          electron="$(node -p "require('./desktop/node_modules/electron')")"
+          ELECTRON_RUN_AS_NODE=1 "$electron" --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-owner-security-${{ matrix.node }}
+          path: .artifacts/windows-owner-security/win32-x64
+          if-no-files-found: error

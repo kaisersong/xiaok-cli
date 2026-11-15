@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime} from '../../src/runtime/node-child-runtime.js';
 import { activeOwnerServicePorts } from './active-owner-service-ports.js';
 import {resolvePackagedBrokerRuntime,brokerRuntimeMatchesHealth,waitBrokerRuntimeReadsKnown} from './broker-node-runtime.js';
 import { configuredDesktopServicePorts, writeDesktopServicePorts, prepareDesktopServicePorts, desktopServiceDiscoveryFile, readDesktopServicePorts } from './desktop-service-discovery.js';
@@ -479,7 +480,10 @@ export function resolveBackgroundNodeRuntime(options: {
 } = {}): {
   command: string;
   env: NodeJS.ProcessEnv;
+  argsPrefix?: readonly string[];
 } {
+  const fixed=resolveNodeChildRuntime(options.env??process.env);
+  if(fixed.argsPrefix.length)return fixed;
   const env = { ...(options.env ?? process.env) };
   const explicitNode = env.XIAOK_NODE_CMD?.trim();
   if (explicitNode) {
@@ -1064,6 +1068,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   const sealOwnedControl=()=>{ownedControl?.seal();ownedBusinessPort=undefined;ownedPreparationPort=undefined;ownedDshPort=undefined;if(ownedBusiness)retireBusiness(ownedBusiness);};
   if(scope && (!/^[a-f0-9]{64}$/.test(scope.profileId) || !/^[a-f0-9]{64}$/.test(scope.workspaceId)))throw Error('kswarm_project_scope_invalid');
   const projectScopeEnv=Object.freeze({KSWARM_DESKTOP_PROFILE_ID:scope?.profileId ?? '',KSWARM_DESKTOP_WORKSPACE_ID:scope?.workspaceId ?? ''});
+  const serviceBaseEnv=()=>{const env=buildSidecarEnv(buildDesktopServiceEnv(process.env,{broker:BROKER_PORT,kswarm:KSWARM_PORT}));delete env.KSWARM_DESKTOP_PROFILE_ID;delete env.KSWARM_DESKTOP_WORKSPACE_ID;return env;};
   assertRoomWorkspaceStartupProtocol();
   const discoveryFile = desktopServiceDiscoveryFile();
   let BROKER_PORT = 4318, KSWARM_PORT = 4400;
@@ -1621,7 +1626,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     }
 
     const brokerEnv = buildIntentBrokerServiceEnv({
-      baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
+      baseEnv: serviceBaseEnv(),
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
@@ -1838,11 +1843,11 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
     const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
-        ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
+        ...serviceBaseEnv(),
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
-        ...projectScopeEnv,
+        ...(scope?projectScopeEnv:{}),
         INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken,
         ...(await (async () => {
           try {
@@ -1873,7 +1878,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       const environment=preparationFreeze({...projected,XIAOK_CONFIG_DIR:getConfigDir(),KSWARM_DATA_ROOT:nodeRuntime.env.KSWARM_DATA_ROOT||join(homedir(),'.kswarm')});
       businessApply(preparationWeakSet,protectedKSwarmStartups,[ticket,preparationFreeze({service,environment})]);
       serverChild=await createOriginalProtectedKSwarmServiceChild(service,ticket);
-    }else serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildKSwarmServerSpawnOptions({env:nodeRuntime.env}));
+    }else serverChild = spawnProcess(nodeRuntime.command, [...(nodeRuntime.argsPrefix??[]),serverPath], buildKSwarmServerSpawnOptions({env:nodeRuntime.env}));
     ownedChildren.track(serverChild, 5_000);
     child = serverChild;
     if(scope&&(ownedBusinessAdmission||ownedPreparationSource||ownedDshAdmission)){
@@ -2496,11 +2501,11 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
       assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
       mkdirSync(brokerLaunch.cwd, { recursive: true });
-      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), cwd: brokerLaunch.cwd, port: BROKER_PORT,
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: serviceBaseEnv(), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
       const brokerRuntime = resolveOrdinaryBrokerRuntime(brokerEnv);
-      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), KSWARM_PORT: String(KSWARM_PORT),
-        BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken, ...projectScopeEnv } });
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...serviceBaseEnv(), KSWARM_PORT: String(KSWARM_PORT),
+        BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken, ...(scope?projectScopeEnv:{}) } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
       const brokerExpected={...expected(brokerLaunch.entryPath),...(brokerRuntime.expected?{'service.runtime.node':brokerRuntime.expected.node,'service.runtime.sqlite':brokerRuntime.expected.sqlite,'service.runtime.execPath':brokerRuntime.command,'service.runtime.executableSha256':brokerRuntime.expected.executableSha256}:{})};
@@ -2508,7 +2513,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         brokerUrl: `http://127.0.0.1:${BROKER_PORT}`, roomToken: desktopRoomToken }, managedSources: [
         { name: 'broker' as const, executable: brokerRuntime.command, entryPath: brokerLaunch.entryPath, args: brokerLaunch.nodeArgs,
           cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: brokerExpected },
-        { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, cwd: dirname(dirname(dirname(serverPath))),
+        { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, args:[...(ksEnv.argsPrefix??[]),serverPath], cwd: dirname(dirname(dirname(serverPath))),
           env: strings(ksEnv.env), healthUrl: `http://127.0.0.1:${KSWARM_PORT}/health`, expectedHealth: expected(serverPath) },
       ] };
   }

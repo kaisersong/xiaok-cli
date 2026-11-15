@@ -13,7 +13,7 @@ const installation=installationArg?['-DMI_FIXTURE_BUILD=1','-DMI_CONFIGURATION_H
 const common=['-Werror','-Wno-deprecated-declarations','-isysroot',sdk.stdout.trim(),'-I',headers,...installation];
 const c=output+'.c.o',cpp=output+'.cpp.o';
 const leafHeader=await buildReadonlyLeafAssets(dirname(output));
-build('cc',[...common,'-std=c11','-DNAPI_VERSION=8','-DNR_FIXTURE_BUILD=1','-DNR_READONLY_LEAF_ASSETS_HEADER='+JSON.stringify(realpathSync(leafHeader)),'-DNR_FIXTURE_ROOT='+JSON.stringify(fixture),...(factsArg&&factsArg!=='-'?['-DNR_FIXTURE_FACTS_HEADER='+JSON.stringify(realpathSync(factsArg))]:[]),...(mode==='baseline'?[]:['-DNR_MAIN_BOOTSTRAP_EMBEDDED=1']),'-c',join(source,'root_resource_authority.c'),'-o',c]);
+build('cc',[...common,'-std=c11','-DNAPI_VERSION=8','-DNR_FIXTURE_BUILD=1',...(process.env.XIAOK_FIXTURE_LEAF_NODE_EXECUTABLE?['-DNR_FIXTURE_LEAF_NODE_EXEC='+JSON.stringify(realpathSync(process.env.XIAOK_FIXTURE_LEAF_NODE_EXECUTABLE))]:[]),'-DNR_READONLY_LEAF_ASSETS_HEADER='+JSON.stringify(realpathSync(leafHeader)),'-DNR_FIXTURE_ROOT='+JSON.stringify(fixture),...(factsArg&&factsArg!=='-'?['-DNR_FIXTURE_FACTS_HEADER='+JSON.stringify(realpathSync(factsArg))]:[]),...(mode==='baseline'?[]:['-DNR_MAIN_BOOTSTRAP_EMBEDDED=1']),'-c',join(source,'root_resource_authority.c'),'-o',c]);
 if(mode!=='baseline')build('c++',[...common,'-std=c++20','-DNAPI_VERSION=8','-DNR_MAIN_BOOTSTRAP_EMBEDDED=1','-DNODE_GYP_MODULE_NAME=root_resource_authority_main','-DV8_COMPRESS_POINTERS','-DV8_ENABLE_SANDBOX','-c',join(source,'main-bootstrap.cc'),'-o',cpp]);
 const installed=[];
 if(mode!=='baseline'){

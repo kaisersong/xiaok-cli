@@ -2,13 +2,15 @@ import type { MobileSnapshot } from '../../electron/mobile-gateway.js';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildMobilePairingPayload,
   buildMobileGatewayReachableUrls,
   createMobileBonjourAdvertiser,
   createMobileGateway,
   loadOrCreateMobileIdentity,
+  resolveMobileGatewayHost,
+  startMobileGatewayDiscovery,
   type MobileGateway,
 } from '../../electron/mobile-gateway.js';
 
@@ -19,6 +21,40 @@ afterEach(async () => {
 });
 
 describe('mobile gateway', () => {
+  it('defaults Windows to loopback while retaining explicit LAN opt-in and other platform defaults', () => {
+    expect(resolveMobileGatewayHost(undefined, 'win32')).toBe('127.0.0.1');
+    expect(resolveMobileGatewayHost('0.0.0.0', 'win32')).toBe('0.0.0.0');
+    expect(resolveMobileGatewayHost(undefined, 'darwin')).toBe('0.0.0.0');
+  });
+  it('does not advertise LAN addresses when the real listener is loopback only', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    let gateway: MobileGateway;
+    try {
+      Object.defineProperty(process, 'platform', {...platform, value: 'win32'});
+      gateway = createMobileGateway({port: 0, desktopName: 'Private Desktop', mobileAccessToken: 'token-test'});
+    } finally { Object.defineProperty(process, 'platform', platform); }
+    openGateways.push(gateway);
+    await gateway.start();
+    expect(gateway.getStatus()).toMatchObject({running: true, host: '127.0.0.1', reachableURLs: []});
+    const hello = await fetch(gateway.getStatus().baseURL + '/v0/mobile/hello');
+    expect(hello.status).toBe(200);
+    expect((await hello.json()).reachableURLs).toEqual([]);
+    const pairing = buildMobilePairingPayload({desktopName: 'Private Desktop', identity: {desktopId: 'private', mobileAccessToken: 'token-test', mobileRelayRoomSecret: 'relay-secret', createdAt: new Date().toISOString()}, gatewayStatus: gateway.getStatus(), relayUrl: 'wss://relay.example/ws'});
+    expect(pairing.gatewayURL).toBe('');
+    expect(pairing.relayUrl).toBe('wss://relay.example/ws');
+    const start = vi.fn();
+    startMobileGatewayDiscovery({start}, gateway.getStatus());
+    expect(start).not.toHaveBeenCalled();
+    startMobileGatewayDiscovery({start}, {...gateway.getStatus(), host: '0.0.0.0', reachableURLs: ['http://192.168.1.23:47891']});
+    expect(start).toHaveBeenCalledOnce();
+  });
+  it('keeps an explicit LAN listener available', async () => {
+    const gateway = createMobileGateway({host: '0.0.0.0', port: 0, desktopName: 'LAN Desktop', mobileAccessToken: 'token-test'});
+    openGateways.push(gateway);
+    await gateway.start();
+    expect(gateway.getStatus()).toMatchObject({running: true, host: '0.0.0.0'});
+    expect((await fetch(gateway.getStatus().baseURL + '/v0/mobile/hello')).status).toBe(200);
+  });
   it('serves a bounded mobile snapshot on the v0 mobile route', async () => {
     const gateway = createMobileGateway({
       host: '127.0.0.1',

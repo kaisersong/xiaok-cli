@@ -1,7 +1,10 @@
 // @vitest-environment node
+import {ownedProfileTempDir as mkdtempSync,seedProfileGroups} from '../support/profile-storage-fixture.js';
+import {writeWindowsPrivateFile} from '../../../src/runtime/windows-owner-security.js';
+import {readProtectedOwnerQualification} from '../../../src/runtime/conversation-activity/owner-qualification.js';
 import {expect,it,vi} from 'vitest';import {createServer,type Socket} from 'node:net';
 import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
-import {mkdtempSync,symlinkSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {symlinkSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {ConversationActivityOwnerClient} from '../../../src/runtime/conversation-activity/owner-client.js';
 import {ensureConversationActivityOwner} from '../../../src/runtime/conversation-activity/owner-launcher.js';
@@ -12,7 +15,7 @@ async function fixture(){
  const root=mkdtempSync(join(tmpdir(),'continuity-owner-qualification-')),runtime=new DesktopContextContinuity(root),p=runtime.port();
  const address=activityOwnerAddress(root),config:ActivityOwnerConfig={schemaVersion:1,dataRoot:address.dataRoot,profileRoot:root,profileId:desktopActivityProfileId(root),actorId:`desktop-user:${desktopActivityProfileId(root)}`,identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}};
  const credentials=createActivityOwnerCredentials(address),digest=activityOwnerConfigDigest(config),file=join(root,ACTIVITY_STORAGE_NAMES.config);
- writeFileSync(file,JSON.stringify(config),{mode:0o600});
+ if(process.platform==='win32')writeWindowsPrivateFile(file,JSON.stringify(config),true);else writeFileSync(file,JSON.stringify(config),{mode:0o600});
  const sockets=new Set<Socket>(),received:Array<{generation:unknown;method:string}>=[];
  let hello:Record<string,unknown>={type:'hello',protocol:1,rootHash:address.rootHash,ownerEpoch:'qualified-epoch',generation:4,profileId:config.profileId,configDigest:digest,ready:true};
  const server=createServer(socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));socket.setEncoding('utf8');let buffer='',admitted=false,connectionHello:Record<string,unknown>;
@@ -51,12 +54,20 @@ it('returns a qualified business client after a read-only probe and requalifies 
 it('does not downgrade a retained Desktop configuration to Standalone when profile authority files are lost',async()=>{
  const f=await fixture();let client:ConversationActivityOwnerClient|undefined;
  try{await f.runtime.close();for(const name of ['continuity-profile.json','continuity.sqlite','continuity.sqlite-wal','continuity.sqlite-shm'])rmSync(join(f.root,name),{force:true});f.setHello({generation:3});
+  expect(()=>readProtectedOwnerQualification(f.root)).toThrow(/^activity_owner_qualification_unavailable$/);
   const request=(async()=>{client=new ConversationActivityOwnerClient(f.root,'producer');return client.request('list',{threadId:'target'});})();
-  // Windows only: a root with no continuity artifact and a config bound to its own
-  // legacy digest is exactly a Windows 1.6.2 root (continuity never adopted, #233),
-  // so it qualifies; the generation-3 owner is still refused before any business request.
-  // Every other platform, and Windows with any artifact left (below), stays unavailable.
-  await expect(request).rejects.toThrow(process.platform==='win32'?'activity_owner_qualification_mismatch':'activity_owner_qualification_unavailable');expect(f.received.filter(row=>row.method!=='status')).toEqual([]);
+  // A digest without any retained domain evidence cannot qualify as legacy.
+  await expect(request).rejects.toThrow(/^activity_owner_qualification_unavailable$/);expect(f.received.filter(row=>row.method!=='status')).toEqual([]);
+ }finally{client?.dispose();await f.close();}
+});
+it.skipIf(process.platform!=='win32')('does not downgrade a retained Desktop configuration with real Windows legacy domain evidence',async()=>{
+ const f=await fixture();let client:ConversationActivityOwnerClient|undefined;
+ try{
+  await f.runtime.close();for(const name of ['continuity-profile.json','continuity.sqlite','continuity.sqlite-wal','continuity.sqlite-shm'])rmSync(join(f.root,name),{force:true});
+  seedProfileGroups(f.root,f.config.profileId);f.setHello({generation:3});
+  expect(readProtectedOwnerQualification(f.root)).toMatchObject({profileId:f.config.profileId,configDigest:activityOwnerConfigDigest(f.config)});
+  const request=(async()=>{client=new ConversationActivityOwnerClient(f.root,'producer');return client.request('list',{threadId:'target'});})();
+  await expect(request).rejects.toThrow(/^activity_owner_qualification_mismatch$/);expect(f.received.filter(row=>row.method!=='status')).toEqual([]);
  }finally{client?.dispose();await f.close();}
 });
 it('does not downgrade a retained Desktop configuration when the continuity profile is lost but continuity.sqlite remains',async()=>{

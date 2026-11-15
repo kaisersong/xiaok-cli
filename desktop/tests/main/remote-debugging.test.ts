@@ -1,5 +1,6 @@
+import {ownedProfileTempDir as mkdtempSync} from '../support/profile-storage-fixture.js';
 import { readFileSync } from 'node:fs';
-import {desktopActivityProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
+import {desktopContinuityScopeProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -125,7 +126,7 @@ describe('packaged upgrade smoke contract', () => {
 });
 
 // Kept in this explicitly selected cross-platform CI file (#168).
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {  rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { configuredDesktopServicePorts, prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';
@@ -223,6 +224,7 @@ import { loadContinuityProfile } from '../../../src/runtime/context-continuity/p
 import { activeOwnerServicePorts } from '../../electron/active-owner-service-ports.js';
 import { activityOwnerAddress, createActivityOwnerCredentials, ACTIVITY_OWNER_GENERATION, ACTIVITY_OWNER_PROTOCOL } from '../../../src/runtime/conversation-activity/owner-protocol.js';
 import { activityOwnerConfigDigest, type ActivityOwnerConfig } from '../../../src/runtime/conversation-activity/owner-runtime.js';
+import { writePrivateActivityFile } from '../../../src/runtime/conversation-activity/storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from '../../../src/runtime/conversation-activity/storage-permissions.js';
 
 it('reuses only authenticated owner endpoints with a matching persisted digest', async () => {
@@ -230,9 +232,8 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
   const address = activityOwnerAddress(root);
   const credentials = createActivityOwnerCredentials(address);
   // Protected root (continuity profile present); the owner config carries Main's
-  // service-scope profile id, as desktop-services writes it, not the continuity UUID.
-  loadContinuityProfile(root);
-  const profileId = desktopActivityProfileId(root);
+  // UUID scope digest, as desktop-services writes it, not the raw UUID or legacy path digest.
+  const profileId = desktopContinuityScopeProfileId(loadContinuityProfile(root));
   const config: ActivityOwnerConfig = {
     schemaVersion: 1, dataRoot: address.dataRoot, profileRoot: root, profileId, actorId: `desktop-user:${profileId}`,
     identity: { kind: 'desktop', path: join(root, 'multi-agent', 'groups.sqlite') },
@@ -242,7 +243,7 @@ it('reuses only authenticated owner endpoints with a matching persisted digest',
       { name: 'broker', executable: process.execPath, entryPath: join(root, 'broker.js'), healthUrl: 'http://127.0.0.1:45002/health' },
     ],
   };
-  writeFileSync(join(root, ACTIVITY_STORAGE_NAMES.config), JSON.stringify(config));
+  writePrivateActivityFile(join(root, ACTIVITY_STORAGE_NAMES.config), JSON.stringify(config));
   let mismatch = false;
   const server = createServer(socket => {
     let buffer = '';

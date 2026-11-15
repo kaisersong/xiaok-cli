@@ -1,6 +1,7 @@
+import {ownedProfileTempDir as mkdtempSync,seedProfileGroups} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,expect,it} from 'vitest';
-import {mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdirSync,rmSync,writeFileSync} from 'node:fs';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -16,14 +17,10 @@ import {desktopActivityProfileId,desktopContinuityScopeProfileId} from '../../..
 // anything wider. A scope digest is only this root's own; the legacy-only
 // qualification exception needs a root with no continuity artifact at all.
 const roots:string[]=[];
+const windowsRefusal=process.platform==='win32'?'activity_owner_qualification_unavailable':'windows_security_unavailable';
 afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
 function tempRoot(prefix:string){const root=mkdtempSync(join(tmpdir(),prefix));roots.push(root);return root;}
-function groupsWith(root:string,profileId:string){
- mkdirSync(join(root,'multi-agent'),{recursive:true,mode:0o700});
- const db=new DatabaseSync(join(root,'multi-agent','groups.sqlite'));
- try{db.exec('PRAGMA user_version=4;CREATE TABLE workspace_execution_authorizations(profile_id TEXT NOT NULL,workspace_id TEXT NOT NULL);CREATE TABLE thread_bindings(thread_id TEXT PRIMARY KEY,profile_id TEXT NOT NULL);');
-  db.prepare('INSERT INTO workspace_execution_authorizations VALUES(?,?)').run(profileId,'w'.repeat(64));}finally{db.close();}
-}
+function groupsWith(root:string,profileId:string){seedProfileGroups(root,profileId);}
 function onPlatform<T>(platform:'win32'|'darwin',run:()=>T):T{
  const original=Object.getOwnPropertyDescriptor(process,'platform')!;
  if(process.platform===platform)return run();
@@ -55,9 +52,10 @@ it('qualification accepts the scope digest only of the root\'s own continuity pr
 it('legacy-only exception (win32): a legacy root without any continuity artifact qualifies only its own legacy digest',()=>{
  const root=tempRoot('scope-guard-legacy-');groupsWith(root,desktopActivityProfileId(root));
  launch(root,desktopActivityProfileId(root));
- expect(onPlatform('win32',()=>readProtectedOwnerQualification(root))).toMatchObject({profileId:desktopActivityProfileId(root)});
+ if(process.platform==='win32')expect(readProtectedOwnerQualification(root)).toMatchObject({profileId:desktopActivityProfileId(root)});
+ else expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow(windowsRefusal);
  launch(root,desktopContinuityScopeProfileId(randomUUID()));
- expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+ expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow(windowsRefusal);
 });
 it('legacy-only exception is Windows only: darwin still requires the continuity profile',()=>{
  const root=tempRoot('scope-guard-legacy-darwin-');groupsWith(root,desktopActivityProfileId(root));
@@ -69,16 +67,16 @@ for(const artifact of ['continuity.sqlite','continuity-profile-migration.json','
   const root=tempRoot('scope-guard-artifact-');groupsWith(root,desktopActivityProfileId(root));
   launch(root,desktopActivityProfileId(root));
   writeFileSync(join(root,artifact),'{}',{mode:0o600});
-  expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+  expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow(windowsRefusal);
  });
 }
 it('legacy-only exception (win32) rejects another root\'s legacy digest, as profileId alone or with that root as profileRoot',()=>{
  const root=tempRoot('scope-guard-legacy-own-'),other=tempRoot('scope-guard-legacy-other-');
  groupsWith(root,desktopActivityProfileId(root));groupsWith(other,desktopActivityProfileId(other));
  launch(root,desktopActivityProfileId(other));
- expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+ expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow(windowsRefusal);
  // A config whose own profileRoot/profileId pair is self-consistent but names the other root.
  const config=mainActivityOwnerConfig(other,desktopActivityProfileId(other),{}),address=activityOwnerAddress(root);
  writeOwnerLaunchConfig(address.dataRoot,randomBytes(16).toString('hex'),{...config,profileRoot:other,dataRoot:address.dataRoot});
- expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow('activity_owner_qualification_unavailable');
+ expect(()=>onPlatform('win32',()=>readProtectedOwnerQualification(root))).toThrow(windowsRefusal);
 });

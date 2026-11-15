@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync,realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
+import { describe, expect, it, vi, inject } from 'vitest';
+import {  mkdirSync, writeFileSync, rmSync, readFileSync, existsSync,realpathSync } from 'node:fs';
+import { join,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ensureConversationActivityOwner } from '../../../src/runtime/conversation-activity/owner-launcher.js';
 import { ACTIVITY_OWNER_GENERATION } from '../../../src/runtime/conversation-activity/owner-protocol.js';
@@ -11,7 +12,7 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 
 describe('independent activity process lifecycle', () => {
   it('keeps collecting native durable facts after the producer client exits, with one owner across concurrent attachment', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'activity-process-')), sessions = join(root, 'sessions'); mkdirSync(sessions);
+    const root = makePrivateTestTempDir(join(tmpdir(), 'activity-process-')), sessions = join(root, 'sessions'); mkdirSync(sessions);
     writeFileSync(join(sessions, 'session.json'), JSON.stringify({ schemaVersion: 1, sessionId: 'session', cwd: root, intentDelegation: { ownership: { state: 'owned', ownerInstanceId: 'instance' } }, messages: [] }));
     const snapshots = new FileTaskSnapshotStore(join(root, 'tasks'));
     let release!: () => void;
@@ -51,7 +52,13 @@ describe('independent activity process lifecycle', () => {
     } finally {
       release(); await host.drain(); producer?.dispose(); observer?.dispose();
       if (pid) { process.kill(pid, 'SIGTERM'); await vi.waitFor(() => expect(() => process.kill(pid!, 0)).toThrow(), { timeout: 5000 }); }
-      rmSync(root, { recursive: true, force: true });
+      await host.closeSourceWriterForMigration();
+      if(process.platform==='win32'){
+        // The global private-TEMP owner removes process-lifetime fixture
+        // directories after the real worker exits; this is no Native receipt.
+        expect(dirname(root)).toBe(inject('profileTestTempRoot' as never));
+        console.log(JSON.stringify({fixtureRoot:root,cleanup:'private-temp-after-worker-exit'}));
+      }else rmSync(root, { recursive: true, force: true });
     }
   }, 15_000);
 });
@@ -61,7 +68,7 @@ it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pendi
   // The real launcher passes the canonical root to argv. Keep this positive
   // fixture equivalent on macOS, where /var aliases /private/var; do not relax
   // the production retirement command/identity fence to accommodate a fixture.
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'activity-legacy-')));
+  const root = realpathSync(makePrivateTestTempDir(join(tmpdir(), 'activity-legacy-')));
   const config = { schemaVersion: 1 as const, dataRoot: root, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: root } };
   const { ConversationActivityStore } = await import('../../../src/runtime/conversation-activity/store.js');
   const store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'));
@@ -109,7 +116,7 @@ it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pendi
 it.skipIf(!['linux', 'darwin'].includes(process.platform)).each(['empty', 'pending'] as const)('retires or reuses an owner built by the previous generation (%s tasks) without a config mismatch', async kind => {
   expect(ACTIVITY_OWNER_GENERATION).toBeGreaterThan(2);
   const { spawn } = await import('node:child_process');
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'activity-prevgen-')));
+  const root = realpathSync(makePrivateTestTempDir(join(tmpdir(), 'activity-prevgen-')));
   const config = { schemaVersion: 1 as const, dataRoot: root, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: root } };
   const { ConversationActivityStore } = await import('../../../src/runtime/conversation-activity/store.js');
   const store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'));

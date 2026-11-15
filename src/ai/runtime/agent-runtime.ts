@@ -1,3 +1,4 @@
+import {KimiPublicResumeHistory} from './kimi-public-resume.js';
 import {retainCommandResult} from '../tools/command-result.js';
 import { getModelFailure } from './model-failure.js';
 import { normalizeRuntimeError } from './runtime-errors.js';
@@ -83,6 +84,10 @@ export interface AgentRuntimeOptions {
 }
 
 export class AgentRuntime {
+  private readonly restoredProviderHistory:KimiPublicResumeHistory;
+  captureRestoredProviderHistory():boolean{return this.restoredProviderHistory.captureRestored();}
+  assertCompactionAllowed():void{if(this.restoredProviderHistory.active)throw Error('KIMI_K3_PUBLIC_RESUME_COMPACTION_UNSUPPORTED');}
+
   private readonly modelPhysicalOwner:ModelStreamPhysicalOwner;
   private readonly semanticCompactionOwner?: SemanticCompactionOwner;
   private readonly onSemanticCompactionOutcome?: (outcome: SemanticCompactionOutcome) => void;
@@ -129,6 +134,7 @@ export class AgentRuntime {
     this.adapter = options.adapter;
     this.registry = options.registry;
     this.session = options.session;
+    this.restoredProviderHistory=new KimiPublicResumeHistory(this.session,()=>this.adapter);
     this.semanticCompactionOwner = options.semanticCompactionOwner;
     this.onSemanticCompactionOutcome = options.onSemanticCompactionOutcome;
     if (this.semanticCompactionOwner) assertSemanticCompactionOwner(this.semanticCompactionOwner, this.session);
@@ -156,6 +162,7 @@ export class AgentRuntime {
     const currentProfile = resolveRegisteredStrictKimiK3Profile(this.adapter);
     const nextProfile = resolveRegisteredStrictKimiK3Profile(adapter);
     if (requiresKimiK3HistoryMigration(currentProfile, nextProfile, this.session.getMessages().length)) {
+      if(this.restoredProviderHistory.active)throw Error('KIMI_K3_PUBLIC_RESUME_MODEL_SWITCH_UNSUPPORTED');
       if(prepareCompoundRootIntentStageView(this.session).active)throw Error('intent_stage_context_model_migration');
       const context = buildSynthesizedProviderContext('model-switch', this.session.getMessages());
       this.session.replaceMessages([{ role: 'user', content: [{ type: 'text', text:
@@ -260,7 +267,12 @@ export class AgentRuntime {
         if (pendingInput) this.session.appendUserText(pendingInput);
 
         const stageViewActive=prepareCompoundRootIntentStageView(this.session).active;
-        if (this.pendingSubtaskBoundary && !stageViewActive) {
+        const publicResume=this.restoredProviderHistory.active;
+        if(publicResume){
+          const request=this.restoredProviderHistory.project(this.session.getMessages(),stageViewActive);
+          if(shouldCompact(estimateTokens(request)+estimateRequestOverheadTokens(this.systemPrompt,this.registry.getToolDefinitions()),this.contextLimit,this.compactThreshold))throw Error('KIMI_K3_PUBLIC_RESUME_CONTEXT_LIMIT_START_NEW_SESSION');
+        }
+        if (this.pendingSubtaskBoundary && !stageViewActive && !publicResume) {
           // The host completion event can arrive inside tool.execute. Capture the
           // candidate only after the complete result batch and queued input exist.
           const sourceRevision = this.session.planCompaction().sourceRevision;
@@ -290,7 +302,7 @@ export class AgentRuntime {
         }
 
         if (
-          !stageViewActive && !autoCompactionBlocked
+          !stageViewActive && !publicResume && !autoCompactionBlocked
           && decideCompactionCandidate({ trigger: 'threshold' }).action === 'delegate-existing-threshold'
           && shouldCompact(
             Math.max(
@@ -393,7 +405,7 @@ export class AgentRuntime {
               const tools = runtime.registry.getToolDefinitions();
               const view=prepareCompoundRootIntentStageView(runtime.session,logicalInvocationId);
               try {
-              const messages=view.messages;
+              const messages=runtime.restoredProviderHistory.project(view.messages,view.active);
               const options = runtime.buildInvocationOptions(requestSignal, invocationContext,messages);
               const prepared = runtime.observationOwner?.prepareRequest
                 ? await runtime.observationOwner.prepareRequest({ logicalInvocationId, messages, tools,

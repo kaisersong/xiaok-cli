@@ -1,3 +1,4 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import * as fs from 'node:fs';
@@ -19,6 +20,14 @@ const seam = vi.hoisted(() => ({
   lstat: undefined as undefined | ((path: string) => void),
   removed: [] as string[],
 }));
+// Windows uses private-at-birth Native directories instead of mkdtemp.
+// Observe the actual call and preserve its SDK result and errors unchanged.
+vi.mock('../../../src/runtime/windows-owner-security.js', async original => {
+  const actual=await original<typeof import('../../../src/runtime/windows-owner-security.js')>();
+  return {...actual,createExclusiveWindowsPrivateDirectory(path:string){
+    const result=actual.createExclusiveWindowsPrivateDirectory(path);seam.roots.push(path);return result;
+  }};
+});
 vi.mock('node:fs', async original => {
   const actual = await original<typeof import('node:fs')>();
   return { ...actual,
@@ -58,7 +67,7 @@ function snapshot(root: string) {
   });
 }
 function fixture() {
-  const root = nativeFs.mkdtempSync(join(tmpdir(), 'activity-readonly-compat-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-readonly-compat-'));
   nativeFs.chmodSync(root, 0o700);
   const file = join(nativeFs.realpathSync(root), 'activity.sqlite'), writer = new ConversationActivityStore(file);
   writer.prepareAssociation({ operationId: 'op', creationIdempotencyKey: 'op',
@@ -256,7 +265,7 @@ it.each([new Error('owner_stat_primary'), undefined])('preserves an actual owner
   expect(seam.open.size).toBe(0); expect(seam.roots).toHaveLength(0);
 });
 
-it('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shim', () => {
+it.runIf(process.platform==='win32')('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shim', () => {
   const f = fixture(), descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   if (!descriptor) throw Error('actual_platform_descriptor_missing');
   let reader: ConversationActivityStore;
@@ -270,4 +279,10 @@ it('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shi
   expect(reader!.getAssociation('op')).not.toBeNull();
   // The existing fixture children use this actual Node executable directly.
   expect(process.execPath.toLowerCase().endsWith('.cmd')).toBe(false);
+});
+
+it.runIf(process.platform!=='win32')('a platform label cannot supply native Windows custody',()=>{
+ const f=fixture(),descriptor=Object.getOwnPropertyDescriptor(process,'platform')!;
+ try{Object.defineProperty(process,'platform',{...descriptor,value:'win32'});expect(()=>read(f)).toThrow();}
+ finally{Object.defineProperty(process,'platform',descriptor);}
 });

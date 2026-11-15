@@ -1,3 +1,4 @@
+import {prepareWindowsOwnedDatabase} from '../../../src/runtime/windows-owner-security.js';
 import {DatabaseSync,StatementSync} from 'node:sqlite';
 import {constants,openSync,closeSync,lstatSync,fstatSync,mkdirSync,realpathSync} from 'node:fs';
 import {dirname,resolve,join,basename} from 'node:path';
@@ -60,6 +61,7 @@ export function openContinuityDatabase(path:string):DatabaseSync{
  const row:Row={stocks:[],callbacks:createProtectedChildCallbackCustody(),closed:false,failed:false,raws:[],unknownFds:[]};held.add(row);
  let fd:number|undefined;
  try{
+  prepareWindowsOwnedDatabase(path);
   try{fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_RDWR|(constants.O_NOFOLLOW??0),0o600);}catch(raw){if(types.isProxy(raw)||!(raw instanceof Error)||Object.getOwnPropertyDescriptor(raw,'code')?.value!=='EEXIST')throw raw;fd=openSync(path,constants.O_RDWR|(constants.O_NOFOLLOW??0));}
   const before=identity(path),actual=fstatSync(fd,{bigint:true});same(before,actual as ReturnType<typeof identity>,path,row);row.fence=createKnownDirectoryWriterFence(parent,'sqlite-db');row.fence.assertOpen();
   captureConstructor(row);row.failed=true;row.database=new NativeDatabase(path);row.failed=false;same(before,identity(path),path,row);same(before,fstatSync(fd,{bigint:true}) as ReturnType<typeof identity>,path,row);

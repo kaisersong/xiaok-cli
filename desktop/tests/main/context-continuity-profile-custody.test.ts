@@ -1,6 +1,8 @@
+import {ownedProfileTempDir} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
 import {DatabaseSync} from 'node:sqlite';
+import {writeWindowsPrivateFile} from '../../../src/runtime/windows-owner-security.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {tmpdir,userInfo} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -16,10 +18,18 @@ vi.mock('node:fs',async importOriginal=>{
 });
 vi.mock('node:child_process',async importOriginal=>{
   const actual=await importOriginal<typeof import('node:child_process')>();
-  return {...actual,spawnSync:(...args:unknown[])=>{const result=Reflect.apply(actual.spawnSync,actual,args);return hooks.afterSpawn?hooks.afterSpawn(result):result;}};
+  return {...actual,spawnSync:(...args:unknown[])=>{const result=Reflect.apply(actual.spawnSync,actual,args);
+    // Windows creates this actual directory through Native, not fs.mkdtemp.
+    // Observe the real child request before a controlled lost-return fault.
+    const last=Array.isArray(args[1])?args[1].at(-1):undefined;
+    if(process.platform==='win32'&&typeof last==='string'&&last.startsWith('{"dataRoot":')){
+      const {snapshotRoot}=JSON.parse(last);
+      if(typeof snapshotRoot==='string'&&existsSync(snapshotRoot))hooks.probeDirectories.push(snapshotRoot);
+    }
+    return hooks.afterSpawn?hooks.afterSpawn(result):result;}};
 });
 const roots:string[]=[];
-function root(){const value=mkdtempSync(join(tmpdir(),'continuity-profile-custody-'));roots.push(value);return value;}
+function root(){const value=ownedProfileTempDir(join(tmpdir(),'continuity-profile-custody-'));roots.push(value);return value;}
 afterEach(()=>{hooks.beforeOpen=undefined;hooks.afterOpen=undefined;hooks.beforeRead=undefined;hooks.afterSpawn=undefined;hooks.afterRemove=undefined;for(const value of [...roots.splice(0),...hooks.probeDirectories.splice(0)])rmSync(value,{recursive:true,force:true,maxRetries:3});});
 
 it('readonly missing identity never creates an identity or directory contents',()=>{
@@ -27,12 +37,13 @@ it('readonly missing identity never creates an identity or directory contents',(
 });
 it('rejects non-string persisted legacy alias values without coercing them into scope IDs',()=>{
   const value=root(),profileId=loadContinuityProfile(value),alias=join(value,'continuity-profile-migration.json');
-  writeFileSync(alias,JSON.stringify({version:1,profileId,legacyProfileId:['a'.repeat(64)],osOwner:String(userInfo().uid)}),{mode:0o600});
+  const bytes=JSON.stringify({version:1,profileId,legacyProfileId:['a'.repeat(64)],osOwner:String(userInfo().uid)});
+  if(process.platform==='win32')writeWindowsPrivateFile(alias,bytes,true);else writeFileSync(alias,bytes,{mode:0o600});
   expect(()=>resolveDesktopProfile(value)).toThrow('profile_identity_unavailable');expect(readContinuityProfile(value)).toBe(profileId);
 },12000);
 it.runIf(process.platform==='win32')('never treats a manually supplied alias as Windows legacy SID proof',()=>{
   const value=root(),profileId=loadContinuityProfile(value),alias=join(value,'continuity-profile-migration.json');
-  writeFileSync(alias,JSON.stringify({version:1,profileId,legacyProfileId:'a'.repeat(64),osOwner:String(userInfo().uid)}),{mode:0o600});
+  writeWindowsPrivateFile(alias,JSON.stringify({version:1,profileId,legacyProfileId:'a'.repeat(64),osOwner:String(userInfo().uid)}),true);
   expect(()=>resolveDesktopProfile(value)).toThrow('profile_identity_unavailable');expect(readContinuityProfile(value)).toBe(profileId);
 },12000);
 it('rejects a replaced identity between original lstat and actual open',()=>{

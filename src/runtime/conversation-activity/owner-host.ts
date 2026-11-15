@@ -1,9 +1,9 @@
 import {assistantDigestEnvelopeSchema} from '../assistant/notification-policy.js';
 import {assertBeforeEffects} from '../verification/before-effects.js';
-import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { writePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
-import { existsSync, lstatSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, lstatSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
@@ -194,8 +194,8 @@ export class ConversationActivityOwnerHost {
       });
       await new Promise<void>((resolve, reject) => { this.server!.once('error', reject); this.server!.listen(this.address.socketPath, () => { this.server!.off('error', reject); resolve(); }); });
       const statusFile = join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.status);
-      writeFileSync(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }), { mode: 0o600 });
-      chmodPrivateActivityFile(`${statusFile}.${process.pid}.tmp`); renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
+      writePrivateActivityFile(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }));
+      renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
       this.service.start();
       this.watchState = JSON.stringify(this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) })));
       if (this.options.idle) { this.idleTimer = (this.options.setInterval ?? setInterval)(() => this.checkIdle(), ACTIVITY_OWNER_IDLE_CHECK_MS); this.idleTimer.unref(); }

@@ -1,0 +1,22 @@
+import {afterEach,expect,it} from 'vitest';
+import {mkdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {AgentSessionState} from '../../src/ai/runtime/session.js';
+import {FileSessionStore} from '../../src/ai/runtime/session-store.js';
+import {createCliWorkspace} from '../support/chat-cli-multi-agent-fixture.js';
+const roots:string[]=[];
+afterEach(()=>{for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true,maxRetries:3});});
+it.each(['--resume','--continue','--takeover'])('the actual CLI %s recovers K3 public history and retains canonical messages',async option=>{
+ const {configDir,homeDir,projectDir}=createCliWorkspace('kimi-public-resume-cli-',roots);mkdirSync(configDir,{mode:0o700});
+ writeFileSync(join(configDir,'config.json'),JSON.stringify({schemaVersion:2,defaultProvider:'kimi',defaultModelId:'k3',providers:{kimi:{type:'first_party',protocol:'openai_legacy',apiKey:'fixture-only',baseUrl:'https://api.kimi.com/coding/v1'}},models:{k3:{provider:'kimi',model:'k3',label:'K3'}},defaultMode:'interactive',channels:{}}),{mode:0o600});
+ const state=new AgentSessionState(),sessionId='sess_kimi_public_resume_fixture';
+ state.replaceMessages([{role:'user',content:[{type:'text',text:'The corrected value is 47.'}]},{role:'assistant',content:[{type:'text',text:'I will retain the corrected value 47.'}]}]);
+ const snapshot={...state.exportSnapshot(),sessionId,cwd:projectDir,model:'k3',lineage:[sessionId]},store=new FileSessionStore(join(configDir,'sessions'));await store.save(snapshot);
+ const requestFile=join(roots[0]!,'provider-request.json'),entry=join(process.cwd(),'.test-dist','src','index.js');
+ const {stdout,stderr}=await promisify(execFile)(process.execPath,['--import',join(process.cwd(),'tests/support/profile-account-child.setup.mjs'),'--import',join(process.cwd(),'tests/support/kimi-public-resume-provider.setup.mjs'),entry,'chat','--auto','--json',option,...(option==='--continue'?[]:[sessionId]),'What is the corrected value?'],{cwd:projectDir,env:{...process.env,HOME:homeDir,USERPROFILE:homeDir,XIAOK_CONFIG_DIR:configDir,XIAOK_TEST_ACCOUNT_HOME:homeDir,XIAOK_TEST_KIMI_REQUEST:requestFile,XIAOK_DISABLE_GLOBAL_PLUGINS:'1'},timeout:20000,maxBuffer:2*1024*1024});
+ expect(JSON.parse(stdout)).toMatchObject({text:'RESUMED_VALUE_47'});expect(stderr).toMatch(/公开上下文|public context/);expect(stderr).not.toContain('KIMI_K3_DURABLE_RESUME_UNSUPPORTED');
+ const request=JSON.parse(readFileSync(requestFile,'utf8'));expect(JSON.stringify(request.messages)).toContain('47');expect(request.messages.filter((message:any)=>message.role==='assistant')).toEqual([]);
+ const saved=await store.load(sessionId);expect(saved!.messages.slice(0,snapshot.messages.length)).toEqual(snapshot.messages);expect(JSON.stringify(saved)).not.toContain('fixture ephemeral reasoning');
+},30000);
