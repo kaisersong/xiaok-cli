@@ -79,6 +79,7 @@ function shipBrokerRuntime({cacheRoot, resources, target}) {
 async function afterPack(context) {
   const {Arch} = require('electron-builder');
   const target = context.electronPlatformName + '-' + Arch[context.arch];
+  if(!targetEntry(target))throw Error('node_child_runtime_unsupported_target');
   const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, context.packager.appInfo.productFilename + '.app', 'Contents', 'Resources') : join(context.appOutDir, 'resources');
   return shipBrokerRuntime({cacheRoot: resolve(context.packager.projectDir, '..', '.artifacts', 'broker-runtimes'), resources, target});
 }

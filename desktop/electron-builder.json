@@ -306,7 +306,7 @@
       }
     ],
     "signIgnore": [
-      "Contents/Resources/services/intent-broker/runtime/darwin-arm64/node$"
+      "Contents/Resources/services/intent-broker/runtime/darwin-(arm64|x64)/node$"
     ]
   },
   "win": {

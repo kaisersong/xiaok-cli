@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import {createAssistantDesktopAdmission} from './assistant-desktop-admission.js';
 import {createAssistantThreadTargets} from './assistant-launch-thread-target.js';
 import {readAssistantTaskSource} from './assistant-task-source.js';
@@ -2032,10 +2033,11 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
               platform: process.platform,
               preferredPython: managedPythonCommand,
             }) : undefined;
+            const nodeRuntime=isNodeServer?resolveNodeChildRuntime({...process.env,...baseEnv},true):undefined;
             const command = pythonLaunch
               ? pythonLaunch.command
               : isNodeServer
-                ? (process.env.XIAOK_NODE_CMD || process.execPath)
+                ? nodeRuntime!.command
                 : launch.command;
             resolvedCommand = command;
             // Design v58 §6.1: no Xiaok-owned daemon launch. The official
@@ -2043,15 +2045,15 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
             // auto-relaunch, so a second `open -n` owner is removed here.
             const runtimeEnv = pythonLaunch
               ? pythonLaunch.env
-              : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
-                ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
+              : isNodeServer
+                ? nodeRuntime!.env
                 : isCuaServer && process.platform === 'win32'
                   ? { ...(baseEnv ?? {}), CUA_DRIVER_RS_TELEMETRY_ENABLED: 'false', CUA_DRIVER_RS_UPDATE_CHECK: 'false', CUA_DRIVER_TELEMETRY_HOME: join(servicesOptions.dataRoot, 'runtime', 'cua-telemetry') } : baseEnv;
             if (isCuaServer) computerUseActivationSignal?.throwIfAborted();
             const connection = await createMcpClientConnection(server.name, {
               type: 'stdio',
               command,
-              args: pythonLaunch?.args ?? launch.args,
+              args: pythonLaunch?.args ?? (nodeRuntime?nodeChildArgs(nodeRuntime,launch.args):launch.args),
               env: runtimeEnv,
               timeout: server.timeout,
               protocol: server.protocol,
@@ -7096,14 +7098,12 @@ async function renderReportArtifactViaBundledMcp({
 }): Promise<Record<string, unknown>> {
   signal?.throwIfAborted();
   mkdirSync(dirname(outputPath), { recursive: true });
-  const command = process.env.XIAOK_NODE_CMD || process.execPath;
-  const runtimeEnv = !process.env.XIAOK_NODE_CMD && process.versions.electron
-    ? { ELECTRON_RUN_AS_NODE: '1' }
-    : undefined;
+  const runtime=resolveNodeChildRuntime(process.env,true);
+  const command=runtime.command,runtimeEnv=runtime.env;
   const connection = await createMcpClientConnection('report-renderer', {
     type: 'stdio',
     command,
-    args: [serverBundlePath],
+    args: nodeChildArgs(runtime,[serverBundlePath]),
     env: runtimeEnv,
     protocol: { mode: 'modern', version: '2026-07-28' },
     timeout: { startup: 30_000, call: 30_000 },

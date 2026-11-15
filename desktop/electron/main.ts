@@ -1,3 +1,4 @@
+import {assertNodeChildRuntimeFilesKnown} from '../../src/runtime/node-child-runtime.js';
 import {createDesktopScopedControlSources,desktopScopedKSwarmOptions} from './desktop-scoped-control-sources.js';
 import {DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
 import {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
@@ -387,7 +388,7 @@ function registerLifetimeDisposerStep(name: string, run: () => Promise<void>): v
   desktopLifetimeSteps.push({ name, run });
 }
 const desktopIngressOwners: IngressOwner[] = [];
-const desktopDurableStores: DurableStoreOwner[] = [];
+const desktopDurableStores: DurableStoreOwner[] = [{name:'packaged-node-runtime-files',async close(){assertNodeChildRuntimeFilesKnown();}}];
 const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
   gate: desktopShutdownGate,
   providerRuntime: pluginProviderRuntime,
@@ -1029,7 +1030,6 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     );
   if(!dshSources)kswarmStartPromise=startMainKSwarm();
   registerLifetimeDisposerStep('local-memory', async () => { await closeDesktopMemoryStore(dataRoot); });
-  if(!dshSources)registerLifetimeDisposerStep('multi-agent-runtime', async () => { await services.disposeMultiAgent(); });
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') return services.conversationActivity?.projectChanged(event.projectId);
   });

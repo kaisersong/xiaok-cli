@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@electron/fuses": "1.8.0",
     "@json-render/react": "0.22.0",
     "@pierre/diffs": "^1.1.20",
     "@pierre/trees": "^1.0.0-beta.3",

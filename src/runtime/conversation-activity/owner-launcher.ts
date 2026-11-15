@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../node-child-runtime.js';
 import { chmodPrivateActivityFile,writePrivateActivityFile,ensurePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
@@ -62,8 +63,9 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   let child: ReturnType<typeof spawn>;
   try {
     chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
-    child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {
-      detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env: { ...buildActivityOwnerEnv(process.env), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+    const runtime=resolveNodeChildRuntime(buildActivityOwnerEnv(process.env));
+    child = (options.spawn ?? spawn)(options.executable ?? runtime.command, nodeChildArgs(runtime,[options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile]), {
+      detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env:runtime.env,
     });
   } finally { closeSync(logFile); }
   let spawnError: unknown; child.once('error', error => { spawnError = error; });

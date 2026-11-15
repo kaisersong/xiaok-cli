@@ -165,8 +165,8 @@ describe('OfficeDocumentParser process isolation', () => {
       SystemRoot: 'C:\\Windows',
       TMPDIR: '/tmp',
       LANG: 'zh_CN.UTF-8',
-      ELECTRON_RUN_AS_NODE: '1',
     });
+    expect(env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
     expect(env).not.toHaveProperty('OPENAI_API_KEY');
     expect(env).not.toHaveProperty('HTTPS_PROXY');
   });

@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from './node-child-runtime.js';
 import { constants, copyFileSync, chmodSync, lstatSync, linkSync, mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -32,14 +33,18 @@ export function getYzjCliLaunchArgs(cli: BundledYzjCli, packageRoot?: string): s
 
 function prepareLauncher(cli: BundledYzjCli, packageRoot?: string): string {
   const windows = cli.binaryPath.endsWith('.exe');
-  const args = [process.execPath, ...getYzjCliLaunchArgs(cli, packageRoot)];
+  const runtime=resolveNodeChildRuntime();
+  const args = [runtime.command, ...nodeChildArgs(runtime,getYzjCliLaunchArgs(cli, packageRoot))];
   if (args.some(arg => /[\r\n\0]/.test(arg))) throw new Error('云之家 CLI launcher 路径无效');
   const command = windows
     ? args.map(arg => `"${arg.replace(/%/g, '%%')}"`).join(' ')
     : args.map(arg => `'${arg.replace(/'/g, `'"'"'`)}'`).join(' ');
+  const environment=runtime.argsPrefix.length
+    ? (windows?'set NODE_OPTIONS=\r\nset NODE_PATH=\r\nset ELECTRON_RUN_AS_NODE=\r\nset XIAOK_NODE_CMD=\r\nfor /f "tokens=1 delims==" %%K in (\'set LD_ 2^>nul\') do set "%%K="\r\nfor /f "tokens=1 delims==" %%K in (\'set DYLD_ 2^>nul\') do set "%%K="\r\n':'unset NODE_OPTIONS NODE_PATH ELECTRON_RUN_AS_NODE XIAOK_NODE_CMD\nfor key in $(env | sed -n "s/^\\(LD_[A-Za-z0-9_]*\\|DYLD_[A-Za-z0-9_]*\\)=.*/\\1/p"); do unset "$key"; done\n')
+    : (runtime.env.ELECTRON_RUN_AS_NODE==='1'?(windows?'set ELECTRON_RUN_AS_NODE=1\r\n':'export ELECTRON_RUN_AS_NODE=1\n'):'');
   const content = windows
-    ? `@echo off\r\nsetlocal DisableDelayedExpansion\r\nset ELECTRON_RUN_AS_NODE=1\r\n${command} %*\r\nexit /b %errorlevel%\r\n`
-    : `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${command} "$@"\n`;
+    ? `@echo off\r\nsetlocal DisableDelayedExpansion\r\n${environment}${command} %*\r\nexit /b %errorlevel%\r\n`
+    : `#!/bin/sh\n${environment}exec ${command} "$@"\n`;
   const id = createHash('sha256').update(content).digest('hex').slice(0, 16);
   const directory = join(cli.binDir, 'launchers', id);
   const launcher = join(directory, windows ? 'yzj-cli.cmd' : 'yzj-cli');

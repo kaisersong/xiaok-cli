@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import { execFile, spawn } from 'node:child_process';
 import {assertBeforeEffects} from '../../src/runtime/verification/before-effects.js';
 import { promisify } from 'node:util';
@@ -24,7 +25,7 @@ child.on('error',error=>{process.stderr.write(error.message);process.exitCode=1;
 function safeEnvironment(input:NodeJS.ProcessEnv):NodeJS.ProcessEnv {
   const env={...input};
   for(const key of Object.keys(env))if(/^(INTENT_BROKER_|KSWARM_|NODE_OPTIONS$|NODE_PATH$)/.test(key))delete env[key];
-  return {...env,ELECTRON_RUN_AS_NODE:'1'};
+  return resolveNodeChildRuntime(env).env;
 }
 function groupExists(pid:number):boolean {
   try{process.kill(-pid,0);return true;}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw error;}
@@ -85,7 +86,8 @@ export function createRoomExternalDiscussionAdapter(options:{
       await input.onNotSpawned?.({...prepared,phase:'not-spawned',noSpawnVerified:true});
       await rm(neutralRoot,{recursive:true,force:true});throw error;
     }
-    const child=spawn(process.execPath,['-e',supervisor],{cwd:neutralRoot,env,detached:true,stdio:['pipe','pipe','pipe']});
+    const runtime=resolveNodeChildRuntime(env);
+    const child=spawn(runtime.command,nodeChildArgs(runtime,['-e',supervisor]),{cwd:neutralRoot,env:runtime.env,detached:true,stdio:['pipe','pipe','pipe']});
     let output='',stderr='',exitCode:number|null=null,closed=false,spawnError:Error|undefined,cleanupError:unknown;
     const signalGroup=(signal:NodeJS.Signals)=>{if(child.pid)try{groupSignal(child.pid,signal);}catch(error){cleanupError=error;}};
     const alive=()=>{if(!child.pid)return false;try{return groupExists(child.pid);}catch(error){cleanupError=error;return true;}};

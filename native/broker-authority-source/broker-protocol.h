@@ -5,7 +5,7 @@
 #define MI_BROKER_LAUNCHER_EXEC MI_MAIN_BUNDLE "/Contents/Resources/native/broker-child-launcher"
 #endif
 #ifndef MI_BROKER_EXEC
-#define MI_BROKER_EXEC MI_MAIN_EXEC
+#define MI_BROKER_EXEC MI_PACKAGED_NODE_EXEC
 #endif
 #ifndef MI_BROKER_ENTRY
 #define MI_BROKER_ENTRY MI_MAIN_BUNDLE "/Contents/Resources/services/intent-broker/src/runtime/original-authority-bootstrap.js"

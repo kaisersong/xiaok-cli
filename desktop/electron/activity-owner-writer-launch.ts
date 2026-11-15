@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import {assertOriginalWriterImplementationContext} from './activity-owner-writer-launcher.js';
 import type { DesktopPreparationCompositionLaunch } from './default-dispatch-preparation-composition-bootstrap.js';
 import { createOwnedCanonicalBusiness, prepareOwnedCanonicalBusinessHello, assertOwnedCanonicalBusinessHelloCurrent, readOwnedCanonicalPreparationFacet, type CanonicalBusinessAdmission } from '../../src/runtime/conversation-activity/owned-canonical-business.js';
@@ -33,7 +34,7 @@ export async function runMainLaunch(state:LaunchState,config:ActivityOwnerConfig
  const configFile=writeOwnerLaunchConfig(address.dataRoot,launch.mainLaunchNonce,data(normalized));state.configArtifact=configFile;
  const logFile=join(address.dataRoot,ACTIVITY_STORAGE_NAMES.log);ensurePrivateActivityFile(logFile);const logFd=openSync(logFile,'a',0o600);let child:ChildProcess;
  try{
-  chmodPrivateActivityFile(logFile);const executable=process.execPath,args=[fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js',import.meta.url)),configFile],spawnOptions={detached:true,stdio:['ignore',logFd,logFd,'ipc'] as ['ignore',number,number,'ipc'],windowsHide:true,env:{...buildActivityOwnerEnv(process.env),ELECTRON_RUN_AS_NODE:'1'}};
+  chmodPrivateActivityFile(logFile);const runtime=resolveNodeChildRuntime(buildActivityOwnerEnv(process.env)),executable=runtime.command,args=nodeChildArgs(runtime,[fileURLToPath(new URL('../../src/runtime/conversation-activity/owner-entry.js',import.meta.url)),configFile]),spawnOptions={detached:true,stdio:['ignore',logFd,logFd,'ipc'] as ['ignore',number,number,'ipc'],windowsHide:true,env:runtime.env};
   launch.assertCurrent();state.business?.launch!.assertCurrent();launch.assertLocal();state.business?.launch!.assertLocal();if(state.closed||state.observationUnknown||state.spawnFailure||stateFor(state.service)!==state)throw Error('WRITER_CONFIG_LAUNCH_CLOSED');
   child=spawn(executable,args,spawnOptions);state.child=child;
  }finally{closeSync(logFd);}
