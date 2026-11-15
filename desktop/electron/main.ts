@@ -210,6 +210,8 @@ import {
   buildMobilePairingPayload,
   createMobileBonjourAdvertiser,
   createMobileGateway,
+  resolveMobileGatewayHost,
+  startMobileGatewayDiscovery,
   loadOrCreateMobileIdentity,
   type MobileApprovalDecision,
   type MobileArtifactPreview,
@@ -1130,7 +1132,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     return value?mobileDisclosure.bind('artifact.preview',value,read.cut):null;
   };
   const mobileGateway = createMobileGateway({
-    host: process.env.XIAOK_MOBILE_GATEWAY_HOST ?? '0.0.0.0',
+    host: resolveMobileGatewayHost(process.env.XIAOK_MOBILE_GATEWAY_HOST),
     port: Number(process.env.XIAOK_MOBILE_GATEWAY_PORT ?? '47891'),
     desktopName: 'Xiaok Desktop',
     desktopId: mobileIdentity.desktopId,
@@ -1256,11 +1258,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   mobileGateway.start()
     .then((status) => {
       debugMain('mobile-gateway:started', status);
-      mobileBonjourAdvertiser.start({
-        name: 'Xiaok Desktop',
-        port: status.port,
-        txt: { protocol: 'mobile-v1' },
-      });
+      startMobileGatewayDiscovery(mobileBonjourAdvertiser, status);
       debugMain('mobile-gateway:bonjour', mobileBonjourAdvertiser.getStatus());
     })
     .catch((err) => debugMain('mobile-gateway:start-failed', err instanceof Error ? err.message : String(err)));
