@@ -27,13 +27,13 @@ jobs:
         with:
           path: xiaok-cli
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Require the readonly private sibling checkout token
+      - name: Require a readonly private sibling credential
         shell: bash
         env:
-          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          DSH_HAS_READ_CREDENTIAL: ${{ secrets.DSH_SIBLING_READ_TOKEN != '' || secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY != '' }}
         run: |
-          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
-            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+          if [ "$DSH_HAS_READ_CREDENTIAL" != "true" ]; then
+            echo "Configure a readonly mydocs token or its dedicated readonly deploy key."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -41,7 +41,9 @@ jobs:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
-          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN || github.token }}
+          ssh-key: ${{ secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY }}
+          ssh-strict: true
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -79,13 +81,13 @@ jobs:
           ref: ${{ inputs.kswarm_ref || github.head_ref || github.ref_name }}
           path: kswarm
           persist-credentials: false
-      - name: Require the readonly private sibling checkout token
+      - name: Require a readonly private sibling credential
         shell: bash
         env:
-          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          DSH_HAS_READ_CREDENTIAL: ${{ secrets.DSH_SIBLING_READ_TOKEN != '' || secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY != '' }}
         run: |
-          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
-            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+          if [ "$DSH_HAS_READ_CREDENTIAL" != "true" ]; then
+            echo "Configure a readonly mydocs token or its dedicated readonly deploy key."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -93,7 +95,9 @@ jobs:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
-          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN || github.token }}
+          ssh-key: ${{ secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY }}
+          ssh-strict: true
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:

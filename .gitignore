@@ -113,3 +113,6 @@ native/broker-authority-source/build/
 /native/windows-owner-security/build/
 /src/runtime/native/win32-*/
 /dist/runtime/native/win32-*/
+
+# Reproducible generated Native SDK build output.
+/native/kswarm-authority-source/build/
