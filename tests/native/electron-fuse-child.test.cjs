@@ -46,7 +46,7 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
  // asar 3 returns its WriteStream before the last write completes. Never read
  // or extract the fixture until the producer has finished (including errors).
  await finished(await asar.createPackage(staging,archive),{cleanup:true});
- for(const [relative,bytes] of expectedFiles)assert.deepEqual(asar.extractFile(archive,relative),bytes,'fixture ASAR bytes: '+relative);
+ for(const [relative,bytes] of expectedFiles)assert.deepEqual(asar.extractFile(archive,path.normalize(relative)),bytes,'fixture ASAR bytes: '+relative);
  const {shipBrokerRuntime}=require('../../desktop/scripts/pack-broker-runtime.cjs');
  shipBrokerRuntime({cacheRoot:path.join(repo,'.artifacts/broker-runtimes'),resources,target:process.platform+'-'+process.arch});
  const physicalApp=require('../../desktop/scripts/pack-node-child.cjs').packNodeChild(archive);
