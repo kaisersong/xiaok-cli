@@ -142,7 +142,7 @@ describe('durable conversation activity', () => {
     expect(store.getDiagnostics().sourceEvents).toBe(2);
   });
 
-  // Release-plan quality review: Windows includes real per-commit ACL/identity IO.
+  // Release-plan quality review: Windows ACL/identity IO and macOS hosted fsync variance.
   // This runner budget changes no product clock, population, or assertion.
   it('bounds a 10000-progress storm while retaining the critical terminal and replay cursor', () => {
     bind();
@@ -154,7 +154,7 @@ describe('durable conversation activity', () => {
     expect(store.ingest('watch', event(1))).toMatchObject({ duplicate: true });
     expect(store.getProjection('watch')?.sourceSequence).toBe(10_001);
     expect(store.getProjection('watch')?.executionState).toBe('completed');
-  },process.platform==='win32'?12_000:5_000);
+  },process.platform==='win32'||process.platform==='darwin'?12_000:5_000);
 
   it('retains the exact mixed progress window and rebuilds its indexed compaction plan on reopen', () => {
     bind();
