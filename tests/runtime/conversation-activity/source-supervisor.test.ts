@@ -1,3 +1,4 @@
+import { makePrivateTestTempDir, cleanupPrivateTestTempDir } from '../../support/private-temp.js';
 import { describe, it, expect, vi } from 'vitest';
 // Fault/delay injection wraps the actual platform birth implementation. The
 // original private context and OS birth query still run; spawn stays real.
@@ -16,7 +17,7 @@ vi.mock('../../../src/runtime/conversation-activity/source-supervisor-birth.js',
     throw Error('activity_source_birth_unavailable');
   }};
 });
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import {  writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
@@ -27,7 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { ActivitySourceSupervisor, readProcessBirth, SOURCE_START_DEADLINE_MS } from '../../../src/runtime/conversation-activity/source-supervisor.js';
 
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'activity-supervisor-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-supervisor-'));
   const listener = createServer(); await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
   const address = listener.address(); if (!address || typeof address === 'string') throw new Error('no port');
   await new Promise<void>(resolve => listener.close(() => resolve()));
@@ -50,7 +51,7 @@ function kswarmTestNode():string{
 describe('native source supervisor process ownership', () => {
   it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
     const f = await fixture();
-    const observerRoot = mkdtempSync(join(tmpdir(), 'activity-external-broker-'));
+    const observerRoot = makePrivateTestTempDir(join(tmpdir(), 'activity-external-broker-'));
     const source = { ...f.source, name: 'broker' as const };
     const original = new ActivitySourceSupervisor(f.root, 'original');
     const observer = new ActivitySourceSupervisor(observerRoot, 'observer');
@@ -72,8 +73,8 @@ describe('native source supervisor process ownership', () => {
         try { process.kill(pid, 'SIGTERM'); } catch {}
         await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
       }
-      rmSync(f.root, { recursive: true, force: true });
-      rmSync(observerRoot, { recursive: true, force: true });
+      cleanupPrivateTestTempDir(f.root);
+      cleanupPrivateTestTempDir(observerRoot);
     }
   }, 15_000);
   it('an idle parent can still exit after unref of its actual supervised child',async()=>{

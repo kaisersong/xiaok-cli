@@ -1,3 +1,4 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import * as fs from 'node:fs';
@@ -66,7 +67,7 @@ function snapshot(root: string) {
   });
 }
 function fixture() {
-  const root = nativeFs.mkdtempSync(join(tmpdir(), 'activity-readonly-compat-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-readonly-compat-'));
   nativeFs.chmodSync(root, 0o700);
   const file = join(nativeFs.realpathSync(root), 'activity.sqlite'), writer = new ConversationActivityStore(file);
   writer.prepareAssociation({ operationId: 'op', creationIdempotencyKey: 'op',

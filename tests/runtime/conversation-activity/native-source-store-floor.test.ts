@@ -1,5 +1,6 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import {afterEach,expect,it} from 'vitest';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -9,7 +10,7 @@ import {build} from 'esbuild';
 import {ConversationActivityStore} from '../../../src/runtime/conversation-activity/store.js';
 const cleanup:Array<()=>void|Promise<void>>=[];afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();});
 const reference={sourceKind:'codex_native_approval',taskId:'task',taskSessionId:'host-session',executionThreadId:'thread',nativeSessionId:'native-session',nativeThreadId:'native-thread',nativeTurnId:'native-turn',nativeGeneration:1,nativeIncarnation:randomUUID()};
-function fixture(){const root=mkdtempSync(join(tmpdir(),'native-activity-floor-'));cleanup.push(()=>rmSync(root,{recursive:true,force:true}));const file=join(root,'activity.sqlite');const store=new ConversationActivityStore(file);cleanup.push(()=>store.close());store.prepareAssociation({operationId:'operation',creationIdempotencyKey:'operation',origin:{profileId:'profile',workspaceId:'workspace',threadId:'thread',actorId:'user'}});store.bindWork({operationId:'operation',watchId:'watch',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'host-session',workId:'task',runId:'run'});return{root,file,store};}
+function fixture(){const root=makePrivateTestTempDir(join(tmpdir(),'native-activity-floor-'));cleanup.push(()=>rmSync(root,{recursive:true,force:true}));const file=join(root,'activity.sqlite');const store=new ConversationActivityStore(file);cleanup.push(()=>store.close());store.prepareAssociation({operationId:'operation',creationIdempotencyKey:'operation',origin:{profileId:'profile',workspaceId:'workspace',threadId:'thread',actorId:'user'}});store.bindWork({operationId:'operation',watchId:'watch',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'host-session',workId:'task',runId:'run'});return{root,file,store};}
 const event={schemaVersion:1,eventId:'start',source:'task_host',logicalSourceId:'host',sourceDataEpoch:'host-session',workId:'task',runId:'run',sourceSequence:1,transportGeneration:0,kind:'started',receivedAt:1,evidenceRefs:[]};
 function version(file:string){const db=new DatabaseSync(file,{readOnly:true});try{return (db.prepare('PRAGMA user_version').get() as any).user_version;}finally{db.close();}}
 it('enrolls only the exact original task/thread/session binding and upgrades the metadata floor atomically',()=>{

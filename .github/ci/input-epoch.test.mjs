@@ -25,12 +25,20 @@ for (const drift of ['head', 'test-bytes']) {
   const git = (...args) => { const result=run('git',args);assert.equal(result.status,0,result.stderr);return result.stdout.trim(); };
   try {
    const privateDependencies = join(root, 'node_modules');
-   // Keep the original 30s copy-child boundary. Node's optional reflink flag
-   // falls back to a normal copy; dereference avoids Windows symlink privileges.
-   const copied = run(process.execPath, ['--input-type=commonjs', '-e',
-    "const fs=require('node:fs');fs.cpSync(process.argv[1],process.argv[2],{recursive:true,dereference:true,force:false,errorOnExist:true,mode:fs.constants.COPYFILE_FICLONE});",
-    join(repository, 'node_modules'), privateDependencies]);
-   assert.equal(copied.status, 0, copied.stderr);
+   // Preserve the complete private dependency tree and the original 30s child
+   // boundary. Windows bulk-copy avoids serial JS traversal of every file.
+   assert.equal(existsSync(privateDependencies), false, 'dependency copy requires a fresh destination');
+   const copied = process.platform === 'win32'
+    ? run(join(process.env.SystemRoot, 'System32', 'robocopy.exe'), [
+      join(repository, 'node_modules'), privateDependencies,
+      '/E', '/COPY:DAT', '/DCOPY:DAT', '/MT:8', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NP',
+     ])
+    : run(process.execPath, ['--input-type=commonjs', '-e',
+      "const fs=require('node:fs');fs.cpSync(process.argv[1],process.argv[2],{recursive:true,dereference:true,force:false,errorOnExist:true,mode:fs.constants.COPYFILE_FICLONE});",
+      join(repository, 'node_modules'), privateDependencies]);
+   assert.equal(copied.signal, null, copied.stderr);
+   // A fresh nonempty tree must report copied files and no extras/mismatches.
+   assert.equal(copied.status, process.platform === 'win32' ? 1 : 0, copied.stderr);
    assert.equal(lstatSync(privateDependencies).isDirectory(), true);
    assert.equal(lstatSync(privateDependencies).isSymbolicLink(), false);
    mkdirSync(join(root,'.github/scripts'),{recursive:true});

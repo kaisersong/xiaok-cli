@@ -99,10 +99,10 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 719ff080e5c8a616541bc6948e8d1c538191ca9f
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 27660cbeb11fa6e41514966575f49ea7097e7676
+          git -C ../kswarm fetch --depth 1 origin baa98725a3704a9dfe65cb0793fdc768e60686ef
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
@@ -323,10 +323,10 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin 719ff080e5c8a616541bc6948e8d1c538191ca9f
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 27660cbeb11fa6e41514966575f49ea7097e7676
+          git -C ../kswarm fetch --depth 1 origin baa98725a3704a9dfe65cb0793fdc768e60686ef
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311

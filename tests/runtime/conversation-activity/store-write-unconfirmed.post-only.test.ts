@@ -1,8 +1,9 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 // ARTIFACT CANDIDATE: UNREVIEWED / UNCOMPILED / UNRUN / POST-ONLY.
 // Proposed copy path: tests/runtime/conversation-activity/store-write-unconfirmed.post-only.test.ts
 import { afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync, existsSync, readFileSync, statSync } from 'node:fs';
+import {  rmSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { activityReadonlyNeedsSnapshot } from '../../../src/runtime/conversation-activity/readonly-snapshot.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ function expectSameThrow(run: () => unknown, primary: unknown) {
   expect(observed.error).toBe(primary);
 }
 function fixture(): Fixture {
-  const root = mkdtempSync(join(tmpdir(), 'activity-store-cleanup-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-store-cleanup-'));
   const f: Fixture = { root, file: join(root, 'conversation-activity.sqlite'), handles: new Set(), closed: new Set(),
     realCloseFailed: new Set(), execCalls: [], closeCalls: [], faults: {}, nowFailure: { armed: false, primary: undefined } };
   fixtures.push(f);

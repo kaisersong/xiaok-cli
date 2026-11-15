@@ -1,5 +1,6 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, statSync, symlinkSync, rmSync, existsSync, readFileSync, readlinkSync } from 'node:fs';
+import {  mkdirSync, writeFileSync, chmodSync, statSync, symlinkSync, rmSync, existsSync, readFileSync, readlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { attachCliConversationActivities, createActivityStartupNotices } from '.
 
 describe.skipIf(process.platform === 'win32')('private storage', () => {
   it('tightens legacy directories and files and rejects symlinks and chmod failure', () => {
-    const base = mkdtempSync(join(tmpdir(), 'activity-private-'));
+    const base = makePrivateTestTempDir(join(tmpdir(), 'activity-private-'));
     const parent = join(base, 'conversation-activity'), root = join(parent, 'fake');
     try {
       mkdirSync(join(root, 'tasks', 'snapshots'), { recursive: true });
@@ -29,7 +30,7 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
   it('accepts a linked ancestor above the activity tree (for example macOS /var -> /private/var)', () => {
-    const base = mkdtempSync(join(tmpdir(), 'activity-linked-home-'));
+    const base = makePrivateTestTempDir(join(tmpdir(), 'activity-linked-home-'));
     try {
       mkdirSync(join(base, 'real-home'));
       symlinkSync(join(base, 'real-home'), join(base, 'home'));
@@ -40,7 +41,7 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
   it.each([0o000, 0o022, 0o077, 0o277])('creates writable private storage under umask %s in a child', mask => {
-    const base = mkdtempSync(join(tmpdir(), 'activity-mask-'));
+    const base = makePrivateTestTempDir(join(tmpdir(), 'activity-mask-'));
     const moduleUrl = (name: string) => pathToFileURL(join(process.cwd(), '.test-dist/src/runtime/conversation-activity', name + '.js')).href;
     try {
       const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -72,7 +73,7 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
     } finally { rmSync(base, { recursive: true, force: true }); }
   });
   it.each(['desktop', '.xiaok', 'custom-config'])('preserves unrelated shared entries in %s', name => {
-    const base = mkdtempSync(join(tmpdir(), 'activity-shared-'));
+    const base = makePrivateTestTempDir(join(tmpdir(), 'activity-shared-'));
     const previousConfigDir = process.env.XIAOK_CONFIG_DIR;
     const root = join(base, name);
     try {
@@ -125,7 +126,7 @@ it('Windows permission guard refuses unavailable storage', () => {
 });
 
 it.skipIf(process.platform === 'win32')('real owner creates private files under inherited strict umask', async () => {
-  const base = mkdtempSync(join(tmpdir(), 'activity-owner-mask-'));
+  const base = makePrivateTestTempDir(join(tmpdir(), 'activity-owner-mask-'));
   const { ensureConversationActivityOwner } = await import('../../../src/runtime/conversation-activity/owner-launcher.js');
   const { spawn } = await import('node:child_process');
   const { readdirSync, lstatSync } = await import('node:fs');
