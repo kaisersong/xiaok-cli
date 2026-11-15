@@ -36,6 +36,8 @@ export default async function setup(project){
   await teardownProfileAccount(ownership);
   if(privateTemp){
    rmSync(privateTemp,{recursive:true,maxRetries:3});
+   if(existsSync(privateTemp))throw Error('test_private_temp_cleanup_unconfirmed');
+   console.log(JSON.stringify({kind:'test-private-temp-cleanup',root:privateTemp,removed:true}));
    for(const key of ['TEMP','TMP'])if(process.env[key]===privateTemp){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
   }
  };

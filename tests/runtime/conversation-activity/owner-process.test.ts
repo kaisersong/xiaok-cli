@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, inject } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync,realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { join,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ensureConversationActivityOwner } from '../../../src/runtime/conversation-activity/owner-launcher.js';
 import { ACTIVITY_OWNER_GENERATION } from '../../../src/runtime/conversation-activity/owner-protocol.js';
@@ -51,7 +51,13 @@ describe('independent activity process lifecycle', () => {
     } finally {
       release(); await host.drain(); producer?.dispose(); observer?.dispose();
       if (pid) { process.kill(pid, 'SIGTERM'); await vi.waitFor(() => expect(() => process.kill(pid!, 0)).toThrow(), { timeout: 5000 }); }
-      rmSync(root, { recursive: true, force: true });
+      await host.closeSourceWriterForMigration();
+      if(process.platform==='win32'){
+        // The global private-TEMP owner removes process-lifetime fixture
+        // directories after the real worker exits; this is no Native receipt.
+        expect(dirname(root)).toBe(inject('profileTestTempRoot' as never));
+        console.log(JSON.stringify({fixtureRoot:root,cleanup:'private-temp-after-worker-exit'}));
+      }else rmSync(root, { recursive: true, force: true });
     }
   }, 15_000);
 });

@@ -19,6 +19,14 @@ const seam = vi.hoisted(() => ({
   lstat: undefined as undefined | ((path: string) => void),
   removed: [] as string[],
 }));
+// Windows uses private-at-birth Native directories instead of mkdtemp.
+// Observe the actual call and preserve its SDK result and errors unchanged.
+vi.mock('../../../src/runtime/windows-owner-security.js', async original => {
+  const actual=await original<typeof import('../../../src/runtime/windows-owner-security.js')>();
+  return {...actual,createExclusiveWindowsPrivateDirectory(path:string){
+    const result=actual.createExclusiveWindowsPrivateDirectory(path);seam.roots.push(path);return result;
+  }};
+});
 vi.mock('node:fs', async original => {
   const actual = await original<typeof import('node:fs')>();
   return { ...actual,

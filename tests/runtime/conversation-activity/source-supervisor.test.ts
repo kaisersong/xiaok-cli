@@ -1,20 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-// Only the birth lookup (execFile) can be made to fail; spawn stays real.
-const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[]}));
-vi.mock('node:child_process',async importOriginal=>{
-  const real=await importOriginal<typeof import('node:child_process')>();
-  return {...real,execFile:((file:string,args:string[],options:{timeout?:number},callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
-    const step=birthFault.plan.shift();
-    if(!birthFault.fail&&(step===undefined||step==='real'))return (real.execFile as unknown as (...a:unknown[])=>unknown)(file,args,options,callback);
-    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(options.timeout??0);
-    if(step&&typeof step==='object'){
-      // A slow lookup: answers after `delay`, unless execFile's timeout kills it first.
-      const limit=options.timeout??Infinity;
-      if(step.delay<limit)setTimeout(()=>callback(null,'639300000000000000\r\n',''),step.delay);
-      else setTimeout(()=>callback(Object.assign(new Error('Command failed: lookup timed out'),{killed:true,signal:'SIGTERM',code:null}),'',''),limit);
-    }else setImmediate(()=>callback(Object.assign(new Error('injected birth lookup failure'),{killed:false,code:1}),'',''));
-    return undefined;
-  }) as unknown as typeof real.execFile};
+// Fault/delay injection wraps the actual platform birth implementation. The
+// original private context and OS birth query still run; spawn stays real.
+const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[],actual:new Map<number,string>()}));
+vi.mock('../../../src/runtime/conversation-activity/source-supervisor-birth.js',async original=>{
+  const real=await original<typeof import('../../../src/runtime/conversation-activity/source-supervisor-birth.js')>();
+  return {...real,async readProcessBirth(...args:Parameters<typeof real.readProcessBirth>){
+    const [pid,timeoutMs]=args,step=birthFault.plan.shift();
+    if(!birthFault.fail&&(step===undefined||step==='real'))return real.readProcessBirth(...args);
+    birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(timeoutMs);
+    const birth=await real.readProcessBirth(...args);birthFault.actual.set(pid,birth);
+    if(step&&typeof step==='object')return new Promise<string>((resolve,reject)=>{
+      if(step.delay<timeoutMs)setTimeout(()=>resolve(birth),step.delay);
+      else setTimeout(()=>reject(Error('activity_source_birth_unavailable')),timeoutMs);
+    });
+    throw Error('activity_source_birth_unavailable');
+  }};
 });
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
@@ -118,12 +118,11 @@ describe('native source supervisor process ownership', () => {
     try{
       const receipt=await supervisor.ensure({...f.source,name:'broker'});pid=receipt.pid;const elapsed=Date.now()-started;
       console.log(JSON.stringify({test:'supervisor-birth-slow',pid,birth:receipt.birth,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed}));
-      expect(receipt).toMatchObject({pid,birth:'639300000000000000',external:false,ownerEpoch:'birth-slow'});
+      expect(receipt).toMatchObject({pid,birth:birthFault.actual.get(pid),external:false,ownerEpoch:'birth-slow'});
       expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeGreaterThan(5000);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
       expect(elapsed).toBeLessThan(SOURCE_START_DEADLINE_MS);
     }finally{
-      // The injected birth is not the child's real birth, so stopOwned would refuse it;
-      // this test's own child is signalled directly, then the spawn barrier drains.
+      // Stop only this fixture's recorded child, then join its spawn barrier.
       birthFault.plan=[];if(pid){try{process.kill(pid,'SIGTERM');}catch{}}await supervisor.sealAndDrainSpawned();
       if(pid)expect(()=>process.kill(pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});
     }
