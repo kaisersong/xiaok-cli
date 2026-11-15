@@ -583,7 +583,7 @@ Build freshness checks identify the owning generated resource; rebuild that owne
 
 | Platform | CLI | Published Desktop | Computer Use |
 |---|---|---|---|
-| macOS Apple Silicon | Supported | DMG / ZIP | Supported with permissions |
+| macOS Apple Silicon (13.5 or later) | Supported | DMG / ZIP | Supported with permissions |
 | macOS Intel | CLI/source use | No Intel asset in the verified latest release | macOS-only runtime requirements apply |
 | Windows x64 | Supported; terminal/hook details vary | Installer | Unavailable |
 | Linux | CLI/source use | Build targets exist; no asset in the verified latest release | Unavailable |

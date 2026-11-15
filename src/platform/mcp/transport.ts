@@ -346,8 +346,7 @@ export async function waitForProcessExit(
       return;
     }
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, PROCESS_EXIT_POLL_MS);
-      timer.unref?.();
+      setTimeout(resolve, PROCESS_EXIT_POLL_MS);
     });
   }
 
@@ -367,8 +366,7 @@ export async function waitForProcessExit(
       return;
     }
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, PROCESS_EXIT_POLL_MS);
-      timer.unref?.();
+      setTimeout(resolve, PROCESS_EXIT_POLL_MS);
     });
   }
   throw new Error(`MCP server child process ${pid} remained alive after SIGKILL`);

@@ -578,7 +578,7 @@ npm run test --prefix desktop -- --run \
 
 | 平台 | CLI | 已发布 Desktop | Computer Use |
 |---|---|---|---|
-| macOS Apple Silicon | 支持 | DMG / ZIP | 授权后支持 |
+| macOS Apple Silicon（13.5 及以上） | 支持 | DMG / ZIP | 授权后支持 |
 | macOS Intel | CLI / 源码使用 | 本次核实的最新 release 无 Intel 产物 | 仍需满足 macOS runtime 要求 |
 | Windows x64 | 支持，终端/hook 细节有差异 | 安装程序 | 不支持 |
 | Linux | CLI / 源码使用 | 有 build target，本次核实的最新 release 无安装包 | 不支持 |

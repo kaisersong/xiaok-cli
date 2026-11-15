@@ -259,6 +259,7 @@
     "releaseType": "release"
   },
   "mac": {
+    "minimumSystemVersion": "13.5",
     "target": [
       "dir",
       "dmg",
