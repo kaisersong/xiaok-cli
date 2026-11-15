@@ -19,3 +19,10 @@ test('the actual target bash guards reject missing credentials and accept presen
   for(const value of ['','false','true']){const result=spawnSync('bash',['-c',script],{env:{PATH:process.env.PATH,DSH_HAS_READ_CREDENTIAL:value},encoding:'utf8'});assert.equal(result.status,value==='true'?0:1,result.stderr);assert.doesNotMatch(result.stdout,/BEGIN OPENSSH|github_pat_|ghp_/);}
  }
 });
+
+test('complete original DSH protocol cases receive the pinned real Broker sibling',()=>{
+ const original=source.split('  original-boundary:')[1];
+ assert.match(original,/repository: kaisersong\/intent-broker\n\s+ref: 21defd02854fc38ae7526cdff9de3f46bf137311\n\s+path: intent-broker\n\s+persist-credentials: false/);
+ assert.match(original,/npm ci --ignore-scripts --prefix \.\.\/intent-broker/);
+ assert.match(original,/\['xiaok-cli','kswarm','mydocs','intent-broker'\]/);
+});
