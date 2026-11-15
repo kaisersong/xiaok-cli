@@ -61,7 +61,7 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
  assert(!fs.existsSync(preloadCanary));assert(!fs.existsSync(evalCanary));assert.doesNotMatch(actual.stderr,/Debugger listening/);
  const result=JSON.parse(fs.readFileSync(report,'utf8'));assert.equal(result.isPackaged,true);assert.equal(result.closed,true);assert.equal(result.code,0,result.stderr);assert.equal(result.signal,null);
  assert.equal(result.message.node,'24.19.0');assert.equal(result.message.sqlite,'3.53.3');assert.equal(result.message.nestedNode,'24.19.0');assert.equal(result.message.nestedStatus,0);assert.equal(result.message.preloadPrefix,2);assert.equal(result.message.cleanEnv,true);assert.equal(fs.realpathSync(result.message.resources),fs.realpathSync(resources));
- const expected=path.join(resources,'services/intent-broker/runtime',process.platform+'-'+process.arch,mac?'node':'node.exe');assert.equal(fs.realpathSync(result.message.execPath),fs.realpathSync(expected));
+ const expected=path.join(resources,'services/intent-broker/runtime',process.platform+'-'+process.arch,process.platform==='win32'?'node.exe':'node');assert.equal(fs.realpathSync(result.message.execPath),fs.realpathSync(expected));
  console.log(JSON.stringify({kind:'real-fused-main-runtime-fixture',wire,node:result.message.node,sqlite:result.message.sqlite,mainClosed:true,ipcChildClosed:true,grandchildClosed:true,canariesExecuted:false,originalNativeMainProof:false,rendererSandboxProof:false}));
  fs.rmSync(root,{recursive:true,maxRetries:3});
 });
