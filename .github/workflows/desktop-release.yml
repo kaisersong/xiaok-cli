@@ -83,6 +83,9 @@ jobs:
       - name: Verify prepared bundled CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
 
+      - name: Prepare pinned ordinary Broker runtime
+        run: cd desktop && node scripts/prepare-broker-runtime.mjs
+
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
 
@@ -155,9 +158,6 @@ jobs:
           node scripts/verification/prepare-artifact-export-toolchain.mjs
           node scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
-
-      - name: Prepare pinned ordinary Broker runtime
-        run: cd desktop && node scripts/prepare-broker-runtime.mjs
 
       - name: Build desktop
         run: cd desktop && npm run build
@@ -311,6 +311,9 @@ jobs:
       - name: Verify prepared bundled CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
 
+      - name: Prepare pinned ordinary Broker runtime
+        run: cd desktop && node scripts/prepare-broker-runtime.mjs
+
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
 
@@ -358,9 +361,6 @@ jobs:
           node scripts/verification/prepare-artifact-export-toolchain.mjs
           node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
-
-      - name: Prepare pinned ordinary Broker runtime
-        run: cd desktop && node scripts/prepare-broker-runtime.mjs
 
       - name: Build desktop
         run: cd desktop && npm run build
