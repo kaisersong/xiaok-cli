@@ -1,3 +1,4 @@
+import { publicMessages } from '../fixtures/service-unavailable-copy';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -98,8 +99,10 @@ describe('conversation work feedback', () => {
     const { container } = mount();
     await waitFor(() => expect(screen.getByRole('status')).toBeVisible());
     const text = container.textContent ?? '';
-    expect(text).toMatch(/xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。|background component does not match this version/);
-    expect(text).not.toMatch(/activity_owner|unavailable|mismatch|Error invoking/);
+    expect(publicMessages).toContain(text);
+    // Exact public-copy equality permits its English word "unavailable",
+    // while appended internal codes or other text fail the same contract.
+    expect(text).not.toMatch(/activity_owner|mismatch|Error invoking/);
     expect(screen.getAllByRole('status')).toHaveLength(1);
   });
   it('keeps the generic message for ordinary read failures', async () => {

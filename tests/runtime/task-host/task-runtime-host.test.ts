@@ -59,22 +59,29 @@ describe('InProcessTaskRuntimeHost', () => {
 
   it('delegates liveness to a real tool budget without imposing the shorter host idle timeout', async () => {
     let finish!:(value:string)=>void;
+    let entered!:()=>void,delegated:Promise<unknown>|undefined;
+    const toolEntered=new Promise<void>(resolve=>{entered=resolve;});
     let toolSignal!:AbortSignal;
     let rootSignal!:AbortSignal;
-    const registry=new ToolRegistry({autoMode:true,toolIdleTimeoutMs:400},[{permission:'safe',definition:{name:'long',description:'test',inputSchema:{}},execute:async(_input,ctx)=>{toolSignal=ctx!.signal!;return new Promise(resolve=>{finish=resolve;});}}]);
+    const registry=new ToolRegistry({autoMode:true,toolIdleTimeoutMs:400},[{permission:'safe',definition:{name:'long',description:'test',inputSchema:{}},execute:async(_input,ctx)=>{toolSignal=ctx!.signal!;entered();return new Promise(resolve=>{finish=resolve;});}}]);
     const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,taskIdleTimeoutMs:150,createTaskId:()=> 'delegated',runner:async input=>{
       rootSignal=input.signal;
       await registry.executeTool('long',{}, {taskId:input.taskId,signal:input.signal,session:new AgentSessionState().exportSnapshot(),messages:[],systemPrompt:'',toolDefinitions:[],
-        onExecutionHealth:state=>{void input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:'turn',invocationId:'tool',state});}});
+        onExecutionHealth:state=>{const acknowledgement=input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:'turn',invocationId:'tool',state});if(state==='running'&&!delegated)delegated=acknowledgement;}});
     }});
     try {
+      // Control timer dispatch, never OS identity or SDK return values.
+      // The 150/400ms deadlines and every midpoint/settlement assertion remain.
+      vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});
       await host.createTask({prompt:'long tool',materials:[]});
-      await vi.waitFor(()=>expect(toolSignal).toBeDefined());
-      await new Promise(resolve=>setTimeout(resolve,200));
+      await toolEntered;expect(toolSignal).toBeDefined();
+      expect(delegated).toBeDefined();await delegated;
+      await vi.advanceTimersByTimeAsync(200);
       expect(rootSignal.aborted).toBe(false);expect(toolSignal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
       await vi.waitFor(()=>expect(toolSignal.aborted).toBe(true));
       expect(host.isExecutingForTest('delegated')).toBe(true);
-    }finally{finish?.('settled');await host.drain();registry.dispose();}
+    }finally{try{finish?.('settled');await host.drain();registry.dispose();}finally{vi.useRealTimers();}}
   });
 
   it('detects a stalled runner, preserves executing ownership until settlement, and excludes approval waits', async () => {
