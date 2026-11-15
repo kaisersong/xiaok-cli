@@ -1,3 +1,4 @@
+import {resolveWindowsDesktopProfile} from './windows-profile.js';
 import {readContinuityProfile,desktopContinuityScopeProfileId} from './profile-identity.js';
 export {readContinuityProfile} from './profile-identity.js';
 import {assertProfileDirectory,readCapturedProfileJson} from './profile-file.js';
@@ -12,6 +13,7 @@ export interface DesktopProfileIdentity {profileId:string;legacyProfileId?:strin
 /** Identity metadata only. Main must serialize initialization before owners
  * start/migrate; this census never enrolls a Native/source or proves NoEscape. */
 export function resolveDesktopProfile(dataRoot:string):DesktopProfileIdentity {
+  if(process.platform==='win32')return resolveWindowsDesktopProfile(dataRoot);
   const legacy=createHash('sha256').update(resolve(dataRoot)).digest('hex'),aliasFile=join(dataRoot,'continuity-profile-migration.json');
   try {
     const existing=existsSync(dataRoot);if(existing)assertProfileDirectory(dataRoot);
@@ -22,10 +24,9 @@ export function resolveDesktopProfile(dataRoot:string):DesktopProfileIdentity {
       if(!alias||typeof alias!=='object'||Array.isArray(alias)||!['version','profileId','legacyProfileId','osOwner'].every(key=>Object.hasOwn(alias!,key)))throw Error();
       if(alias.version!==1||typeof alias.profileId!=='string'||typeof alias.legacyProfileId!=='string'||typeof alias.osOwner!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(alias.profileId)||!/^[a-f0-9]{64}$/.test(alias.legacyProfileId)||alias.osOwner!==String(userInfo().uid))throw Error();
     }
+    if(!alias&&existsSync(join(dataRoot,'continuity-profile.json'))&&domains.has(legacy))throw Error('profile_identity_unavailable');
     const legacyProfileId=alias?.legacyProfileId??legacy;
     const requireExisting=Boolean(alias)||migrated||existsSync(join(dataRoot,'continuity.sqlite'))||[...domains].some(id=>id!==legacyProfileId);
-    // Username equality is never SID/ACL proof for legacy adoption.
-    if(process.platform==='win32'&&(alias!==undefined||domains.has(legacyProfileId)))throw Error();
     const profileId=loadContinuityProfile(dataRoot,{requireExisting});
     // Main's own scope rows for this UUID (desktopContinuityScopeProfileId) are this profile, not a foreign domain.
     const ownScope=desktopContinuityScopeProfileId(profileId);
@@ -40,8 +41,9 @@ export function resolveDesktopProfile(dataRoot:string):DesktopProfileIdentity {
 
 /** A moved data root retains identity. Corruption never triggers adoption. */
 export function loadContinuityProfile(dataRoot:string,options?:{requireExisting?:boolean}):string {
+  if(process.platform==='win32')return resolveWindowsDesktopProfile(dataRoot,options).profileId;
   mkdirSync(dataRoot,{recursive:true,mode:0o700});assertProfileDirectory(dataRoot);
-  const file=join(dataRoot,'continuity-profile.json'),info=userInfo(),osOwner=process.platform==='win32'?info.username:String(info.uid);
+  const file=join(dataRoot,'continuity-profile.json'),info=userInfo(),osOwner=String(info.uid);
   if(!options?.requireExisting)try {
     const fd=openSync(file,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
     try{writeFileSync(fd,JSON.stringify({version:1,profileId:randomUUID(),osOwner}));fsyncSync(fd);}finally{closeSync(fd);}

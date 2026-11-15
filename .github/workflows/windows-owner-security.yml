@@ -8,6 +8,7 @@ on:
       - 'src/runtime/conversation-activity/**'
       - 'scripts/verification/prepare-windows-owner-security.mjs'
       - 'tests/native/windows-owner-security.test.cjs'
+      - 'tests/native/windows-profile-custody.test.cjs'
       - '.github/workflows/windows-owner-security.yml'
       - 'package*.json'
 permissions:
@@ -31,7 +32,7 @@ jobs:
       - name: Prepare fixed N-API owner security
         run: node scripts/verification/prepare-windows-owner-security.mjs source
       - name: Run real Windows ACL and process birth cases in Node
-        run: node --test tests/native/windows-owner-security.test.cjs
+        run: node --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
       - name: Install locked Electron
         working-directory: desktop
         run: node node_modules/electron/install.js
@@ -39,7 +40,7 @@ jobs:
         shell: bash
         run: |
           electron="$(node -p "require('./desktop/node_modules/electron')")"
-          ELECTRON_RUN_AS_NODE=1 "$electron" --test tests/native/windows-owner-security.test.cjs
+          ELECTRON_RUN_AS_NODE=1 "$electron" --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: windows-owner-security-${{ matrix.node }}

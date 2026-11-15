@@ -63,7 +63,7 @@ done:free(default_owner);CloseHandle(token);return allowed;
 }
 static HANDLE open_path(const wchar_t *path, int write) {
   /* No FILE_SHARE_DELETE: replacement cannot change the opened object mid-call. */
-  return CreateFileW(path,READ_CONTROL|FILE_READ_ATTRIBUTES|(write?WRITE_DAC:0),FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,NULL);
+  return CreateFileW(path,GENERIC_READ|READ_CONTROL|FILE_READ_ATTRIBUTES|(write?WRITE_DAC:0),FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,NULL);
 }
 static int private_descriptor(PSECURITY_DESCRIPTOR descriptor,PSID owner,PACL acl,TOKEN_USER *user,BYTE flags) {
   SECURITY_DESCRIPTOR_CONTROL control;DWORD revision;void *raw=NULL;
@@ -175,6 +175,7 @@ static napi_value write_private(napi_env env,napi_callback_info info) {
 done:
   if(handle!=INVALID_HANDLE_VALUE&&!CloseHandle(handle))result=NULL;free(path);free(bytes);free(user);free(acl);return result?result:fail(env);
 }
+napi_value init_windows_profile_custody(napi_env env,napi_value exports);
 static napi_value init(napi_env env,napi_value exports) {
   napi_property_descriptor methods[]={
     {"inspect",NULL,inspect,NULL,NULL,NULL,napi_default,NULL},
@@ -184,6 +185,6 @@ static napi_value init(napi_env env,napi_value exports) {
     {"processBirth",NULL,birth,NULL,NULL,NULL,napi_default,NULL},
     {"writePrivateFile",NULL,write_private,NULL,NULL,NULL,napi_default,NULL}
   };
-  if(napi_define_properties(env,exports,sizeof(methods)/sizeof(methods[0]),methods)!=napi_ok)return fail(env);return exports;
+  if(napi_define_properties(env,exports,sizeof(methods)/sizeof(methods[0]),methods)!=napi_ok)return fail(env);return init_windows_profile_custody(env,exports);
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME,init)

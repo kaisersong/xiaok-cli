@@ -256,7 +256,7 @@ it.each([new Error('owner_stat_primary'), undefined])('preserves an actual owner
   expect(seam.open.size).toBe(0); expect(seam.roots).toHaveLength(0);
 });
 
-it('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shim', () => {
+it.runIf(process.platform==='win32')('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shim', () => {
   const f = fixture(), descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   if (!descriptor) throw Error('actual_platform_descriptor_missing');
   let reader: ConversationActivityStore;
@@ -270,4 +270,10 @@ it('uses the real Store Windows branch without POSIX O_NOFOLLOW or a command shi
   expect(reader!.getAssociation('op')).not.toBeNull();
   // The existing fixture children use this actual Node executable directly.
   expect(process.execPath.toLowerCase().endsWith('.cmd')).toBe(false);
+});
+
+it.runIf(process.platform!=='win32')('a platform label cannot supply native Windows custody',()=>{
+ const f=fixture(),descriptor=Object.getOwnPropertyDescriptor(process,'platform')!;
+ try{Object.defineProperty(process,'platform',{...descriptor,value:'win32'});expect(()=>read(f)).toThrow();}
+ finally{Object.defineProperty(process,'platform',descriptor);}
 });

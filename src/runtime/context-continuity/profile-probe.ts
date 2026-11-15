@@ -1,3 +1,5 @@
+import {createExclusiveWindowsPrivateDirectory,assertWindowsSecurityAvailable} from '../windows-owner-security.js';
+import {randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {lstatSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -104,12 +106,14 @@ process.stdout.write(JSON.stringify({version:1,domains:[...domains],migrated}));
 
 /** Metadata census only, never an execution, source or Native qualification. */
 export function readProfileDomainCensus(dataRoot: string): ProfileDomainCensus {
+  if(process.platform==='win32')assertWindowsSecurityAvailable();
   // Reserve before even mkdtemp can reenter/throw after creating a resource.
   // An unknown fate blocks further allocations for this process lifetime.
   if(pendingProfileProbe)throw Error('profile_identity_unavailable');
   const reservation={directory:undefined as string|undefined};
   pendingProfileProbe=reservation;
-  const snapshotRoot=mkdtempSync(join(tmpdir(),'xiaok-profile-census-'));
+  const snapshotRoot=process.platform==='win32'?join(tmpdir(),'xiaok-profile-census-'+randomUUID()):mkdtempSync(join(tmpdir(),'xiaok-profile-census-'));
+  if(process.platform==='win32')createExclusiveWindowsPrivateDirectory(snapshotRoot);
   reservation.directory=snapshotRoot;
   const before=lstatSync(snapshotRoot,{bigint:true});
   const env:NodeJS.ProcessEnv={ELECTRON_RUN_AS_NODE:'1'};

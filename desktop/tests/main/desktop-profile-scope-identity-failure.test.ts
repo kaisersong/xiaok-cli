@@ -1,6 +1,7 @@
+import {ownedProfileDirectory,seedProfileGroups} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {existsSync,lstatSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {existsSync,symlinkSync,lstatSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -118,11 +119,11 @@ async function attach(platform:Platform,start:Awaited<ReturnType<typeof mainStar
  return {result,release,notices};
 }
 
-describe.each(['win32','darwin'] as const)('fresh install whose first identity fails, then start / restart on %s',platform=>{
+describe.each([process.platform==='win32'?'win32':'darwin'] as const)('fresh install whose first identity fails, then start / restart on %s',platform=>{
  it('the failed start writes no legacy-scoped row; the next two starts attach, never hit profile.ts:28 and write no migration file',async()=>{
   const base=mkdtempSync(join(tmpdir(),`profile-scope-idfail-${platform}-`));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
   vi.stubEnv('XIAOK_CONFIG_DIR',join(base,'config'));vi.stubEnv('XIAOK_DISABLE_GLOBAL_PLUGINS','1');
-  const dataRoot=join(base,'data');mkdirSync(dataRoot,{recursive:true,mode:0o700});mkdirSync(join(base,'config'),{recursive:true});
+  const dataRoot=join(base,'data');ownedProfileDirectory(dataRoot);mkdirSync(join(base,'config'),{recursive:true});
   writeFileSync(join(base,'config','config.json'),JSON.stringify({schemaVersion:1,defaultModel:'custom',models:{custom:{baseUrl:'http://127.0.0.1:1/v1',apiKey:'fixture-only',model:'fixture'}},defaultMode:'interactive',channels:{}}));
   const legacy=legacyOf(dataRoot);
 
@@ -207,4 +208,20 @@ describe.each(['win32','darwin'] as const)('fresh install whose first identity f
 it('toPosixRelative normalizes Windows separators so populatedTables/filesUnder stay posix',()=>{
  expect(toPosixRelative('C:\\tmp\\base','C:\\tmp\\base\\data\\artifact-workspace\\workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
  expect(toPosixRelative('/tmp/base','/tmp/base/data/artifact-workspace/workspace.sqlite')).toBe('data/artifact-workspace/workspace.sqlite');
+});
+
+it.skipIf(process.platform==='win32')('an emulated Windows name cannot replace actual SID/ACL proof or poison the next POSIX start',()=>{
+ const base=mkdtempSync(join(tmpdir(),'profile-no-fake-sid-'));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
+ const dataRoot=join(base,'data');mkdirSync(dataRoot,{mode:0o700});
+ const unavailable=onPlatform('win32',()=>resolveDesktopMainIdentity(dataRoot));
+ expect(unavailable.scope).toBe('unavailable');expect(mainDshScopeAvailable(unavailable)).toBe(false);
+ expect(existsSync(join(dataRoot,'continuity-profile.json'))).toBe(false);
+ const actual=resolveDesktopMainIdentity(dataRoot);expect(actual.failure).toBeUndefined();expect(actual.scope).toBe('continuity');
+});
+
+it.runIf(process.platform!=='win32')('a dangling canonical artifact cannot fall back to a legacy scope',()=>{
+ const base=mkdtempSync(join(tmpdir(),'profile-dangling-'));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
+ const root=join(base,'data');ownedProfileDirectory(root);seedProfileGroups(root,legacyOf(root));
+ symlinkSync(join(base,'missing-profile.json'),join(root,'continuity-profile.json'));
+ const identity=resolveDesktopMainIdentity(root);expect(identity.scope).toBe('unavailable');expect(identity.continuity).toBeNull();
 });

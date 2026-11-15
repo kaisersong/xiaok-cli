@@ -1,6 +1,8 @@
+import {resolveDesktopMainIdentity} from '../../electron/desktop-main-identity.js';
+import {ownedProfileTempDir as mkdtempSync,ownedProfileDirectory,seedProfileGroups} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
-import {mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {mkdirSync,readFileSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {resolveDesktopServiceScope} from '../../electron/desktop-service-scope.js';
 import {mainActivityOwnerConfig} from '../../electron/activity-owner-main-config.js';
@@ -21,7 +23,7 @@ function tempDir(prefix:string){const dir=mkdtempSync(join(tmpdir(),prefix));cle
 async function openProfile(root:string){const runtime=new DesktopContextContinuity(root);runtime.port();cleanups.push(()=>runtime.close());return runtime;}
 // What desktop-services does for a Main start on `dataRoot`.
 function mainLaunch(dataRoot:string,nonce='m'.repeat(32)){
- const scope=resolveDesktopServiceScope({dataRoot});
+ const scope=resolveDesktopServiceScope({dataRoot,profileId:resolveDesktopMainIdentity(dataRoot).profileId});
  const config=mainActivityOwnerConfig(dataRoot,scope.profileId,{});
  const address=activityOwnerAddress(config.dataRoot);
  writeOwnerLaunchConfig(address.dataRoot,nonce,{...config,dataRoot:address.dataRoot});
@@ -36,7 +38,7 @@ it('Main-written config on a blank protected root qualifies with Main\'s service
 it('a dataRoot under a symlinked parent (macOS /var -> /private/var) still qualifies with Main\'s profileId',async()=>{
  const real=tempDir('owner-main-real-'),parent=tempDir('owner-main-link-'),link=join(parent,'var');
  symlinkSync(real,link,process.platform==='win32'?'junction':'dir');
- mkdirSync(join(real,'xiaok-desktop'));const dataRoot=join(link,'xiaok-desktop');
+ ownedProfileDirectory(join(real,'xiaok-desktop'));const dataRoot=join(link,'xiaok-desktop');
  await openProfile(dataRoot);
  const {scope,address}=mainLaunch(dataRoot);
  expect(address.dataRoot).toBe(realpathSync(join(real,'xiaok-desktop')));
@@ -45,9 +47,9 @@ it('a dataRoot under a symlinked parent (macOS /var -> /private/var) still quali
  expect(readProtectedOwnerQualification(dataRoot)).toMatchObject({profileId:scope.profileId});
  expect(readProtectedOwnerQualification(address.dataRoot)).toMatchObject({profileId:scope.profileId});
 });
-it('a 1.6.2 data directory (old continuity profile, groups.sqlite, stale owner config) qualifies after the new launch',async()=>{
+it('a UUID profile with a stale 1.6.2 owner config qualifies after the new Main launch',async()=>{
  const root=tempDir('owner-main-upgrade-');await openProfile(root);
- mkdirSync(join(root,'multi-agent'),{recursive:true});writeFileSync(join(root,'multi-agent','groups.sqlite'),'');
+ seedProfileGroups(root,resolveDesktopMainIdentity(root).profileId);
  // 1.6.2 left a config bound to the continuity UUID: it must not qualify.
  const address=activityOwnerAddress(root);
  writeFileSync(join(address.dataRoot,'activity-owner.config.json'),JSON.stringify({schemaVersion:1,dataRoot:address.dataRoot,profileId:'2f9c0e0a-0000-4000-8000-000000000000',actorId:'desktop-user:2f9c0e0a-0000-4000-8000-000000000000',identity:{kind:'desktop',path:join(address.dataRoot,'multi-agent','groups.sqlite')}}),{mode:0o600});
