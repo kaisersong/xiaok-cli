@@ -106,6 +106,5 @@ export {fixture,runScenario,scenarioInvoke,transportSignal,hash};
 /** Quality-reviewed observation window; Native clocks and cancellation stay real. */
 export function intentDependencyRunnerBudget(original:number):number {
  if(process.platform!=='darwin')return original;
- const major=Number(process.versions.node.split('.')[0]);
- return major>=24?Math.max(original,90_000):major>=22?Math.max(original,60_000):original;
+ return Math.max(original,300_000);
 }
