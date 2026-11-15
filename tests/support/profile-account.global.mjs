@@ -1,5 +1,7 @@
-import {mkdtempSync,realpathSync,rmSync} from 'node:fs';
+import {mkdtempSync,realpathSync,rmSync,existsSync} from 'node:fs';
 import {homedir,tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {createProfileAccountOwnership,teardownProfileAccount} from './profile-account-ownership.mjs';
@@ -10,6 +12,10 @@ export default async function setup(project){
  // and 8.3 aliases are host facts, never ownership proof for a test Store.
  const previous={TEMP:process.env.TEMP,TMP:process.env.TMP};let privateTemp;
  if(process.platform==='win32'){
+  if(!existsSync(new URL('../../src/runtime/native/win32-x64/windows_owner_security.node',import.meta.url))){
+   const prepared=spawnSync(process.execPath,[fileURLToPath(new URL('../../scripts/verification/prepare-windows-owner-security.mjs',import.meta.url)),'source'],{encoding:'utf8',windowsHide:true,timeout:180000});
+   if(prepared.error||prepared.status!==0||prepared.signal)throw Error('test_private_temp_security_unavailable',{cause:prepared.error??prepared.stderr});
+  }
   const {createExclusiveWindowsPrivateDirectory}=await import('../../src/runtime/windows-owner-security.js');
   privateTemp=join(realpathSync(tmpdir()),'xiaok-vitest-temp-'+randomUUID());
   createExclusiveWindowsPrivateDirectory(privateTemp);

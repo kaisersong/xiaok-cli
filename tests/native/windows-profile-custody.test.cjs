@@ -3,7 +3,7 @@ const windows={skip:process.platform!=='win32'};
 const addon=()=>require(process.env.XIAOK_WINDOWS_SECURITY_TEST_ADDON||'../../src/runtime/native/win32-x64/windows_owner_security.node');
 function ps(script){const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
 function fixture(){const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-profile-custody-')),root=path.join(base,'私有');assert.equal(api.createPrivateDirectory(root),true);return {api,base,root,cleanup(){fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}};}
-function everyone(file){ps(`$p='${file.replace(/'/g,"''")}';$a=Get-Acl -LiteralPath $p;$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));Set-Acl -LiteralPath $p -AclObject $a`);}
+function everyone(file){ps(`$p='${file.replace(/'/g,"''")}';$a=[IO.File]::GetAccessControl($p);$sid=[Security.Principal.SecurityIdentifier]::new('S-1-1-0');$a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::Read,[Security.AccessControl.AccessControlType]::Allow));[IO.File]::SetAccessControl($p,$a)`);}
 test('native profile custody holds exact paths, excludes writes and concurrent initialization',windows,()=>{
  const f=fixture();let lease,read;
  try{const file=path.join(f.root,'conversation-activity.sqlite');f.api.writePrivateFile(file,'fixture',true);lease=f.api.holdProfile(f.root,true);assert.match(lease.currentSid,/^S-1-/);assert.match(lease.rootIdentity,/^\d+:\d+:\d+$/);lease.assertCurrent();

@@ -34,6 +34,9 @@ jobs:
       - uses: ./.github/actions/windows-private-temp
       - name: Run real Windows ACL and process birth cases in Node
         run: node --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
+      - name: Diagnose a failed atomic publication with the same native decisions
+        if: failure()
+        run: node scripts/verification/diagnose-windows-profile-publication.mjs
       - name: Install locked Electron
         working-directory: desktop
         run: node node_modules/electron/install.js
