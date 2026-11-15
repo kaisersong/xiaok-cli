@@ -1,27 +1,22 @@
 /* Ordinary permission observation. Never a Native/DSH authority or verdict cache. */
 static const napi_type_tag activity_permission_tag={UINT64_C(0xb013dc585e4348a2),UINT64_C(0xa09e26fa7e371bbc)};
 typedef struct ActivityPermissions {
-  wchar_t *paths[8],*parent;HANDLE root,files[4],scratch;BY_HANDLE_FILE_INFORMATION root_id,ids[4];TOKEN_USER *user;
+  wchar_t *paths[8],*parent,*expected,*actual;HANDLE root,files[4],scratch;BY_HANDLE_FILE_INFORMATION root_id,ids[4];TOKEN_USER *user;
   int started,ready,failed,close_attempted,closed,scratch_unknown;struct ActivityPermissions *retained_next;
 } ActivityPermissions;
 static ActivityPermissions *retained_activity_permissions=NULL;
 static int activity_same_file(BY_HANDLE_FILE_INFORMATION *a,BY_HANDLE_FILE_INFORMATION *b){return a->dwVolumeSerialNumber==b->dwVolumeSerialNumber&&a->nFileIndexHigh==b->nFileIndexHigh&&a->nFileIndexLow==b->nFileIndexLow;}
-static int activity_canonical_path(HANDLE handle,const wchar_t *path){
-  DWORD n=GetFinalPathNameByHandleW(handle,NULL,0,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS),m=GetFullPathNameW(path,0,NULL,NULL);int valid=0;
-  if(!n||!m||n>32767||m>32767)return 0;
-  wchar_t *actual=(wchar_t*)calloc(n+1,sizeof(wchar_t)),*expected=(wchar_t*)calloc(m+1,sizeof(wchar_t));
-  DWORD actual_length=actual?GetFinalPathNameByHandleW(handle,actual,n+1,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS):0,expected_length=expected?GetFullPathNameW(path,m+1,expected,NULL):0;
-  if(actual_length&&actual_length<=n&&expected_length&&expected_length<=m){
-    const wchar_t *value=actual;
-    if(wcsncmp(actual,L"\\\\?\\UNC\\",8)==0){actual[6]=L'\\';value=actual+6;}
-    else if(wcsncmp(actual,L"\\\\?\\",4)==0)value=actual+4;
-    valid=_wcsicmp(value,expected)==0;
-  }
-  free(actual);free(expected);return valid;
+static int activity_canonical_path(ActivityPermissions *ctx){
+  DWORD length=GetFinalPathNameByHandleW(ctx->root,ctx->actual,32768,FILE_NAME_NORMALIZED|VOLUME_NAME_DOS);
+  if(!length||length>=32768)return 0;
+  const wchar_t *value=ctx->actual;
+  if(wcsncmp(value,L"\\\\?\\UNC\\",8)==0){ctx->actual[6]=L'\\';value=ctx->actual+6;}
+  else if(wcsncmp(value,L"\\\\?\\",4)==0)value=ctx->actual+4;
+  return _wcsicmp(value,ctx->expected)==0;
 }
 static int activity_parent_private(ActivityPermissions *ctx,TOKEN_USER *user){
   BY_HANDLE_FILE_INFORMATION info;PSECURITY_DESCRIPTOR descriptor=NULL;PSID owner=NULL;PACL acl=NULL;int valid=0;
-  if(!GetFileInformationByHandle(ctx->root,&info)||!(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)||!activity_same_file(&info,&ctx->root_id)||!activity_canonical_path(ctx->root,ctx->parent))return 0;
+  if(!GetFileInformationByHandle(ctx->root,&info)||!(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)||!activity_same_file(&info,&ctx->root_id)||!activity_canonical_path(ctx))return 0;
   if(GetSecurityInfo(ctx->root,SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&owner,NULL,&acl,NULL,&descriptor)!=ERROR_SUCCESS||!descriptor||!owner||!protection_owner(owner,user)||!acl||!IsValidAcl(acl))goto done;
   DWORD allows=0;int inheritable=0;
   for(DWORD i=0;i<acl->AceCount;i++){
@@ -73,7 +68,7 @@ static napi_value activity_permissions_verify(napi_env env,napi_callback_info in
     }
     ctx->ready=1;
   }
-  if(!ctx->ready||!EqualSid(user->User.Sid,ctx->user->User.Sid)||!activity_parent_private(ctx,user))goto done;
+  if(!ctx->ready||!EqualSid(user->User.Sid,ctx->user->User.Sid))goto done;
   for(size_t i=0;i<4;i++)if(!activity_file_private(ctx->files[i],user,&ctx->ids[i]))goto done;
   for(size_t i=4;i<8;i++){
     DWORD attrs=GetFileAttributesW(ctx->paths[i]);if(attrs==INVALID_FILE_ATTRIBUTES){if(GetLastError()==ERROR_FILE_NOT_FOUND)continue;goto done;}
@@ -97,7 +92,7 @@ static napi_value activity_permissions_close(napi_env env,napi_callback_info inf
   ActivityPermissions *ctx=activity_permissions_value(env,info);if(!ctx||!activity_permissions_close_handles(ctx))return fail(env);
   napi_value value;if(napi_get_undefined(env,&value)!=napi_ok)return fail(env);return value;
 }
-static void activity_permissions_free(ActivityPermissions *ctx){for(size_t i=0;i<8;i++)free(ctx->paths[i]);free(ctx->parent);free(ctx->user);free(ctx);}
+static void activity_permissions_free(ActivityPermissions *ctx){for(size_t i=0;i<8;i++)free(ctx->paths[i]);free(ctx->parent);free(ctx->expected);free(ctx->actual);free(ctx->user);free(ctx);}
 static void activity_permissions_finalize(napi_env env,void *data,void *hint){
   (void)env;(void)hint;ActivityPermissions *ctx=(ActivityPermissions*)data;
   if(activity_permissions_close_handles(ctx))activity_permissions_free(ctx);
@@ -113,6 +108,10 @@ static napi_value create_activity_permissions(napi_env env,napi_callback_info in
   for(size_t i=0;i<length;i++)if(base[i]==L'/')base[i]=L'\\';
   wchar_t *last=wcsrchr(base,L'\\');if(!last||!last[1])goto bad;size_t parent_length=(size_t)(last-base);if(parent_length==2&&base[1]==L':')parent_length++;
   ctx->parent=(wchar_t*)calloc(parent_length+1,sizeof(wchar_t));if(!ctx->parent)goto bad;memcpy(ctx->parent,base,parent_length*sizeof(wchar_t));
+  /* Lexical input normalization only; filesystem resolution stays fresh in verify. */
+  DWORD expected_size=GetFullPathNameW(ctx->parent,0,NULL,NULL);if(!expected_size||expected_size>32767)goto bad;
+  ctx->expected=(wchar_t*)calloc(expected_size+1,sizeof(wchar_t));ctx->actual=(wchar_t*)calloc(32768,sizeof(wchar_t));if(!ctx->expected||!ctx->actual)goto bad;
+  DWORD expected_length=GetFullPathNameW(ctx->parent,expected_size+1,ctx->expected,NULL);if(!expected_length||expected_length>expected_size)goto bad;
   for(size_t i=0;i<8;i++){size_t size=length+wcslen(suffixes[i])+1;ctx->paths[i]=(wchar_t*)calloc(size,sizeof(wchar_t));if(!ctx->paths[i])goto bad;wcscpy_s(ctx->paths[i],size,base);wcscat_s(ctx->paths[i],size,suffixes[i]);}
   napi_value object;if(napi_create_object(env,&object)!=napi_ok||napi_type_tag_object(env,object,&activity_permission_tag)!=napi_ok)goto bad;
   napi_property_descriptor methods[]={{"verify",NULL,activity_permissions_verify,NULL,NULL,NULL,napi_default,NULL},{"close",NULL,activity_permissions_close,NULL,NULL,NULL,napi_default,NULL}};

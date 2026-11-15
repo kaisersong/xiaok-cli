@@ -136,8 +136,19 @@ test('held activity context rejects a broadened parent or loss of inheritable fu
    context=api.createActivityPermissions(file);assert.equal(context.verify(),true);
    const q=root.replace(/'/g,"''");
    if(alteration==='everyone')ps(`$p='${q}';$a=[IO.Directory]::GetAccessControl($p);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule('Everyone','Read','Allow')));[IO.Directory]::SetAccessControl($p,$a)`);
-   else ps(`$p='${q}';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User;$a=New-Object Security.AccessControl.DirectorySecurity;$a.SetOwner($sid);$a.SetAccessRuleProtection($true,$false);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl',[Security.AccessControl.InheritanceFlags]0,[Security.AccessControl.PropagationFlags]0,'Allow')));${alteration==='inherit-only'?"$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl',[Security.AccessControl.InheritanceFlags]3,[Security.AccessControl.PropagationFlags]2,'Allow')));":''}[IO.Directory]::SetAccessControl($p,$a)`);
+   else ps(`$p='${q}';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User;$a=New-Object Security.AccessControl.DirectorySecurity;$a.SetOwner($sid);$a.SetAccessRuleProtection($true,$false);$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'ReadAndExecute,ChangePermissions',[Security.AccessControl.InheritanceFlags]0,[Security.AccessControl.PropagationFlags]0,'Allow')));${alteration==='inherit-only'?"$a.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl',[Security.AccessControl.InheritanceFlags]3,[Security.AccessControl.PropagationFlags]2,'Allow')));":''}[IO.Directory]::SetAccessControl($p,$a)`);
+   if(alteration!=='everyone')assert.equal(api.inspect(root).currentUserInheritableFullControl,false,alteration+' fixture must be insufficient');
    assert.throws(()=>context.verify(),/windows_security/,alteration);api.protectDirectory(root);assert.throws(()=>context.verify(),/windows_security/,'failure remains latched');context.close();context=undefined;
   }finally{context?.close();api.protectDirectory(root);fs.rmSync(base,{recursive:true,force:true,maxRetries:3});}
  }
+});
+test('activity context normalizes pathname input and refuses an actual ancestor replacement',windows,()=>{
+ const api=addon(),base=fs.mkdtempSync(path.join(os.tmpdir(),'xiaok-context-canonical-')),root=path.join(base,'私有目录'),file=path.join(root,'a.sqlite');let context,moved=false;
+ try{
+  api.createPrivateDirectory(root);for(const suffix of ['', '.owner.sqlite','-wal','-shm'])api.writePrivateFile(file+suffix,'private',true);
+  context=api.createActivityPermissions(root+'\\..\\私有目录\\a.sqlite');assert.equal(context.verify(),true);
+  try{fs.renameSync(base,base+'.moved');moved=true;}catch(error){assert(['EPERM','EACCES','EBUSY'].includes(error.code),'only actual sharing/access denial is accepted');}
+  if(moved)assert.throws(()=>context.verify(),/windows_security/);else assert.equal(context.verify(),true);
+  context.close();context=undefined;
+ }finally{context?.close();fs.rmSync(moved?base+'.moved':base,{recursive:true,force:true,maxRetries:3});}
 });
