@@ -1,3 +1,4 @@
+import {createDesktopScopedControlSources,desktopScopedKSwarmOptions} from './desktop-scoped-control-sources.js';
 import {DEFAULT_PERSONAL_ASSISTANT_ID} from './assistant-types.js';
 import {AssistantAnalysisSettings} from './assistant-analysis-settings.js';
 import {bootstrapDesktopAssistantAnalysisProvider,checkDesktopAssistantAnalysisProviderSupport} from './assistant-analysis-provider.js';
@@ -36,9 +37,6 @@ import { configureInstalledEnterpriseClis } from '../../src/runtime/enterprise-c
 import { YzjCliAuthService } from './yzj-cli-auth-service.js';
 import { registerYzjCliAuthIpc, isYzjCliAuthSenderAllowed } from './yzj-cli-auth-typed-ipc.js';
 import {bindOriginalMainDshBrokerService} from './broker-protected-service-binding.js';
-import {createDefaultDispatchPreparationNativeSource} from './default-dispatch-preparation-native-source.js';
-import {createDefaultDispatchPreparationOwner} from './default-dispatch-preparation-owner.js';
-import {createDefaultDispatchBusinessController} from './default-dispatch-business-controller.js';
 import {createDesktopDispatchLaunchCapsule} from './default-dispatch-native-bootstrap.js';
 import {registerDefaultDispatchIpc} from './default-dispatch-typed-ipc.js';
 import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
@@ -62,7 +60,6 @@ import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
 import { createDesktopKSwarmService, startDesktopKSwarmService, startDesktopKSwarmServiceDegrading } from './kswarm-service-lifetime.js';
 import {createDesktopWriterControlLaunchCapsule} from './kswarm-writer-control-native-bootstrap.js';
-import {createKSwarmWriterControlSource} from './kswarm-writer-control-source.js';
 import {createKSwarmWriterControlService} from './kswarm-writer-control-service.js';
 import {registerKSwarmWriterControlIpc} from './kswarm-writer-control-typed-ipc.js';
 import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
@@ -866,28 +863,23 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     if(!desktopShutdownGate.isOpen)return window;
   }
   const dshPrepared=dshSources?readOriginalMainDshPreparedSources(dshSources):undefined;
-  const writerScope=()=>({profileId:serviceScope.profileId,workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')});
-  const preparationNativeSource=createDefaultDispatchPreparationNativeSource({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
-  const preparationOwner=createDefaultDispatchPreparationOwner(preparationNativeSource);
-  desktopIngressOwners.push(preparationOwner.ingress);
-  desktopFinalLifetimeSteps.push({name:'default-dispatch-preparation-owner',run:()=>preparationOwner.drain()});
-  const defaultDispatchController=createDefaultDispatchBusinessController({window,scope:writerScope(),isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer}),preparationRecipient:preparationOwner});
-  // Register the passive owner before the first capsule can call Native SDKs.
-  desktopIngressOwners.push(defaultDispatchController.ingress);
-  desktopFinalLifetimeSteps.push({name:'default-dispatch-controller',run:()=>defaultDispatchController.drain()});
-  const writerSource=createKSwarmWriterControlSource({getWindow:()=>mainWindow,getScope:writerScope,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  const scopedControls=createDesktopScopedControlSources({identity:mainIdentity,window,getWindow:()=>mainWindow,
+    getScope:()=>({profileId:serviceScope.profileId,workspaceId:createHash('sha256').update(resolve(process.cwd())).digest('hex')}),
+    isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer}),
+    registerIngress:owner=>desktopIngressOwners.push(owner),registerFinalStep:step=>desktopFinalLifetimeSteps.push(step)});
+  const preparationOwner=scopedControls?.preparationOwner,defaultDispatchController=scopedControls?.defaultDispatchController,writerSource=scopedControls?.writerSource;
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, {
-    activityOwnerPending: !dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    activityOwnerPending: Boolean(scopedControls) && !dshPrepared && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
     ...(dshPrepared?{ownedDshAdmission:dshPrepared.businessSource.admission}:{}),
-    desktopProjectScope:writerScope(),ownedControlAdmission:writerSource.admission,ownedBusinessAdmission:defaultDispatchController.businessAdmission,ownedPreparationSource:preparationOwner.transportSource,ownedPreparationAdmission:preparationOwner.transportAdmission,
+    ...desktopScopedKSwarmOptions(scopedControls),
   });
-  if (!kswarmService) {writerSource.seal();defaultDispatchController.seal();preparationOwner.seal();return window;}
-  try{preparationOwner.bindService(kswarmService);}catch(error){preparationOwner.seal();console.warn('[default-dispatch-preparation] service binding unavailable',error);}
-  writerSource.bindService(kswarmService);defaultDispatchController.bindService(kswarmService);desktopIngressOwners.push(writerSource.ingress);
-  const defaultDispatchBootstrap={controller:defaultDispatchController,capsule:createDesktopDispatchLaunchCapsule(defaultDispatchController,kswarmService)};
-  const writerControlBootstrap={source:writerSource,capsule:createDesktopWriterControlLaunchCapsule({source:writerSource,service:kswarmService,window})};
-  registerKSwarmWriterControlIpc(shutdownAwareIpc,createKSwarmWriterControlService({source:writerSource,service:kswarmService}));
+  if (!kswarmService) {writerSource?.seal();defaultDispatchController?.seal();preparationOwner?.seal();return window;}
+  if(preparationOwner)try{preparationOwner.bindService(kswarmService);}catch(error){preparationOwner.seal();console.warn('[default-dispatch-preparation] service binding unavailable',error);}
+  writerSource?.bindService(kswarmService);defaultDispatchController?.bindService(kswarmService);if(writerSource)desktopIngressOwners.push(writerSource.ingress);
+  const defaultDispatchBootstrap=defaultDispatchController?{controller:defaultDispatchController,capsule:createDesktopDispatchLaunchCapsule(defaultDispatchController,kswarmService)}:undefined;
+  const writerControlBootstrap=writerSource?{source:writerSource,capsule:createDesktopWriterControlLaunchCapsule({source:writerSource,service:kswarmService,window})}:undefined;
+  if(writerSource)registerKSwarmWriterControlIpc(shutdownAwareIpc,createKSwarmWriterControlService({source:writerSource,service:kswarmService}));
   let kswarmStartPromise: Promise<void>;
   registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
   const runtimeActions = createDesktopRuntimeActionService({
@@ -997,7 +989,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     debugMain('task-initialization:failed');
     console.error('[main] task initialization failed:', error);
   });
-  registerDefaultDispatchIpc(shutdownAwareIpc,defaultDispatchController,preparationOwner);
+  if(defaultDispatchController)registerDefaultDispatchIpc(shutdownAwareIpc,defaultDispatchController,preparationOwner);
   desktopIngressOwners.push(services.goalShutdown.ingress,services.kswarmBootstrapShutdown,services.taskShutdown.ingress);
   const decisionModelOwner=getDecisionModelService(services.getDataRoot());
   decisionModelOwner.setPythonCommandResolver(()=>managedPythonCommand);
@@ -1026,7 +1018,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       if (!status.running || status.lastError) throw new Error(status.lastError ?? 'KSwarm service failed to start');
     })
     : startDesktopKSwarmServiceDegrading(desktopShutdownGate, kswarmService,
-      process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
+      scopedControls && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' ? config => services.attachConversationActivityOwner(config) : undefined,
       error => {
         const code = error instanceof Error ? error.message : 'activity_owner_attach_failed';
         console.error(`[main] Activity owner attach failed (${code}); starting KSwarm without it`);

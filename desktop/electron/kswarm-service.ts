@@ -1064,6 +1064,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   const sealOwnedControl=()=>{ownedControl?.seal();ownedBusinessPort=undefined;ownedPreparationPort=undefined;ownedDshPort=undefined;if(ownedBusiness)retireBusiness(ownedBusiness);};
   if(scope && (!/^[a-f0-9]{64}$/.test(scope.profileId) || !/^[a-f0-9]{64}$/.test(scope.workspaceId)))throw Error('kswarm_project_scope_invalid');
   const projectScopeEnv=Object.freeze({KSWARM_DESKTOP_PROFILE_ID:scope?.profileId ?? '',KSWARM_DESKTOP_WORKSPACE_ID:scope?.workspaceId ?? ''});
+  const serviceBaseEnv=()=>{const env=buildSidecarEnv(buildDesktopServiceEnv(process.env,{broker:BROKER_PORT,kswarm:KSWARM_PORT}));delete env.KSWARM_DESKTOP_PROFILE_ID;delete env.KSWARM_DESKTOP_WORKSPACE_ID;return env;};
   assertRoomWorkspaceStartupProtocol();
   const discoveryFile = desktopServiceDiscoveryFile();
   let BROKER_PORT = 4318, KSWARM_PORT = 4400;
@@ -1621,7 +1622,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     }
 
     const brokerEnv = buildIntentBrokerServiceEnv({
-      baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
+      baseEnv: serviceBaseEnv(),
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
@@ -1838,11 +1839,11 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
     const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
-        ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })),
+        ...serviceBaseEnv(),
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
-        ...projectScopeEnv,
+        ...(scope?projectScopeEnv:{}),
         INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken,
         ...(await (async () => {
           try {
@@ -2496,11 +2497,11 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
       assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
       mkdirSync(brokerLaunch.cwd, { recursive: true });
-      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), cwd: brokerLaunch.cwd, port: BROKER_PORT,
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: serviceBaseEnv(), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
       const brokerRuntime = resolveOrdinaryBrokerRuntime(brokerEnv);
-      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(buildDesktopServiceEnv(process.env, { broker: BROKER_PORT, kswarm: KSWARM_PORT })), KSWARM_PORT: String(KSWARM_PORT),
-        BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken, ...projectScopeEnv } });
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...serviceBaseEnv(), KSWARM_PORT: String(KSWARM_PORT),
+        BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken, ...(scope?projectScopeEnv:{}) } });
       const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
       const brokerExpected={...expected(brokerLaunch.entryPath),...(brokerRuntime.expected?{'service.runtime.node':brokerRuntime.expected.node,'service.runtime.sqlite':brokerRuntime.expected.sqlite,'service.runtime.execPath':brokerRuntime.command,'service.runtime.executableSha256':brokerRuntime.expected.executableSha256}:{})};
