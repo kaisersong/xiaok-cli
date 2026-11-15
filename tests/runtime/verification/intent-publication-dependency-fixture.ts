@@ -105,6 +105,6 @@ import type {startPublicController} from '../../../src/runtime/verification/cont
 export {fixture,runScenario,scenarioInvoke,transportSignal,hash};
 /** Quality-reviewed observation window; Native clocks and cancellation stay real. */
 export function intentDependencyRunnerBudget(original:number):number {
- if(process.platform!=='darwin')return original;
+ if(process.platform!=='darwin'&&process.platform!=='linux')return original;
  return Math.max(original,300_000);
 }

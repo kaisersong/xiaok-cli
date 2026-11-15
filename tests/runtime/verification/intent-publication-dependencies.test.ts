@@ -95,7 +95,7 @@ it.for([row])('whole graph read refuses actual sibling %s drift even for empty d
 // Only infrastructure moves out of these five row-specific case budgets.
 for (const row of ['valid','missing-parent','missing-sibling-edge','extra-edge','parent-noncanonical'] as const) describe('fresh invocation dependency fixture '+row,()=>{
  let ready:Awaited<ReturnType<typeof fixture>>|undefined,running:Promise<void>|undefined;
- beforeEach((ctx:TestContext)=>runScenario(ctx,async(_signal,lifetime)=>{ready=undefined;running=undefined;ready=await fixture(lifetime);}),90_000);
+ beforeEach((ctx:TestContext)=>runScenario(ctx,async(_signal,lifetime)=>{ready=undefined;running=undefined;ready=await fixture(lifetime);}),intentDependencyRunnerBudget(90_000));
  afterEach(async()=>{const owned=ready,work=running;ready=undefined;running=undefined;try{await work;}catch(raw){owned?.fail(raw);}await owned?.close();},30_000);
 it.for([row])('actual invocation-only append retains complete parent graph: %s',{timeout:row==="valid"?40000:row==="missing-parent"?40000:30000},(mode,ctx:TestContext)=>{
  const raw=runScenario(ctx,async(signal,lifetime)=>{
