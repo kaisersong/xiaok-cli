@@ -1,50 +1,102 @@
-name: Published Windows installed-path QA
+name: Intent RPC15 resource diagnostic — do-not-use-for-release
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        required: true
-        default: '1.5.15'
-        type: string
-      tag:
-        required: true
-        default: 'desktop-v1.5.15'
-        type: string
-      fullSHA:
-        required: true
-        default: '6770092945a42fb0e45ef0d68d0971bfc01b51a8'
-        type: string
-      expectedInstallerSHA256:
-        default: 'b98433d1ea78b5076eb3bbf4afdfcf444fa34515e7b8618405eb804ea2cb57a2'
-        required: true
-        type: string
+  workflow_dispatch: {}
 permissions:
   contents: read
+concurrency:
+  group: intent-rpc15-resource-diagnostic-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
-  installed-path-qa:
-    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch'
-    runs-on: windows-2022
-    timeout-minutes: 20
+  diagnostic:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    runs-on: macos-15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
           repository: kaisersong/xiaok-cli
-          ref: ${{ github.sha }}
+          ref: 63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334
           persist-credentials: false
-      - name: Verify published installer and exercise installed Kimi smoke
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          QA_VERSION: ${{ inputs.version }}
-          QA_TAG: ${{ inputs.tag }}
-          QA_RELEASE_SHA: ${{ inputs.fullSHA }}
-          QA_INSTALLER_SHA256: ${{ inputs.expectedInstallerSHA256 }}
+      - name: Require exact unmodified product source
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = 63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: ./.github/actions/node-headers
+      - name: Install the original CI dependency closure
+        id: deps
+        shell: bash
         run: |
-          & ./scripts/qa/windows-published-install.ps1 -Version $env:QA_VERSION -Tag $env:QA_TAG -FullSHA $env:QA_RELEASE_SHA -ExpectedInstallerSHA256 $env:QA_INSTALLER_SHA256
-      - name: Preserve actual QA receipts
+          bash .github/scripts/retry.sh npm ci --ignore-scripts
+          bash .github/scripts/retry.sh npm rebuild better-sqlite3
+      - name: Prepare metadata-only diagnostic driver outside source
+        id: driver
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/intent-rpc15-resource-driver.py" <<'PY'
+          import os, pathlib, subprocess, json, sys, time, re
+          SHA = '63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334'
+          mode = sys.argv[1]
+          assert mode in ('default', 'heap4096')
+          assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == SHA
+          assert subprocess.check_output(['git','diff','--name-only'], text=True).strip() == ''
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'intent-rpc15-diagnostic'
+          folder = root / mode
+          folder.mkdir(parents=True, exist_ok=False)
+          env = os.environ.copy()
+          env.pop('NODE_OPTIONS', None)
+          if mode == 'heap4096':
+              first = json.loads((root/'default'/'receipt.json').read_text())
+              if first.get('outerTimedOut'):
+                  (folder/'uncomparable.json').write_text(json.dumps({'reason':'prior outer timeout, physical cleanup unknown; no comparison'}))
+                  raise SystemExit(1)
+              env['NODE_OPTIONS'] = '--max-old-space-size=4096'
+          probe_code = "const v8=require('node:v8'),os=require('node:os');console.log(JSON.stringify({node:process.version,arch:process.arch,platform:process.platform,totalMemory:os.totalmem(),freeMemory:os.freemem(),heapLimit:v8.getHeapStatistics().heap_size_limit,nodeOptions:process.env.NODE_OPTIONS??null}))"
+          probe = json.loads(subprocess.check_output(['node','-e',probe_code], env=env, text=True))
+          assert re.fullmatch(r'v(?:22\.14\.0|24\.\d+\.\d+)',probe['node'])
+          probe['sysctl'] = {}
+          for key in ['hw.memsize','hw.ncpu','machdep.cpu.brand_string']:
+              q = subprocess.run(['/usr/sbin/sysctl','-n',key], capture_output=True, text=True)
+              probe['sysctl'][key] = {'exitCode':q.returncode,'value':q.stdout.strip()}
+          (folder/'probe.json').write_text(json.dumps(probe,indent=2)+'\n')
+          print(json.dumps({'diagnosticOnly':True,'mode':mode,'probe':probe}),flush=True)
+          profile = folder/'cpu'
+          profile.mkdir()
+          args = ['node','--cpu-prof','--cpu-prof-dir='+str(profile),'node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(folder/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
+          started = time.monotonic()
+          timed_out = False
+          code = None
+          with (folder/'test.log').open('xb') as log:
+              try:
+                  q = subprocess.run(args,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=600)
+                  code = q.returncode
+              except subprocess.TimeoutExpired:
+                  timed_out = True
+          receipt = {'sourceSHA':SHA,'diagnosticOnly':True,'notNativeOrReleaseQualification':True,'mode':mode,'actualNode':probe['node'],'seconds':round(time.monotonic()-started,3),'exitCode':code,'outerTimedOut':timed_out,'productionRPC15Changed':False,'caseAssertionsChanged':False,'caseRunner300Changed':False,'material105000Changed':False,'command':args}
+          (folder/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          print(json.dumps(receipt),flush=True)
+          text = (folder/'test.log').read_text(errors='replace')
+          print(text[-24000:],flush=True)
+          raise SystemExit(code if isinstance(code,int) and code>=0 else 1)
+          PY
+      - name: Observe original default-heap case without changing the 15s RPC
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
+        shell: bash
+        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" default
+      - name: Observe the same complete case with 4GB worker old-space
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.driver.outcome == 'success' }}
+        shell: bash
+        run: python3 "$RUNNER_TEMP/intent-rpc15-resource-driver.py" heap4096
+      - name: Preserve ephemeral-host diagnostic measurements and real failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: published-windows-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/xiaok-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
-          if-no-files-found: warn
+          name: intent-rpc15-diagnostic-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/intent-rpc15-diagnostic/
+          retention-days: 7
+          if-no-files-found: error
