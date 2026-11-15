@@ -160,6 +160,7 @@ jobs:
           node ../scripts/copy-harness-runtime.mjs
           node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
           node scripts/copy-broker-runtime-package.cjs
+          node scripts/prepare-broker-runtime.mjs
           test -f dist/main/desktop/electron/broker-runtime-package.cjs
           test -f dist/main/desktop/electron/broker-runtime-file.cjs
           test -f dist/main/desktop/resources/broker-runtime-lock.json

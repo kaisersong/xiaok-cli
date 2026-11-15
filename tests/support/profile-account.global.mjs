@@ -17,9 +17,11 @@ export default async function setup(project){
    if(prepared.error||prepared.status!==0||prepared.signal)throw Error('test_private_temp_security_unavailable',{cause:prepared.error??prepared.stderr});
   }
   const {createExclusiveWindowsPrivateDirectory}=await import('../../src/runtime/windows-owner-security.js');
-  privateTemp=join(realpathSync(tmpdir()),'xiaok-vitest-temp-'+randomUUID());
+  const parent=realpathSync.native(tmpdir());
+  if(!/^[A-Za-z]:\\/.test(parent))throw Error('test_private_temp_drive_path_required');
+  privateTemp=join(parent,'xiaok-vitest-temp-'+randomUUID());
   createExclusiveWindowsPrivateDirectory(privateTemp);
-  privateTemp=realpathSync(privateTemp);process.env.TEMP=privateTemp;process.env.TMP=privateTemp;
+  privateTemp=realpathSync.native(privateTemp);process.env.TEMP=privateTemp;process.env.TMP=privateTemp;
  }
  const installedRuntime=join(homedir(),'.xiaok','runtime','python-env');
  // Only the installed-plugin integration fixture uses these explicit paths.

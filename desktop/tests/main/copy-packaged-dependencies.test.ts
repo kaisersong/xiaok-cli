@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync, readdirSync, statSync, chmodSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, normalize, relative, sep } from 'node:path';
+import { resolve, join, normalize, relative, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { finished } from 'node:stream/promises';
 import { createPackageWithOptions, extractFile, statFile, uncache } from '@electron/asar';
@@ -42,9 +42,16 @@ describe('production dependency closure copy', () => {
     writeFileSync(join(f.app, 'dist', 'main', 'entry.js'), "import spawn from 'cross-spawn';\n");
     await finished(await createPackageWithOptions(f.app, f.asarPath, {}), { cleanup: true }); uncache(f.asarPath);
     const { verifyPackagedRuntimeDependencies: verify } = require('../../scripts/verify-packaged-runtime-dependencies.cjs');
+    const {shipBrokerRuntime}=require('../../scripts/pack-broker-runtime.cjs');
+    const {packNodeChild}=require('../../scripts/pack-node-child.cjs');
+    const cacheRoot=resolve(import.meta.dirname,'../../../.artifacts/broker-runtimes'),target=`${process.platform}-${process.arch}`;
+    if(!existsSync(join(cacheRoot,target)))throw new Error('test_pinned_node_cache_missing: run npm run prepare:broker-runtime in desktop');
+    shipBrokerRuntime({cacheRoot,resources:f.root,target});
+    packNodeChild(f.asarPath);
     const options = { asarPath: f.asarPath, electronPath: require('electron') };
     expect(() => verify(options)).toThrow(/packaged runtime verification failed/);
     await copy(f);
+    rmSync(join(f.root,'node-child'),{recursive:true});packNodeChild(f.asarPath);
     expect(verify(options)).toEqual({ specifiers: ['cross-spawn'], runtimeVerified: true });
   });
 

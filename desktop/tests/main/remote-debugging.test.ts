@@ -1,3 +1,4 @@
+import {ownedProfileTempDir as mkdtempSync} from '../support/profile-storage-fixture.js';
 import { readFileSync } from 'node:fs';
 import {desktopContinuityScopeProfileId} from '../../../src/runtime/conversation-activity/owner-profile-id.js';
 import { join } from 'node:path';
@@ -125,7 +126,7 @@ describe('packaged upgrade smoke contract', () => {
 });
 
 // Kept in this explicitly selected cross-platform CI file (#168).
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {  rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { configuredDesktopServicePorts, prepareDesktopServicePorts, readDesktopServicePorts, desktopServiceUrl } from '../../electron/desktop-service-discovery.js';

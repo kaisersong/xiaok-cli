@@ -1,13 +1,12 @@
-import {existsSync,mkdtempSync,mkdirSync,rmdirSync,copyFileSync,rmSync} from 'node:fs';
+import {existsSync,mkdirSync,copyFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
+import {makePrivateTestTempDir} from '../../../tests/support/private-temp.js';
 import {createExclusiveWindowsPrivateDirectory,writeWindowsPrivateFile} from '../../../src/runtime/windows-owner-security.js';
 /** Emulate normal user ownership even when the Windows test runner is elevated. */
 export function ownedProfileTempDir(prefix:string):string {
- const temporary=mkdtempSync(prefix);
- if(process.platform!=='win32')return temporary;
- const owned=temporary+'-owned';createExclusiveWindowsPrivateDirectory(owned);rmdirSync(temporary);return owned;
+ return makePrivateTestTempDir(prefix);
 }
 export function ownedProfileDirectory(path:string):void {
  if(process.platform!=='win32'){mkdirSync(path,{recursive:true,mode:0o700});return;}

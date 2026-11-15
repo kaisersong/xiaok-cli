@@ -1,6 +1,7 @@
+import {ownedProfileTempDir as mkdtempSync,ownedProfileDirectory} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { cpSync,existsSync,mkdirSync,mkdtempSync, realpathSync,renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync,existsSync,mkdirSync, realpathSync,renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadContinuityProfile,resolveDesktopProfile } from '../../electron/context-continuity/profile.js';
@@ -12,6 +13,7 @@ describe('main-owned persistent continuity profile (A07)', () => {
   it('keeps the same identity after moving the data root', () => {
     const root = mkdtempSync(join(tmpdir(), 'continuity-profile-'));
     try {
+      ownedProfileDirectory(join(root,'old'));
       const before = loadContinuityProfile(join(root, 'old'));
       renameSync(join(root, 'old'), join(root, 'new'));
       expect(loadContinuityProfile(join(root, 'new'))).toBe(before);

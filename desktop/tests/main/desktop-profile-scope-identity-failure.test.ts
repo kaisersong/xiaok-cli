@@ -1,7 +1,8 @@
+import {ownedProfileTempDir as mkdtempSync} from '../support/profile-storage-fixture.js';
 import {ownedProfileDirectory,seedProfileGroups,openProfileDatabaseSnapshot} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {existsSync,symlinkSync,lstatSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {existsSync,symlinkSync,lstatSync,mkdirSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
