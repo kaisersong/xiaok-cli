@@ -31,6 +31,7 @@ jobs:
       - run: npm ci --ignore-scripts --prefix desktop
       - name: Prepare fixed N-API owner security
         run: node scripts/verification/prepare-windows-owner-security.mjs source
+      - uses: ./.github/actions/windows-private-temp
       - name: Run real Windows ACL and process birth cases in Node
         run: node --test tests/native/windows-owner-security.test.cjs tests/native/windows-profile-custody.test.cjs
       - name: Install locked Electron

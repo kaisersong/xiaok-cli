@@ -1,0 +1,21 @@
+name: Private Windows test temporary directory
+description: Create a current-SID directory without tightening the runner shared TEMP
+runs:
+  using: composite
+  steps:
+    - name: Create private test TEMP at a canonical physical path
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        @'
+        const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+        const root=fs.realpathSync(process.env.RUNNER_TEMP);
+        const file=path.resolve('src/runtime/native/win32-x64/windows_owner_security.node');
+        const manifest=JSON.parse(fs.readFileSync(file.replace(/\.node$/,'.json'),'utf8'));
+        if(manifest.target!=='win32-x64'||manifest.napi!==8||crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==manifest.sha256)throw Error('windows_test_temp_binary_unverified');
+        const api=require(file),directory=path.join(root,'xiaok-private-test-'+crypto.randomUUID());
+        if(api.createPrivateDirectory(directory)!==true)throw Error('windows_test_temp_birth_failed');
+        const physical=fs.realpathSync(directory),lease=api.holdProfile(physical,true);lease.assertCurrent();lease.close();
+        fs.appendFileSync(process.env.GITHUB_ENV,'TEMP='+physical+'\nTMP='+physical+'\n');
+        console.log('Created a private current-SID test TEMP under RUNNER_TEMP; shared parent unchanged.');
+        '@ | node

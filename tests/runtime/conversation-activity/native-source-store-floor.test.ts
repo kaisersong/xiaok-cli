@@ -42,7 +42,12 @@ it('rolls back the new floor when the actual original enrollment transaction fai
 });
 it('uses the actual frozen profile4 Store owner lock and rejects its business writer after the new floor',async()=>{
  const f=fixture();f.store.close();const snapshot=resolve('tests/runtime/conversation-activity/fixtures/store-profile4.original.ts.txt');const output=join(f.root,'profile4-original.mjs');
- await build({stdin:{contents:readFileSync(snapshot,'utf8'),resolveDir:resolve('src/runtime/conversation-activity'),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:output,logLevel:'silent'});
+ await build({stdin:{contents:readFileSync(snapshot,'utf8'),resolveDir:resolve('src/runtime/conversation-activity'),loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:output,logLevel:'silent',plugins:process.platform==='win32'?[{name:'original-windows-security-location',setup(builder){
+  // The frozen Store's code remains unchanged. Keep the real current fixed
+  // security module at its emitted package location, beside its verified DLL;
+  // bundling it into a temp .mjs would change import.meta.url and lose custody.
+  builder.onResolve({filter:/windows-owner-security\.js$/},()=>({path:pathToFileURL(resolve('.test-dist/src/runtime/windows-owner-security.js')).href,external:true}));
+ }}]:[]});
  const {ConversationActivityStore:Original}=await import(pathToFileURL(output).href);const old=new Original(f.file);try{expect(()=>new ConversationActivityStore(f.file)).toThrow('conversation_activity_owner_held');}finally{old.close();}
  const current=new ConversationActivityStore(f.file);current.enrollNativeAttentionSource('watch',reference);current.close();
  expect(()=>new Original(f.file)).toThrow('conversation_activity_schema_unsupported');expect(version(f.file)).toBe(5);
