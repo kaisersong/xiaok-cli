@@ -2,6 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {createReceiverUploadVerifier,SignedUploadReply} from './receiver-upload-authentication.js';
 import type {Socket} from 'node:net';
 import {callControllerIpc} from './controller-ipc.js';
+import {RECEIVER_RPC_LIVENESS_MS} from './receiver-liveness.js';
 import {canonicalVerificationJson as json,parseVerificationTuple,hashVerificationTuple,type VerificationTuple,VERIFICATION_BUDGET} from './protocol.js';
 import type {Identity,SignedReceiverReply,createReceiverReplyVerifier} from './receiver-authentication.js';
 import type {readControllerSocketAuditPeer} from './socket-peer.js';
@@ -16,7 +17,7 @@ export function createReceiverTransport(input:{socketPath:string;receiverService
  const lifetime=new AbortController(),pending=new Set<Promise<unknown>>();let closed=false,closing:Promise<void>|undefined;
  function current(){if(closed)throw Error('receiver_transport_closed');try{const result:unknown=assertCurrent();if(result!==undefined){void Promise.resolve(result).catch(()=>{});throw Error('receiver_transport_current_sync');}}catch(error){closed=true;lifetime.abort();throw error;}}
  current();
- async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc(socketPath,bytes,{signal,verifyServerPeer(socket){
+ async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc(socketPath,bytes,{timeoutMs:RECEIVER_RPC_LIVENESS_MS,signal,verifyServerPeer(socket){
    current();const peer=readPeer(socket);
    if(!peer||Object.keys(peer).sort().join(',')!=='auditSessionId,gid,pid,uid'||peer.uid!==uid||!Number.isSafeInteger(peer.gid)||peer.gid<0||!Number.isSafeInteger(peer.auditSessionId)||peer.auditSessionId<1||!Number.isSafeInteger(peer.pid)||peer.pid<1)throw Error('receiver_transport_peer');
    current();if(beforeSend){const result:unknown=beforeSend();if(result!==undefined){void Promise.resolve(result).catch(()=>{});throw Error('receiver_transport_before_send_sync');}}

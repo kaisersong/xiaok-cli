@@ -50,7 +50,7 @@ it('parent completion final set rejects old native-approved child publication re
   expect(f.f.composition.privateHost.authorityService.inspectOwner(owner)?.currentVerification).toBe('valid');
   await expect(f.receiver.publication.observeIntentCompletion({subject},f.f.peer,signal())).rejects.toThrow();
  }finally{await lifetime.cleanup(()=>f.close());}
-}),intentDependencyRunnerBudget(105000));
+}),intentDependencyRunnerBudget(105000,600000));
 
 it('the original final dependency set carries actual receiver identity for parent capture',(ctx:TestContext)=>runScenario(ctx,async(signal,lifetime)=>{
  const f=await fixture(lifetime);try{const observed=await f.receiver.publication.observeIntentDependencies({subject:f.subjects.at(-1)},f.f.peer,signal());

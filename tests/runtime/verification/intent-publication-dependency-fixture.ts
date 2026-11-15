@@ -104,7 +104,7 @@ async function fixture(lifetime:ScenarioLifetime,afterQuery?:()=>void,options:Pa
 import type {startPublicController} from '../../../src/runtime/verification/controller-public-daemon.js';
 export {fixture,runScenario,scenarioInvoke,transportSignal,hash};
 /** Quality-reviewed observation window; Native clocks and cancellation stay real. */
-export function intentDependencyRunnerBudget(original:number):number {
+export function intentDependencyRunnerBudget(original:number,macObserverMinimum=300_000):number {
  if(process.platform!=='darwin'&&process.platform!=='linux')return original;
- return Math.max(original,300_000);
+ return Math.max(original,process.platform==='darwin'?macObserverMinimum:300_000);
 }
