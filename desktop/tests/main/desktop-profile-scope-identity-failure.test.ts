@@ -1,4 +1,4 @@
-import {ownedProfileDirectory,seedProfileGroups} from '../support/profile-storage-fixture.js';
+import {ownedProfileDirectory,seedProfileGroups,openProfileDatabaseSnapshot} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {existsSync,symlinkSync,lstatSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
@@ -47,10 +47,10 @@ function scopeValues(dataRoot:string):string[]{
  const values=new Set<string>();
  for(const [file,columns] of tables){
   const path=join(dataRoot,file);if(!existsSync(path))continue;
-  const db=new DatabaseSync(path,{readOnly:true});
+  const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
   try{const names=new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row=>String(row.name)));
    for(const [table,column] of columns)if(names.has(table))for(const row of db.prepare(`SELECT DISTINCT ${column} AS v FROM ${table}`).all())values.add(String(row.v).replace(/^desktop-user:/,''));
-  }finally{db.close();}
+  }finally{snapshot.close();}
  }
  return [...values].sort();
 }
@@ -63,12 +63,12 @@ function filesContaining(root:string,needles:readonly string[]):string[]{
   const bytes=readFileSync(path);
   for(const needle of needles)if(bytes.includes(Buffer.from(needle))||bytes.includes(Buffer.from(needle.toUpperCase())))hits.push(`${path} (bytes)`);
   if(bytes.subarray(0,16).toString('latin1')==='SQLite format 3\0'){
-   const db=new DatabaseSync(path,{readOnly:true});
+   const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
    try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>)
     for(const row of db.prepare(`SELECT * FROM "${table.replaceAll('"','""')}"`).all() as Array<Record<string,unknown>>)
      for(const [column,value] of Object.entries(row)){const text=value instanceof Uint8Array?Buffer.from(value).toString('latin1'):String(value);
       for(const needle of needles)if(text.toLowerCase().includes(needle))hits.push(`${path} ${table}.${column}`);}
-   }finally{db.close();}
+   }finally{snapshot.close();}
   }
  }};
  walk(root);return [...new Set(hits)].sort();
@@ -78,10 +78,10 @@ function populatedTables(root:string):string[]{
  const out:string[]=[];
  const walk=(dir:string)=>{for(const name of readdirSync(dir)){const path=join(dir,name),st=lstatSync(path);
   if(st.isDirectory()){walk(path);continue;}if(!st.isFile()||readFileSync(path).subarray(0,16).toString('latin1')!=='SQLite format 3\0')continue;
-  const db=new DatabaseSync(path,{readOnly:true});
+  const snapshot=openProfileDatabaseSnapshot(path),db=snapshot.db;
   try{for(const {name:table} of db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{name:string}>){
    const {c}=db.prepare(`SELECT count(*) AS c FROM "${table.replaceAll('"','""')}"`).get() as {c:number};if(c>0)out.push(`${toPosixRelative(root,path)} ${table}=${c}`);}
-  }finally{db.close();}
+  }finally{snapshot.close();}
  }};
  walk(root);return out.sort();
 }
