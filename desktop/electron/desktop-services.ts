@@ -2549,7 +2549,18 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
   contextContinuity.requireEffectInventory();
-  const multiAgentReady=(dshStartup?dshStartup.state.recoveryReady:(multiAgentService?.initialize(host)??Promise.resolve())).then(()=>contextContinuity.auditEffectInventory(async()=>{if(legacyEffectInventoryFailure)throw legacyEffectInventoryFailure.raw;return continuityAuditSdk.invoke<TaskSnapshot[]>(FileTaskSnapshotStore.prototype.inspectPersistedInventory,snapshotStore,[]);},legacyEffectOwnerPresent));
+  const multiAgentReady=(dshStartup?dshStartup.state.recoveryReady:(multiAgentService?.initialize(host)??Promise.resolve())).then(()=>contextContinuity.auditEffectInventory(async accept=>{
+    if(legacyEffectInventoryFailure)throw legacyEffectInventoryFailure.raw;
+    const ids=await continuityAuditSdk.invoke<string[]>(FileTaskSnapshotStore.prototype.inspectPersistedTaskIds,snapshotStore,[]);
+    for(const id of ids){
+      const snapshot=await continuityAuditSdk.invoke<TaskSnapshot|null>(FileTaskSnapshotStore.prototype.inspectPersistedTask,snapshotStore,[id]);
+      if(!snapshot)throw new Error('task_inventory_unavailable');
+      accept(snapshot);
+    }
+    const finalIds=await continuityAuditSdk.invoke<string[]>(FileTaskSnapshotStore.prototype.inspectPersistedTaskIds,snapshotStore,[]);
+    const expected=new Set(ids);
+    if(finalIds.length!==ids.length||finalIds.some(id=>!expected.has(id)))throw new Error('task_inventory_changed');
+  },legacyEffectOwnerPresent));
   // Existing ready remains recovery-complete. Native A construction/schema is
   // separate so the original Root composition never waits on its own recovery.
   const dshReady:Promise<void>|undefined=dshStartup?modelProbeApply(modelProbeThen,multiAgentReady,[()=>dshStartup.state.constructionReady]) as Promise<void>:undefined;

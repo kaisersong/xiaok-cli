@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**1.6.4.** This source version includes Windows profile recovery, public-context Kimi resume and startup fixes. See the [release notes](release-notes/1.6.4.md) for verified changes and remaining limits. Published Desktop downloads remain available from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest); the published CLI can be installed with `npm install -g xiaokcode`.
+**1.6.5.** This source version fixes Desktop startup with legacy inbox judgments and large historical task inventories. See the [release notes](release-notes/1.6.5.md) for validation and remaining limits. Published Desktop downloads remain available from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest); the published CLI can be installed with `npm install -g xiaokcode`.
 
 ---
 
