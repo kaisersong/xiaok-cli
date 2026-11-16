@@ -79,7 +79,7 @@ jobs:
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
       - name: Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-      - name: Runtime gate
+      - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
       - name: SQLite binding
         shell: bash
@@ -229,7 +229,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: ZIP permissions
         run: python3 -c 'import glob,stat,zipfile; p=glob.glob("desktop/release/*-mac.zip"); assert len(p)==1; z=zipfile.ZipFile(p[0]); denied=[e.filename for e in z.infolist() if (stat.S_ISREG(e.external_attr>>16) or stat.S_ISDIR(e.external_attr>>16)) and not (e.external_attr>>16)&0o200]; assert not denied,denied; print("All ZIP regular files/directories permit owner quarantine removal")'
-      - name: Verify signature and ticket
+      - name: Verify macOS signature and notarization
         shell: bash
         run: |
           app_path="desktop/release/mac-arm64/xiaok.app"
@@ -255,7 +255,7 @@ jobs:
             console.log(JSON.stringify(BUILD_INFO));
           })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
-      - name: Upload assets
+      - name: Upload to GitHub Release
         run: node scripts/desktop-release-identity.mjs upload-mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -300,7 +300,7 @@ jobs:
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
       - name: Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-      - name: Runtime gate
+      - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
       - name: SQLite binding
         shell: bash
@@ -353,7 +353,7 @@ jobs:
         env:
           PROVENANCE_ASAR: desktop/release/win-unpacked/resources/app.asar
         run: *verify_packaged_provenance
-      - name: Windows Kimi smoke
+      - name: Run packaged Windows Kimi K3 smoke
         shell: pwsh
         run: |
           $smokeRoot = Join-Path $env:RUNNER_TEMP 'xiaok-kimi-packaged-smoke'
@@ -377,7 +377,7 @@ jobs:
             throw 'Packaged Kimi smoke did not write its result'
           }
           node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
-      - name: Upload assets
+      - name: Upload to GitHub Release
         run: node scripts/desktop-release-identity.mjs upload-windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
