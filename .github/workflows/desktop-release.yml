@@ -65,6 +65,13 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      - name: Generate exact-source desktop build provenance
+        shell: bash
+        run: &generate_desktop_provenance |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=normal)"
+          node scripts/set-build-info.mjs release
+
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -90,10 +97,6 @@ jobs:
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
 
       - name: Verify native SQLite binding loads
-        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
-        # node-gyp source build when it does not see gypfile:false. Either path is
-        # acceptable, but a binding that cannot be loaded must fail here rather
-        # than inside the packaged app.
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
@@ -143,9 +146,6 @@ jobs:
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
 
       - name: Vendor self-contained provider runtimes (macOS)
-        # Materialises the pinned CPython closure from runtime-lock.json. The
-        # closure itself is not committed (~340 MB); packaging verifies its
-        # canonical-tree merkle and fails the build if it drifts.
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
@@ -159,11 +159,11 @@ jobs:
           node scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
-      - name: Generate exact-source desktop build provenance
+      - name: Audit prepared source
         shell: bash
-        run: &generate_desktop_provenance |
-          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          node scripts/set-build-info.mjs release
+        run: &audit_desktop_source |
+          git status --porcelain=v1 --untracked-files=all
+          git diff --exit-code HEAD -- . ':(exclude)dist/**' ':(exclude)src/build-info.ts'
 
       - name: Build desktop
         run: cd desktop && npm run build
@@ -311,6 +311,10 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      - name: Generate exact-source desktop build provenance
+        shell: bash
+        run: *generate_desktop_provenance
+
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
 
@@ -387,9 +391,9 @@ jobs:
           node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
-      - name: Generate exact-source desktop build provenance
+      - name: Audit prepared source
         shell: bash
-        run: *generate_desktop_provenance
+        run: *audit_desktop_source
 
       - name: Build desktop
         run: cd desktop && npm run build
