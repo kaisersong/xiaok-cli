@@ -181,15 +181,7 @@ try {
   Run-Owned 'installed-packaged-kimi-smoke' $installedExe ''
   Assert-OwnedExited
   if (-not (Test-Path -LiteralPath $resultPath)) { throw 'Packaged Kimi smoke did not write its result' }
-  $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-  if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 2) { throw 'Packaged Kimi smoke result is incomplete' }
-  foreach ($model in @('k3', 'k3-256k')) {
-    $entry = $result.modelResults | Where-Object { $_.model -eq $model }
-    if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) { throw "Packaged Kimi multi-turn smoke failed for $model" }
-  }
-  if ($result.authorizationDenyNetworkRequests -ne 0 -or $result.rollbackDenyNetworkRequests -ne 0) { throw 'Packaged Kimi deny smoke observed a network request' }
-  $canaryHit = Get-ChildItem -LiteralPath $smokeRoot -Recurse -File | Where-Object { $_.FullName -ne $resultPath } | Select-String -SimpleMatch 'PACKAGED_SMOKE_RUNTIME_ONLY' -List
-  if ($canaryHit) { throw "Provider-private reasoning canary persisted at $($canaryHit.Path)" }
+  Assert-Smoke $resultPath
   Copy-Item -LiteralPath $resultPath -Destination (Join-Path $evidence 'smoke-result.json')
   $receipt.smokeResultSHA256 = Hash $resultPath
 } catch { $errors.Add("body: $($_.Exception.ToString()) at $($_.ScriptStackTrace)") }
@@ -215,8 +207,13 @@ finally {
     try {
       if (((Get-Item -LiteralPath $cache -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Cache parent is a reparse point; retained' }
       $entries = @(Get-ChildItem -LiteralPath $cache -Force)
+      $newInstalled = @($records | Where-Object { $_.phase -ceq 'silent-install' -and $_.Contains('exit') -and $_.exit -eq 0 -and $_.waited }).Count -eq 1
+      $oldInstalled = @($records | Where-Object { $_.phase -ceq 'install-old-1.6.2' -and $_.Contains('exit') -and $_.exit -eq 0 -and $_.waited }).Count -eq 1
+      $expectedCacheHash = if ($newInstalled) { $ExpectedInstallerSHA256 } elseif ($oldInstalled) { 'e66856df3b267da6c292a987f663c86fa9342e928c4c81ed08ff44c46f87eeae' } else { throw 'No completed installer owns the cache; retained' }
+      Save-Json 'owned-cache-before-cleanup.json' @{ expectedSHA256 = $expectedCacheHash; newInstalled = $newInstalled; oldInstalled = $oldInstalled;
+        entries = @($entries | ForEach-Object { @{ name = $_.Name; attributes = $_.Attributes.ToString(); sha256 = if ($_ -is [IO.FileInfo] -and ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { Hash $_.FullName } else { $null } } }) }
       if ($entries.Count -ne 1 -or $entries[0].Name -cne 'installer.exe' -or $entries[0].PSIsContainer -or
-          ($entries[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Hash $entries[0].FullName) -cne $ExpectedInstallerSHA256) { throw 'Unexpected known-folder cache; retained, not deleted' }
+          ($entries[0].Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or (Hash $entries[0].FullName) -cne $expectedCacheHash) { throw 'Unexpected known-folder cache; retained, not deleted' }
       Remove-Item -LiteralPath $entries[0].FullName; Remove-Item -LiteralPath $cache
     } catch { $errors.Add("owned installer cache: $($_.Exception.ToString())") }
   }

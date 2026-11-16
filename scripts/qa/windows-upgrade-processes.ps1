@@ -110,13 +110,9 @@ function Assert-InstalledVersion([string]$Expected) {
   Save-Json "installed-version-$Expected.json" @{ fileVersion = $info.FileVersion; productVersion = $info.ProductVersion; sha256 = (Hash $installedExe) }
 }
 function Assert-Smoke([string]$ResultFile) {
-  $value = Get-Content -LiteralPath $ResultFile -Raw | ConvertFrom-Json
-  if ($value.status -cne 'pass' -or $value.modelResults.Count -ne 2) { throw 'Old installed smoke incomplete' }
-  foreach ($model in @('k3', 'k3-256k')) {
-    $entry = @($value.modelResults | Where-Object { $_.model -ceq $model })
-    if ($entry.Count -ne 1 -or $entry[0].requests -ne 2 -or -not $entry[0].secondTurnReplayedReasoning) { throw 'Old installed multi-turn smoke failed' }
-  }
-  if ($value.authorizationDenyNetworkRequests -ne 0 -or $value.rollbackDenyNetworkRequests -ne 0) { throw 'Old installed deny smoke observed network requests' }
+  $verifier = Join-Path $env:GITHUB_WORKSPACE 'scripts/verify-packaged-kimi-smoke-result.mjs'
+  & node $verifier $ResultFile $smokeRoot
+  if ($LASTEXITCODE -ne 0) { throw 'Installed smoke rejected by the product profiles/segmentation/canary verifier' }
 }
 function Assert-OwnedExited {
   $deadline = [DateTime]::UtcNow.AddSeconds(15)

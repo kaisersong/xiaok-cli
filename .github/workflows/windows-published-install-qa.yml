@@ -37,6 +37,9 @@ jobs:
           repository: kaisersong/xiaok-cli
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Verify identified installers and upgrade 1.6.2 to 1.6.4
         shell: pwsh
         env:
