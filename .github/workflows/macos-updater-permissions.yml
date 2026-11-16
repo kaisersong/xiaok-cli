@@ -1,0 +1,31 @@
+name: macOS updater distribution permissions
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/macos-update-permissions*'
+      - '.github/workflows/desktop-release.yml'
+      - '.github/workflows/macos-updater-permissions.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  quarantine-permissions:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.14.0', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify exact recipe HEAD and actual filesystem behavior
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          node --test .github/scripts/macos-update-permissions.test.cjs

@@ -87,7 +87,7 @@ jobs:
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
       - name: Clone desktop sidecar repositories
-        run: |
+        run: &clone_sidecars |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
           git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
@@ -201,8 +201,10 @@ jobs:
             ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels \
             --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
             --keychain "$MACOS_SIGNING_KEYCHAIN"
+      - name: Materialize reviewed Mac distribution hook
+        run: git show "${GITHUB_WORKFLOW_SHA}:.github/scripts/macos-update-permissions.cjs" > "$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
       - name: Package signed macOS app
-        run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false
+        run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false -c.afterPack="$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -225,6 +227,8 @@ jobs:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify ZIP owner-write permissions
+        run: python3 -c 'import glob,stat,zipfile; p=glob.glob("desktop/release/*-mac.zip"); assert len(p)==1; z=zipfile.ZipFile(p[0]); denied=[e.filename for e in z.infolist() if (stat.S_ISREG(e.external_attr>>16) or stat.S_ISDIR(e.external_attr>>16)) and not (e.external_attr>>16)&0o200]; assert not denied,denied; print("All ZIP regular files/directories permit owner quarantine removal")'
       - name: Verify macOS signature and notarization
         shell: bash
         run: |
@@ -304,16 +308,7 @@ jobs:
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
       - name: Clone desktop sidecar repositories
-        run: |
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
-          git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 9f969b7912cc94e660643d390184bd0c6f00058f
-          git -C ../kswarm checkout --detach FETCH_HEAD
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
-          git -C ../intent-broker checkout --detach FETCH_HEAD
+        run: *clone_sidecars
       - uses: ./.github/actions/install-desktop-sidecars
       - name: Build report-renderer bundle
         shell: bash
