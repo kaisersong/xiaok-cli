@@ -5,14 +5,14 @@ import { MIN_NODE_VERSION, isNodeVersionAtLeast, shouldBlockChatOnOldNode, oldNo
 
 describe('Node support', () => {
   it('declares the minimum version', () => {
-    expect(MIN_NODE_VERSION).toBe('22.14.0');
+    expect(MIN_NODE_VERSION).toBe('22.22.1');
   });
 
   it.each([
-    ['22.13.1', false], ['22.14.0', true], ['22.14.1', true],
+    ['22.13.1', false], ['22.14.0', false], ['22.14.1', false], ['22.22.0', false], ['22.22.1', true],
     ['24.0.0', true], ['24.21.0', true], ['22.12.0', false],
     ['22.5.0', false], ['20.19.2', false], ['v22.12.0', false],
-    ['v22.14.0', true], ['', true], ['invalid', true], ['22.14', true],
+    ['v22.14.0', false], ['v22.22.1', true], ['', true], ['invalid', true], ['22.14', true],
     ['22.14.0garbage', true],
   ])('compares %s against the minimum', (version, expected) => {
     expect(isNodeVersionAtLeast(version, MIN_NODE_VERSION)).toBe(expected);
@@ -25,8 +25,9 @@ describe('Node support', () => {
 
   it.each([
     ['linux', '22.13.1', false, false, true],
-    ['linux', '22.14.0', false, false, false],
-    ['linux', '22.14.1', false, false, false],
+    ['linux', '22.14.0', false, false, true],
+    ['linux', '22.14.1', false, false, true],
+    ['linux', '22.22.1', false, false, false],
     ['linux', '24.0.0', false, false, false],
     ['linux', '24.21.0', false, false, false],
     ['darwin', '22.12.0', false, false, false],
@@ -54,7 +55,7 @@ describe('Node support', () => {
 
   it('uses the exact plain-language message', () => {
     const message = oldNodeMessage('v22.12.0');
-    expect(message).toBe('xiaok 需要 Node 22.14.0 或更新版本，你现在用的是 v22.12.0。请升级 Node 后重新运行，可用 nvm 或官网安装包升级。');
+    expect(message).toBe('xiaok 需要 Node 22.22.1+（22.x）或 Node 24+，你现在用的是 v22.12.0。请升级 Node 后重新运行，可用 nvm 或官网安装包升级。');
     for (const forbidden of ['ERR_', 'http', '{', '}', '    at ']) {
       expect(message).not.toContain(forbidden);
     }
@@ -80,7 +81,7 @@ describe('Node support', () => {
   it('keeps package and lockfile engines aligned', () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
     const lock = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
-    expect(pkg.engines.node).toBe('>=22.14.0');
-    expect(lock.packages[''].engines.node).toBe('>=22.14.0');
+    expect(pkg.engines.node).toBe('^22.22.1 || >=24.0.0');
+    expect(lock.packages[''].engines.node).toBe('^22.22.1 || >=24.0.0');
   });
 });

@@ -25,8 +25,8 @@ function snapshot() { return { ...new AgentSessionState().exportSnapshot(), sess
 describe('real FileSessionStore process crash ownership', () => {
   it('refuses a live writer then recovers its fully published marker after SIGKILL', async () => {
     const root = fixture();
-    const code = `import os from 'node:os';import {syncBuiltinESMExports} from 'node:module';const originalUserInfo=os.userInfo.bind(os);os.userInfo=()=>({...originalUserInfo(),homedir:${JSON.stringify(userInfo().homedir)}});syncBuiltinESMExports();import {writeSync} from 'node:fs';const {FileSessionStore}=await import(${JSON.stringify(pathToFileURL(resolve('src/ai/runtime/session-store/file-store.ts')).href)});const store=new FileSessionStore(${JSON.stringify(root)},()=>{writeSync(1,'READY\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);});await store.save(${JSON.stringify(snapshot())});`;
-    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const code = `import {writeSync} from 'node:fs';const {FileSessionStore}=await import(${JSON.stringify(pathToFileURL(resolve('src/ai/runtime/session-store/file-store.ts')).href)});const store=new FileSessionStore(${JSON.stringify(root)},()=>{writeSync(1,'READY\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);});await store.save(${JSON.stringify(snapshot())});`;
+    const child = spawn(process.execPath, ['--import', pathToFileURL(resolve('tests/support/profile-account-child.setup.mjs')).href, '--import', 'tsx', '--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env,XIAOK_TEST_ACCOUNT_HOME:userInfo().homedir,XIAOK_TEST_RUNTIME_HOME:process.env.HOME??userInfo().homedir} });
     const closed = once(child, 'close'); let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
     try {
       await new Promise<void>((resolveReady, reject) => {
