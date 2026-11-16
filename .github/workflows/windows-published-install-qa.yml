@@ -23,7 +23,7 @@ on:
         required: true
         type: choice
         default: published
-        options: [published, draft]
+        options: [published, draft, withdrawn]
 permissions:
   contents: read
 jobs:
@@ -60,7 +60,7 @@ jobs:
           path: ${{ runner.temp }}/xiaok-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
           if-no-files-found: warn
   draft-installed-path-qa:
-    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch' && inputs.expectedReleaseState == 'draft'
+    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch' && (inputs.expectedReleaseState == 'draft' || inputs.expectedReleaseState == 'withdrawn')
     permissions:
       contents: write
     runs-on: windows-2022

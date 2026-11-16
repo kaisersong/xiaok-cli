@@ -6,7 +6,7 @@ param(
   [Parameter(Mandatory)][string]$FullSHA,
   [Parameter(Mandatory)][string]$ExpectedInstallerSHA256,
   [Parameter(Mandatory)][long]$ExpectedReleaseID,
-  [ValidateSet('published','draft')][string]$ExpectedReleaseState = 'published'
+  [ValidateSet('published','draft','withdrawn')][string]$ExpectedReleaseState = 'published'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -87,10 +87,15 @@ function Resolve-TagCommit {
   throw 'Tag indirection limit exceeded'
 }
 function Assert-CandidateState($Release) {
-  $expectDraft = $ExpectedReleaseState -ceq 'draft'
+  $expectDraft = $ExpectedReleaseState -cne 'published'
+  # One-time withdrawn state for canonical 1.6.4; installer bytes remain independently hash-pinned.
+  $withdrawn = $ExpectedReleaseState -ceq 'withdrawn'
   if ($Release.tag_name -cne $Tag -or $Release.draft -ne $expectDraft -or $Release.prerelease -ne $false -or
       [long]$Release.id -ne $ExpectedReleaseID -or
-      ($expectDraft -and $null -ne $Release.published_at) -or
+      ($ExpectedReleaseState -ceq 'draft' -and $null -ne $Release.published_at) -or
+      ($withdrawn -and ($ExpectedReleaseID -ne 446491810 -or
+        $FullSHA -cne '394ee76a5e00fd53f0ab3b127e0f20cd7819cd91' -or
+        ([DateTimeOffset]$Release.published_at).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') -cne '2026-11-16T02:53:45Z')) -or
       (-not $expectDraft -and -not $Release.published_at)) { throw 'Candidate release identity/state mismatch' }
 }
 function Assert-NoRegistry {
