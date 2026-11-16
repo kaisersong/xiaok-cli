@@ -64,7 +64,7 @@ function Assert-NoReparse([string]$Path) {
   $current = Get-Item -LiteralPath $Path -Force
   while ($current -and ((Is-OwnedPath $current.FullName) -or $current.FullName -eq $root)) {
     if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse point in owned executable path: $($current.FullName)" }
-    $current = if ($current.PSIsContainer) { $current.Parent } else { $current.Directory }
+    $current = if ($current -is [IO.DirectoryInfo]) { $current.Parent } else { $current.Directory }
   }
 }
 function Api([string]$Suffix) {
@@ -116,6 +116,20 @@ function Assert-NoForeignApp {
 $envNames = @('APPDATA','LOCALAPPDATA','TEMP','TMP','XIAOK_CONFIG_DIR','XIAOK_KIMI_PACKAGED_SMOKE_RESULT','XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE')
 $savedEnv = @{}; foreach ($n in $envNames) { $savedEnv[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 try {
+  Assert-NoReparse $root; Assert-NoReparse $evidence
+  $probe = Join-Path $root 'path-guard-probe.txt'
+  [IO.File]::WriteAllText($probe, 'owned probe'); Assert-NoReparse $probe
+  $junction = Join-Path $root 'path-guard-junction'
+  New-Item -ItemType Junction -Path $junction -Target $evidence | Out-Null
+  try {
+    $rejected = $false
+    try { Assert-NoReparse $junction } catch {
+      if ($_.Exception.Message -notlike 'Reparse point in owned executable path:*') { throw }
+      $rejected = $true
+    }
+    if (-not $rejected) { throw 'Path guard accepted a junction' }
+  } finally { Remove-Item -LiteralPath $junction -Force }
+  Save-Json 'path-guard-controls.json' @{ plainDirectory = $true; plainFile = $true; junctionRejected = $rejected }
   $ref = Resolve-TagCommit; $release = Api "/releases/$ExpectedReleaseID"; Assert-CandidateState $release
   $assetName = "xiaok-setup-$Version.exe"
   $assets = @($release.assets | Where-Object { $_.name -ceq $assetName })
@@ -178,7 +192,7 @@ try {
   if ($canaryHit) { throw "Provider-private reasoning canary persisted at $($canaryHit.Path)" }
   Copy-Item -LiteralPath $resultPath -Destination (Join-Path $evidence 'smoke-result.json')
   $receipt.smokeResultSHA256 = Hash $resultPath
-} catch { $errors.Add("body: $($_.Exception.ToString())") }
+} catch { $errors.Add("body: $($_.Exception.ToString()) at $($_.ScriptStackTrace)") }
 finally {
   try { Stop-JoinOwned } catch { $errors.Add("pre-uninstall owned drain: $($_.Exception.ToString())") }
   foreach ($n in $envNames) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n], 'Process') }
