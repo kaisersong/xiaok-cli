@@ -7,7 +7,12 @@ function Observe-Owned {
     foreach ($proc in $all) {
       if ($selected.ContainsKey([int]$proc.ProcessId) -or -not $selected.ContainsKey([int]$proc.ParentProcessId)) { continue }
       $parents = @($all | Where-Object { $_.ProcessId -eq $proc.ParentProcessId })
-      if ($parents.Count -ne 1 -or $proc.CreationDate -lt $parents[0].CreationDate -or -not $proc.ExecutablePath) { throw 'Unknown owned descendant identity; no signal authorized' }
+      if ($parents.Count -ne 1 -or $proc.CreationDate -lt $parents[0].CreationDate -or -not $proc.ExecutablePath) {
+        $facts = @{ child = @{ pid = $proc.ProcessId; birth = $proc.CreationDate; path = $proc.ExecutablePath; parentPID = $proc.ParentProcessId };
+          parents = @($parents | ForEach-Object { @{ pid = $_.ProcessId; birth = $_.CreationDate; path = $_.ExecutablePath } }); selectedPIDs = @($selected.Keys) }
+        Save-Json ("unknown-descendant-" + [guid]::NewGuid().ToString() + '.json') $facts
+        throw 'Unknown owned descendant identity; no signal authorized'
+      }
       $selected[[int]$proc.ProcessId] = 'observed-owned-parent'; $added = $true
     }
   } while ($added)
