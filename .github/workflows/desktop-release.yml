@@ -159,6 +159,12 @@ jobs:
           node scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
+      - name: Generate exact-source desktop build provenance
+        shell: bash
+        run: &generate_desktop_provenance |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          node scripts/set-build-info.mjs release
+
       - name: Build desktop
         run: cd desktop && npm run build
         env:
@@ -263,6 +269,25 @@ jobs:
           grep "TeamIdentifier=Y9YR86UG94" "$RUNNER_TEMP/xiaok-codesign.txt"
           xcrun stapler validate "$app_path"
 
+      - name: Verify packaged desktop source identity
+        shell: bash
+        env:
+          PROVENANCE_ASAR: desktop/release/mac-arm64/xiaok.app/Contents/Resources/app.asar
+        run: &verify_packaged_provenance |
+          node - "$PROVENANCE_ASAR" <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const { extractFile } = require('./desktop/node_modules/@electron/asar');
+          (async () => {
+            const source = extractFile(process.argv[2], path.join('dist', 'main', 'src', 'build-info.js'));
+            const { BUILD_INFO } = await import('data:text/javascript;base64,' + source.toString('base64'));
+            assert.equal(BUILD_INFO.commit, process.env.RELEASE_SHA);
+            assert.equal(BUILD_INFO.version, process.env.RELEASE_TAG.slice('desktop-v'.length));
+            assert.equal(BUILD_INFO.dirty, false);
+            console.log(JSON.stringify(BUILD_INFO));
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+
       - name: Upload to GitHub Release
         run: node scripts/desktop-release-identity.mjs upload-mac
         env:
@@ -362,6 +387,10 @@ jobs:
           node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
 
+      - name: Generate exact-source desktop build provenance
+        shell: bash
+        run: *generate_desktop_provenance
+
       - name: Build desktop
         run: cd desktop && npm run build
         env:
@@ -369,6 +398,12 @@ jobs:
 
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
+
+      - name: Verify packaged desktop source identity
+        shell: bash
+        env:
+          PROVENANCE_ASAR: desktop/release/win-unpacked/resources/app.asar
+        run: *verify_packaged_provenance
 
       - name: Run packaged Windows Kimi K3 smoke
         shell: pwsh
