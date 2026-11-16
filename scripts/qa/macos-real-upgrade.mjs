@@ -50,6 +50,7 @@ const DEADLINE = START + 25 * 60_000; // New QA budget, not a product timeout ch
 const qaUid = process.getuid?.();
 const qaHome = homedir();
 const owned = new Map();
+const pendingTerminal = new Map();
 const children = new Set();
 let root, evidence, app, appExecutable, oldChild, oldIdentity, monitorPromise;
 let monitorStopped = false, monitorError, latestGuiApplications = [], installedRequest = false;
@@ -191,13 +192,25 @@ async function signature(bundle, version, label) {
   assert(`${assess.out}${assess.err}`.includes('accepted') && `${assess.out}${assess.err}`.includes('Notarized Developer ID'), 'notarized_assessment');
   const facts = { version, bundle, bundleId: plist.CFBundleIdentifier, team: TEAM, feed: feed(bundle) }; save(`signature-${label}.json`, facts); return facts;
 }
-async function processes() {
-  const { out } = await command('/bin/ps', ['-ww', '-axo', 'pid=,ppid=,pgid=,uid=,lstart=,comm='], { quiet: true, timeout: 5000 });
+function parseProcessSnapshot(out) {
   return out.split('\n').filter(Boolean).map(line => {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+((?:\S+\s+){4}\S+)\s+(.+)$/.exec(line); assert(m, 'process_snapshot_shape');
-    return { pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]), uid: Number(m[4]), birth: m[5], executable: m[6] };
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+((?:\S+\s+){4}\S+)\s+(\S+)\s+(.+)$/.exec(line); assert(m, 'process_snapshot_shape');
+    return { pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]), uid: Number(m[4]), birth: m[5], state: m[6], executable: m[7] };
   });
 }
+async function processes() {
+  const { out } = await command('/bin/ps', ['-ww', '-axo', 'pid=,ppid=,pgid=,uid=,lstart=,stat=,comm='], { quiet: true, timeout: 5000 });
+  return parseProcessSnapshot(out);
+}
+function terminalPlaceholder(row) {
+  return typeof row?.state === 'string' && /^Z/.test(row.state) &&
+    (row.executable === '<defunct>' || /^\([^()/]+\)$/.test(row.executable));
+}
+function knownTerminalSnapshot(previous, current) {
+  return Boolean(previous && current && isAbsolute(previous.executable) && previous.pid === current.pid &&
+    previous.uid === current.uid && previous.birth === current.birth && terminalPlaceholder(current));
+}
+function residualProcesses(rows) { return rows.filter(row => owned.has(row.pid) || pendingTerminal.has(row.pid)); }
 function cacheRoots() {
   const base = join(qaHome, 'Library', 'Caches');
   return existsSync(base) ? readdirSync(base).filter(n => /xiaok/i.test(n)).map(n => join(base, n)) : [];
@@ -221,6 +234,15 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes } 
     const inFreshProfile = [join(qaHome, '.xiaok'), join(qaHome, 'Library', 'Application Support', 'xiaok'), join(root, 'user-data')].some(p => inside(p, row.executable));
     const ship = basename(row.executable) === 'ShipIt' && (inApp || inside(join(qaHome, 'Library', 'Caches', `${APP_ID}.ShipIt`), row.executable));
     if (inApp || descendant || ship || inFreshProfile) {
+      if (terminalPlaceholder(row)) {
+        const previous = owned.get(row.pid);
+        if (previous && !knownTerminalSnapshot(previous, row)) {
+          identityConflict(previous, row, phase, 'owned_pid_identity_changed'); assert.fail('owned_pid_identity_changed');
+        }
+        pendingTerminal.set(row.pid, { ...row });
+        event('terminal-awaiting-reap-observed', { previous: previous ?? null, current: row, authorityGranted: false, reaped: false });
+        continue;
+      }
       if (!owned.has(row.pid)) {
         if (ship) assert(shipItSHA256 && await fileHash(row.executable) === shipItSHA256, 'shipit_executable_not_original_signed_helper');
         owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid }); event('owned-process-observed', owned.get(row.pid));
@@ -469,6 +491,13 @@ function identityConflict(previous, current, phase, reason) {
 async function signalOwnedProcess(record, requestedSignal, { readProcesses = processes, sendSignal = (pid, signal) => process.kill(pid, signal) } = {}) {
   let live = (await readProcesses()).find(p => p.pid === record.pid);
   if (!live) return { kind: 'absent', pid: record.pid };
+  if (sameProcessIdentity(record, owned.get(record.pid)) && knownTerminalSnapshot(record, live)) {
+    pendingTerminal.set(live.pid, { ...live });
+    if (!diagnosticEvent('terminal-awaiting-reap-not-signalled', { current: live, signalSent: false, reaped: false })) {
+      return { kind: 'rejected', failure: { pid: record.pid, reason: 'terminal_evidence_unconfirmed' } };
+    }
+    return { kind: 'terminal-awaiting-reap', pid: record.pid };
+  }
   if (!sameProcessIdentity(record, live)) {
     const rechecked = await recheckParenthesizedComm(record, live, readProcesses);
     if (rechecked.kind === 'absent') return { kind: 'absent', pid: record.pid };
@@ -561,7 +590,7 @@ async function cleanup() {
   }
   if (app) { try { await sample('cleanup'); } catch (e) { failures.push({ reason: e.message }); } }
   const after = await processes();
-  const residual = after.filter(p => owned.has(p.pid));
+  const residual = residualProcesses(after);
   const shipItLogs = [];
   for (const name of ['ShipIt_stdout.log', 'ShipIt_stderr.log']) {
     const file = join(qaHome, 'Library', 'Caches', `${APP_ID}.ShipIt`, name);
@@ -572,7 +601,7 @@ async function cleanup() {
   save('shipit-log-capture.json', shipItLogs);
   let profile = [];
   try { profile = profileInventory(); } catch (error) { failures.push({ owner: 'profile-inventory', reason: error.message }); }
-  const facts = { failures, residual, ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
+  const facts = { failures, residual, terminalAwaitingReapObserved: [...pendingTerminal.values()], ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
     profile, externalApplications: externalApplications() };
   save('cleanup.json', facts);
   assert(failures.length === 0 && residual.length === 0 && children.size === 0, 'owned_cleanup_unconfirmed');
@@ -799,7 +828,7 @@ async function pureControls() {
 
   const signalTemp = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-signal-pure-'));
   const savedSignalState = { root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest,
-    owned: new Map(owned), diagnostics: [...qaDiagnostics] };
+    owned: new Map(owned), pendingTerminal: new Map(pendingTerminal), diagnostics: [...qaDiagnostics] };
   const signalCheck = async (name, action) => { await action(); passed++; console.log(`PASS ${name}`); };
   try {
     root = signalTemp; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
@@ -865,6 +894,27 @@ async function pureControls() {
       assert.equal(owned.get(python.pid), python);
     });
     owned.delete(python.pid);
+    await signalCheck('OS terminal state is parsed and never treated as a reaped PID', async () => {
+      const rows = parseProcessSnapshot('52 50 50 501 Mon Nov 16 03:00:00 2026 Z <defunct>\n53 50 50 501 Mon Nov 16 03:00:00 2026 S /qa/path with spaces\n');
+      assert.equal(rows[0].state, 'Z'); assert.equal(rows[0].executable, '<defunct>'); assert.equal(rows[1].executable, '/qa/path with spaces');
+      const record = { ...gui, pid: 52, ppid: gui.pid, birth: 'terminal-birth', executable: join(root, 'python3'), directChild: false };
+      const terminal = { ...record, state: 'Z', executable: '<defunct>' }; owned.set(record.pid, record);
+      let signals = 0;
+      const outcome = await signalOwnedProcess(record, 'SIGTERM', { readProcesses: async () => [terminal], sendSignal: () => { signals++; return true; } });
+      assert.equal(outcome.kind, 'terminal-awaiting-reap'); assert.equal(signals, 0); assert.equal(owned.get(record.pid), record);
+      await observeOwnedProcesses([terminal], 'pure-terminal'); assert.equal(owned.get(record.pid), record);
+      assert.equal(residualProcesses([terminal]).length, 1); assert.equal(residualProcesses([]).length, 0);
+      for (const change of [{ state: 'S' }, { birth: 'different-birth' }, { uid: qaUid + 1 }, { executable: '/foreign-image' }]) {
+        signals = 0;
+        const rejected = await signalOwnedProcess(record, 'SIGTERM', { readProcesses: async () => [{ ...terminal, ...change }], sendSignal: () => { signals++; return true; } });
+        assert.equal(rejected.kind, 'rejected'); assert.equal(signals, 0);
+      }
+      const firstSeen = { ...terminal, pid: 53, birth: 'first-seen-terminal' };
+      await observeOwnedProcesses([firstSeen], 'pure-terminal-first-seen');
+      assert.equal(owned.has(firstSeen.pid), false); assert.equal(pendingTerminal.has(firstSeen.pid), true);
+      assert.equal(residualProcesses([firstSeen]).length, 1);
+      owned.delete(record.pid); pendingTerminal.clear();
+    });
     await signalCheck('a signal failure remains a cleanup failure', async () => {
       const outcome = await signalOwnedProcess(gui, 'SIGTERM', { readProcesses: async () => [gui], sendSignal: () => { throw Object.assign(new Error('fixture-denied'), { code: 'EPERM' }); } });
       assert.equal(outcome.failure.reason, 'EPERM');
@@ -883,6 +933,7 @@ async function pureControls() {
   } finally {
     ({ root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest } = savedSignalState);
     owned.clear(); for (const [pid, record] of savedSignalState.owned) owned.set(pid, record);
+    pendingTerminal.clear(); for (const [pid, record] of savedSignalState.pendingTerminal) pendingTerminal.set(pid, record);
     qaDiagnostics.splice(0, qaDiagnostics.length, ...savedSignalState.diagnostics);
     rmSync(signalTemp, { recursive: true, force: true });
   }
