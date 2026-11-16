@@ -44,11 +44,16 @@ $shortcuts = @((Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'xi
 # UUID.v5(com.xiaok.desktop, electron-builder namespace), fixed by the 677 build inputs.
 $guid = 'e915e417-4c7f-5880-944a-980493960d29'
 $regNames = @("Software\$guid", "Software\Microsoft\Windows\CurrentVersion\Uninstall\$guid")
+$publicationToken = $env:GH_TOKEN
 $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+foreach ($tokenName in @('GH_TOKEN','GITHUB_TOKEN')) {
+  Remove-Item -LiteralPath "Env:$tokenName" -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath "Env:$tokenName") { throw 'Publication credential remains in child environment' }
+}
 $receipt = [ordered]@{ status = 'FAIL'; productReleaseSHA = $FullSHA; qaSourceSHA = $env:GITHUB_SHA;
   version = $Version; tag = $Tag; repository = $repo; runID = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT;
   scriptSHA256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant(); root = $root;
-  expectedReleaseState = $ExpectedReleaseState;
+  expectedReleaseState = $ExpectedReleaseState; childPublicationCredentialRemoved = $true;
   claim = "Published 1.6.2 to $ExpectedReleaseState candidate 1.6.4 NSIS overwrite upgrade and installed Kimi smoke; no automatic updater, full historical migration, live model, full UI or Native qualification" }
 function Save-Json($Name, $Value) { $Value | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $evidence $Name) -Encoding utf8 }
 function Hash($Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -64,6 +69,7 @@ function Assert-NoReparse([string]$Path) {
 }
 function Api([string]$Suffix) {
   if ($Suffix -notmatch '^/(releases|git)/[A-Za-z0-9_./-]+$') { throw 'Unexpected GitHub API suffix' }
+  Write-Host "GitHub GET $Suffix"
   Invoke-RestMethod -Uri "https://api.github.com/repos/$repo$Suffix" -Headers $headers -Method Get
 }
 function Resolve-TagCommit {
@@ -219,6 +225,9 @@ finally {
     }
   } catch { $errors.Add("final observation: $($_.Exception.ToString())") }
   foreach ($n in $envNames) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n], 'Process') }
+  foreach ($file in @(Get-ChildItem -LiteralPath $evidence -Recurse -File)) {
+    if ([IO.File]::ReadAllText($file.FullName).Contains($publicationToken)) { $errors.Add('Publication credential found in evidence; publication must stop') }
+  }
   $receipt.errors = @($errors); $receipt.steps = @($records); $receipt.observedOwnedIdentities = @($owned.Values); $receipt.forcedStops = @($forcedStops)
   $receipt.finishedUTC = [DateTime]::UtcNow.ToString('o')
   if ($errors.Count -eq 0) { $receipt.status = 'PASS' }

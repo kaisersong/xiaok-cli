@@ -28,10 +28,10 @@ permissions:
   contents: read
 jobs:
   installed-path-qa:
-    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch' && inputs.expectedReleaseState == 'published'
     runs-on: windows-2022
     timeout-minutes: 20
-    steps:
+    steps: &installed_qa_steps
       - uses: actions/checkout@v4
         with:
           repository: kaisersong/xiaok-cli
@@ -56,3 +56,10 @@ jobs:
           name: windows-real-upgrade-qa-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/xiaok-installed-qa-${{ github.run_id }}-${{ github.run_attempt }}/evidence/
           if-no-files-found: warn
+  draft-installed-path-qa:
+    if: github.repository == 'kaisersong/xiaok-cli' && github.event_name == 'workflow_dispatch' && inputs.expectedReleaseState == 'draft'
+    permissions:
+      contents: write
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps: *installed_qa_steps

@@ -44,6 +44,7 @@ function Stop-JoinOwned {
   if ($drainErrors.Count) { throw ($drainErrors -join "`n") }
 }
 function Run-Owned([string]$Phase, [string]$Exe, [string]$Arguments) {
+  if ((Test-Path Env:GH_TOKEN) -or (Test-Path Env:GITHUB_TOKEN)) { throw 'Refusing to pass publication credentials to installed processes' }
   if (-not (Is-OwnedPath $Exe)) { throw 'Executable outside owned root' }
   Assert-NoReparse $Exe
   $start = @{ FilePath = $Exe; PassThru = $true; WorkingDirectory = $root; RedirectStandardOutput = (Join-Path $evidence "$Phase.stdout.log"); RedirectStandardError = (Join-Path $evidence "$Phase.stderr.log") }
