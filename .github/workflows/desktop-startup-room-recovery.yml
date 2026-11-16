@@ -99,7 +99,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.22.0'
-      - name: Retain the absolute KSwarm test child executable
+      - name: Retain KSwarm child executable
         id: ks_test_node
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'executable=' + process.execPath + '\n')"
       - uses: actions/setup-node@v4
@@ -109,13 +109,13 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Keep client Node and KSwarm test child Node separate
+      - name: Separate client and KSwarm Node
         env:
           KS_TEST_NODE_EXECUTABLE: ${{ steps.ks_test_node.outputs.executable }}
         run: node -e "const fs=require('node:fs'),path=require('node:path');const child=process.env.KS_TEST_NODE_EXECUTABLE;if(!child||!path.isAbsolute(child))throw Error('ks_test_node_missing');fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE='+child+'\n');console.log(JSON.stringify({clientNode:process.versions.node,clientExecutable:process.execPath,ksChildExecutable:child}));"
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
-      - name: Install the locked Electron runtime for real module imports
+      - name: Install locked Electron for module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
       - name: Prepare ordinary Windows owner security
@@ -198,6 +198,7 @@ jobs:
           tests/main/assistant-inbox-service.test.ts
           tests/main/context-continuity-inventory-scale.test.ts
           tests/main/context-continuity-inspection-batch.test.ts
+          tests/main/context-continuity-sdk-custody.test.ts
 
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop
@@ -346,7 +347,7 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
-      - name: Install the locked Electron runtime for real module imports
+      - name: Install locked Electron for module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
       - name: Prepare ordinary Windows owner security
