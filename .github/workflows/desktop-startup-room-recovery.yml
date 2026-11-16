@@ -140,13 +140,22 @@ jobs:
           .test-dist/tests/utils/sqlite-parsing-copy.test.js
           .test-dist/tests/package/builtin-sqlite-contract.test.js
           .test-dist/tests/ai/runtime/sqlite-session-store.test.js
-          .test-dist/tests/ai/runtime/session-execution-authority.test.js
           .test-dist/tests/ai/runtime/file-session-store-crash-lock.test.js
           .test-dist/tests/ai/memory/migrations.test.js
           .test-dist/tests/ai/memory/retrieval.test.js
           .test-dist/tests/runtime/verification/native-sqlite-census.test.js
-          .test-dist/tests/runtime/verification/registration-intrinsic-fences.test.js
           .test-dist/tests/runtime/verification/storage-budget.test.js
+      - name: POSIX durable execution and native registration fences
+        if: runner.os != 'Windows'
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ai/runtime/session-execution-authority.test.js
+          .test-dist/tests/runtime/verification/registration-intrinsic-fences.test.js
+      - name: Windows unsupported directory durability must refuse authority
+        if: runner.os == 'Windows'
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ai/runtime/windows-directory-durability-refusal.test.js
       - name: Real host recovery ordering and durable receipts
         run: >
           npm run test:sandbox:run --

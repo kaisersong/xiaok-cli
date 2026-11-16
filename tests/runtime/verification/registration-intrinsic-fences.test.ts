@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
@@ -59,7 +60,7 @@ for(const phase of ['begin','closing','snapshot'] as const)it.each(targets)(`act
  const root=mkdtempSync(join(tmpdir(),'registration-intrinsic-host-')),script=join(root,'probe.mjs');
  try{
   writeFileSync(script,childSource);
-  const child=spawnSync(process.execPath,['--import',createRequire(import.meta.url).resolve('tsx'),script,moduleUrl.href,snapshotUrl.href,privateUrl.href,target,phase],{encoding:'utf8',timeout:4500});
+  const child=spawnSync(process.execPath,['--import',pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href,script,moduleUrl.href,snapshotUrl.href,privateUrl.href,target,phase],{encoding:'utf8',timeout:4500});
   expect(child.status,child.stderr).toBe(0);const proof=JSON.parse(child.stdout.trim());
   const proofRoot=process.env.REGISTRATION_INTRINSIC_PROOF_DIR;if(proofRoot){mkdirSync(proofRoot,{recursive:true});writeFileSync(join(proofRoot,target+'-'+phase+'.json'),JSON.stringify(proof,null,2));}
   expect(proof.cases.length).toBeGreaterThan(0);
@@ -70,7 +71,7 @@ it.each(['globals','WeakMapPrototype'])('refuses WeakMap native-brand replacemen
  const root=mkdtempSync(join(tmpdir(),'registration-intrinsic-brand-')),script=join(root,'probe.mjs');
  try{
   writeFileSync(script,childSource.replace("['Object','Array','String','RegExp','Map','Set','WeakMap','Number','Math','JSON','Reflect']","['WeakMap']"));
-  const child=spawnSync(process.execPath,['--import',createRequire(import.meta.url).resolve('tsx'),script,moduleUrl.href,snapshotUrl.href,privateUrl.href,target,'brand'],{encoding:'utf8',timeout:4500});
+  const child=spawnSync(process.execPath,['--import',pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href,script,moduleUrl.href,snapshotUrl.href,privateUrl.href,target,'brand'],{encoding:'utf8',timeout:4500});
   expect(child.status,child.stderr).toBe(0);const proof=JSON.parse(child.stdout.trim());
   expect(proof.cases.filter((c:any)=>c.error!=='application_registration_changed'||c.returned||c.calls!==0||!c.normalAfterRestoration)).toEqual([]);
  }finally{rmSync(root,{recursive:true,force:true});}
@@ -143,7 +144,7 @@ it.each(['row','schema'] as const)('actual native closing fence refuses a real %
  const root=mkdtempSync(join(tmpdir(),'registration-comparator-host-')),script=join(root,'probe.mjs');
  try{
   writeFileSync(script,liveComparatorChild);
-  const child=spawnSync(process.execPath,['--import',createRequire(import.meta.url).resolve('tsx'),script,moduleUrl.href,privateUrl.href,kind],{encoding:'utf8',timeout:4500});
+  const child=spawnSync(process.execPath,['--import',pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href,script,moduleUrl.href,privateUrl.href,kind],{encoding:'utf8',timeout:4500});
   expect(child.status,child.stderr).toBe(0);const proof=JSON.parse(child.stdout.trim());
   expect(proof).toEqual({error:'application_registration_changed',returned:false,calls:0,restoredRows:[{owner_key:'owner',n:kind==='row'?2:1}]});
  }finally{rmSync(root,{recursive:true,force:true});}

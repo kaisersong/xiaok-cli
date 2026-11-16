@@ -32,8 +32,8 @@ try{artifact=validate(cache);}catch(error){
   console.log('Windows owner security artifact not present on this non-Windows build');process.exit(0);
  }
  const before=sourceHash(),require=createRequire(join(root,'package.json'));
- const result=spawnSync(process.execPath,[require.resolve('node-gyp/bin/node-gyp.js'),'rebuild','--directory',source,'--arch=x64'],{stdio:'inherit',windowsHide:true,timeout:180000});
- if(result.error||result.status!==0||sourceHash()!==before)throw Error('windows_security_compile_failed');
+ const result=spawnSync(process.execPath,[require.resolve('node-gyp/bin/node-gyp.js'),'rebuild','--directory',source,'--arch=x64'],{stdio:'inherit',windowsHide:true,timeout:600000});
+ if(result.error||result.status!==0||sourceHash()!==before)throw Error('windows_security_compile_failed',{cause:{status:result.status,signal:result.signal,error:result.error?.message,sourceChanged:sourceHash()!==before}});
  const bytes=read(join(source,'build/Release',binary),4*1024*1024),manifest={version:1,target:'win32-x64',napi:8,sha256:hash(bytes),sourceSha256:before};
  publish(cache,binary,bytes);publish(cache,json,Buffer.from(JSON.stringify(manifest)+'\n'));artifact=validate(cache);
  }
