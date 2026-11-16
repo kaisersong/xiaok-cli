@@ -42,6 +42,9 @@ function assertNewerVersion(next, previous) {
 }
 const NEW = Object.freeze({ tag: process.env.QA_NEW_TAG, sha: process.env.QA_NEW_SHA,
   release: process.env.QA_NEW_RELEASE_ID, zipSHA256: process.env.QA_NEW_ZIP_SHA256 });
+function userQuitMode(raw) { assert(raw === undefined || raw === 'false' || raw === 'true', 'invalid_user_quit_mode'); return raw === 'true'; }
+const GRACEFUL_USER_QUIT = userQuitMode(process.env.QA_GRACEFUL_USER_QUIT);
+const profileEntryLimit = graceful => graceful ? 100_000 : 20_000;
 const START = performance.now();
 const DEADLINE = START + 25 * 60_000; // New QA budget, not a product timeout change.
 const qaUid = process.getuid?.();
@@ -203,7 +206,7 @@ function profileInventory() {
   const roots = [...cacheRoots(), join(qaHome, 'Library', 'LaunchAgents', `${APP_ID}.ShipIt.plist`), join(qaHome, '.xiaok'), join(qaHome, 'Library', 'Application Support', 'xiaok')];
   const entries = [];
   function walk(file) {
-    assert(entries.length < 20_000, 'profile_inventory_bound');
+    assert(entries.length < profileEntryLimit(GRACEFUL_USER_QUIT), 'profile_inventory_bound');
     if (!existsSync(file)) return;
     const st = lstatSync(file); assert(st.uid === qaUid, 'foreign_profile_owner');
     entries.push({ path: file, inode: st.ino, dev: st.dev, mode: st.mode, size: st.size, kind: st.isSymbolicLink() ? 'symlink' : st.isDirectory() ? 'directory' : 'file' });
@@ -356,6 +359,41 @@ function relaunchedGui(applications, previous, runnerPID) {
   return row;
 }
 
+function gracefulQuitTargetMatches(expected, current, application) {
+  return sameProcessIdentity(expected, current) && Boolean(application && !application.terminated &&
+    application.pid === expected.pid && application.bundleIdentifier === expected.bundleIdentifier &&
+    application.bundleURL === expected.bundle && application.executableURL === expected.executable);
+}
+function parseQuitProcessRow(text) {
+  const match = /^\s*(\d+)\s+(\d+)\s+((?:\S+\s+){4}\S+)\s+(.+)$/.exec(text.trim());
+  if (!match || text.trim().includes('\n')) throw new Error('quit_process_snapshot_shape');
+  return { pid: Number(match[1]), uid: Number(match[2]), birth: match[3], executable: match[4] };
+}
+async function requestGracefulUserQuit(identity) {
+  assert(GRACEFUL_USER_QUIT && installedRequest && sameProcessIdentity(identity, owned.get(identity.pid)), 'user_quit_not_authorized');
+  const expected = { ...identity, bundle: app, bundleIdentifier: APP_ID };
+  const source = `ObjC.import('AppKit'); ObjC.import('Foundation');
+${sameProcessIdentity.toString()}
+${gracefulQuitTargetMatches.toString()}
+${parseQuitProcessRow.toString()}
+const expected = ${JSON.stringify(expected)};
+const applications = $.NSWorkspace.sharedWorkspace.runningApplications, matching = [];
+for (let i = 0; i < applications.count; i++) { const a = applications.objectAtIndex(i); if (Number(a.processIdentifier) === expected.pid) matching.push(a); }
+if (matching.length !== 1) throw new Error('user_quit_app_not_unique');
+const application = matching[0];
+const task = $.NSTask.alloc.init, pipe = $.NSPipe.pipe;
+task.launchPath = '/bin/ps'; task.arguments = ['-ww', '-p', String(expected.pid), '-o', 'pid=,uid=,lstart=,comm=']; task.standardOutput = pipe;
+task.launch; const data = pipe.fileHandleForReading.readDataToEndOfFile; task.waitUntilExit;
+if (Number(task.terminationStatus) !== 0) throw new Error('user_quit_ps_failed');
+const current = parseQuitProcessRow(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding)));
+const facts = { pid: Number(application.processIdentifier), terminated: Boolean(application.isTerminated), bundleIdentifier: ObjC.unwrap(application.bundleIdentifier), bundleURL: ObjC.unwrap(application.bundleURL.path), executableURL: ObjC.unwrap(application.executableURL.path) };
+if (!gracefulQuitTargetMatches(expected, current, facts)) throw new Error('user_quit_identity_mismatch');
+const accepted = Boolean(application.terminate);
+JSON.stringify({ accepted, current, application: facts, forced: false, signalSent: false });`;
+  const receipt = await command('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source], { timeout: 5000 });
+  const result = JSON.parse(receipt.out); assert(result.accepted === true && result.forced === false && result.signalSent === false, 'user_quit_not_accepted');
+  event('normal-user-quit-requested', result);
+}
 async function monitor() {
   while (!monitorStopped) { try { await sample('monitor'); } catch (e) { monitorError = e; break; } await delay(250); }
 }
@@ -524,9 +562,6 @@ async function cleanup() {
   if (app) { try { await sample('cleanup'); } catch (e) { failures.push({ reason: e.message }); } }
   const after = await processes();
   const residual = after.filter(p => owned.has(p.pid));
-  const facts = { failures, residual, ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
-    profile: profileInventory(), externalApplications: externalApplications() };
-  save('cleanup.json', facts);
   const shipItLogs = [];
   for (const name of ['ShipIt_stdout.log', 'ShipIt_stderr.log']) {
     const file = join(qaHome, 'Library', 'Caches', `${APP_ID}.ShipIt`, name);
@@ -535,6 +570,11 @@ async function cleanup() {
     const bytes = readFileSync(file); writeFileSync(join(evidence, name), bytes, { mode: 0o600 }); shipItLogs.push({ file, exists: true, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
   save('shipit-log-capture.json', shipItLogs);
+  let profile = [];
+  try { profile = profileInventory(); } catch (error) { failures.push({ owner: 'profile-inventory', reason: error.message }); }
+  const facts = { failures, residual, ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
+    profile, externalApplications: externalApplications() };
+  save('cleanup.json', facts);
   assert(failures.length === 0 && residual.length === 0 && children.size === 0, 'owned_cleanup_unconfirmed');
   if (oldChild) assert(oldChild.qaClosed, 'direct_app_not_waited_closed');
   assert(externalApplications().every(p => !p.exists), 'external_application_path_changed');
@@ -597,6 +637,14 @@ async function main() {
     try { const response = await oldCDP.evaluate('window.xiaokDesktop.quitAndInstall()'); event('install-ipc-response', { response }); assert(!response?.status || ['pending', 'already_handed_off'].includes(response.status), 'install_ipc_rejected'); }
     catch (e) { if (e.message !== 'cdp_closed') throw e; event('install-ipc-disconnected-during-quit', {}); }
   } finally { oldCDP.close(); }
+  if (GRACEFUL_USER_QUIT) {
+    await waitFor(async () => {
+      await sample('squirrel-staged-before-user-quit');
+      return [...owned.values()].some(record => record.shipIt && record.observedAfterInstallRequest) &&
+        readFileSync(join(evidence, 'app.stdout'), 'utf8').includes('nativeUpdater.update-downloaded');
+    }, 60_000, 'native_squirrel_stage_not_observed');
+    await requestGracefulUserQuit(oldIdentity);
+  }
   await waitFor(async () => oldChild.qaClosed && oldChild.exitCode === 0, 120_000, 'old_app_did_not_exit');
   const restarted = await waitFor(async () => { await sample('relaunch'); return relaunchedGui(latestGuiApplications, oldIdentity, process.pid); }, 180_000, 'nsworkspace_did_not_relaunch_same_path');
   assert(restarted.ppid !== process.pid && restarted.birth !== oldIdentity.birth, 'not_os_owned_new_launch'); event('os-owned-relaunch-observed', { ...restarted, directlySpawnedByRunner: false, reapClaim: false });
@@ -648,7 +696,7 @@ finally {
   if (evidence) {
     try { await cleanup(); } catch (e) { primary ??= { message: e.message, stack: e.stack }; event('cleanup-failed', { message: e.message }); }
     if (qaDiagnostics.length && !primary) primary = { message: 'qa_diagnostic_evidence_unconfirmed' };
-    save('RESULT.json', { oldVersion: OLD.version, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, qaDiagnostics, status: primary ? 'FAIL' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', failure: primary ?? null, old: OLD, new: NEW, qaSourceBinding: qaSourceBinding ?? null, facts: resultFacts,
+    save('RESULT.json', { oldVersion: OLD.version, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT, qaDiagnostics, status: primary ? 'FAIL' : GRACEFUL_USER_QUIT ? 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE_AFTER_USER_QUIT' : 'PASS_REAL_SIGNED_MAC_SHIPIT_UPGRADE', gracefulUserQuitMode: GRACEFUL_USER_QUIT, failure: primary ?? null, old: OLD, new: NEW, qaSourceBinding: qaSourceBinding ?? null, facts: resultFacts,
       elapsedSeconds: (performance.now() - START) / 1000, noProductBuildOrCopyReplacement: true, noFeedOverride: true, noModelSDKCUAGoalTask: true,
       profileDisposition: 'Retained until hosted disposable VM destruction; artifacts contain evidence only, not app binaries or caches.',
       notClaimed: ['Windows', 'Goal14', 'CUA3', 'held native qualification', 'signing or publication', 'reap of launchd-owned processes'] });
@@ -660,9 +708,28 @@ if (primary) { console.error(primary.message); process.exitCode = 1; }
 async function pureControls() {
   let passed = 0;
   const check = (name, action) => { action(); passed++; console.log(`PASS ${name}`); };
+  check('graceful user Quit is explicit opt-in and stock default remains false', () => {
+    assert.equal(userQuitMode(undefined), false); assert.equal(userQuitMode('false'), false); assert.equal(userQuitMode('true'), true);
+    assert.throws(() => userQuitMode('yes'), /invalid_user_quit_mode/);
+    assert.equal(profileEntryLimit(false), 20_000); assert.equal(profileEntryLimit(true), 100_000);
+  });
   const path = '/qa/installed/xiaok.app', exe = `${path}/Contents/MacOS/xiaok`, uid = 501;
   const old = { pid: 10, uid, birth: 'old-birth', executable: exe }, child = { ...old, pid: 11, birth: 'child-birth' };
   const registration = { pid: 10, bundleIdentifier: APP_ID, bundleURL: path, executableURL: exe, terminated: false };
+  check('normal user Quit requires exact process and AppKit application identities', () => {
+    const expected = { ...old, bundle: path, bundleIdentifier: APP_ID };
+    assert.equal(gracefulQuitTargetMatches(expected, old, registration), true);
+    for (const [key, value] of [['pid', 99], ['uid', 999], ['birth', 'new'], ['executable', '/foreign']]) {
+      assert.equal(gracefulQuitTargetMatches(expected, { ...old, [key]: value }, registration), false);
+    }
+    for (const [key, value] of [['pid', 99], ['terminated', true], ['bundleIdentifier', 'foreign'], ['bundleURL', '/foreign'], ['executableURL', '/foreign']]) {
+      assert.equal(gracefulQuitTargetMatches(expected, old, { ...registration, [key]: value }), false);
+    }
+    const row = parseQuitProcessRow(' 10 501 Mon Nov 16 03:00:00 2026 /qa/app with spaces\n');
+    assert.equal(row.executable, '/qa/app with spaces'); assert.equal(row.birth, 'Mon Nov 16 03:00:00 2026');
+    assert.throws(() => parseQuitProcessRow('10 501 bad\n11 501 duplicate'), /quit_process_snapshot_shape/);
+  });
+
   const choose = (apps, before = [old, child], after = before) => selectGuiApplications(apps, before, after, { uid, bundle: path, executable: exe });
   await (async () => {
     const temporary = mkdtempSync(join(tmpdir(), 'xiaok-qa-owned-pure-'));

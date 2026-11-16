@@ -7,6 +7,11 @@ on:
         type: boolean
         default: false
         required: true
+      graceful_user_quit:
+        description: Separate workaround path; normal user Quit after native Squirrel staging, never a forced exit
+        type: boolean
+        default: false
+        required: true
       old_version:
         description: Fixed published old version; each selection is an independent QA run
         type: choice
@@ -57,6 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           QA_OLD_VERSION: ${{ inputs.old_version }}
+          QA_GRACEFUL_USER_QUIT: ${{ inputs.graceful_user_quit }}
           QA_NEW_TAG: ${{ inputs.new_tag }}
           QA_NEW_SHA: ${{ inputs.new_sha }}
           QA_NEW_RELEASE_ID: ${{ inputs.new_release_id }}
