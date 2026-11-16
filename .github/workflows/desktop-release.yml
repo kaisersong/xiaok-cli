@@ -25,18 +25,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
-      - name: Validate selected release tag
+      - name: Validate tag
         run: node -e 'if(!/^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(process.env.RELEASE_TAG||""))process.exit(1)'
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
-      - name: Resolve one immutable release source
+      - name: Resolve source
         id: identity
         run: node scripts/desktop-release-identity.mjs resolve
-      - name: Fail when cross-platform and release sibling pins drift
+      - name: Check sibling pins
         run: node scripts/check-desktop-sibling-pins.mjs
-      - name: Create Draft GitHub Release
+      - name: Create draft
         run: node scripts/desktop-release-identity.mjs draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,36 +58,36 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Generate source provenance
+      - name: Source provenance
         shell: bash
         run: &source_provenance |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=normal)"
           node scripts/set-build-info.mjs release
-      - name: Prepare node-gyp headers (retrying download, cached)
+      - name: Node headers
         uses: ./.github/actions/node-headers
-      - name: Install root dependencies
+      - name: Root dependencies
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
-      - name: Install desktop dependencies
+      - name: Desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
-      - name: Prepare locked bundled Yunzhijia binary before packaging
+      - name: Prepare Yunzhijia
         working-directory: desktop
         run: node scripts/prepare-packaged-yzj-cli.cjs
-      - name: Verify prepared bundled CLI lifecycle
+      - name: CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
-      - name: Prepare pinned ordinary Broker runtime
+      - name: Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-      - name: Test packaged runtime dependency gate
+      - name: Runtime gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
-      - name: Verify native SQLite binding loads
+      - name: SQLite binding
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
-      - name: Clone desktop sidecar repositories
-        run: &clone_sidecars |
+      - name: Clone sidecars
+        run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
           git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
@@ -98,10 +98,10 @@ jobs:
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
       - uses: ./.github/actions/install-desktop-sidecars
-      - name: Build report-renderer bundle
+      - name: Build report renderer
         shell: bash
         run: bash .github/scripts/build-report-renderer.sh
-      - name: Build canvas frontend and MCP bundle
+      - name: Build canvas
         shell: bash
         run: bash .github/scripts/build-canvas-bundles.sh
       - name: Download Python wheels (macOS)
@@ -123,12 +123,12 @@ jobs:
       - name: Smoke test report-renderer
         run: |
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
-      - name: Vendor self-contained provider runtimes (macOS)
+      - name: Vendor Mac runtimes
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64 --verify
-      - name: Prepare verified artifact export helper
+      - name: Artifact helper
         env:
           XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
         run: |
@@ -146,7 +146,7 @@ jobs:
         run: cd desktop && npm run build
         env:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
-      - name: Validate macOS signing secrets
+      - name: Check signing secrets
         shell: bash
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -156,7 +156,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
         run: bash --noprofile --norc -e -o pipefail .github/scripts/check-macos-signing-secrets.sh
-      - name: Write Apple notarization API key
+      - name: Notary key
         shell: bash
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -171,7 +171,7 @@ jobs:
           key_path.write_bytes(base64.b64decode(os.environ["APPLE_API_KEY_P8_BASE64"]))
           key_path.chmod(0o600)
           PY
-      - name: Import macOS signing certificate
+      - name: Import certificate
         shell: bash
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -195,13 +195,13 @@ jobs:
           security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
           security find-identity -v -p codesigning "$keychain_path"
           echo "MACOS_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-      - name: Sign macOS bundled wheel binaries
+      - name: Sign wheels
         run: |
           python3 scripts/sign-macos-wheel-binaries.py \
             ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels \
             --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
             --keychain "$MACOS_SIGNING_KEYCHAIN"
-      - name: Materialize reviewed Mac distribution hook
+      - name: Load distribution hook
         run: git show "${GITHUB_WORKFLOW_SHA}:.github/scripts/macos-update-permissions.cjs" > "$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
       - name: Package signed macOS app
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false -c.afterPack="$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
@@ -227,9 +227,9 @@ jobs:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Verify ZIP owner-write permissions
+      - name: ZIP permissions
         run: python3 -c 'import glob,stat,zipfile; p=glob.glob("desktop/release/*-mac.zip"); assert len(p)==1; z=zipfile.ZipFile(p[0]); denied=[e.filename for e in z.infolist() if (stat.S_ISREG(e.external_attr>>16) or stat.S_ISDIR(e.external_attr>>16)) and not (e.external_attr>>16)&0o200]; assert not denied,denied; print("All ZIP regular files/directories permit owner quarantine removal")'
-      - name: Verify macOS signature and notarization
+      - name: Verify signature and ticket
         shell: bash
         run: |
           app_path="desktop/release/mac-arm64/xiaok.app"
@@ -237,7 +237,7 @@ jobs:
           codesign -dv --verbose=4 "$app_path" 2>&1 | tee "$RUNNER_TEMP/xiaok-codesign.txt"
           grep "TeamIdentifier=Y9YR86UG94" "$RUNNER_TEMP/xiaok-codesign.txt"
           xcrun stapler validate "$app_path"
-      - name: Verify packaged source identity
+      - name: ASAR source identity
         shell: bash
         env:
           PROVENANCE_ASAR: desktop/release/mac-arm64/xiaok.app/Contents/Resources/app.asar
@@ -255,7 +255,7 @@ jobs:
             console.log(JSON.stringify(BUILD_INFO));
           })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
-      - name: Upload to GitHub Release
+      - name: Upload assets
         run: node scripts/desktop-release-identity.mjs upload-mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -276,54 +276,63 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Generate source provenance
+      - name: Source provenance
         shell: bash
         run: *source_provenance
-      - name: Prepare node-gyp headers (retrying download, cached)
+      - name: Node headers
         uses: ./.github/actions/node-headers
-      - name: Compile Windows verification namespace helper
+      - name: Compile Windows helper
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
           node scripts/verification/build-windows-absence.mjs --target x64
           node scripts/verification/test-windows-absence.mjs
-      - name: Install root dependencies
+      - name: Root dependencies
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
-      - name: Install desktop dependencies
+      - name: Desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
-      - name: Prepare locked bundled Yunzhijia binary before packaging
+      - name: Prepare Yunzhijia
         working-directory: desktop
         run: node scripts/prepare-packaged-yzj-cli.cjs
-      - name: Verify prepared bundled CLI lifecycle
+      - name: CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
-      - name: Prepare pinned ordinary Broker runtime
+      - name: Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-      - name: Test packaged runtime dependency gate
+      - name: Runtime gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
-      - name: Verify native SQLite binding loads
+      - name: SQLite binding
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
-      - name: Clone desktop sidecar repositories
-        run: *clone_sidecars
+      - name: Clone sidecars
+        run: |
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
+          git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git -C ../kswarm fetch --depth 1 origin 9f969b7912cc94e660643d390184bd0c6f00058f
+          git -C ../kswarm checkout --detach FETCH_HEAD
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
+          git -C ../intent-broker checkout --detach FETCH_HEAD
       - uses: ./.github/actions/install-desktop-sidecars
-      - name: Build report-renderer bundle
+      - name: Build report renderer
         shell: bash
         run: bash .github/scripts/build-report-renderer.sh
-      - name: Build canvas frontend and MCP bundle
+      - name: Build canvas
         shell: bash
         run: bash .github/scripts/build-canvas-bundles.sh
       - name: Download Python wheels (Windows)
         run: ./.github/scripts/download-windows-slide-wheels.ps1
-      - name: Vendor self-contained provider runtimes (Windows)
+      - name: Vendor Windows runtimes
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
-      - name: Prepare verified artifact export helper
+      - name: Artifact helper
         env:
           XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
         run: |
@@ -339,12 +348,12 @@ jobs:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
-      - name: Verify packaged source identity
+      - name: ASAR source identity
         shell: bash
         env:
           PROVENANCE_ASAR: desktop/release/win-unpacked/resources/app.asar
         run: *verify_packaged_provenance
-      - name: Run packaged Windows Kimi K3 smoke
+      - name: Windows Kimi smoke
         shell: pwsh
         run: |
           $smokeRoot = Join-Path $env:RUNNER_TEMP 'xiaok-kimi-packaged-smoke'
@@ -368,7 +377,7 @@ jobs:
             throw 'Packaged Kimi smoke did not write its result'
           }
           node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
-      - name: Upload to GitHub Release
+      - name: Upload assets
         run: node scripts/desktop-release-identity.mjs upload-windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -385,7 +394,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
-      - name: Verify draft desktop updater release assets
+      - name: Verify draft assets
         run: node scripts/desktop-release-identity.mjs verify-draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
