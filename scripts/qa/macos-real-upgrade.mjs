@@ -51,6 +51,9 @@ const qaUid = process.getuid?.();
 const qaHome = homedir();
 const owned = new Map();
 const pendingTerminal = new Map();
+const pendingComm = new Map();
+const pendingChildren = new Map();
+let acceptedUserQuit = false;
 const children = new Set();
 let root, evidence, app, appExecutable, oldChild, oldIdentity, monitorPromise;
 let monitorStopped = false, monitorError, latestGuiApplications = [], installedRequest = false;
@@ -210,7 +213,7 @@ function knownTerminalSnapshot(previous, current) {
   return Boolean(previous && current && isAbsolute(previous.executable) && previous.pid === current.pid &&
     previous.uid === current.uid && previous.birth === current.birth && terminalPlaceholder(current));
 }
-function residualProcesses(rows) { return rows.filter(row => owned.has(row.pid) || pendingTerminal.has(row.pid)); }
+function residualProcesses(rows) { return rows.filter(row => owned.has(row.pid) || pendingTerminal.has(row.pid) || pendingComm.has(row.pid) || pendingChildren.has(row.pid)); }
 function cacheRoots() {
   const base = join(qaHome, 'Library', 'Caches');
   return existsSync(base) ? readdirSync(base).filter(n => /xiaok/i.test(n)).map(n => join(base, n)) : [];
@@ -227,13 +230,26 @@ function profileInventory() {
   }
   roots.forEach(walk); return entries;
 }
-async function observeOwnedProcesses(rows, phase, { readProcesses = processes } = {}) {
+function postQuitUnconfirmedImage(previous, current, context) {
+  return Boolean(context.graceful === true && context.accepted === true && context.installRequested === true &&
+    previous && current && isAbsolute(previous.executable) && inside(app, previous.executable) &&
+    previous.pid === current.pid && previous.uid === current.uid && previous.birth === current.birth &&
+    typeof current.state === 'string' && /^[RSIUT]/.test(current.state) &&
+    current.executable === `(${basename(previous.executable)})`);
+}
+async function observeOwnedProcesses(rows, phase, { readProcesses = processes,
+  quitContext = { graceful: GRACEFUL_USER_QUIT, accepted: acceptedUserQuit, installRequested: installedRequest } } = {}) {
   for (const row of rows) {
     if (row.uid !== qaUid || row.pid === process.pid) continue;
-    const inApp = inside(app, row.executable), descendant = owned.has(row.ppid);
+    const inApp = inside(app, row.executable), descendant = owned.has(row.ppid) && !pendingComm.has(row.ppid);
     const inFreshProfile = [join(qaHome, '.xiaok'), join(qaHome, 'Library', 'Application Support', 'xiaok'), join(root, 'user-data')].some(p => inside(p, row.executable));
     const ship = basename(row.executable) === 'ShipIt' && (inApp || inside(join(qaHome, 'Library', 'Caches', `${APP_ID}.ShipIt`), row.executable));
-    if (inApp || descendant || ship || inFreshProfile) {
+    if (!owned.has(row.pid) && pendingComm.has(row.ppid) && !inApp && !ship && !inFreshProfile) {
+      assert(diagnosticEvent('child-of-unconfirmed-image-observed', { current: row, authorityGranted: false,
+        signalAuthorized: false, reaped: false }), 'pending_child_evidence_unconfirmed');
+      pendingChildren.set(row.pid, { ...row }); continue;
+    }
+    if (owned.has(row.pid) || pendingComm.has(row.pid) || inApp || descendant || ship || inFreshProfile) {
       if (terminalPlaceholder(row)) {
         const previous = owned.get(row.pid);
         if (previous && !knownTerminalSnapshot(previous, row)) {
@@ -244,6 +260,7 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes } 
         continue;
       }
       if (!owned.has(row.pid)) {
+        assert(isAbsolute(row.executable), 'new_owned_image_not_absolute');
         if (ship) assert(shipItSHA256 && await fileHash(row.executable) === shipItSHA256, 'shipit_executable_not_original_signed_helper');
         owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid }); event('owned-process-observed', owned.get(row.pid));
       }
@@ -254,10 +271,19 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes } 
           const rechecked = await recheckParenthesizedComm(previous, current, readProcesses);
           if (rechecked.kind === 'absent') continue;
           if (rechecked.kind === 'restored') current = rechecked.current;
+          else if (postQuitUnconfirmedImage(previous, current, quitContext) &&
+              postQuitUnconfirmedImage(previous, rechecked.current, quitContext)) {
+            const observation = { previous, first: current, current: rechecked.current, phase,
+              authorityGranted: false, signalAuthorized: false, terminal: false, reaped: false };
+            if (diagnosticEvent('post-user-quit-image-unconfirmed', observation)) {
+              pendingComm.set(row.pid, observation); continue;
+            }
+          }
         }
         const matches = sameProcessIdentity(previous, current);
         if (!matches) identityConflict(previous, current, phase, 'owned_pid_identity_changed');
         assert(matches, 'owned_pid_identity_changed');
+        pendingComm.delete(row.pid);
       }
     }
   }
@@ -414,6 +440,7 @@ const accepted = Boolean(application.terminate);
 JSON.stringify({ accepted, current, application: facts, forced: false, signalSent: false });`;
   const receipt = await command('/usr/bin/osascript', ['-l', 'JavaScript', '-e', source], { timeout: 5000 });
   const result = JSON.parse(receipt.out); assert(result.accepted === true && result.forced === false && result.signalSent === false, 'user_quit_not_accepted');
+  acceptedUserQuit = true;
   event('normal-user-quit-requested', result);
 }
 async function monitor() {
@@ -601,7 +628,7 @@ async function cleanup() {
   save('shipit-log-capture.json', shipItLogs);
   let profile = [];
   try { profile = profileInventory(); } catch (error) { failures.push({ owner: 'profile-inventory', reason: error.message }); }
-  const facts = { failures, residual, terminalAwaitingReapObserved: [...pendingTerminal.values()], ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
+  const facts = { failures, residual, terminalAwaitingReapObserved: [...pendingTerminal.values()], imageUnconfirmedObservations: [...pendingComm.values()], unconfirmedParentChildren: [...pendingChildren.values()], ...directAppExitFacts(oldChild), adoptedProcessesReapedByRunner: false,
     profile, externalApplications: externalApplications() };
   save('cleanup.json', facts);
   assert(failures.length === 0 && residual.length === 0 && children.size === 0, 'owned_cleanup_unconfirmed');
@@ -828,7 +855,7 @@ async function pureControls() {
 
   const signalTemp = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-signal-pure-'));
   const savedSignalState = { root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest,
-    owned: new Map(owned), pendingTerminal: new Map(pendingTerminal), diagnostics: [...qaDiagnostics] };
+    owned: new Map(owned), pendingTerminal: new Map(pendingTerminal), pendingComm: new Map(pendingComm), pendingChildren: new Map(pendingChildren), acceptedUserQuit, diagnostics: [...qaDiagnostics] };
   const signalCheck = async (name, action) => { await action(); passed++; console.log(`PASS ${name}`); };
   try {
     root = signalTemp; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
@@ -893,6 +920,71 @@ async function pureControls() {
       await assert.rejects(observeOwnedProcesses([parenthesized], 'pure-reread', { readProcesses: async () => [parenthesized] }), /owned_pid_identity_changed/);
       assert.equal(owned.get(python.pid), python);
     });
+    const quittingChild = { ...gui, pid: 54, ppid: gui.pid, birth: 'quitting-child', state: 'R<', directChild: false };
+    const unknownQuittingChild = { ...quittingChild, state: 'S<', executable: '(xiaok)' };
+    const quitContext = { graceful: true, accepted: true, installRequested: true };
+    owned.set(quittingChild.pid, quittingChild);
+    await signalCheck('accepted normal Quit observes the exact unconfirmed image without altering ownership or proving absence', async () => {
+      await observeOwnedProcesses([unknownQuittingChild], 'pure-post-quit', { readProcesses: async () => [unknownQuittingChild], quitContext });
+      assert.equal(owned.get(quittingChild.pid), quittingChild);
+      assert.equal(residualProcesses([unknownQuittingChild]).length, 1);
+      assert.equal(residualProcesses([]).length, 0);
+    });
+    await signalCheck('pending image grants no signal and no descendant ownership; present candidates still fail final closure', async () => {
+      let signals = 0;
+      const outcome = await signalOwnedProcess(quittingChild, 'SIGTERM', {
+        readProcesses: async () => [unknownQuittingChild], sendSignal: () => { signals++; return true; },
+      });
+      assert.equal(signals, 0); assert.equal(outcome.kind, 'rejected');
+      const candidate = { ...quittingChild, pid: 55, ppid: quittingChild.pid, executable: '/usr/bin/true' };
+      await observeOwnedProcesses([candidate], 'pure-pending-parent', { quitContext });
+      assert.equal(owned.has(candidate.pid), false); assert.equal(pendingChildren.has(candidate.pid), true);
+      assert.equal(residualProcesses([candidate]).length, 1); assert.equal(residualProcesses([]).length, 0);
+      pendingChildren.delete(candidate.pid);
+    });
+    for (const [name, context] of [
+      ['before normal Quit accepted', { ...quitContext, accepted: false }],
+      ['outside user Quit mode', { ...quitContext, graceful: false }],
+      ['before installation request', { ...quitContext, installRequested: false }],
+    ]) {
+      await signalCheck(`unconfirmed image rejects ${name}`, async () => {
+        await assert.rejects(observeOwnedProcesses([unknownQuittingChild], 'pure-quit-negative', {
+          readProcesses: async () => [unknownQuittingChild], quitContext: context,
+        }), /owned_pid_identity_changed/);
+      });
+    }
+    for (const [name, fresh] of [
+      ['changed UID', { ...unknownQuittingChild, uid: qaUid + 1 }],
+      ['changed birth', { ...unknownQuittingChild, birth: 'reused-pid' }],
+      ['foreign full image', { ...unknownQuittingChild, executable: '/foreign-image' }],
+      ['different basename', { ...unknownQuittingChild, executable: '(xiaok-helper)' }],
+    ]) {
+      await signalCheck(`unconfirmed image fresh snapshot rejects ${name}`, async () => {
+        await assert.rejects(observeOwnedProcesses([unknownQuittingChild], 'pure-fresh-negative', {
+          readProcesses: async () => [fresh], quitContext,
+        }), /owned_pid_identity_changed/);
+        assert.equal(owned.get(quittingChild.pid), quittingChild);
+      });
+    }
+    await signalCheck('first-seen nonterminal pseudo image cannot gain ownership', async () => {
+      const firstSeen = { ...unknownQuittingChild, pid: 56 };
+      await assert.rejects(observeOwnedProcesses([firstSeen], 'pure-first-seen', { quitContext }), /new_owned_image_not_absolute/);
+      assert.equal(owned.has(firstSeen.pid), false);
+    });
+    await signalCheck('only exact restored full image restores the original signal gate; absent never receives a signal', async () => {
+      await observeOwnedProcesses([quittingChild], 'pure-restored', { quitContext });
+      assert.equal(pendingComm.has(quittingChild.pid), false);
+      let signals = 0;
+      const restored = await signalOwnedProcess(quittingChild, 'SIGTERM', {
+        readProcesses: async () => [quittingChild], sendSignal: () => { signals++; return true; },
+      });
+      assert.equal(signals, 1); assert.equal(restored.signal, 'SIGTERM');
+      const absent = await signalOwnedProcess(quittingChild, 'SIGTERM', {
+        readProcesses: async () => [], sendSignal: () => { signals++; return true; },
+      });
+      assert.equal(absent.kind, 'absent'); assert.equal(signals, 1);
+    });
+    owned.delete(quittingChild.pid); pendingComm.delete(quittingChild.pid);
     owned.delete(python.pid);
     await signalCheck('OS terminal state is parsed and never treated as a reaped PID', async () => {
       const rows = parseProcessSnapshot('52 50 50 501 Mon Nov 16 03:00:00 2026 Z <defunct>\n53 50 50 501 Mon Nov 16 03:00:00 2026 S /qa/path with spaces\n');
@@ -934,6 +1026,9 @@ async function pureControls() {
     ({ root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest } = savedSignalState);
     owned.clear(); for (const [pid, record] of savedSignalState.owned) owned.set(pid, record);
     pendingTerminal.clear(); for (const [pid, record] of savedSignalState.pendingTerminal) pendingTerminal.set(pid, record);
+    pendingComm.clear(); for (const [pid, record] of savedSignalState.pendingComm) pendingComm.set(pid, record);
+    pendingChildren.clear(); for (const [pid, record] of savedSignalState.pendingChildren) pendingChildren.set(pid, record);
+    acceptedUserQuit = savedSignalState.acceptedUserQuit;
     qaDiagnostics.splice(0, qaDiagnostics.length, ...savedSignalState.diagnostics);
     rmSync(signalTemp, { recursive: true, force: true });
   }
