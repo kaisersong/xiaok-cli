@@ -1,5 +1,5 @@
 import BuiltinDatabase from '../../utils/builtin-sqlite.js';
-import {DatabaseSync} from 'node:sqlite';
+import {DatabaseSync,StatementSync} from 'node:sqlite';
 import { mkdirSync, lstatSync, realpathSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Database } from '../../utils/builtin-sqlite.js';
@@ -9,6 +9,8 @@ import { syncDirectoryTreeStrict } from '../../utils/atomic-file.js';
 const privateFreeze=Object.freeze;
 const privateCreate=Object.create,privateApply=Reflect.apply,privateDescriptor=Object.getOwnPropertyDescriptor,privatePrototype=Object.getPrototypeOf;
 const NativeDatabase=BuiltinDatabase,originalDatabasePrototype=DatabaseSync.prototype;
+const originalNativePrepare=DatabaseSync.prototype.prepare;
+const originalNativeStatements=privateFreeze(Object.fromEntries([['raw','setReturnArrays'],['get','get'],['all','all'],['columns','columns'],['safeIntegers','setReadBigInts']].map(([key,nativeKey])=>[key!,privateDescriptor(StatementSync.prototype,nativeKey!)!.value as Function])));
 const nativeConnections=new WeakMap<Database,Readonly<{receiver:object;prepare:Function;open:Function;inTransaction:Function;statement:Readonly<Record<string,Function>>;databasePrototype:object;statementPrototype:object;prototypes:readonly {target:object;prototype:object|null}[];fingerprints:readonly Readonly<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>[] }>>();
 /** Only the actual no-verbose private opener mints this code/data-access context. No authority is supplied. */
 export function readPrivateDatabaseNativeAccess(db:Database){return nativeConnections.get(db);}
@@ -25,9 +27,9 @@ export function openPrivateVerificationDatabase(inputRoot: string): Database {
   const options=privateCreate(null);options.timeout=0;options.verbose=null;options.nativeBinding=null;
   const db = new NativeDatabase(path, options);
   const databasePrototype=privatePrototype(db),nativePrototype=originalDatabasePrototype;
-  const prepare=privateDescriptor(nativePrototype,'prepare')!.value as Function;
+  const prepare=originalNativePrepare;
   const probe=privateApply(prepare,db,['SELECT 1']),statementPrototype=privatePrototype(probe);
-  const statement:Record<string,Function>={};for(const [key,nativeKey] of [['raw','setReturnArrays'],['get','get'],['all','all'],['columns','columns'],['safeIntegers','setReadBigInts']])statement[key!]=privateDescriptor(statementPrototype,nativeKey!)!.value;
+  const statement=originalNativeStatements;
   const fingerprints:Array<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>=[];
   const targets=[db,databasePrototype,nativePrototype,statementPrototype];
   for(const target of targets)for(const key of new Set([...Reflect.ownKeys(target),'prepare','pragma','open','close','exec','isOpen','isTransaction']))fingerprints.push({target,key,descriptor:privateDescriptor(target,key)});

@@ -151,6 +151,7 @@ jobs:
           npm run test:sandbox:run --
           .test-dist/tests/ai/runtime/session-execution-authority.test.js
           .test-dist/tests/runtime/verification/registration-intrinsic-fences.test.js
+          .test-dist/tests/runtime/verification/private-database-native-capture.test.js
       - name: Windows unsupported directory durability must refuse authority
         if: runner.os == 'Windows'
         run: >
