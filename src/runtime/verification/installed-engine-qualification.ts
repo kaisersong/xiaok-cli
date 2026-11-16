@@ -9,7 +9,7 @@ import {assertVerificationBlobBudgetDatabase} from './blob-budget.js';
 import {qualificationDisplayDeadline} from './qualification-display-deadline.js';
 import {createMountedEngineProbe} from '../isolated-execution/mounted-engine-probe.js';
 import type {QuiescenceExpectation} from '../isolated-execution/physical-quiescence.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {version as osVersion} from 'node:os';
 import {initializeInstalledMacEngine,assertInstalledMacEngineHandle,assertInstalledEngineDatabase,inspectInstalledMacEngineHandle} from './installed-engine.js';

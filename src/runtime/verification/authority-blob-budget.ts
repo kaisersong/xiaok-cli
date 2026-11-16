@@ -1,6 +1,6 @@
 import {readInstalledCapacityAuthority,claimInstalledCapacityLayer,finishInstalledCapacityLayer,failInstalledCapacityLayer} from './installed-controller.js';
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createVerificationBlobBudget,assertVerificationBlobBudgetAuthority} from './blob-budget.js';
 import {runVerificationTransaction,assertVerificationDatabaseBudget} from './storage-budget.js';
 const authorityBudgets=new WeakMap<object,object>();

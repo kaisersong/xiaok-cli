@@ -2,7 +2,7 @@ import {beforeAll,afterAll,afterEach,expect,it,vi} from 'vitest';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,realpathSync,statSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join,resolve,basename,dirname} from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 // Only installed route lookup is a fixture. Stores, leases, native custody,
 // pager capture and fixed SQLite queries below are the real implementations.
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:()=>({kind:'ordinary'})}));
@@ -12,7 +12,7 @@ import {startProfileSourceCapture,readProfileSourceCapture} from '../../../src/r
 const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-sqlite-sessions-'))),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');
 const cleanups:Array<()=>unknown>=[];afterEach(async()=>{for(const close of cleanups.splice(0).reverse())await close();});
 beforeAll(()=>{
- const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');
+ const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');
  execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);
@@ -34,7 +34,7 @@ async function captured(paths:string[]){
  const sources=paths.map((path,index)=>{const d=statSync(dirname(path),{bigint:true}),s=statSync(path,{bigint:true});return {sourceId:'source-'+index,kind:'sqlite-db' as const,snapshotFormat:'session-sqlite-v1' as const,directory:{canonicalPath:dirname(path),device:String(d.dev),inode:String(d.ino)},database:{basename:basename(path),device:String(s.dev),inode:String(s.ino)}};});
  const owner=await startProfileSourceCapture({uid:process.getuid!(),directoryHelper,sqliteHelper,sources,signal:new AbortController().signal});cleanups.push(()=>owner.close());const token=await owner.capture();return {owner,token};
 }
-function change(path:string,sql:string,unsafe=false){const db=new Database(path);try{if(unsafe)db.unsafeMode(true);db.exec(sql);}finally{db.close();}}
+function change(path:string,sql:string,unsafe=false){const db=new Database(path);try{if(unsafe)(db as any).enableDefensive?.(false);db.exec(sql);}finally{db.close();}}
 it('uses actual all-source capture and retains migrated/live sessions and the original SQLite identity domain',async()=>{
  const {readCapturedSQLiteSessionSources}=await import('../../../src/runtime/verification/captured-sqlite-sessions.js');
  const first=await fixture(true),second=await fixture(),{owner,token}=await captured([first,second]);const before=readProfileSourceCapture(owner,token);

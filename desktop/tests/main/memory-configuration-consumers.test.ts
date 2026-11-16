@@ -3,7 +3,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import { DEFAULT_CONFIG, type Config } from '../../../src/types.js';
 import { normalizeMemoryConfiguration, isCompactionModel } from '../../../src/ai/memory/configuration.js';
 import { LayeredMemoryStore } from '../../../src/ai/memory/layered-store.js';

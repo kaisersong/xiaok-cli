@@ -1,7 +1,7 @@
 import {captureApplicationData} from './application-value-data.js';
 import {assertIntentApplicationEnvelope} from './intent-application-binding.js';
 import {createHash,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {VerificationOwner} from './proof-authority.js';
 import {assertVerificationCompletionCompositionDatabase,type createVerificationCompletionComposition} from './completion-composition.js';
 import {parseApplicationBindingReview,applicationBindingReviewBytes,type ApplicationBindingReview} from './application-binding-review.js';

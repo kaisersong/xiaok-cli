@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -12,7 +13,7 @@ import { createReadTool } from '../../../src/ai/tools/read.js';
 import { mcpTestContext } from '../../support/mcp-cancellation-context.js';
 import { createProviderDisclosureFetch } from '../../../src/runtime/sol-pi/provider-disclosure.js';
 const environmentRoot = join(homedir(), '.cache/xiaok/sol-pi/deepseek-recipe-0.1.1');
-const qualifiedHost = (() => { if (process.platform !== 'darwin' || process.arch !== 'arm64' || !existsSync(join(environmentRoot, 'manifest.json'))) return false; try { const Database = createRequire(import.meta.url)('better-sqlite3'); new Database(':memory:').close(); return true; } catch { return false; } })();
+const qualifiedHost = (() => { if (process.platform !== 'darwin' || process.arch !== 'arm64' || !existsSync(join(environmentRoot, 'manifest.json'))) return false; try { const Database = BuiltinDatabase; new Database(':memory:').close(); return true; } catch { return false; } })();
 const cleanup: Array<() => void> = [];
 afterEach(() => { try { for (const close of cleanup.splice(0).reverse()) close(); } finally { vi.useRealTimers(); } });
 function freshSession() { const session = new AgentSessionState(); session.restoreSnapshot({ ...session.exportSnapshot(), sessionId: randomUUID() }); return session; }

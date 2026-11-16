@@ -1,5 +1,5 @@
 import {describe,it,expect,vi} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 import * as decoder from '../../../src/runtime/verification/intent-contract-enrollment.js';

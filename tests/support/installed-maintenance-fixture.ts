@@ -4,7 +4,7 @@ import {join,resolve,relative,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {rmSync} from 'node:fs';
 import {vi} from 'vitest';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as handoff from '../../src/runtime/verification/installed-maintenance-handoff.js';
 import * as stack from '../../src/runtime/verification/installed-execution-stack.js';
 import type {QuiescenceExpectation} from '../../src/runtime/isolated-execution/physical-quiescence.js';

@@ -2,7 +2,7 @@ import {afterAll,beforeAll,beforeEach,expect,it,vi} from 'vitest';
 import {mkdtempSync,mkdirSync,realpathSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 const account=vi.hoisted(()=>({home:''}));
 vi.mock('node:os',async load=>({...await load<typeof import('node:os')>(),userInfo:()=>({username:'source-fixture',uid:process.getuid!(),gid:process.getgid!(),shell:null,homedir:account.home})}));
 vi.mock('../../../src/runtime/verification/migration-markers.js',async load=>({...await load<typeof import('../../../src/runtime/verification/migration-markers.js')>(),readInstalledCurrentProfile:()=>({kind:'ordinary'})}));

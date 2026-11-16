@@ -92,7 +92,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the fixed KSwarm test child Node
@@ -133,6 +133,20 @@ jobs:
       - run: npm run test:sandbox:build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+      - name: Built-in SQLite store, rollback and source custody regressions
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/utils/builtin-sqlite.test.js
+          .test-dist/tests/utils/sqlite-parsing-copy.test.js
+          .test-dist/tests/package/builtin-sqlite-contract.test.js
+          .test-dist/tests/ai/runtime/sqlite-session-store.test.js
+          .test-dist/tests/ai/runtime/session-execution-authority.test.js
+          .test-dist/tests/ai/runtime/file-session-store-crash-lock.test.js
+          .test-dist/tests/ai/memory/migrations.test.js
+          .test-dist/tests/ai/memory/retrieval.test.js
+          .test-dist/tests/runtime/verification/native-sqlite-census.test.js
+          .test-dist/tests/runtime/verification/registration-intrinsic-fences.test.js
+          .test-dist/tests/runtime/verification/storage-budget.test.js
       - name: Real host recovery ordering and durable receipts
         run: >
           npm run test:sandbox:run --
@@ -173,6 +187,7 @@ jobs:
           tests/main/assistant-inbox-store.test.ts
           tests/main/assistant-inbox-service.test.ts
           tests/main/context-continuity-inventory-scale.test.ts
+          tests/main/context-continuity-inspection-batch.test.ts
 
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop

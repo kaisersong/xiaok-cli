@@ -1,5 +1,5 @@
 import {vi} from 'vitest';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as root from '../../src/runtime/verification/installed-controller.js';
 import * as shared from '../../src/runtime/verification/shared-blob-capacity.js';
 import {createSharedCapacityLedger,assertSharedCapacityLedgerAuthority,type CapacityRecord,type CapacityMetadataReplacementFacts,type CapacityMetadataReplacementCommitContext} from '../../src/runtime/verification/shared-capacity-ledger.js';

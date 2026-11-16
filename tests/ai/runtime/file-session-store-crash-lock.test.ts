@@ -4,7 +4,7 @@ vi.mock('node:module', async original => {
   const actual = await original<typeof import('node:module')>();
   return { ...actual, createRequire: (...args: Parameters<typeof actual.createRequire>) => {
     const require = actual.createRequire(...args);
-    return (id: string) => { if (id === 'better-sqlite3') { native.attempts++; if (native.unavailable) throw new Error('native missing'); } return require(id); };
+    return (id: string) => { if (id === '../../../src/utils/builtin-sqlite.js') { native.attempts++; if (native.unavailable) throw new Error('native missing'); } return require(id); };
   } };
 });
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
@@ -46,12 +46,12 @@ describe('real FileSessionStore process crash ownership', () => {
     const root = fixture(), path = join(root, 'crash-test.json.save-lock'); writeFileSync(path, marker);
     await expect(new FileSessionStore(root).save(snapshot())).rejects.toThrow(); expect(readFileSync(path, 'utf8')).toBe(marker);
   });
-  it('keeps ordinary Windows-compatible save pure JS when optional native cleanup is unavailable', async () => {
+  it('recovers a proven dead save lock with built-in SQLite while external addons remain unavailable', async () => {
     const root = fixture(); native.unavailable = true;
     const store = new FileSessionStore(root, (path, text, options) => writeFileAtomicallySync(path, text, { ...options, platform: 'win32' }));
     await expect(store.save(snapshot())).resolves.toBeUndefined(); expect(native.attempts).toBe(0);
     const lock = join(root, 'crash-test.json.save-lock'); writeFileSync(lock, JSON.stringify({ version: 1, pid: 2147483647, hostname: hostname(), nonce: randomUUID() }));
-    await expect(store.save(snapshot())).rejects.toThrow(); expect(existsSync(lock)).toBe(true);
+    await expect(store.save(snapshot())).resolves.toBeUndefined(); expect(existsSync(lock)).toBe(false);
   });
   it('never treats EPERM as a dead PID and never removes a replacement marker in finally', async () => {
     const root = fixture(), lock = join(root, 'crash-test.json.save-lock');

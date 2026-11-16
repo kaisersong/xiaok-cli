@@ -20,7 +20,7 @@ it.skipIf(!posix)('discovers the original persistent timed constructor and cold 
  expect(readOrdinaryProfileSources()!.generation).toBe(first.generation);
 });
 
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {compileTimedCustody,populateTimedStore} from '../../support/timed-action-source-fixture.js';
 import {startProfileSourceCapture,readProfileSqliteSchema,readProfileSqliteLosslessRows,type ProfileCaptureSource} from '../../../src/runtime/verification/profile-source-capture.js';
 import {iterateCapturedSQLiteTimedActionSources} from '../../../src/runtime/verification/captured-sqlite-timed-actions.js';

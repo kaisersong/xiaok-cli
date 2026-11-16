@@ -116,3 +116,6 @@ native/broker-authority-source/build/
 
 # Reproducible generated Native SDK build output.
 /native/kswarm-authority-source/build/
+
+# Verified build-only official SQLite amalgamation.
+/native/sqlite-source/build/

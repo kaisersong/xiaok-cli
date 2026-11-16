@@ -2,7 +2,7 @@ import {createPrimitiveCapacityLedger as createSharedCapacityLedger} from '../..
 import {sharedCommandFault} from '../../support/shared-command-fault.js';
 import {createControllerMetadataCapacity} from '../../../src/runtime/verification/controller-metadata-capacity.js';
 import {afterEach,it,expect} from 'vitest';
-import Database from 'better-sqlite3';import {mkdtempSync,rmSync,writeFileSync,unlinkSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import Database from '../../../src/utils/builtin-sqlite.js';import {mkdtempSync,rmSync,writeFileSync,unlinkSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {type CapacityMetadataEntry,type CapacityMetadataAllocation,type CapacityTransaction} from '../../../src/runtime/verification/shared-capacity-ledger.js';
 const MiB=1024**2,cleanup:Array<()=>void>=[];afterEach(()=>{for(const close of cleanup.splice(0).reverse())close();});
 function fixture(){const root=mkdtempSync(join(tmpdir(),'metadata-attribution-')),path=join(root,'authority.sqlite'),db=new Database(path);db.pragma('journal_mode=DELETE');cleanup.push(()=>{db.close();rmSync(root,{recursive:true,force:true});});const bindings=new WeakMap<object,{sessionKey:string;producerKey:string}>(),proofs=new WeakMap<object,string>();let check=()=>{};

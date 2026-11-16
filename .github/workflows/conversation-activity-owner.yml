@@ -10,7 +10,7 @@ on:
       - 'scripts/verification/copy-windows-absence.mjs'
       - 'desktop/electron/*.mjs'
       - 'scripts/copy-glob-worker.mjs'
-      - 'scripts/repair-better-sqlite3-types.cjs'
+      - 'src/utils/builtin-sqlite.ts'
       - 'package*.json'
       - 'tsconfig*.json'
       - 'vitest.sandbox.config.mjs'
@@ -24,7 +24,7 @@ on:
       - 'scripts/verification/copy-windows-absence.mjs'
       - 'desktop/electron/*.mjs'
       - 'scripts/copy-glob-worker.mjs'
-      - 'scripts/repair-better-sqlite3-types.cjs'
+      - 'src/utils/builtin-sqlite.ts'
       - 'package*.json'
       - 'tsconfig*.json'
       - 'vitest.sandbox.config.mjs'
@@ -38,7 +38,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, windows-2022]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:

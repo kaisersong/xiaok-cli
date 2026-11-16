@@ -3,7 +3,7 @@ import {MAIN_ROOT_FAMILY_METHODS} from './main-root-family-enrollment-data.js';
 import {captureKSwarmEnrollmentData} from './kswarm-enrollment-data.js';
 import {createSourceDeletionReferenceGuard} from './source-deletion-reference-guard.js';
 import {createPublicKey} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createCompletionBoundary,type CompletionKernelPeer} from './completion-boundary.js';
 import {createOwnerEnrollmentAuthority} from './owner-enrollment-authority.js';
 import {createIndependentVerifierRecipes,type RecipeBinding} from './independent-recipes.js';

@@ -34,6 +34,6 @@ if (failure) {
   console.warn(`[xiaok] node-pty 不可用 (${process.platform}/${process.arch}, Node ${process.version}, ABI ${process.versions.modules})\n`
     + `包路径：${root ?? '未找到'}\n原始错误：${String(failure).slice(0, 8192)}\n`
     + 'sudo 交互能力暂不可用；请在自己的终端执行命令，或在 CLI 中手动输入 !<command>。\n'
-    + '若 npm 拦截了脚本，可一次性授权：npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode'
+    + '若 npm 拦截了脚本，可一次性授权：npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,nodejieba,onnxruntime-node xiaokcode'
     + linuxHint);
 }

@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { assertVerificationDatabaseBudget, runVerificationTransaction, isVerific
 
 describe('actual persisted verification bytes and FULL classification', () => {
   it('counts tuple/reply metadata, not just payload or number of rows', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'); const db = new Database(':memory:');
+    const Database = BuiltinDatabase; const db = new Database(':memory:');
     try {
       db.exec('CREATE TABLE publication_journal(tuple_json TEXT,reply_json TEXT,state_json TEXT,challenge TEXT);');
       db.prepare('INSERT INTO publication_journal VALUES(?,?,?,?)').run('x'.repeat(2048), 'y'.repeat(2048), '{}', 'z'.repeat(64));
@@ -16,7 +17,7 @@ describe('actual persisted verification bytes and FULL classification', () => {
   });
   it('real SQLite FULL rolls back and is reported as capacity, never memory success', () => {
     const root = mkdtempSync(join(tmpdir(), 'verification-full-'));
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(join(root, 'authority.sqlite'));
+    const Database = BuiltinDatabase, db = new Database(join(root, 'authority.sqlite'));
     try {
       db.exec('CREATE TABLE sample(value BLOB)'); db.pragma('max_page_count=4');
       expect(() => runVerificationTransaction(db, () => db.prepare('INSERT INTO sample VALUES(?)').run(Buffer.alloc(65536)))).toThrow('verification_capacity_exhausted');
@@ -31,7 +32,7 @@ it.each([
  ['goal_application_requests','request_id TEXT,principal_json TEXT,binding_json TEXT,challenge_id TEXT'],
  ['goal_application_challenges','id TEXT,principal TEXT,boot TEXT,state TEXT,review_json TEXT,transition_id TEXT'],
 ])('reserves terminal headroom for durable %s instead of treating resource intents as free metadata',(table,columns)=>{
- const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(':memory:');
+ const Database=BuiltinDatabase,db=new Database(':memory:');
  try{
   db.exec(`CREATE TABLE ${table}(${columns})`);
   const column=columns.split(' ')[0];
@@ -42,7 +43,7 @@ it.each([
 });
 
 it('counts the full original registration in Goal session enrollment receipts',()=>{
- const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(':memory:');
+ const Database=BuiltinDatabase,db=new Database(':memory:');
  try{db.exec('CREATE TABLE owner_enrollment_goal_sessions(logical_owner_key TEXT,owner_key TEXT,goal_session_id TEXT,registration_json TEXT)');
  db.prepare('INSERT INTO owner_enrollment_goal_sessions VALUES(?,?,?,?)').run('logical','owner','session','x'.repeat(2048));
  expect(()=>assertVerificationDatabaseBudget(db,{additionalBytes:1,limitBytes:2048})).toThrow('verification_control_budget');
@@ -57,7 +58,7 @@ it.each([
  ['owner_enrollment_loop_subjects','logical_owner_key TEXT,owner_key TEXT,subject_json TEXT,registration_json TEXT','registration_json'],
  ['owner_enrollment_intents','logical_owner_key TEXT,registration_json TEXT,loop_subject_json TEXT','loop_subject_json'],
 ])('counts persisted Loop enrollment bytes independently of the allocated-page fallback: %s %s %s',(table,columns,column)=>{
- const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(':memory:');
+ const Database=BuiltinDatabase,db=new Database(':memory:');
  try{
   db.exec(`CREATE TABLE ${table}(${columns})`);db.prepare(`INSERT INTO ${table}(${column}) VALUES(?)`).run('汉'.repeat(8192));
   // Exercise the actual SQL census independently of its second physical-page
@@ -69,14 +70,14 @@ it.each([
 
 describe('actual SQLite physical cap admission', () => {
   it('admits an actual empty database with zero allocated pages', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       expect(db.pragma('page_count', {simple: true})).toBe(0);
       expect(() => assertVerificationDatabaseBudget(db, {additionalBytes: 0})).not.toThrow();
     } finally { db.close(); }
   });
   it('uses the real smaller page cap at the exact original budget boundary before a writer runs', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       expect(db.pragma('page_size', {simple: true})).toBe(4096);
@@ -94,7 +95,7 @@ describe('actual SQLite physical cap admission', () => {
     } finally { db.close(); }
   });
   it('retains a smaller explicit logical limit even when the real physical cap allows more', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       db.pragma('max_page_count=8');
@@ -103,7 +104,7 @@ describe('actual SQLite physical cap admission', () => {
     } finally { db.close(); }
   });
   it('classifies a count above the captured maximum as invalid geometry before physical exhaustion', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       expect(db.pragma('max_page_count=4', {simple: true})).toBe(4);
@@ -114,7 +115,7 @@ describe('actual SQLite physical cap admission', () => {
     } finally { db.close(); }
   });
   it('reads each geometry pragma once and uses those exact values', () => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       const original = db.pragma.bind(db), seen: string[] = [];
@@ -134,7 +135,7 @@ describe('actual SQLite physical cap admission', () => {
     ['page_count', 4294967295],
     ['page_size', Number.MAX_SAFE_INTEGER],
   ])('rejects invalid actual geometry fault %s=%s', (name, value) => {
-    const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
+    const Database = BuiltinDatabase, db = new Database(':memory:');
     try {
       const original = db.pragma.bind(db);
       const spy = vi.spyOn(db, 'pragma').mockImplementation((query: unknown, ...args: unknown[]) => query === name ? value : original(query, ...args));
@@ -144,9 +145,9 @@ describe('actual SQLite physical cap admission', () => {
   });
 });
 
-it.each(['plain-forged','actual-native'] as const)('brands only actual native SQLite FULL after actual own transaction rollback: %s',mode=>{
- const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(':memory:');try{db.exec('CREATE TABLE native_full(value BLOB)');db.pragma('max_page_count=4');let cause:unknown;
+it.each(['plain-forged','actual-native'] as const)('retains unconfirmed exhaustion after actual own rollback without a driver-specific native error class: %s',mode=>{
+ const Database=BuiltinDatabase,db=new Database(':memory:');try{db.exec('CREATE TABLE native_full(value BLOB)');db.pragma('max_page_count=4');let cause:unknown;
  try{runVerificationTransaction(db,()=>{if(mode==='plain-forged'){db.prepare('INSERT INTO native_full VALUES(?)').run(Buffer.from('actual rollback row'));throw Object.assign(Error('ordinary callback failure'),{name:'SqliteError',code:'SQLITE_FULL'});}db.prepare('INSERT INTO native_full VALUES(?)').run(Buffer.alloc(65536));});}catch(error){cause=error;}
- expect(cause).toBeInstanceOf(Error);expect(db.inTransaction).toBe(false);expect(db.prepare('SELECT COUNT(*) n FROM native_full').get()).toEqual({n:0});expect(isVerificationHeadroomNotReady(cause,db)).toBe(mode==='actual-native');if(mode==='actual-native')expect((cause as Error).cause).toBeInstanceOf(Database.SqliteError);else expect((cause as Error).cause).not.toBeInstanceOf(Database.SqliteError);
+ expect(cause).toBeInstanceOf(Error);expect(db.inTransaction).toBe(false);expect(db.prepare('SELECT COUNT(*) n FROM native_full').get()).toEqual({n:0});expect(isVerificationHeadroomNotReady(cause,db)).toBe(false);expect((cause as Error).cause).toBeInstanceOf(Error);if(mode==='actual-native')expect((cause as Error).cause).toMatchObject({code:'ERR_SQLITE_ERROR',errcode:13});else expect((cause as Error).cause).toMatchObject({code:'SQLITE_FULL'});
  }finally{db.close();}
 });

@@ -1,6 +1,6 @@
 import {readGenericRegistrationData} from './registration-generic-collector.js';
 import type {IntentContractEnrollment} from './intent-contract-enrollment.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {VerificationOwner} from './proof-authority.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {captureRegistrationSnapshot} from './registration-value-snapshot.js';
@@ -15,7 +15,7 @@ const define=Object.defineProperty,nativePush=Array.prototype.push;
 const nativeOwn=Object.hasOwn,nativeArray=Array.isArray,nativeKeys=Reflect.ownKeys,nativeSafeInteger=Number.isSafeInteger;
 const arrayPrototype=Array.prototype,objectPrototype=Object.prototype,nativeString=String;
 interface FoldState {enabled:boolean;ready:boolean}
-// Planning only, confined to one synchronous collector. Never authority/currentness.
+// Per-call planning only; never authority/currentness.
 function primitiveRawRows(rows:unknown[][]):boolean {
  for(let i=0;i<rows.length;i++){const row=rows[i]!;for(let j=0;j<row.length;j++){const value=row[j];if(value!==null&&typeof value!=='string'&&(typeof value!=='number'||!nativeSafeInteger(value)))return false;}}
  return true;
@@ -47,8 +47,7 @@ function intentSeed(raw:VerificationOwner):VerificationOwner|undefined {
  return {profileId:p.value,ownerKind:'intent',ownerId:o.value};
 }
 function append<T>(array:T[],value:T):void{define(array,array.length,{__proto__:null,value,enumerable:true,writable:true,configurable:true} as PropertyDescriptor);}
-// Only private native result arrays, after the complete closing intrinsic
-// fence. Parameter arrays before that fence retain defineProperty above.
+// Post-fence native rows only; pre-fence parameters still use defineProperty.
 function appendResult<T>(array:T[],value:T):void{apply(nativePush,array,[value]);}
 import {REGISTRATION_TABLE_KEYS} from './registration-table-keys.js';
 export {REGISTRATION_TABLE_KEYS} from './registration-table-keys.js';
@@ -61,11 +60,12 @@ export function createRegistrationCensusDatabase(db:Database){
  const native=readPrivateDatabaseNativeAccess(db);if(!native)return undefined;
  function current(){
   assertRegistrationIntrinsics();
-  if(isProxy(db)||descriptor(db,native!.symbol)?.value!==native!.cpp||prototype(db)!==native!.databasePrototype||prototype(native!.cpp)!==native!.cppPrototype)fail();
+  if(isProxy(db)||native!.receiver!==db||prototype(db)!==native!.databasePrototype)fail();
+  for(const entry of native!.prototypes)if(prototype(entry.target)!==entry.prototype)fail();
   for(let i=0;i<native!.fingerprints.length;i++){const entry=native!.fingerprints[i]!;if(!isDeepStrictEqual(descriptor(entry.target,entry.key),entry.descriptor))fail();}
-  if(apply(native!.open,native!.cpp,[])!==true)fail();
+  if(apply(native!.open,native!.receiver,[])!==true)fail();
  }
- const prepare=(sql:string)=>apply(native.prepare,native.cpp,[sql,db,false,false]);
+ const prepare=(sql:string)=>apply(native.prepare,native.receiver,[sql]);
  const call=(key:string,stmt:object,args:unknown[]=[])=>apply(native.statement[key]!,stmt,args);
  // Only counter() calls raw, after the complete function_list fence and builtin check.
  // Its fixed header-read tail closes once before any counter result is returned.
@@ -87,9 +87,7 @@ export function createRegistrationCensusDatabase(db:Database){
  function copyRecords(columns:Array<{name:string}>,rows:unknown[][]):Record<string,any>[] {const result:Record<string,any>[]=[];
   for(let i=0;i<rows.length;i++){if(rows[i]!.length!==columns.length)fail();const row:Record<string,any>={__proto__:null};for(let j=0;j<columns.length;j++){if(columns[j]!.name==='__proto__')fail();row[columns[j]!.name]=rows[i]![j];}appendResult(result,row);}return result;
  }
- // Private fixed-query reader: schema() already checked the realm before the
- // first call, or the preceding call checked it after all(). Keep both guards
- // after native SQL boundaries; prepare/step can reconnect a changed schema.
+ // Keep both post-SQL guards: prepare/step may reconnect a changed schema.
  function tableColumns(table:typeof tables[number]):Record<string,any>[] {
   const stmt=prepare('PRAGMA main.table_xinfo('+table+')');call('raw',stmt,[true]);assertNativeSqliteColumnConstruction();
   const columns=call('columns',stmt) as Array<{name:string}>,rows=call('all',stmt) as unknown[][];assertNativeSqliteColumnConstruction();
@@ -101,8 +99,10 @@ export function createRegistrationCensusDatabase(db:Database){
  }
  function schema(){const modules=records('PRAGMA module_list');if(modules.some(r=>typeof r.name==='string'&&tables.includes(lower(r.name))))fail();
   const master=records('SELECT type,name,tbl_name,rootpage,sql FROM main.sqlite_master ORDER BY type,name,tbl_name,rootpage,sql');
-  for(const row of master)if(tables.includes(lower(String(row.name)))&&row.type==='table'&&typeof row.sql==='string'&&/^CREATE\s+VIRTUAL\s+TABLE/i.test(row.sql))fail();
-  const kinds=records('PRAGMA main.table_list');for(const row of kinds)if(row.schema==='main'&&tables.includes(lower(String(row.name)))&&(row.type!=='table'&&row.type!=='view'||row.type==='view'&&['verification_profiles','verification_storage_features'].includes(lower(String(row.name)))))fail();
+  // Schema identifiers must be native TEXT. Never coerce returned Blob objects.
+  if(master.some(row=>typeof row.name!=='string'||typeof row.tbl_name!=='string'||typeof row.type!=='string'))fail();
+  for(const row of master)if(tables.includes(lower(row.name))&&row.type==='table'&&typeof row.sql==='string'&&/^CREATE\s+VIRTUAL\s+TABLE/i.test(row.sql))fail();
+  const kinds=records('PRAGMA main.table_list');if(kinds.some(row=>typeof row.schema!=='string'||typeof row.name!=='string'||typeof row.type!=='string'))fail();for(const row of kinds)if(row.schema==='main'&&tables.includes(lower(row.name))&&(row.type!=='table'&&row.type!=='view'||row.type==='view'&&['verification_profiles','verification_storage_features'].includes(lower(String(row.name)))))fail();
   const columns={__proto__:null} as unknown as Record<string,Record<string,any>[]>,present=new Set<string>();
   // table_list stays fully guarded: SQLite may connect arbitrary views/vtabs.
   // Only private native metadata copying/control flow separates one table read
@@ -112,7 +112,7 @@ export function createRegistrationCensusDatabase(db:Database){
   const adjacentMetadata=master.every(row=>typeof row.name==='string');
   // table_list may have entered callbacks. Use its final positive classification,
   // not only the earlier master row, before trusting an existing main snapshot.
-  const transactionMetadata=adjacentMetadata&&typeof native!.inTransaction==='function'&&apply(native!.inTransaction,native!.cpp,[])===true&&tables.every(table=>!master.some(row=>row.type==='table'&&lower(row.name)===table)||kinds.some(row=>row.schema==='main'&&row.name===table&&row.type==='table'));
+  const transactionMetadata=adjacentMetadata&&typeof native!.inTransaction==='function'&&apply(native!.inTransaction,native!.receiver,[])===true&&tables.every(table=>!master.some(row=>row.type==='table'&&lower(row.name)===table)||kinds.some(row=>row.schema==='main'&&row.name===table&&row.type==='table'));
   if(adjacentMetadata)assertNativeSqliteColumnConstruction();
   if(transactionMetadata){
    // No transaction is created here. Fixed ordinary-table metadata only, using

@@ -1,19 +1,9 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { describe, expect, it } from 'vitest';
 
-const canLoad = (() => {
-  try {
-    const Database = require('better-sqlite3');
-    const db = new Database(':memory:');
-    db.close();
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-describe.skipIf(!canLoad)('better-sqlite3 native module', () => {
+describe('runtime built-in SQLite (no external addon)', () => {
   it('can create and query an in-memory database', () => {
-    const Database = require('better-sqlite3');
+    const Database = BuiltinDatabase;
     const db = new Database(':memory:');
 
     db.exec('CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)');
@@ -27,7 +17,7 @@ describe.skipIf(!canLoad)('better-sqlite3 native module', () => {
   });
 
   it('handles prepared statements correctly', () => {
-    const Database = require('better-sqlite3');
+    const Database = BuiltinDatabase;
     const db = new Database(':memory:');
 
     db.exec('CREATE TABLE items (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');

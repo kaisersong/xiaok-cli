@@ -1,7 +1,7 @@
 import {persistInstalledMaintenanceRequest,type InstalledCleanupCommandFacts} from './installed-maintenance-handoff.js';
 import {readMaintenanceExecution,type createInstalledMaintenanceExecution} from './maintenance-execution.js';
 import{createHash}from'node:crypto';
-import type{Database}from'better-sqlite3';
+import type{Database}from'../../utils/builtin-sqlite.js';
 import{canonicalVerificationJson as json}from'./protocol.js';
 import{assertControllerMaterialPipelineDatabase,type createControllerMaterialPipeline}from'./material-pipeline.js';
 import{assertDockerRunnerDatabase,type createDockerRunner}from'../isolated-execution/docker-runner.js';

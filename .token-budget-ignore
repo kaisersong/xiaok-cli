@@ -385,3 +385,11 @@ tests/support/installed-maintenance-fixture.ts
 tests/support/installed-maintenance-probe-fixture.ts
 tests/support/sol-pi-cli-intent-verification-smoke.mjs
 tests/ui/ask-question.test.ts
+
+# Pre-existing oversized files at parent 9d689892; SQLite import/per-ID guard changes only.
+# Parent sizes: service38101/store32251/default-dispatch50679/yzj-shutdown22046 bytes.
+# Preserve existing authority class boundaries during this migration; no new-file exemption.
+desktop/electron/context-continuity/service.ts
+desktop/electron/context-continuity/store.ts
+desktop/tests/main/default-dispatch-store-sdk.test.ts
+tests/commands/yzj-serve-shutdown.test.ts

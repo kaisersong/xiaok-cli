@@ -1,3 +1,4 @@
+import {openSqliteParsingCopy,isSqliteParsingCopyCleanupUnknown} from '../../utils/sqlite-parsing-copy.js';
 import {BROKER_ROOM_QUERIES,BROKER_ROOM_COLUMNS,type BrokerRoomQueryId} from './broker-room-source-schema.js';
 import {BUDGET_SOURCE_QUERIES,BUDGET_SOURCE_COLUMNS,type BudgetQueryId} from './budget-source-queries.js';
 import {TIMED_ACTION_QUERIES,TIMED_ACTION_COLUMNS,type TimedActionQueryId} from './timed-action-source-queries.js';
@@ -9,7 +10,7 @@ import type {InstalledControllerLifetime} from './installed-controller-lifetime.
 import {isWriterLockSourceName} from './writer-lock-source-name.js';
 import {spawn,type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import {METADATA_SESSION_QUERIES,type MetadataSessionQueryId} from './metadata-session-query-manifest.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {ARTIFACT_WORKSPACE_QUERIES,type ArtifactWorkspaceQueryId} from './artifact-workspace-source-schema.js';
@@ -117,11 +118,11 @@ function openSnapshot(owner:object,token:object,index:number,integrityCopy=false
  if(original.length!==fact.byteLength||original.subarray(0,16).toString('binary')!=='SQLite format 3\0'||original[18]!==original[19]||![1,2].includes(original[18]!))throw Error('source_sqlite_header');
  const size=original.readUInt16BE(16);if((size===1?65536:size)!==fact.pageSize)throw Error('source_sqlite_header');
  const bytes=Buffer.from(original);bytes[18]=bytes[19]=1;
- let database:Database.Database|undefined;
- try{database=new Database(bytes,{readonly:!integrityCopy});database.pragma(integrityCopy?'query_only=OFF':'query_only=ON');database.pragma('trusted_schema=OFF');database.pragma('temp_store=MEMORY');
-  if(database.readonly===integrityCopy||!database.memory||database.pragma('page_count',{simple:true})!==fact.pageCount||database.pragma('page_size',{simple:true})!==fact.pageSize)throw Error('source_sqlite_snapshot');
-  const readers=owners.get(owner)!.readers;let closed=false,closeFailure:unknown;const iterators=new Set<Iterator<unknown>>();const close=()=>{if(closed){if(closeFailure)throw closeFailure;return;}closed=true;const errors:unknown[]=closeFailure?[closeFailure]:[];for(const iterator of iterators)try{iterator.return?.();}catch(error){errors.push(error);}iterators.clear();try{if(database!.open)database!.close();}catch(error){errors.push(error);}if(errors.length){closeFailure=new AggregateError(errors,'source_sqlite_reader_close');throw closeFailure;}bytes.fill(0);readers.delete(close);};readers.add(close);return {database,close,assertUsable(){if(closeFailure)throw closeFailure;if(closed)throw Error('source_sqlite_reader_closed');},setIterator(value:Iterator<unknown>){if(closeFailure)throw closeFailure;iterators.add(value);},closeIterator(value:Iterator<unknown>){try{value.return?.();iterators.delete(value);}catch(error){closeFailure??=new AggregateError([error],'source_sqlite_reader_close');throw closeFailure;}}};
- }catch(error){try{if(database?.open)database.close();}catch(cleanup){const failure=new AggregateError([error,cleanup],'source_sqlite_reader_close');owners.get(owner)!.readers.add(()=>{if(database?.open||bytes.byteLength)throw failure;});throw failure;}bytes.fill(0);throw error;}
+ let database:Database.Database|undefined,parsing:ReturnType<typeof openSqliteParsingCopy>|undefined;
+ try{parsing=openSqliteParsingCopy(bytes,!integrityCopy);database=parsing.database;database.pragma(integrityCopy?'query_only=OFF':'query_only=ON');database.pragma('trusted_schema=OFF');database.pragma('temp_store=MEMORY');
+  if(database.readonly===integrityCopy||database.memory||database.pragma('page_count',{simple:true})!==fact.pageCount||database.pragma('page_size',{simple:true})!==fact.pageSize)throw Error('source_sqlite_snapshot');
+  const readers=owners.get(owner)!.readers;let closed=false,closeFailure:unknown;const iterators=new Set<Iterator<unknown>>();const close=()=>{if(closed){if(closeFailure)throw closeFailure;return;}closed=true;const errors:unknown[]=closeFailure?[closeFailure]:[];for(const iterator of iterators)try{iterator.return?.();}catch(error){errors.push(error);}iterators.clear();try{parsing!.close();}catch(error){errors.push(error);}if(errors.length){closeFailure=new AggregateError(errors,'source_sqlite_reader_close');throw closeFailure;}bytes.fill(0);readers.delete(close);};readers.add(close);return {database,close,assertUsable(){if(closeFailure)throw closeFailure;if(closed)throw Error('source_sqlite_reader_closed');},setIterator(value:Iterator<unknown>){if(closeFailure)throw closeFailure;iterators.add(value);},closeIterator(value:Iterator<unknown>){try{value.return?.();iterators.delete(value);}catch(error){closeFailure??=new AggregateError([error],'source_sqlite_reader_close');throw closeFailure;}}};
+ }catch(error){if(isSqliteParsingCopyCleanupUnknown(error)){owners.get(owner)!.readers.add(()=>{throw error;});throw error;}try{parsing?.close();}catch(cleanup){const failure=new AggregateError([error,cleanup],'source_sqlite_reader_close');owners.get(owner)!.readers.add(()=>{if(database?.open||bytes.byteLength)throw failure;});throw failure;}bytes.fill(0);throw error;}
 }
 export function readSqliteSourceSchema(owner:object,token:object,index:number):readonly Readonly<{type:string;name:string;tbl_name:string;sql:string|null}>[]{
  const snapshot=openSnapshot(owner,token,index);

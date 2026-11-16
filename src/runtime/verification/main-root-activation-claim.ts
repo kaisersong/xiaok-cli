@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { canonicalVerificationJson as json, VERIFICATION_BUDGET } from './protocol.js';
 import { assertVerificationDatabaseBudget } from './storage-budget.js';
 import { parseMainRootFamilyEnrollmentRecord, parseMainRootFamilyPrincipal, mainRootFamilyReviewHash, type MainRootFamilyPrincipal } from './main-root-family-enrollment-data.js';

@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {constants,openSync,closeSync,fstatSync,lstatSync,writeSync,readSync,fsyncSync} from 'node:fs';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {assertInstalledCapacityAuthorityLifetime,readInstalledCapacityAuthority,readInstalledCapacityLayer} from './installed-controller.js';
 import {assertInstalledMetadataClosureCapture,readInstalledMetadataClosure,checkInstalledMetadataClosure} from './installed-metadata-closure.js';

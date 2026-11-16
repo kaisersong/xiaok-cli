@@ -16,7 +16,7 @@ vi.mock('../../../src/runtime/verification/socket-peer.js',()=>({readControllerS
 import {startInstalledMacRootBroker} from '../../../src/runtime/verification/root-broker.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdtempSync,realpathSync,statSync,rmSync,readFileSync,writeFileSync} from 'node:fs';
@@ -25,7 +25,7 @@ import {join,resolve,basename} from 'node:path';
 import {startProfileSourceCapture,readProfileSourceCapture,type ProfileCaptureSource} from '../../../src/runtime/verification/profile-source-capture.js';
 import {createInstalledRootBrokerClient} from '../../../src/runtime/verification/root-broker-client.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'profile-socket-'))),sqliteHelper=join(root,'sqlite'),directoryHelper=join(root,'directory');let serial=0;
-beforeAll(()=>{f.socket=join(root,'broker.sock');const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
+beforeAll(()=>{f.socket=join(root,'broker.sock');const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 const sha=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
 function sql(large=false){const path=join(root,'db-'+serial+++'.sqlite'),db=new Database(path);db.pragma('busy_timeout=0');if(large)db.pragma('journal_mode=WAL');db.exec('CREATE TABLE original(bytes BLOB);INSERT INTO original VALUES(zeroblob(0))');if(large)writeFileSync(path+'-journal',Buffer.alloc(0));const s=statSync(path,{bigint:true}),d=statSync(root,{bigint:true});const source:ProfileCaptureSource={sourceId:'source-'+String(serial).padStart(4,'0')+(large?'x'.repeat(145):''),kind:'sqlite-db',snapshotFormat:'loop-sqlite-v1',directory:{canonicalPath:root,device:String(d.dev),inode:String(d.ino)},database:{basename:basename(path),device:String(s.dev),inode:String(s.ino)}};return{path,db,source};}

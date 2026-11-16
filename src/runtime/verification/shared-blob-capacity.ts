@@ -16,7 +16,7 @@ import {readProtectedRunCapacityBinding} from './protected-run-ledger.js';
 import {readDockerCapacityExecution,readDockerArchiveCapacitySource} from '../isolated-execution/docker-runner.js';
 import {readBrokerStagingCapacitySource} from '../isolated-execution/broker-staging.js';
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {createSharedCapacityLedger,type CapacityOwner} from './shared-capacity-ledger.js';
 import {readProfileCapacityOwnerBinding} from './profile-owner-registry.js';

@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {mkdtempSync,existsSync,writeFileSync,rmSync,mkdirSync} from 'node:fs';
@@ -148,27 +149,16 @@ it.each(['row','schema'] as const)('actual native closing fence refuses a real %
  }finally{rmSync(root,{recursive:true,force:true});}
 });
 
-it('fixed schema table_list keeps its full fence around a real reconnecting unrelated virtual-table factory',()=>{
+it('built-in runtime exposes no caller virtual-table factory and safely inventories an unrelated native FTS table',()=>{
  const root=mkdtempSync(join(tmpdir(),'registration-schema-vtab-')),db=openPrivateVerificationDatabase(root);
- const prior=Object.getOwnPropertyDescriptor(Map,'length')!,define=Object.defineProperty;
- let armed=false,calls=0,error:unknown;
  try{
-  db.table('schema_metadata_probe',function(){
-   if(armed){calls++;define(Map,'length',{...prior,value:-0});}
-   return {columns:['value'],rows:function*(){yield [1];}};
-  });
-  db.exec('CREATE VIRTUAL TABLE unrelated_schema_probe USING schema_metadata_probe');
-  // Discard SQLite schema metadata so the original table_list must reconnect it.
+  expect(Reflect.has(db,'table')).toBe(false);
+  db.exec('CREATE VIRTUAL TABLE unrelated_schema_probe USING fts5(value)');
   db.exec('PRAGMA writable_schema=RESET');
-  const census=createRegistrationCensusDatabase(db)!;armed=true;
-  try{census.begin();}catch(value){error=value;}
-  finally{armed=false;define(Map,'length',prior);}
-  expect(calls).toBeGreaterThan(0);
-  expect(error).toBeInstanceOf(Error);
-  expect((error as Error).message).toBe('application_registration_changed');
-  const restored=census.begin();restored.finish();
- }finally{armed=false;define(Map,'length',prior);db.close();rmSync(root,{recursive:true,force:true});}
+  const current=createRegistrationCensusDatabase(db)!.begin();current.finish();
+ }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
+
 it('public records still fences an actual SQL callback before copying any returned row',()=>{
  const root=mkdtempSync(join(tmpdir(),'registration-public-record-callback-')),db=openPrivateVerificationDatabase(root);
  const prior=Object.getOwnPropertyDescriptor(Map,'length')!,define=Object.defineProperty;
@@ -184,7 +174,7 @@ it('public records still fences an actual SQL callback before copying any return
  }finally{armed=false;define(Map,'length',prior);db.close();rmSync(root,{recursive:true,force:true});}
 });
 
-it('non-text sqlite_master names keep the original pre-query guard after real Buffer coercion',()=>{
+it('rejects non-TEXT sqlite_master names without entering caller Buffer coercion',()=>{
  const root=mkdtempSync(join(tmpdir(),'registration-schema-name-coercion-')),db=openPrivateVerificationDatabase(root);
  const table='verification_application_history',define=Object.defineProperty,apply=Reflect.apply;
  const mapLength=Object.getOwnPropertyDescriptor(Map,'length')!,bufferString=Object.getOwnPropertyDescriptor(Buffer.prototype,'toString')!;
@@ -192,9 +182,9 @@ it('non-text sqlite_master names keep the original pre-query guard after real Bu
  try{
   db.exec('CREATE TABLE '+table+'(owner_key TEXT)');
   // Only this owned DB's malicious-fixture construction disables defensive mode.
-  db.unsafeMode(true);
+  (db as any).enableDefensive?.(false);
   try{db.pragma('writable_schema=ON');db.prepare('UPDATE main.sqlite_master SET name=CAST(name AS BLOB) WHERE name=?').run(table);}
-  finally{db.unsafeMode(false);}
+  finally{(db as any).enableDefensive?.(true);}
   define(Buffer.prototype,'toString',{...bufferString,value:function(this:Buffer,...args:unknown[]){
    const result=apply(bufferString.value,this,args);
    if(armed&&result===table&&++coercions===2)define(Map,'length',{...mapLength,value:-0});
@@ -203,11 +193,11 @@ it('non-text sqlite_master names keep the original pre-query guard after real Bu
   const census=createRegistrationCensusDatabase(db)!;armed=true;
   try{census.begin();}catch(value){error=value;}
   finally{armed=false;define(Map,'length',mapLength);define(Buffer.prototype,'toString',bufferString);}
-  expect(coercions).toBeGreaterThanOrEqual(2);expect(error).toBeInstanceOf(Error);
+  expect(coercions).toBe(0);expect(error).toBeInstanceOf(Error);
   expect((error as Error).message).toBe('application_registration_changed');
-  db.unsafeMode(true);
+  (db as any).enableDefensive?.(false);
   try{db.exec("UPDATE main.sqlite_master SET name=CAST(name AS TEXT) WHERE typeof(name)='blob'");}
-  finally{db.unsafeMode(false);}
+  finally{(db as any).enableDefensive?.(true);}
   const restored=census.begin();restored.finish();
  }finally{armed=false;define(Map,'length',mapLength);define(Buffer.prototype,'toString',bufferString);db.close();rmSync(root,{recursive:true,force:true});}
 });
@@ -233,8 +223,8 @@ it.each([false,true])('complete actual table_xinfo metadata remains equal to nat
  const f=transactionMetadataFixture();
  try{
   if(transaction)f.db.exec('BEGIN IMMEDIATE');
-  const native=readPrivateDatabaseNativeAccess(f.db)!,getter=Object.getOwnPropertyDescriptor(native.cpp,'inTransaction')!.get!;
-  expect(Reflect.apply(getter,native.cpp,[])).toBe(transaction);
+  const native=readPrivateDatabaseNativeAccess(f.db)!,getter=Object.getOwnPropertyDescriptor(native.receiver,'isTransaction')!.get!;
+  expect(Reflect.apply(getter,native.receiver,[])).toBe(transaction);
   const c=createRegistrationCensusDatabase(f.db)!.begin();
   expect(Object.keys(c.evidence.columns).sort()).toEqual([...f.tables].sort());
   for(const table of f.tables){
@@ -242,17 +232,17 @@ it.each([false,true])('complete actual table_xinfo metadata remains equal to nat
    expect(actual).toEqual(expected);expect(actual.length).toBe(4);
    for(const row of actual)expect(Object.getPrototypeOf(row)).toBe(null);
   }
-  c.finish();expect(Reflect.apply(getter,native.cpp,[])).toBe(transaction);
+  c.finish();expect(Reflect.apply(getter,native.receiver,[])).toBe(transaction);
  }finally{closeTransactionMetadataFixture(f);}
 });
 it('an actual caller read transaction blocks a second connection DDL until its original census checkpoint finishes',()=>{
  const f=transactionMetadataFixture();let peer:ReturnType<typeof openPrivateVerificationDatabase>|undefined;
  try{
-  const SQLite=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+  const SQLite=BuiltinDatabase as typeof BuiltinDatabase;
   peer=new SQLite(join(f.root,'authority.sqlite'),{timeout:0});
   f.db.exec('BEGIN');const owner=createRegistrationCensusDatabase(f.db)!,c=owner.begin();
   let failure:unknown;try{peer.exec('ALTER TABLE verification_application_history ADD COLUMN after_read TEXT');}catch(error){failure=error;}
-  expect(failure).toMatchObject({code:'SQLITE_BUSY'});
+  expect(failure).toMatchObject({code:'ERR_SQLITE_ERROR',errcode:5});
   expect(c.evidence.columns['verification_application_history']!.some(row=>row.name==='after_read')).toBe(false);
   c.finish();f.db.exec('COMMIT');
   peer.exec('ALTER TABLE verification_application_history ADD COLUMN after_read TEXT');
@@ -263,7 +253,7 @@ it('an actual WAL reader keeps the original schema snapshot while a second conne
  const f=transactionMetadataFixture();let peer:ReturnType<typeof openPrivateVerificationDatabase>|undefined;
  try{
   f.db.pragma('journal_mode=WAL');
-  const SQLite=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');peer=new SQLite(join(f.root,'authority.sqlite'),{timeout:0});
+  const SQLite=BuiltinDatabase as typeof BuiltinDatabase;peer=new SQLite(join(f.root,'authority.sqlite'),{timeout:0});
   f.db.exec('BEGIN');const owner=createRegistrationCensusDatabase(f.db)!,first=owner.begin();first.finish();
   peer.exec('ALTER TABLE verification_application_history ADD COLUMN after_wal_commit TEXT');
   const locked=owner.begin();expect(locked.evidence.columns['verification_application_history']!.some(row=>row.name==='after_wal_commit')).toBe(false);locked.finish();
@@ -274,22 +264,22 @@ it('an actual WAL reader keeps the original schema snapshot while a second conne
 it('a real COMMIT/BEGIN true-to-true transaction ABA cannot validate a prior census after actual schema change',()=>{
  const f=transactionMetadataFixture();let peer:ReturnType<typeof openPrivateVerificationDatabase>|undefined;
  try{
-  const SQLite=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');peer=new SQLite(join(f.root,'authority.sqlite'),{timeout:0});
+  const SQLite=BuiltinDatabase as typeof BuiltinDatabase;peer=new SQLite(join(f.root,'authority.sqlite'),{timeout:0});
   f.db.exec('BEGIN');const owner=createRegistrationCensusDatabase(f.db)!,old=owner.begin();expect(f.db.inTransaction).toBe(true);
   f.db.exec('COMMIT');peer.exec('ALTER TABLE verification_application_history ADD COLUMN new_epoch TEXT');f.db.exec('BEGIN');expect(f.db.inTransaction).toBe(true);
   expect(()=>old.finish()).toThrow('application_registration_changed');
   const fresh=owner.begin();expect(fresh.evidence.columns['verification_application_history']!.some(row=>row.name==='new_epoch')).toBe(true);fresh.finish();
  }finally{closeTransactionMetadataFixture(f,peer);}
 });
-it('real public and CPP transaction accessors reject a forged getter and remain bound to actual native state',()=>{
+it('real public and built-in native transaction accessors reject a forged getter and remain bound to actual native state',()=>{
  const f=transactionMetadataFixture();let getterCalls=0;
  try{
-  const native=readPrivateDatabaseNativeAccess(f.db)!,original=Object.getOwnPropertyDescriptor(native.cpp,'inTransaction')!.get!;
-  expect(Reflect.apply(original,native.cpp,[])).toBe(false);
+  const native=readPrivateDatabaseNativeAccess(f.db)!,original=Object.getOwnPropertyDescriptor(native.receiver,'isTransaction')!.get!;
+  expect(Reflect.apply(original,native.receiver,[])).toBe(false);
   const forged={configurable:true,get(){getterCalls++;return true;}};
   expect(Reflect.defineProperty(f.db,'inTransaction',forged)).toBe(false);
-  expect(Reflect.defineProperty(native.cpp,'inTransaction',forged)).toBe(false);
+  expect(Reflect.defineProperty(native.receiver,'isTransaction',forged)).toBe(false);
   const c=createRegistrationCensusDatabase(f.db)!.begin();c.finish();
-  expect(getterCalls).toBe(0);expect(Reflect.apply(original,native.cpp,[])).toBe(false);
+  expect(getterCalls).toBe(0);expect(Reflect.apply(original,native.receiver,[])).toBe(false);
  }finally{closeTransactionMetadataFixture(f);}
 });

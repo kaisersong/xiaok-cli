@@ -41,12 +41,12 @@ it('keeps the actual FileSession migration export read-only while ordinary writi
 
 it.each(['sqlite-session','sqlite-goal'] as const)('rechecks after actual discovery and closes %s before the first PRAGMA',async kind=>{
  const root=fixture(),path=join(root,'source.sqlite'),helpers=await import('../../../src/runtime/verification/ordinary-source-writer-observation.js'),original=helpers.observeOrdinarySQLiteWriter;vi.spyOn(helpers,'observeOrdinarySQLiteWriter').mockImplementation((...args)=>{original(...args);route.kind='pending';});
- const Db=kind==='sqlite-session'?(await import('better-sqlite3')).default:(await import('node:sqlite')).DatabaseSync,closed=vi.spyOn(Db.prototype,'close');let unexpectedlyOpened:SQLiteSessionStore|SqliteGoalStore|undefined;
+ const Db=kind==='sqlite-session'?(await import('../../../src/utils/builtin-sqlite.js')).default:(await import('node:sqlite')).DatabaseSync,closed=vi.spyOn(Db.prototype,'close');let unexpectedlyOpened:SQLiteSessionStore|SqliteGoalStore|undefined;
  try{expect(()=>{unexpectedlyOpened=kind==='sqlite-session'?new SQLiteSessionStore(path):new SqliteGoalStore(path);}).toThrow('ordinary_source_route');expect(closed).toHaveBeenCalledTimes(1);}finally{if(unexpectedlyOpened instanceof SQLiteSessionStore)unexpectedlyOpened.dispose();else unexpectedlyOpened?.close();}
 });
 it.each(['sqlite-session','sqlite-goal'] as const)('closes the original %s connection when its first actual PRAGMA throws',async kind=>{
  const root=fixture(),path=join(root,'source.sqlite'),failure=Error('actual_pragma_failed');let unexpectedlyOpened:SQLiteSessionStore|SqliteGoalStore|undefined;
- if(kind==='sqlite-session'){const Db=(await import('better-sqlite3')).default,closed=vi.spyOn(Db.prototype,'close');const invoked=vi.spyOn(Db.prototype,'pragma').mockImplementation(()=>{throw failure;});try{expect(()=>{unexpectedlyOpened=new SQLiteSessionStore(path);}).toThrow(failure);expect(closed).toHaveBeenCalledTimes(1);}finally{(unexpectedlyOpened as SQLiteSessionStore|undefined)?.dispose();for(const db of invoked.mock.contexts)if(db instanceof Db&&db.open)db.close();}}
+ if(kind==='sqlite-session'){const Db=(await import('../../../src/utils/builtin-sqlite.js')).default,closed=vi.spyOn(Db.prototype,'close');const invoked=vi.spyOn(Db.prototype,'pragma').mockImplementation(()=>{throw failure;});try{expect(()=>{unexpectedlyOpened=new SQLiteSessionStore(path);}).toThrow(failure);expect(closed).toHaveBeenCalledTimes(1);}finally{(unexpectedlyOpened as SQLiteSessionStore|undefined)?.dispose();for(const db of invoked.mock.contexts)if(db instanceof Db&&db.open)db.close();}}
  else{const Db=(await import('node:sqlite')).DatabaseSync,closed=vi.spyOn(Db.prototype,'close');const invoked=vi.spyOn(Db.prototype,'exec').mockImplementation(()=>{throw failure;});try{expect(()=>{unexpectedlyOpened=new SqliteGoalStore(path);}).toThrow(failure);expect(closed).toHaveBeenCalledTimes(1);}finally{(unexpectedlyOpened as SqliteGoalStore|undefined)?.close();for(const db of invoked.mock.contexts)if(db instanceof Db&&db.isOpen)db.close();}}
 });
 
@@ -61,7 +61,7 @@ it.each(['file-session','sqlite-session'] as const)('rejects %s after its origin
 });
 it.each(['sqlite-session','sqlite-goal'] as const)('closes %s and does not create schema if actual registration fails',async kind=>{
  const root=fixture(),path=join(root,'source.sqlite'),helpers=await import('../../../src/runtime/verification/ordinary-source-writer-observation.js'),failure=Error('source_registry_unavailable');vi.spyOn(helpers,'observeOrdinarySQLiteWriter').mockImplementation(()=>{throw failure;});
- const Db=kind==='sqlite-session'?(await import('better-sqlite3')).default:(await import('node:sqlite')).DatabaseSync,closed=vi.spyOn(Db.prototype,'close');expect(()=>kind==='sqlite-session'?new SQLiteSessionStore(path):new SqliteGoalStore(path)).toThrow(failure);expect(closed).toHaveBeenCalledTimes(1);
+ const Db=kind==='sqlite-session'?(await import('../../../src/utils/builtin-sqlite.js')).default:(await import('node:sqlite')).DatabaseSync,closed=vi.spyOn(Db.prototype,'close');expect(()=>kind==='sqlite-session'?new SQLiteSessionStore(path):new SqliteGoalStore(path)).toThrow(failure);expect(closed).toHaveBeenCalledTimes(1);
  const inspect=new (await import('node:sqlite')).DatabaseSync(path);try{expect(inspect.prepare("select name from sqlite_master where type='table'").all()).toEqual([]);}finally{inspect.close();}
 });
 

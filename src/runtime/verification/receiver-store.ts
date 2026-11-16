@@ -1,9 +1,10 @@
+import BuiltinDatabase from '../../utils/builtin-sqlite.js';
 import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { mkdirSync, lstatSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { syncDirectoryTreeStrict } from '../../utils/atomic-file.js';
 import { canonicalVerificationJson, hashVerificationTuple, parseVerificationTuple, VERIFICATION_BUDGET, type VerificationTuple } from './protocol.js';
 
@@ -31,7 +32,7 @@ export class VerificationReceiverStore {
       if (existsSync(file) && (lstatSync(file).isSymbolicLink() || !lstatSync(file).isFile())) throw Error('receiver_store_path');
     }
     if (existsSync(path + '-wal') || existsSync(path + '-shm')) throw Error('receiver_unexpected_wal');
-    const NativeDatabase = createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+    const NativeDatabase = BuiltinDatabase as typeof BuiltinDatabase;
     const db = new NativeDatabase(path, { timeout: 0 });
     try {
       db.pragma('journal_mode = DELETE'); db.pragma('synchronous = FULL');

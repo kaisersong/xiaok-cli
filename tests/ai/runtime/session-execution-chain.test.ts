@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -29,7 +30,7 @@ it('releases every real ancestor even when one actual SQLite close reports an er
  const {targets}=fixture();let chain:ReturnType<typeof createSessionExecutionChain>|undefined;
  for(const target of targets)chain=createSessionExecutionChain({target,parent:chain});
  const acquired=await acquireSessionExecutionChain(chain!,{invocationId:'close-failure',kind:'compound'});
- const Database=createRequire(import.meta.url)('better-sqlite3');const close=Database.prototype.close;let once=true;
+ const Database=BuiltinDatabase;const close=Database.prototype.close;let once=true;
  const spy=vi.spyOn(Database.prototype,'close').mockImplementation(function(this:any){const result=close.call(this);if(once){once=false;throw Error('injected-close-error');}return result;});
  try{await expect(acquired.releaseAfterDrain()).rejects.toThrow('injected-close-error');}
  finally{spy.mockRestore();}

@@ -3,7 +3,7 @@ import {consumeBlobCommandContext} from '../verification/blob-budget.js';
 import type {CapacityWriteContext,PreparedCapacityCommandFacts} from '../verification/capacity-command.js';
 import {mkdirSync,lstatSync,realpathSync,openSync,closeSync,writeFileSync,fsyncSync,fstatSync,readFileSync,readdirSync,unlinkSync,rmdirSync,constants} from 'node:fs';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ValidationMaterialReview} from '../verification/product-material-authorization.js';
 import {assertVerificationBlobBudgetDatabase,type createVerificationBlobBudget,type BlobReservationProposal} from '../verification/blob-budget.js';
 import {canonicalVerificationJson} from '../verification/protocol.js';

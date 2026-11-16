@@ -1,6 +1,6 @@
 import {readKSwarmEnrollmentSnapshot} from './kswarm-enrollment-store.js';
 import {isKSwarmOwnerIdentity} from './kswarm-host-subject.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {createVerificationAuthority,type VerificationOwner} from './proof-authority.js';
 import {openPrivateVerificationDatabase} from './private-database.js';

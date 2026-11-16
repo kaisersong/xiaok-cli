@@ -10,7 +10,7 @@ import {assertApprovedVerificationOperationsDatabase} from './approved-verificat
 import type {RecipeBinding} from './independent-recipes.js';
 import type {ControllerPeer} from './controller-public-daemon.js';
 import type {ValidationMaterialInvocation} from './product-material-authorization.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {QuiescenceExpectation,PhysicalQuiescenceReceipt} from '../isolated-execution/physical-quiescence.js';
 import {assertInstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {assertInstalledRootBrokerClient} from './root-broker-client.js';

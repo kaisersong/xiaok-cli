@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ describe('service-private exact-operation capability ledger', () => {
   });  it('reclaims expired capability slots while preserving immutable audit and denying replay', () => {
     const root = mkdtempSync(join(tmpdir(), 'controller-grants-'));
     const store = new ControllerGrantStore(root);
-    const NativeDatabase = createRequire(import.meta.url)('better-sqlite3');
+    const NativeDatabase = BuiltinDatabase;
     const db = new NativeDatabase(join(root, 'authority.sqlite'));
     try {
       const old = store.issue({ principalId: 'host', requestSource: 'user', method: 'controller.status', payload: {}, expiresAt: 2000 }, 1000);

@@ -7,7 +7,7 @@ import {inspectExecutionPreparationCommand,executeExecutionPreparationCommand,ty
 import {consumeBlobCommandContext} from '../verification/blob-budget.js';
 import type {CapacityWriteContext,PreparedCapacityCommandFacts} from '../verification/capacity-command.js';
 import {createHash,randomBytes} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson} from '../verification/protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from '../verification/storage-budget.js';
 import {assertVerificationBlobBudgetDatabase,type createVerificationBlobBudget,type BlobReservationProposal,type BlobReservationTransaction} from '../verification/blob-budget.js';

@@ -126,7 +126,7 @@ The CLI can ask about material delegation choices when interactive input is avai
 
 ### Requirements
 
-- **CLI:** Node.js **22.14 or later**.
+- **CLI:** Node.js **22.22.1+ (22.x), or 24+**.
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
@@ -146,7 +146,7 @@ The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`.
 > **npm >= 11.16 users:** npm blocks dependency install/postinstall scripts by default. If you see a warning like `install scripts not yet covered by allowScripts`, install with:
 >
 > ```bash
-> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
 > ```
 >
 > The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). The example also allows the CLI health check, `node-pty` and SQLite install scripts. For persistent policy, merge the required package names into your existing allowlist; do not overwrite unrelated entries. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.

@@ -1,5 +1,5 @@
 import {assertKSwarmSqlIntegrity} from './kswarm-sql-integrity.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {assertStorageOwnerSchema} from './storage-owner-schema.js';
 const capabilities=new WeakMap<object,()=>void>();

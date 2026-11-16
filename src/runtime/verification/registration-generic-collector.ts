@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {VerificationOwner} from './proof-authority.js';
 import {types} from 'node:util';
 import {canonicalVerificationJson as json} from './protocol.js';

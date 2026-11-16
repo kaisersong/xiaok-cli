@@ -1,5 +1,5 @@
 import {vi} from 'vitest';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as rawCommands from '../../src/runtime/isolated-execution/docker-runner.js';
 import type {RawReservationTransaction,createDockerRunner} from '../../src/runtime/isolated-execution/docker-runner.js';
 /** Test-only fault injection into the actual compiled command. This is not an
