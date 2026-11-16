@@ -7,6 +7,22 @@ function Observe-Owned {
     foreach ($proc in $all) {
       if ($selected.ContainsKey([int]$proc.ProcessId) -or -not $selected.ContainsKey([int]$proc.ParentProcessId)) { continue }
       $parents = @($all | Where-Object { $_.ProcessId -eq $proc.ParentProcessId })
+      if ($parents.Count -eq 1 -and $null -ne $proc.CreationDate -and $null -ne $parents[0].CreationDate -and
+          $proc.CreationDate -ge $parents[0].CreationDate -and -not $proc.ExecutablePath) {
+        $first = @{ pid = $proc.ProcessId; birth = $proc.CreationDate; parentPID = $proc.ParentProcessId; path = $proc.ExecutablePath }
+        $fresh = @(Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.ProcessId)")
+        if ($fresh.Count -gt 1) { throw 'Ambiguous second process snapshot; no signal authorized' }
+        $originalEnded = $fresh.Count -eq 0 -or ($null -ne $fresh[0].CreationDate -and $fresh[0].CreationDate -ne $proc.CreationDate)
+        Save-Json ("process-reread-" + [guid]::NewGuid().ToString() + '.json') @{
+          first = $first; second = @($fresh | ForEach-Object { @{ pid = $_.ProcessId; birth = $_.CreationDate; parentPID = $_.ParentProcessId; path = $_.ExecutablePath } }); originalEnded = $originalEnded }
+        if ($originalEnded) { continue }
+        if ($fresh.Count -ne 1 -or $null -eq $fresh[0].CreationDate -or $fresh[0].CreationDate -ne $proc.CreationDate -or
+            $fresh[0].ParentProcessId -ne $proc.ParentProcessId -or -not $fresh[0].ExecutablePath) {
+          throw 'Second process snapshot remains unknown; no signal authorized'
+        }
+        $proc = $fresh[0]
+        $all = @($all | ForEach-Object { if ($_.ProcessId -eq $proc.ProcessId) { $proc } else { $_ } })
+      }
       if ($parents.Count -ne 1 -or $proc.CreationDate -lt $parents[0].CreationDate -or -not $proc.ExecutablePath) {
         $facts = @{ child = @{ pid = $proc.ProcessId; birth = $proc.CreationDate; path = $proc.ExecutablePath; parentPID = $proc.ParentProcessId };
           parents = @($parents | ForEach-Object { @{ pid = $_.ProcessId; birth = $_.CreationDate; path = $_.ExecutablePath } }); selectedPIDs = @($selected.Keys) }
