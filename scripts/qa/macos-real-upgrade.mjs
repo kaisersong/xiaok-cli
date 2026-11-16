@@ -211,7 +211,7 @@ function profileInventory() {
   }
   roots.forEach(walk); return entries;
 }
-async function observeOwnedProcesses(rows, phase) {
+async function observeOwnedProcesses(rows, phase, { readProcesses = processes } = {}) {
   for (const row of rows) {
     if (row.uid !== qaUid || row.pid === process.pid) continue;
     const inApp = inside(app, row.executable), descendant = owned.has(row.ppid);
@@ -223,8 +223,15 @@ async function observeOwnedProcesses(rows, phase) {
         owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid }); event('owned-process-observed', owned.get(row.pid));
       }
       else {
-        const previous = owned.get(row.pid), matches = sameProcessIdentity(previous, row);
-        if (!matches) identityConflict(previous, row, phase, 'owned_pid_identity_changed');
+        const previous = owned.get(row.pid);
+        let current = row;
+        if (!sameProcessIdentity(previous, current)) {
+          const rechecked = await recheckParenthesizedComm(previous, current, readProcesses);
+          if (rechecked.kind === 'absent') continue;
+          if (rechecked.kind === 'restored') current = rechecked.current;
+        }
+        const matches = sameProcessIdentity(previous, current);
+        if (!matches) identityConflict(previous, current, phase, 'owned_pid_identity_changed');
         assert(matches, 'owned_pid_identity_changed');
       }
     }
@@ -405,14 +412,30 @@ function sameProcessIdentity(previous, current) {
   return Boolean(previous && current && previous.pid === current.pid && previous.uid === current.uid &&
     previous.birth === current.birth && previous.executable === current.executable);
 }
+async function recheckParenthesizedComm(previous, current, readProcesses = processes) {
+  const candidate = previous && current && previous.pid === current.pid && previous.uid === current.uid &&
+    previous.birth === current.birth && isAbsolute(previous.executable) && /^\([^()/]+\)$/.test(current.executable);
+  if (!candidate) return { kind: 'not-candidate' };
+  const fresh = (await readProcesses()).find(row => row.pid === previous.pid);
+  const kind = !fresh ? 'absent' : sameProcessIdentity(previous, fresh) ? 'restored' : 'unconfirmed';
+  if (!diagnosticEvent('owned-comm-snapshot-rechecked', { previous, current, fresh: fresh ?? null, outcome: kind, signalAuthorized: false })) {
+    return { kind: 'unconfirmed' };
+  }
+  return { kind, current: fresh };
+}
 function identityConflict(previous, current, phase, reason) {
   diagnosticEvent('owned-identity-conflict', { previous: previous ?? null, current: current ?? null, phase, reason, installedRequest,
     comparisons: { pid: previous?.pid === current?.pid, uid: previous?.uid === current?.uid,
       birth: previous?.birth === current?.birth, executable: previous?.executable === current?.executable } });
 }
 async function signalOwnedProcess(record, requestedSignal, { readProcesses = processes, sendSignal = (pid, signal) => process.kill(pid, signal) } = {}) {
-  const live = (await readProcesses()).find(p => p.pid === record.pid);
+  let live = (await readProcesses()).find(p => p.pid === record.pid);
   if (!live) return { kind: 'absent', pid: record.pid };
+  if (!sameProcessIdentity(record, live)) {
+    const rechecked = await recheckParenthesizedComm(record, live, readProcesses);
+    if (rechecked.kind === 'absent') return { kind: 'absent', pid: record.pid };
+    if (rechecked.kind === 'restored') live = rechecked.current;
+  }
   const known = owned.get(record.pid);
   if (!sameProcessIdentity(record, known) || !sameProcessIdentity(record, live)) {
     identityConflict(record, live, 'cleanup', 'identity_changed_not_signaled');
@@ -746,6 +769,35 @@ async function pureControls() {
         const actual = await invokeSignal(gui, [{ ...gui, [key]: value }]); assert.deepEqual(actual.actions, [['fresh-ps']]); assert.equal(actual.outcome.failure.reason, 'identity_changed_not_signaled');
       });
     }
+    const python = { ...gui, pid: 52, ppid: gui.pid, birth: 'python-birth', executable: join(root, 'python3'), directChild: false };
+    const parenthesized = { ...python, executable: '(python3.11)' }; owned.set(python.pid, python);
+    for (const [name, rows, expected] of [
+      ['absent', [], 'absent'], ['restored', [python], 'restored'], ['still-parenthesized', [parenthesized], 'unconfirmed'],
+      ['uid-changed', [{ ...python, uid: qaUid + 1 }], 'unconfirmed'],
+      ['birth-changed', [{ ...python, birth: 'new-birth' }], 'unconfirmed'],
+      ['image-changed', [{ ...python, executable: '/other-image' }], 'unconfirmed'],
+    ]) {
+      await signalCheck(`parenthesized comm ${name} requires exact second-snapshot facts`, async () => {
+        let reads = 0, signals = 0;
+        const proof = await recheckParenthesizedComm(python, parenthesized, async () => { reads++; return rows; });
+        assert.equal(proof.kind, expected); assert.equal(reads, 1);
+        reads = 0;
+        const outcome = await signalOwnedProcess(python, 'SIGTERM', {
+          readProcesses: async () => ++reads === 1 ? [parenthesized] : rows,
+          sendSignal: () => { signals++; return true; },
+        });
+        assert.equal(reads, 2); assert.equal(signals, expected === 'restored' ? 1 : 0);
+        if (expected === 'unconfirmed') assert.equal(outcome.kind, 'rejected');
+        if (expected === 'absent') assert.equal(outcome.kind, 'absent');
+      });
+    }
+    await signalCheck('observer rejects unresolved comm and accepts only absent or restored re-read', async () => {
+      await observeOwnedProcesses([parenthesized], 'pure-reread', { readProcesses: async () => [] });
+      await observeOwnedProcesses([parenthesized], 'pure-reread', { readProcesses: async () => [python] });
+      await assert.rejects(observeOwnedProcesses([parenthesized], 'pure-reread', { readProcesses: async () => [parenthesized] }), /owned_pid_identity_changed/);
+      assert.equal(owned.get(python.pid), python);
+    });
+    owned.delete(python.pid);
     await signalCheck('a signal failure remains a cleanup failure', async () => {
       const outcome = await signalOwnedProcess(gui, 'SIGTERM', { readProcesses: async () => [gui], sendSignal: () => { throw Object.assign(new Error('fixture-denied'), { code: 'EPERM' }); } });
       assert.equal(outcome.failure.reason, 'EPERM');
