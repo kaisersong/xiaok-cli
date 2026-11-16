@@ -149,15 +149,6 @@ jobs:
           tests/main/kswarm-project-agent-ipc-registry.test.ts
           tests/main/kswarm-proxy-ipc-registry.test.ts
 
-      - name: Persisted inbox and large history startup regressions
-        working-directory: desktop
-        run: >-
-          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
-          tests/main/assistant-inbox-legacy.test.ts
-          tests/main/assistant-inbox-store.test.ts
-          tests/main/assistant-inbox-service.test.ts
-          tests/main/context-continuity-inventory-scale.test.ts
-
       - name: Desktop deadline boundaries at the declared Node floor
         working-directory: desktop
         run: >
@@ -173,6 +164,15 @@ jobs:
       - name: Prepare locked Windows absence helper at the source reader layout
         if: runner.os == 'Windows'
         run: node desktop/tests/support/prepare-windows-source-absence.mjs
+
+      - name: Persisted inbox and large history startup regressions
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/assistant-inbox-legacy.test.ts
+          tests/main/assistant-inbox-store.test.ts
+          tests/main/assistant-inbox-service.test.ts
+          tests/main/context-continuity-inventory-scale.test.ts
 
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop
