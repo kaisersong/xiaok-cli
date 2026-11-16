@@ -5,7 +5,8 @@ param(
   [Parameter(Mandatory)][string]$Tag,
   [Parameter(Mandatory)][string]$FullSHA,
   [Parameter(Mandatory)][string]$ExpectedInstallerSHA256,
-  [Parameter(Mandatory)][long]$ExpectedReleaseID
+  [Parameter(Mandatory)][long]$ExpectedReleaseID,
+  [ValidateSet('published','draft')][string]$ExpectedReleaseState = 'published'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,7 @@ $repo = 'kaisersong/xiaok-cli'
 if ($Version -cnotmatch '^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$' -or
     $Tag -cne "desktop-v$Version" -or $FullSHA -cnotmatch '^[0-9a-f]{40}$' -or
     $ExpectedInstallerSHA256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid release identity input' }
-if ($Version -cne '1.6.4' -or $ExpectedReleaseID -le 0) { throw 'Only explicitly identified published 1.6.4 is allowed' }
+if ($Version -cne '1.6.4' -or $ExpectedReleaseID -le 0) { throw 'Only explicitly identified 1.6.4 is allowed' }
 if (-not $IsWindows -or $env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ARCH -ne 'X64' -or
     $env:ImageOS -ne 'win22' -or $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_REPOSITORY -cne $repo) {
   throw 'Requires the fixed repository disposable windows-2022 x64 job'
@@ -47,7 +48,8 @@ $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.
 $receipt = [ordered]@{ status = 'FAIL'; productReleaseSHA = $FullSHA; qaSourceSHA = $env:GITHUB_SHA;
   version = $Version; tag = $Tag; repository = $repo; runID = $env:GITHUB_RUN_ID; runAttempt = $env:GITHUB_RUN_ATTEMPT;
   scriptSHA256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant(); root = $root;
-  claim = 'Published 1.6.2 to 1.6.4 NSIS overwrite upgrade and installed Kimi smoke; no automatic updater, full historical migration, live model, full UI or Native qualification' }
+  expectedReleaseState = $ExpectedReleaseState;
+  claim = "Published 1.6.2 to $ExpectedReleaseState candidate 1.6.4 NSIS overwrite upgrade and installed Kimi smoke; no automatic updater, full historical migration, live model, full UI or Native qualification" }
 function Save-Json($Name, $Value) { $Value | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $evidence $Name) -Encoding utf8 }
 function Hash($Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Is-OwnedPath([string]$Path) {
@@ -78,9 +80,12 @@ function Resolve-TagCommit {
   }
   throw 'Tag indirection limit exceeded'
 }
-function Assert-Published($Release) {
-  if ($Release.tag_name -cne $Tag -or $Release.draft -ne $false -or $Release.prerelease -ne $false -or
-      -not $Release.published_at -or [long]$Release.id -ne $ExpectedReleaseID) { throw 'Requires an actually published normal release' }
+function Assert-CandidateState($Release) {
+  $expectDraft = $ExpectedReleaseState -ceq 'draft'
+  if ($Release.tag_name -cne $Tag -or $Release.draft -ne $expectDraft -or $Release.prerelease -ne $false -or
+      [long]$Release.id -ne $ExpectedReleaseID -or
+      ($expectDraft -and $null -ne $Release.published_at) -or
+      (-not $expectDraft -and -not $Release.published_at)) { throw 'Candidate release identity/state mismatch' }
 }
 function Assert-NoRegistry {
   foreach ($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryHive]::LocalMachine)) {
@@ -105,19 +110,19 @@ function Assert-NoForeignApp {
 $envNames = @('APPDATA','LOCALAPPDATA','TEMP','TMP','XIAOK_CONFIG_DIR','XIAOK_KIMI_PACKAGED_SMOKE_RESULT','XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE')
 $savedEnv = @{}; foreach ($n in $envNames) { $savedEnv[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 try {
-  $ref = Resolve-TagCommit; $release = Api "/releases/tags/$Tag"; Assert-Published $release
+  $ref = Resolve-TagCommit; $release = Api "/releases/$ExpectedReleaseID"; Assert-CandidateState $release
   $assetName = "xiaok-setup-$Version.exe"
   $assets = @($release.assets | Where-Object { $_.name -ceq $assetName })
   if ($assets.Count -ne 1 -or $assets[0].state -cne 'uploaded' -or [long]$assets[0].size -le 0) { throw 'Exact NSIS installer asset missing/ambiguous' }
   $asset = $assets[0]
-  Save-Json 'published-before.json' @{ release = $release; tagRef = $ref; asset = $asset; expectedSHA256 = $ExpectedInstallerSHA256 }
+  Save-Json 'candidate-before.json' @{ release = $release; tagRef = $ref; asset = $asset; expectedSHA256 = $ExpectedInstallerSHA256 }
   $downloadHeaders = $headers.Clone(); $downloadHeaders.Accept = 'application/octet-stream'
   Invoke-WebRequest -Uri "https://api.github.com/repos/$repo/releases/assets/$($asset.id)" -Headers $downloadHeaders -OutFile $installer
   if ((Get-Item -LiteralPath $installer).Length -ne $asset.size -or (Hash $installer) -cne $ExpectedInstallerSHA256) { throw 'Installer size/SHA256 mismatch' }
   $receipt.releaseID = $release.id; $receipt.assetID = $asset.id; $receipt.installerSHA256 = Hash $installer
-  $again = Api "/releases/$($release.id)"; Assert-Published $again
+  $again = Api "/releases/$($release.id)"; Assert-CandidateState $again
   $same = @($again.assets | Where-Object { $_.id -eq $asset.id -and $_.name -ceq $assetName -and $_.size -eq $asset.size -and $_.updated_at -ceq $asset.updated_at })
-  if ($same.Count -ne 1) { throw 'Published asset changed during download' }; $null = Resolve-TagCommit
+  if ($same.Count -ne 1) { throw 'Candidate asset changed during download' }; $null = Resolve-TagCommit
   Assert-NoRegistry; Assert-NoForeignApp
   foreach ($path in @($cache) + $shortcuts) { if (Test-Path -LiteralPath $path) { throw "Occupied runner known-folder fixture: $path" } }
   $preflightPassed = $true
@@ -207,10 +212,10 @@ finally {
       $oldFinal = Assert-OldReleaseIdentity
       if ($receipt.Contains('oldAssetUpdatedAt') -and $oldFinal.asset.updated_at -cne $receipt.oldAssetUpdatedAt) { throw 'Old asset identity changed during QA' }
       Save-Json 'old-published-final.json' $oldFinal
-      $null = Resolve-TagCommit; $finalRelease = Api "/releases/$($release.id)"; Assert-Published $finalRelease
+      $null = Resolve-TagCommit; $finalRelease = Api "/releases/$($release.id)"; Assert-CandidateState $finalRelease
       $finalAsset = @($finalRelease.assets | Where-Object { $_.id -eq $asset.id -and $_.name -ceq $assetName -and $_.size -eq $asset.size -and $_.updated_at -ceq $asset.updated_at })
-      if ($finalAsset.Count -ne 1) { throw 'Published asset identity changed during QA' }
-      Save-Json 'published-after.json' @{ release = $finalRelease; tagRef = (Resolve-TagCommit); installerSHA256 = $ExpectedInstallerSHA256 }
+      if ($finalAsset.Count -ne 1) { throw 'Candidate asset identity changed during QA' }
+      Save-Json 'candidate-after.json' @{ release = $finalRelease; tagRef = (Resolve-TagCommit); installerSHA256 = $ExpectedInstallerSHA256 }
     }
   } catch { $errors.Add("final observation: $($_.Exception.ToString())") }
   foreach ($n in $envNames) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n], 'Process') }

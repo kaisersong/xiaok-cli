@@ -19,6 +19,11 @@ on:
       expectedReleaseID:
         required: true
         type: string
+      expectedReleaseState:
+        required: true
+        type: choice
+        default: published
+        options: [published, draft]
 permissions:
   contents: read
 jobs:
@@ -32,7 +37,7 @@ jobs:
           repository: kaisersong/xiaok-cli
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Verify published installers and upgrade 1.6.2 to 1.6.4
+      - name: Verify identified installers and upgrade 1.6.2 to 1.6.4
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,8 +46,9 @@ jobs:
           QA_RELEASE_SHA: ${{ inputs.fullSHA }}
           QA_INSTALLER_SHA256: ${{ inputs.expectedInstallerSHA256 }}
           QA_RELEASE_ID: ${{ inputs.expectedReleaseID }}
+          QA_RELEASE_STATE: ${{ inputs.expectedReleaseState }}
         run: |
-          & ./scripts/qa/windows-real-upgrade.ps1 -Version $env:QA_VERSION -Tag $env:QA_TAG -FullSHA $env:QA_RELEASE_SHA -ExpectedInstallerSHA256 $env:QA_INSTALLER_SHA256 -ExpectedReleaseID $env:QA_RELEASE_ID
+          & ./scripts/qa/windows-real-upgrade.ps1 -Version $env:QA_VERSION -Tag $env:QA_TAG -FullSHA $env:QA_RELEASE_SHA -ExpectedInstallerSHA256 $env:QA_INSTALLER_SHA256 -ExpectedReleaseID $env:QA_RELEASE_ID -ExpectedReleaseState $env:QA_RELEASE_STATE
       - name: Preserve actual QA receipts
         if: always()
         uses: actions/upload-artifact@v4
