@@ -1,5 +1,4 @@
 name: Desktop Release
-
 on:
   push:
     tags:
@@ -10,17 +9,13 @@ on:
         description: 'Tag to release (e.g. desktop-v1.6.3)'
         required: true
         default: 'desktop-v1.6.3'
-
 permissions:
   contents: write
-
 env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-
 concurrency:
   group: desktop-release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
-
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -46,7 +41,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SHA: ${{ steps.identity.outputs.sha }}
-
   build-mac:
     needs: create-release
     runs-on: macos-15
@@ -57,7 +51,6 @@ jobs:
         with:
           ref: ${{ needs.create-release.outputs.sha }}
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -65,43 +58,34 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Generate exact-source desktop build provenance
+      - name: Generate source provenance
         shell: bash
-        run: &generate_desktop_provenance |
+        run: &source_provenance |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=normal)"
           node scripts/set-build-info.mjs release
-
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
-
       - name: Install root dependencies
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
-
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
-
       - name: Prepare locked bundled Yunzhijia binary before packaging
         working-directory: desktop
         run: node scripts/prepare-packaged-yzj-cli.cjs
-
       - name: Verify prepared bundled CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
-
       - name: Prepare pinned ordinary Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
-
       - name: Verify native SQLite binding loads
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
-
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
@@ -113,17 +97,13 @@ jobs:
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
-
       - uses: ./.github/actions/install-desktop-sidecars
-
       - name: Build report-renderer bundle
         shell: bash
         run: bash .github/scripts/build-report-renderer.sh
-
       - name: Build canvas frontend and MCP bundle
         shell: bash
         run: bash .github/scripts/build-canvas-bundles.sh
-
       - name: Download Python wheels (macOS)
         run: |
           wheel_dir="../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels"
@@ -140,17 +120,14 @@ jobs:
               --abi abi3 \
               --abi none
           done
-
       - name: Smoke test report-renderer
         run: |
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
-
       - name: Vendor self-contained provider runtimes (macOS)
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64 --verify
-
       - name: Prepare verified artifact export helper
         env:
           XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
@@ -158,18 +135,17 @@ jobs:
           node scripts/verification/prepare-artifact-export-toolchain.mjs
           node scripts/verification/build-artifact-export-helper.mjs --target darwin-arm64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
-
-      - name: Audit prepared source
+      - name: Audit source
         shell: bash
-        run: &audit_desktop_source |
+        run: &audit_source |
           git status --porcelain=v1 --untracked-files=all
-          git diff --exit-code HEAD -- . ':(exclude)dist/**' ':(exclude)src/build-info.ts'
-
+          node --input-type=module -e 'import{verifyArtifact as v}from"./scripts/verification/copy-windows-absence.mjs";console.log(v("data/verification/windows/win32-x64","x64"))'
+          derived=data/verification/windows/win32-x64/windows-installation-absence
+          git diff --exit-code HEAD -- . ':(exclude)dist/**' ':(exclude)src/build-info.ts' ":(exclude)$derived.exe" ":(exclude)$derived.json"
       - name: Build desktop
         run: cd desktop && npm run build
         env:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
-
       - name: Validate macOS signing secrets
         shell: bash
         env:
@@ -180,7 +156,6 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
         run: bash --noprofile --norc -e -o pipefail .github/scripts/check-macos-signing-secrets.sh
-
       - name: Write Apple notarization API key
         shell: bash
         env:
@@ -191,13 +166,11 @@ jobs:
           import base64
           import os
           from pathlib import Path
-
           key_id = os.environ["APPLE_API_KEY_ID"]
           key_path = Path(os.environ["RUNNER_TEMP"]) / f"AuthKey_{key_id}.p8"
           key_path.write_bytes(base64.b64decode(os.environ["APPLE_API_KEY_P8_BASE64"]))
           key_path.chmod(0o600)
           PY
-
       - name: Import macOS signing certificate
         shell: bash
         env:
@@ -207,12 +180,10 @@ jobs:
           cert_path="$RUNNER_TEMP/xiaok-developer-id.p12"
           keychain_path="$RUNNER_TEMP/xiaok-signing.keychain-db"
           keychain_password="$(openssl rand -hex 24)"
-
           python3 - <<'PY'
           import base64
           import os
           from pathlib import Path
-
           cert_path = Path(os.environ["RUNNER_TEMP"]) / "xiaok-developer-id.p12"
           cert_path.write_bytes(base64.b64decode(os.environ["MACOS_CERTIFICATE_P12_BASE64"]))
           PY
@@ -223,23 +194,19 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
           security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
           security find-identity -v -p codesigning "$keychain_path"
-
           echo "MACOS_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-
       - name: Sign macOS bundled wheel binaries
         run: |
           python3 scripts/sign-macos-wheel-binaries.py \
             ../kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels \
             --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
             --keychain "$MACOS_SIGNING_KEYCHAIN"
-
       - name: Package signed macOS app
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
       - name: Notarize macOS app
         timeout-minutes: 135
         run: scripts/notarize-macos-app.sh desktop/release/mac-arm64/xiaok.app
@@ -252,14 +219,12 @@ jobs:
           NOTARY_POLL_INTERVAL_SECONDS: "30"
           NOTARY_REUSE_IN_PROGRESS: "true"
           NOTARY_REUSE_WINDOW_SECONDS: "7200"
-
       - name: Package macOS distributables
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --arm64 --publish never --prepackaged release/mac-arm64/xiaok.app -c.mac.notarize=false
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
       - name: Verify macOS signature and notarization
         shell: bash
         run: |
@@ -268,8 +233,7 @@ jobs:
           codesign -dv --verbose=4 "$app_path" 2>&1 | tee "$RUNNER_TEMP/xiaok-codesign.txt"
           grep "TeamIdentifier=Y9YR86UG94" "$RUNNER_TEMP/xiaok-codesign.txt"
           xcrun stapler validate "$app_path"
-
-      - name: Verify packaged desktop source identity
+      - name: Verify packaged source identity
         shell: bash
         env:
           PROVENANCE_ASAR: desktop/release/mac-arm64/xiaok.app/Contents/Resources/app.asar
@@ -287,12 +251,10 @@ jobs:
             console.log(JSON.stringify(BUILD_INFO));
           })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
-
       - name: Upload to GitHub Release
         run: node scripts/desktop-release-identity.mjs upload-mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build-windows:
     needs: create-release
     runs-on: windows-2022
@@ -303,7 +265,6 @@ jobs:
         with:
           ref: ${{ needs.create-release.outputs.sha }}
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -311,47 +272,37 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Generate exact-source desktop build provenance
+      - name: Generate source provenance
         shell: bash
-        run: *generate_desktop_provenance
-
+        run: *source_provenance
       - name: Prepare node-gyp headers (retrying download, cached)
         uses: ./.github/actions/node-headers
-
       - name: Compile Windows verification namespace helper
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
           node scripts/verification/build-windows-absence.mjs --target x64
           node scripts/verification/test-windows-absence.mjs
-
       - name: Install root dependencies
         shell: bash
         run: bash .github/scripts/retry.sh npm ci
-
       - name: Install desktop dependencies
         shell: bash
         run: cd desktop && bash ../.github/scripts/retry.sh npm ci
-
       - name: Prepare locked bundled Yunzhijia binary before packaging
         working-directory: desktop
         run: node scripts/prepare-packaged-yzj-cli.cjs
-
       - name: Verify prepared bundled CLI lifecycle
         run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
-
       - name: Prepare pinned ordinary Broker runtime
         run: cd desktop && node scripts/prepare-broker-runtime.mjs
-
       - name: Test packaged runtime dependency gate
         run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
-
       - name: Verify native SQLite binding loads
         shell: bash
         run: |
           node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
           cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
-
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
@@ -363,26 +314,20 @@ jobs:
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
           git -C ../intent-broker checkout --detach FETCH_HEAD
-
       - uses: ./.github/actions/install-desktop-sidecars
-
       - name: Build report-renderer bundle
         shell: bash
         run: bash .github/scripts/build-report-renderer.sh
-
       - name: Build canvas frontend and MCP bundle
         shell: bash
         run: bash .github/scripts/build-canvas-bundles.sh
-
       - name: Download Python wheels (Windows)
         run: ./.github/scripts/download-windows-slide-wheels.ps1
-
       - name: Vendor self-contained provider runtimes (Windows)
         run: |
           cd ../kai-xiaok-plugins
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
           node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
-
       - name: Prepare verified artifact export helper
         env:
           XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
@@ -390,25 +335,20 @@ jobs:
           node scripts/verification/prepare-artifact-export-toolchain.mjs
           node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
           cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
-
-      - name: Audit prepared source
+      - name: Audit source
         shell: bash
-        run: *audit_desktop_source
-
+        run: *audit_source
       - name: Build desktop
         run: cd desktop && npm run build
         env:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
-
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
-
-      - name: Verify packaged desktop source identity
+      - name: Verify packaged source identity
         shell: bash
         env:
           PROVENANCE_ASAR: desktop/release/win-unpacked/resources/app.asar
         run: *verify_packaged_provenance
-
       - name: Run packaged Windows Kimi K3 smoke
         shell: pwsh
         run: |
@@ -418,14 +358,12 @@ jobs:
           $localAppData = Join-Path $smokeRoot 'localappdata'
           $tempDir = Join-Path $smokeRoot 'temp'
           New-Item -ItemType Directory -Force -Path $appData, $localAppData, $tempDir | Out-Null
-
           $env:XIAOK_KIMI_PACKAGED_SMOKE_RESULT = $resultPath
           $env:XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE = '1'
           $env:APPDATA = $appData
           $env:LOCALAPPDATA = $localAppData
           $env:TEMP = $tempDir
           $env:TMP = $tempDir
-
           $executable = Resolve-Path 'desktop/release/win-unpacked/xiaok.exe'
           $process = Start-Process -FilePath $executable -PassThru -Wait
           if ($process.ExitCode -ne 0) {
@@ -435,12 +373,10 @@ jobs:
             throw 'Packaged Kimi smoke did not write its result'
           }
           node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
-
       - name: Upload to GitHub Release
         run: node scripts/desktop-release-identity.mjs upload-windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   verify-release:
     needs: [create-release, build-mac, build-windows]
     runs-on: ubuntu-latest
