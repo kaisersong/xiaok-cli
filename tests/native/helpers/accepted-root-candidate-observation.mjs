@@ -5,7 +5,9 @@ import {fileURLToPath} from 'node:url';
 import ts from 'typescript';
 // Reviewed 1.6.4 fixed-Node launches and credential pre-probe update the file.
 // Prior source 64b1365c59a30d781f898f5abc5be58e406cdfb3286b8485bf401ba998cffb65; both observed candidate functions are byte-identical.
-export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='8a4e14439f9aa1c6ca1a90d2850b92c664d689e55689aee5af69d83899d3deeb';
+// Reviewed 1.6.5 inventory-only startup change; both target functions remain byte-identical.
+// Equivalence: handoff/desktop-history-candidate-source-equivalence.json; prior pin retained there.
+export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='f2b9d3623d342329f52d6f0cc901669a89d06c69016bd07d6f51b9269d9a2ac9';
 const alias='__fixedOriginalCandidateObservation';
 const targets=[['runKSwarmHandoffTask','kswarm_direct'],['runWorkspaceProjectTask','room_project']];
 function prefix(url){
