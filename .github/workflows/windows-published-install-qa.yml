@@ -1,25 +1,20 @@
-name: Receiver bounded-work diagnostic — do-not-use-for-release
+name: Receiver RPC context diagnostic — not release qualification
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
   diagnostic:
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22.14.0']
     runs-on: macos-15
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: kaisersong/xiaok-cli
-          ref: 63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334
+          ref: 394ee76a5e00fd53f0ab3b127e0f20cd7819cd91
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '22.14.0'
           cache: npm
       - uses: ./.github/actions/node-headers
       - name: Original dependency closure
@@ -27,52 +22,41 @@ jobs:
         run: |
           bash .github/scripts/retry.sh npm ci --ignore-scripts
           bash .github/scripts/retry.sh npm rebuild better-sqlite3
-      - name: Observe original whole case with an explicitly experimental receiver budget
+      - name: Observe receiver RPC settlements without changing any budget
         shell: bash
         run: |
           python3 - <<'PY'
           import pathlib,subprocess,os,json,time,hashlib,sys
-          SHA='63f5ba8bdc0d71c8e07a6204e57a62e0fb7bb334'
+          SHA='394ee76a5e00fd53f0ab3b127e0f20cd7819cd91'
           assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==SHA
           assert not subprocess.check_output(['git','diff','--name-only'],text=True).strip()
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'receiver30-diagnostic';root.mkdir()
-          patches=[]
-          def patch(name,items):
-           p=pathlib.Path(name);original=p.read_text();s=original
-           for a,b in items:
-            assert s.count(a)==1,(name,a,s.count(a));s=s.replace(a,b)
-           p.write_text(s)
-           patches.append({'path':name,'originalSHA256':hashlib.sha256(original.encode()).hexdigest(),'diagnosticSHA256':hashlib.sha256(s.encode()).hexdigest(),'changes':len(items)})
-          patch('src/runtime/verification/receiver-transport.ts',[
-           ('async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc(socketPath,bytes,{signal,verifyServerPeer(socket){',
-            'async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){const diagnosticStarted=process.hrtime.bigint();try{return await callControllerIpc(socketPath,bytes,{timeoutMs:30000,signal,verifyServerPeer(socket){'),
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'receiver-rpc-context-394ee76a';root.mkdir()
+          p=pathlib.Path('src/runtime/verification/receiver-transport.ts');original=p.read_text();s=original
+          changes=[
+           ('async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){return callControllerIpc(socketPath,bytes,{timeoutMs:RECEIVER_RPC_LIVENESS_MS,signal,verifyServerPeer(socket){',
+            'async function exchange(bytes:Buffer,signal:AbortSignal,beforeSend?:()=>void){const diagnosticStarted=process.hrtime.bigint();let diagnosticFailed=false;let diagnosticBeforeSendMs:number|null=null;try{return await callControllerIpc(socketPath,bytes,{timeoutMs:RECEIVER_RPC_LIVENESS_MS,signal,verifyServerPeer(socket){'),
            ('if(beforeSend){const result:unknown=beforeSend();',
-            'if(beforeSend){const diagnosticBefore=process.hrtime.bigint();const result:unknown=beforeSend();try{console.error(JSON.stringify({diagnosticOnly:true,kind:"before-send",enteredMs:Number(diagnosticBefore-diagnosticStarted)/1e6,elapsedMs:Number(process.hrtime.bigint()-diagnosticBefore)/1e6}));}catch{}'),
+            'if(beforeSend){const diagnosticBefore=process.hrtime.bigint();const result:unknown=beforeSend();diagnosticBeforeSendMs=Number(process.hrtime.bigint()-diagnosticBefore)/1e6;'),
            (' }});}',
-            ' }});}finally{try{console.error(JSON.stringify({diagnosticOnly:true,kind:"rpc-settled",method:JSON.parse(bytes.toString()).method??"upload-register",elapsedMs:Number(process.hrtime.bigint()-diagnosticStarted)/1e6}));}catch{}}}')])
-          patch('src/runtime/verification/receiver-service.ts',[
-           ('startControllerIpc({socketPath,publicPeerAuthenticated:true,','startControllerIpc({socketPath,requestTimeoutMs:30000,publicPeerAuthenticated:true,')])
-          patch('tests/runtime/verification/intent-completion-dependencies.test.ts',[
-           ('}),intentDependencyRunnerBudget(105000));','}),600000);')])
-          (root/'patches.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'sourceSHA':SHA,'patches':patches},indent=2)+'\n')
-          env=os.environ.copy();env.pop('NODE_OPTIONS',None)
-          probe=json.loads(subprocess.check_output(['node','-e',"const os=require('node:os'),v8=require('node:v8');console.log(JSON.stringify({node:process.version,arch:process.arch,platform:process.platform,memory:os.totalmem(),heapLimit:v8.getHeapStatistics().heap_size_limit,nodeOptions:process.env.NODE_OPTIONS??null}))"],env=env,text=True))
-          (root/'probe.json').write_text(json.dumps(probe,indent=2)+'\n')
-          args=['node','node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(root/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
+            ' }});}catch(error){diagnosticFailed=true;throw error;}finally{try{console.error(JSON.stringify({diagnosticOnly:true,kind:"receiver-rpc-settled",method:JSON.parse(bytes.toString()).method??"upload-register",timeoutMs:RECEIVER_RPC_LIVENESS_MS,failed:diagnosticFailed,beforeSendMs:diagnosticBeforeSendMs,elapsedMs:Number(process.hrtime.bigint()-diagnosticStarted)/1e6}));}catch{}}}')]
+          for a,b in changes:
+           assert s.count(a)==1,(a,s.count(a));s=s.replace(a,b)
+          p.write_text(s)
+          (root/'patches.json').write_text(json.dumps({'diagnosticOnly':True,'notReleaseSource':True,'sourceSHA':SHA,'path':str(p),'originalSHA256':hashlib.sha256(original.encode()).hexdigest(),'diagnosticSHA256':hashlib.sha256(s.encode()).hexdigest(),'budgetsUnchanged':True,'originalTestFileUnchanged':True},indent=2)+'\n')
+          env=os.environ.copy()
+          args=['node','node_modules/vitest/vitest.mjs','run','--config','vitest.config.ts','tests/runtime/verification/intent-completion-dependencies.test.ts','--maxWorkers=1','--minWorkers=1','--reporter=verbose','--reporter=json','--outputFile='+str(root/'results.json'),'--testNamePattern','parent completion final set rejects old native-approved child publication references after a same-proof child republishes']
           started=time.monotonic();code=None;unknown=False
           with (root/'test.log').open('wb') as out:
            try:code=subprocess.run(args,env=env,stdout=out,stderr=subprocess.STDOUT,timeout=780).returncode
            except subprocess.TimeoutExpired:unknown=True
-          receipt={'diagnosticOnly':True,'notNativeOrReleaseQualification':True,'sourceSHA':SHA,'receiverExperimentalBudgetMs':30000,'experimentalCaseObserverMs':600000,'originalCaseCallbackUnchanged':True,'generalRPCDefaultUnchanged':True,'authorityClocksUnchanged':True,'material105000Unchanged':True,'originalCaseAssertionsUnchanged':True,'physicalUnknownUnchanged':True,'exitCode':code,'outerTimedOut':unknown,'elapsedSeconds':time.monotonic()-started,'command':args}
-          (root/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
-          print(json.dumps(receipt));print((root/'test.log').read_text(errors='replace')[-40000:])
-          sys.exit(code if isinstance(code,int) and code>=0 else 1)
+          receipt={'diagnosticOnly':True,'notNativeOrReleaseQualification':True,'sourceSHA':SHA,'receiverBudgetMs':30000,'allProductAndTestBudgetsUnchanged':True,'originalCaseCallbackAndAssertionsUnchanged':True,'physicalUnknownUnchanged':True,'exitCode':code,'outerTimedOut':unknown,'elapsedSeconds':time.monotonic()-started,'command':args}
+          (root/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');print(json.dumps(receipt));print((root/'test.log').read_text(errors='replace')[-40000:]);sys.exit(code if isinstance(code,int) and code>=0 else 1)
           PY
-      - name: Preserve real bounded-work results including failures
+      - name: Preserve bounded diagnostic results including failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: receiver30-diagnostic-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/receiver30-diagnostic/
+          name: receiver-rpc-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/receiver-rpc-context-394ee76a/
           retention-days: 7
           if-no-files-found: error
