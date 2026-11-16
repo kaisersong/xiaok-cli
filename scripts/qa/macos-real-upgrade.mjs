@@ -58,7 +58,7 @@ let acceptedUserQuit = false;
 const children = new Set();
 let root, evidence, app, appExecutable, oldChild, oldIdentity, monitorPromise;
 let monitorStopped = false, monitorError, latestGuiApplications = [], installedRequest = false;
-let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256, qaSourceBinding;
+let primary, resultFacts = {}, commandId = 0, cleaning = false, shipItSHA256, newShipItSHA256, qaSourceBinding;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 const inside = (parent, value) => { const r = relative(parent, value); return r === '' || (!isAbsolute(r) && r !== '..' && !r.startsWith(`..${sep}`)); };
 function remaining() { if (!cleaning) assert(performance.now() < DEADLINE, 'qa_wall_budget_exhausted'); }
@@ -231,6 +231,33 @@ function profileInventory() {
   }
   roots.forEach(walk); return entries;
 }
+function officialShipItRole(actual, phase) {
+  if (![actual, phase.oldReferenceSHA256, phase.newReferenceSHA256].every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value))) return null;
+  if (actual === phase.oldReferenceSHA256) return 'old-reference';
+  const exited = phase.oldExit;
+  if (actual === phase.newReferenceSHA256 && phase.installedRequest === true && phase.originalHelperAfterRequest === true &&
+      exited?.directAppExited === true && exited.directAppCloseObserved === true &&
+      exited.directAppExitCode === 0 && exited.directAppSignal === null) return 'new-reference';
+  return null;
+}
+function officialShipItPath(executable) {
+  return isAbsolute(executable) && basename(executable) === 'ShipIt' &&
+    (inside(app, executable) || inside(join(qaHome, 'Library', 'Caches', `${APP_ID}.ShipIt`), executable));
+}
+async function verifyOfficialShipItFile(row) {
+  assert(diagnosticEvent('shipit-file-scope-observed', { current: row, pathScoped: officialShipItPath(row.executable),
+    expectedUID: qaUid, signalAuthorized: false }), 'shipit_scope_evidence_unconfirmed');
+  assert(row.uid === qaUid && officialShipItPath(row.executable), 'shipit_path_or_uid_not_scoped');
+  const actual = await fileHash(row.executable);
+  const phase = { oldReferenceSHA256: shipItSHA256, newReferenceSHA256: newShipItSHA256, installedRequest,
+    originalHelperAfterRequest: [...owned.values()].some(p => p.shipIt && p.uid === qaUid && officialShipItPath(p.executable) && p.shipItFileRole === 'old-reference' &&
+      p.shipItFileSHA256 === shipItSHA256 && p.observedAfterInstallRequest === true), oldExit: directAppExitFacts(oldChild) };
+  const role = officialShipItRole(actual, phase);
+  assert(diagnosticEvent('official-shipit-file-observed', { current: row, actualFileSHA256: actual,
+    phase, role: role ?? 'rejected', kernelMemoryHashClaim: false, signalAuthorized: false }), 'shipit_digest_evidence_unconfirmed');
+  assert(role, 'shipit_file_not_authorized_for_handoff_phase');
+  return { shipItFileRole: role, shipItFileSHA256: actual };
+}
 function postQuitUnconfirmedImage(previous, current, context) {
   return Boolean(context.graceful === true && context.accepted === true && context.installRequested === true &&
     previous && current && isAbsolute(previous.executable) && inside(app, previous.executable) &&
@@ -252,7 +279,7 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes,
       // No ownership exists yet. Admit only independently scoped, stable full images.
       let freshOne, freshTwo;
       if (isAbsolute(row.executable) && /^[RSIUT]/.test(row.state) && (inApp || ship || inFreshProfile)) {
-        if (ship) assert(shipItSHA256 && await fileHash(row.executable) === shipItSHA256, 'shipit_executable_not_original_signed_helper');
+        const helperFacts = ship ? await verifyOfficialShipItFile(row) : {};
         freshOne = (await readProcesses()).find(p => p.pid === row.pid);
         if (freshOne) {
           assert(freshOne.uid === firstSeen.uid && freshOne.birth === firstSeen.birth, 'pending_first_seen_pid_changed');
@@ -263,7 +290,7 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes,
             /^[RSIUT]/.test(freshOne.state) && /^[RSIUT]/.test(freshTwo.state)) {
           assert(diagnosticEvent('first-seen-full-image-confirmed', { firstSeen, current: row, freshOne, freshTwo,
             independentScope: true, signalSent: false, reaped: false }), 'first_seen_admission_evidence_unconfirmed');
-          owned.set(row.pid, { ...freshTwo, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: false });
+          owned.set(row.pid, { ...freshTwo, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: false, ...helperFacts });
           pendingFirstSeen.delete(row.pid); pendingChildren.delete(row.pid); continue;
         }
       }
@@ -296,8 +323,8 @@ async function observeOwnedProcesses(rows, phase, { readProcesses = processes,
           assert(pendingFirstSeen.size < 4096, 'first_seen_pending_bound');
           pendingFirstSeen.set(row.pid, { ...row }); continue;
         }
-        if (ship) assert(shipItSHA256 && await fileHash(row.executable) === shipItSHA256, 'shipit_executable_not_original_signed_helper');
-        owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid }); pendingChildren.delete(row.pid); event('owned-process-observed', owned.get(row.pid));
+        const helperFacts = ship ? await verifyOfficialShipItFile(row) : {};
+        owned.set(row.pid, { ...row, observedAfterInstallRequest: installedRequest, shipIt: ship, directChild: row.pid === oldChild?.pid, ...helperFacts }); pendingChildren.delete(row.pid); event('owned-process-observed', owned.get(row.pid));
       }
       else {
         const previous = owned.get(row.pid);
@@ -699,6 +726,11 @@ async function main() {
   const oldTree = await tree(app), newTree = await tree(referenceApp); save('old-bundle-tree.json', oldTree); save('expected-new-bundle-tree.json', newTree);
   const shipHelpers = oldTree.filter(e => e.kind === 'file' && e.name.endsWith('/Resources/ShipIt') && e.name.includes('/Squirrel.framework/'));
   assert(shipHelpers.length === 1, 'original_signed_shipit_helper_missing'); shipItSHA256 = shipHelpers[0].sha256;
+  const newShipHelpers = newTree.filter(e => e.kind === 'file' && e.name.endsWith('/Resources/ShipIt') && e.name.includes('/Squirrel.framework/'));
+  assert(newShipHelpers.length === 1, 'new_reference_signed_shipit_helper_missing'); newShipItSHA256 = newShipHelpers[0].sha256;
+  save('shipit-reference-pins.json', { oldReference: { source: OLD.sha, version: OLD.version, fileSHA256: shipItSHA256 },
+    newReference: { source: NEW.sha, version: NEW.tag.slice(9), fileSHA256: newShipItSHA256 },
+    bothReferenceBundleSignaturesVerified: true, kernelMemoryHashClaim: false });
   const port = DEFAULT_CDP_PORT;
   const priorListener = await command('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], { allowFailure: true, timeout: 5000 });
   assert(priorListener.code === 1 && priorListener.signal === null && !priorListener.spawnError && !priorListener.timedOut && priorListener.out === '' && priorListener.err === '', 'production_cdp_port_not_proven_vacant');
@@ -731,7 +763,7 @@ async function main() {
   if (GRACEFUL_USER_QUIT) {
     await waitFor(async () => {
       await sample('squirrel-staged-before-user-quit');
-      return [...owned.values()].some(record => record.shipIt && record.observedAfterInstallRequest) &&
+      return [...owned.values()].some(record => record.shipIt && record.shipItFileRole === 'old-reference' && record.observedAfterInstallRequest) &&
         readFileSync(join(evidence, 'app.stdout'), 'utf8').includes('nativeUpdater.update-downloaded');
     }, 60_000, 'native_squirrel_stage_not_observed');
     await requestGracefulUserQuit(oldIdentity);
@@ -890,7 +922,7 @@ async function pureControls() {
 
   const signalTemp = mkdtempSync(join(realpathSync(tmpdir()), 'xiaok-qa-signal-pure-'));
   const savedSignalState = { root, evidence, app, appExecutable, oldChild, oldIdentity, primary, monitorError, installedRequest,
-    owned: new Map(owned), pendingTerminal: new Map(pendingTerminal), pendingComm: new Map(pendingComm), pendingChildren: new Map(pendingChildren), pendingFirstSeen: new Map(pendingFirstSeen), acceptedUserQuit, diagnostics: [...qaDiagnostics] };
+    owned: new Map(owned), pendingTerminal: new Map(pendingTerminal), pendingComm: new Map(pendingComm), pendingChildren: new Map(pendingChildren), pendingFirstSeen: new Map(pendingFirstSeen), acceptedUserQuit, shipItSHA256, newShipItSHA256, diagnostics: [...qaDiagnostics] };
   const signalCheck = async (name, action) => { await action(); passed++; console.log(`PASS ${name}`); };
   try {
     root = signalTemp; evidence = join(root, 'evidence'); mkdirSync(evidence, { mode: 0o700 });
@@ -1152,6 +1184,51 @@ async function pureControls() {
       finally { evidence = previousEvidence; }
       assert.equal(qaDiagnostics.length, before + 1); assert.equal(owned.get(gui.pid), gui);
     });
+    await signalCheck('official new-reference ShipIt is observed only after the original handoff facts', async () => {
+      const helperDir = join(app, 'Contents', 'Frameworks', 'Squirrel.framework', 'Resources'); mkdirSync(helperDir, { recursive: true });
+      const helper = join(helperDir, 'ShipIt'); const nextBytes = Buffer.from('new reference helper fixture; no signing claim');
+      writeFileSync(helper, nextBytes);
+      shipItSHA256 = createHash('sha256').update('old reference helper fixture').digest('hex');
+      newShipItSHA256 = createHash('sha256').update(nextBytes).digest('hex');
+      installedRequest = true; oldChild = { ...oldChild, qaClosed: true, exitCode: 0, signalCode: null };
+      owned.set(79, { ...gui, pid: 79, birth: 'old-helper', executable: helper, shipIt: true, shipItFileRole: 'old-reference', shipItFileSHA256: shipItSHA256, observedAfterInstallRequest: true });
+      const nextHelper = { ...gui, pid: 80, ppid: 1, birth: 'new-official-helper', state: 'S', executable: helper, directChild: false };
+      await observeOwnedProcesses([nextHelper], 'pure-new-helper');
+      assert.equal(owned.get(nextHelper.pid).shipItFileRole, 'new-reference');
+      assert.equal(owned.get(nextHelper.pid).shipItFileSHA256, newShipItSHA256);
+      owned.delete(80);
+    });
+    await signalCheck('first-seen helper promotion uses the same two-reference phase validator', async () => {
+      const executable = join(app, 'Contents', 'Frameworks', 'Squirrel.framework', 'Resources', 'ShipIt');
+      const first = { ...gui, pid: 81, ppid: 79, birth: 'first-seen-new-helper', state: 'S', executable: '(ShipIt)', directChild: false };
+      const complete = { ...first, executable };
+      await observeOwnedProcesses([first], 'pure-pending-new-helper');
+      assert.equal(owned.has(first.pid), false);
+      await observeOwnedProcesses([complete], 'pure-admit-new-helper', { readProcesses: async () => [complete] });
+      assert.equal(owned.get(first.pid).shipItFileRole, 'new-reference');
+      assert.equal(pendingFirstSeen.has(first.pid), false); owned.delete(first.pid); owned.delete(79);
+      await assert.rejects(verifyOfficialShipItFile(complete), /shipit_file_not_authorized_for_handoff_phase/);
+    });
+    const goodHelperPhase = { oldReferenceSHA256: shipItSHA256, newReferenceSHA256: newShipItSHA256,
+      installedRequest: true, originalHelperAfterRequest: true,
+      oldExit: { directAppExited: true, directAppCloseObserved: true, directAppExitCode: 0, directAppSignal: null } };
+    check('original helper is mandatory and accepted before any handoff; new helper requires all phase facts', () => {
+      assert.equal(officialShipItRole(shipItSHA256, { ...goodHelperPhase, installedRequest: false, originalHelperAfterRequest: false, oldExit: null }), 'old-reference');
+      assert.equal(officialShipItRole(newShipItSHA256, goodHelperPhase), 'new-reference');
+      for (const phase of [
+        { ...goodHelperPhase, installedRequest: false }, { ...goodHelperPhase, originalHelperAfterRequest: false },
+        ...Object.entries({ directAppExited: false, directAppCloseObserved: false, directAppExitCode: 1, directAppSignal: 'SIGTERM' })
+          .map(([key, value]) => ({ ...goodHelperPhase, oldExit: { ...goodHelperPhase.oldExit, [key]: value } })),
+      ]) assert.equal(officialShipItRole(newShipItSHA256, phase), null);
+      assert.equal(officialShipItRole('f'.repeat(64), goodHelperPhase), null);
+      assert.equal(officialShipItRole(newShipItSHA256, { ...goodHelperPhase, oldReferenceSHA256: undefined }), null);
+    });
+    await signalCheck('correct helper digest never authorizes a foreign path, relative path or UID', async () => {
+      const executable = join(app, 'Contents', 'Frameworks', 'Squirrel.framework', 'Resources', 'ShipIt');
+      for (const change of [{ executable: join(root, 'outside', 'ShipIt') }, { executable: 'ShipIt' }, { uid: qaUid + 1 }]) {
+        await assert.rejects(verifyOfficialShipItFile({ ...gui, executable, ...change }), /shipit_path_or_uid_not_scoped/);
+      }
+    });
     check('codesign success requires the complete successful process tuple', () => {
       const good = { spawnError: undefined, timedOut: false, code: 0, signal: null, actualWait: true, reaped: true, closeObserved: true };
       assert.equal(successfulCodesign(good), true);
@@ -1164,7 +1241,7 @@ async function pureControls() {
     pendingComm.clear(); for (const [pid, record] of savedSignalState.pendingComm) pendingComm.set(pid, record);
     pendingChildren.clear(); for (const [pid, record] of savedSignalState.pendingChildren) pendingChildren.set(pid, record);
     pendingFirstSeen.clear(); for (const [pid, record] of savedSignalState.pendingFirstSeen) pendingFirstSeen.set(pid, record);
-    acceptedUserQuit = savedSignalState.acceptedUserQuit;
+    acceptedUserQuit = savedSignalState.acceptedUserQuit; shipItSHA256 = savedSignalState.shipItSHA256; newShipItSHA256 = savedSignalState.newShipItSHA256;
     qaDiagnostics.splice(0, qaDiagnostics.length, ...savedSignalState.diagnostics);
     rmSync(signalTemp, { recursive: true, force: true });
   }
