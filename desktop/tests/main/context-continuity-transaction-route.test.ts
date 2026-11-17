@@ -38,8 +38,10 @@ it.skipIf(process.platform!=='darwin')('closes the route scope before an async t
  try{setOrdinaryRouteAclProbeListener(()=>{probes++;});expect(()=>store.transaction(()=>{continuation=(async()=>{await gate;store.db.prepare('SELECT 1').get();})();return continuation;})).toThrow('async_transaction_not_supported');expect(probes).toBe(1);probes=0;done();await continuation;expect(probes).toBe(2);}
  finally{setOrdinaryRouteAclProbeListener();store.close();rmSync(root,{recursive:true,force:true});}
 });
+// The reverse control performs 402 real ACL subprocess probes. This bounds
+// the test runner only; all product clocks and probe-count assertions stay fixed.
 it.skipIf(process.platform!=='darwin')('measures the original SQLite transaction against the existing no-reuse reverse control',()=>{
  const root=mkdtempSync(join(tmpdir(),'continuity-route-timing-')),store=new ContinuityStore(join(root,'actual.sqlite'),'profile');const observations:Array<{reuse:boolean;elapsedMs:number;probes:number}>=[];
  try{for(const reuse of [false,true]){setOrdinaryRouteJobScopeReuse(reuse);let probes=0;setOrdinaryRouteAclProbeListener(()=>{probes++;});const start=performance.now();store.transaction(()=>{for(let i=0;i<200;i++)store.db.prepare('INSERT OR REPLACE INTO continuity_meta VALUES (?,?)').run('timing-'+i,String(i));});observations.push({reuse,elapsedMs:performance.now()-start,probes});}console.log(JSON.stringify({kind:'real-acl-sqlite-route-reverse-control',observations}));expect(observations[0].probes).toBe(402);expect(observations[1].probes).toBe(1);}
  finally{setOrdinaryRouteAclProbeListener();setOrdinaryRouteJobScopeReuse(true);store.close();rmSync(root,{recursive:true,force:true});}
-});
+},12_000);
