@@ -2781,6 +2781,7 @@ export interface LocaleStrings {
   sidebarRecent: string;
   sidebarNoResults: string;
   sidebarNoRecent: string;
+  sidebarRecentReadUnavailable: string;
   sidebarRename: string;
   sidebarKnowledge: string;
   // sidebar - update popover
@@ -3478,6 +3479,7 @@ followUpAcceptedDraft:string;
     historyRecovered: (taskId: string) => string;
     historyLoadEarlier: (remaining: number) => string;
     historyLoading: string;
+    historyEmptyCurrent: string;
     taskCreateFailed: string;
     submissionConflict: string;
     submissionNotPrepared: string;

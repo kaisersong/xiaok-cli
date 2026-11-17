@@ -370,6 +370,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       const localItems = raw ? JSON.parse(raw) : [];
       const desktop = getDesktopApi();
       let scheduledItems: ScheduledTask[] = localItems.map((item: ScheduledTask) => normalizeScheduledTaskRuntimeLink(item));
+      let projectionFailed = false;
       if (desktop?.getScheduledTasks) {
         try {
           const mainItems = await desktop.getScheduledTasks();
@@ -377,7 +378,8 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
             scheduledItems = mergeScheduledTaskCache((mainItems as ScheduledTask[]).map(item=>({...item,mainKind:'scheduled_task' as const})), localItems as ScheduledTask[]);
             const linkedItems: ScheduledTask[] = [];
             for (const item of scheduledItems) {
-              linkedItems.push(await ensureThreadForRuntimeTask(item));
+              try { linkedItems.push(await ensureThreadForRuntimeTask(item)); }
+              catch { projectionFailed = true; linkedItems.push(item); }
             }
             scheduledItems = linkedItems;
 
@@ -407,9 +409,10 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
         allMap.set(t.id, normalizeScheduledTaskRuntimeLink(t));
       }
       if (generation !== readGeneration.current) return;
-      localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
+      if (!projectionFailed) localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(scheduledItems));
       setTasks(Array.from(allMap.values()));
-      setScheduledReadError('');
+      setScheduledReadError(projectionFailed ? t.scheduledProjectionUnavailable : '');
+      if (projectionFailed) reportScheduledReadFailure();
     } catch (error) {
       if (generation === readGeneration.current) {setScheduledReadError(scheduledErrorMessage(error,t,true));reportScheduledReadFailure();}
     }

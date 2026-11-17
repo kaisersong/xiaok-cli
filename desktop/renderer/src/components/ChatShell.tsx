@@ -2314,7 +2314,17 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       <ChatView
         localCommands={hideObservationControls ? undefined : [{name: 'observation', description: t.observation.commandHint}]}
         inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
-        emptyContent={emptyContent}
+        emptyContent={emptyContent !== undefined ? emptyContent : (
+          !isAssistantThread(taskId) && thread.coverage === 'complete' && thread.taskIds.length === 0 &&
+          !thread.currentTaskId && !thread.legacyTaskIds?.length && assistantTimeline.length === 0 && status === 'idle'
+            ? <div className="mx-auto max-w-[800px] px-14 py-8 text-sm text-[var(--c-text-secondary)]">
+              <p>{t.chatShell.historyEmptyCurrent}</p>
+              <div className="mt-3 flex gap-4 text-[var(--c-accent)]">
+                <button type="button" onClick={() => navigate('/automations/schedules')}>{t.sidebarAutomations}</button>
+                <button type="button" onClick={() => navigate('/')}>{t.newTask}</button>
+              </div>
+            </div> : undefined
+        )}
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD&&taskId!==LEGACY_ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}

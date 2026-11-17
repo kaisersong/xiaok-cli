@@ -1,9 +1,18 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../renderer/src/api/bridge';
+import {ensureAggregatedScheduledThread} from '../../renderer/src/lib/scheduled-task-threads';
 const state = vi.hoisted(() => ({ desktop: null as Record<string, unknown> | null }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => state.desktop, isDesktop: () => true }));
 afterEach(() => { state.desktop = null; vi.unstubAllGlobals(); });
 const conversation = { id: 'main-owned', title: 'source', status: 'idle', mode: 'work', createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: 'task_real', taskIds: ['task_real'], revision: 1, coverage: 'complete' };
+it('scheduled navigation through the actual bridge never creates or forges Main task bindings',async()=>{
+ const open=vi.fn(()=>{throw Error('renderer write prohibited');});vi.stubGlobal('indexedDB',{open});
+ const create=vi.fn();state.desktop={createContextConversation:create,getContextConversation:vi.fn(async()=>conversation)};
+ const row=await ensureAggregatedScheduledThread({threadId:conversation.id,runtimeTaskId:'task_forged'},['task_real','task_forged'],api);
+ expect(row.threadId).toBe(conversation.id);expect(create).not.toHaveBeenCalled();expect(open).not.toHaveBeenCalled();
+ await expect(api.updateThreadTaskId(conversation.id,'task_forged')).rejects.toThrow('source_binding_conflict');
+ expect(conversation.taskIds).toEqual(['task_real']);
+});
 it('creates and updates new conversations through the main owner without touching IndexedDB', async () => {
   const open = vi.fn(() => { throw new Error('renderer write prohibited'); }); vi.stubGlobal('indexedDB', { open });
   const create = vi.fn(async () => conversation), get = vi.fn(async () => conversation), update = vi.fn(async () => conversation);

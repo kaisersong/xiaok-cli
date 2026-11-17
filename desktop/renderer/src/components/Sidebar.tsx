@@ -69,7 +69,7 @@ interface SidebarDetailsRow {
 export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const { threads: allThreads, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
+  const { threads: allThreads, readUnavailable, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
   const threads = allThreads.filter(thread => thread.id !== ASSISTANT_THREAD_ID);
   const [searchQuery, setSearchQuery] = useState('');
   const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
@@ -147,6 +147,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
         const runtimeTaskIds = new Set<string>();
         const linkedItems: SidebarScheduledTask[] = [];
+        let projectionFailed = false;
         for (const item of items) {
           let runs: unknown[] = [];
           if (desktop?.getTimedActionRuns && item.id) {
@@ -155,13 +156,13 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           const collectedRuntimeTaskIds = collectScheduledRuntimeTaskIds(item, Array.isArray(runs) ? runs : []);
           for (const runtimeTaskId of collectedRuntimeTaskIds) runtimeTaskIds.add(runtimeTaskId);
           const linked = collectedRuntimeTaskIds.length > 0
-            ? await ensureAggregatedScheduledThread(item, collectedRuntimeTaskIds).catch(() => item)
+            ? await ensureAggregatedScheduledThread(item, collectedRuntimeTaskIds).catch(() => { projectionFailed = true; return item; })
             : item;
           linkedItems.push(linked);
         }
 
         if (disposed) return;
-        localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(linkedItems));
+        if (!projectionFailed) localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify(linkedItems));
         setSidebarTasks(linkedItems.map((t: any) => ({
           id: t.id,
           name: t.name,
@@ -175,7 +176,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         }
         setScheduledThreadIds(threadIds);
         setScheduledRuntimeTaskIds(runtimeTaskIds);
-        setScheduledReadUnavailable(false);
+        setScheduledReadUnavailable(projectionFailed);
+        if (projectionFailed) reportScheduledReadFailure();
       } catch { if (!disposed) {setScheduledReadUnavailable(true);reportScheduledReadFailure();} }
     };
 
@@ -446,7 +448,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 {t.sidebarRecent}
               </div>
             )}
-            {filteredThreads.length === 0 && (
+            {readUnavailable && <p role="alert" className="py-3 text-center text-xs text-[var(--c-text-secondary)]">{t.sidebarRecentReadUnavailable}</p>}
+            {filteredThreads.length === 0 && !readUnavailable && (
               <p className="py-3 text-center text-xs text-[var(--c-text-secondary)]">
                 {searchQuery ? t.sidebarNoResults : t.sidebarNoRecent}
               </p>

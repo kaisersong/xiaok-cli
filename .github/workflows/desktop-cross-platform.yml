@@ -210,6 +210,23 @@ jobs:
       - name: Build renderer
         run: cd desktop && npm run build:renderer
 
+      - name: Scheduled history stays read-only under Main continuity
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run
+          tests/renderer/scheduled-thread-continuity-readonly.test.ts
+          tests/renderer/scheduled-task-threads.test.ts
+          tests/renderer/context-continuity-thread-bridge.test.ts
+          tests/renderer/scheduled-bootstrap-failure.test.tsx
+          tests/renderer/scheduled-bootstrap-continuity.test.tsx
+          tests/renderer/scheduled-sidebar-failure.test.tsx
+          tests/renderer/scheduled-sidebar-selection.test.tsx
+          tests/renderer/scheduled-page-conflict.test.tsx
+          tests/renderer/scheduled-task-delivery.test.tsx
+          tests/renderer/thread-list-read-failure.test.tsx
+          tests/renderer/chat-shell-draft-prompt.test.tsx
+          tests/renderer/chat-view-empty-state.test.tsx
+
       - name: Managed Python runtime regression
         run: cd desktop && npm run test -- --run tests/main/python-runtime.test.ts tests/main/deploy-bundled-plugins.test.ts
 

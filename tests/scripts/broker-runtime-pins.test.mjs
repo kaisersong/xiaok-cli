@@ -33,7 +33,7 @@ test('a package manifest cannot mint an arbitrary executable pin', t => {
 for (const target of ['darwin-arm64','win32-x64']) test(`actual official bytes verify on ${target} without granting Native qualification`,t=>{
   const f=fixture(t,target);const runtime=resolvePackagedBrokerRuntime(f.options);
   assert.equal(runtime.command,f.command);
-  assert.deepEqual(runtime.expected,{node:'24.19.0',sqlite:'3.53.3',executableSha256:f.entry.executableSha256});
+  assert.deepEqual(runtime.expected,{node:'24.22.3',sqlite:'3.54.1',executableSha256:f.entry.executableSha256});
   const health={service:{runtime:{...runtime.expected,execPath:f.command}}};
   assert.equal(brokerRuntimeMatchesHealth(health,runtime),true);
   assert.equal(brokerRuntimeMatchesHealth({service:{runtime:{...health.service.runtime,node:'22.14.0'}}},runtime),false);
@@ -61,7 +61,8 @@ test('Proxy/accessor environment rejected without traps/getters and unsupported 
   assert.equal(traps,0);let gets=0;const env={};Object.defineProperty(env,'NODE_OPTIONS',{get(){gets++;return '';},enumerable:true});
   assert.throws(()=>resolvePackagedBrokerRuntime({...f.options,env}),/broker_runtime_env/);assert.equal(gets,0);
   assert.equal(resolvePackagedBrokerRuntime({isPackaged:false,resourcesPath:'/unused'}),null);
-  assert.equal(resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'linux',arch:'x64'}),null);
+  assert.equal(resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'linux',arch:'ia32'}),null);
+  assert.throws(()=>resolvePackagedBrokerRuntime({isPackaged:true,resourcesPath:'/unused',platform:'linux',arch:'x64'}),/ENOENT|broker_runtime/);
 });
 test('missing supported runtime refuses environment fallback',t=>{
   const root=realpathSync(mkdtempSync(join(tmpdir(),'broker-missing-')));t.after(()=>rmSync(root,{recursive:true,force:true}));

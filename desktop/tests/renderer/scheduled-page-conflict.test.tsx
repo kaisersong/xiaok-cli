@@ -6,6 +6,9 @@ import { ScheduledPage } from '../../renderer/src/components/ScheduledPage';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
 const mocks = vi.hoisted(() => ({
+  continuity: false,
+  getThread: vi.fn(),
+  listThreads: vi.fn(),
   getScheduledTasks: vi.fn(),
   updateScheduledTask: vi.fn(),
   setScheduledTaskStatus: vi.fn(),
@@ -20,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../renderer/src/shared/desktop', () => ({
   getDesktopApi: () => ({
+    ...(mocks.continuity ? {getContextConversation:()=>undefined} : {}),
     getScheduledTasks: mocks.getScheduledTasks,
     updateScheduledTask: mocks.updateScheduledTask,
     setScheduledTaskStatus: mocks.setScheduledTaskStatus,
@@ -34,8 +38,8 @@ vi.mock('../../renderer/src/api', () => ({
     createThread: mocks.createThread,
     createTask: mocks.createTask,
     updateThreadTaskId: mocks.updateThreadTaskId,
-    getThread: vi.fn(),
-    listThreads: vi.fn(),
+    getThread: mocks.getThread,
+    listThreads: mocks.listThreads,
     deleteThread: mocks.deleteThread,
   },
 }));
@@ -86,9 +90,21 @@ describe('ScheduledPage stale schedule edits', () => {
     expect(JSON.parse(localStorage.getItem('xiaok:scheduled-tasks')!)).toMatchObject([{ id: task.id, threadId: 'instance-thread', lastRunAt: 100 }]);
     expect(screen.getByTitle('删除任务会话')).toBeInTheDocument();
   });
+  it('retains the scheduled entry and cache when its Main history link is unreadable', async () => {
+    mocks.continuity = true;
+    const task = {id:'own-main',name:'Unreadable history',prompt:'work',frequency:'manual',status:'active',threadId:'original-thread',runtimeTaskId:'task_original',createdAt:1,updatedAt:2};
+    const before=JSON.stringify([task]);localStorage.setItem('xiaok:scheduled-tasks',before);
+    mocks.getScheduledTasks.mockResolvedValue([task]);mocks.getThread.mockRejectedValue(Error('not_readable'));
+    renderScheduledPage();
+    expect(await screen.findByText('Unreadable history')).toBeVisible();
+    expect(await screen.findByText('计划与提醒数据暂时无法读取，请刷新重试。')).toBeVisible();
+    expect(localStorage.getItem('xiaok:scheduled-tasks')).toBe(before);
+    expect(mocks.createThread).not.toHaveBeenCalled();expect(mocks.updateThreadTaskId).not.toHaveBeenCalled();
+  });
   const scrollIntoView = vi.fn();
 
   beforeEach(() => {
+    mocks.continuity = false;
     localStorage.clear();
     localStorage.setItem('xiaok:locale', 'zh');
     mocks.onReminder.mockReturnValue(() => undefined);
