@@ -1,7 +1,8 @@
 // @vitest-environment node
 import {afterEach,expect,it,vi} from 'vitest';
-import {rmSync,readFileSync,renameSync,symlinkSync} from 'node:fs';
+import {readFileSync,renameSync,symlinkSync} from 'node:fs';
 import {ownedProfileTempDir} from '../support/profile-storage-fixture.js';
+import {cleanupPrivateTestTempDir} from '../../../tests/support/private-temp.js';
 import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {createDesktopServices} from '../../electron/desktop-services.js';
 import {FileTaskSnapshotStore} from '../../../src/runtime/task-host/snapshot-store.js';
@@ -20,7 +21,7 @@ async function fixture(realGroups=false){
  const p=main.continuity.port(),actor=Object.freeze({requestSource:'user' as const,actorId:'desktop-user:'+mainIdentity.profileId});
  const task:TaskSnapshot={taskId:'task_local_archive_fixture',sessionId:'session_local_archive_fixture',prompt:'RAW_PROMPT_CANARY',materials:[],status:'completed',events:[{type:'canvas_tool_call',toolName:'bash',input:{command:'TOOL_INPUT_CANARY'},toolUseId:'fixture-tool',eventId:'fixture-call'},{type:'canvas_tool_result',toolName:'bash',toolUseId:'fixture-tool',ok:true,response:'TOOL_RESULT_CANARY',eventId:'fixture-result'},{type:'assistant_delta',delta:'Actual old assistant content'},{type:'result',result:{summary:'Actual old assistant content',artifacts:[]}}],createdAt:1,updatedAt:2} as TaskSnapshot;
  const store=new FileTaskSnapshotStore(join(root,'tasks'));await store.save(task);
- return {root,main,p,actor,store,task,mainIdentity,close:async()=>{await main.disposeMultiAgent();main.getKnowledgeBaseStore().close();rmSync(root,{recursive:true,force:true});}};
+ return {root,main,p,actor,store,task,mainIdentity,close:async()=>{await main.disposeMultiAgent();main.getKnowledgeBaseStore().close();cleanupPrivateTestTempDir(root);}};
 }
 it('reads actual unbound private-file assistant data without granting ownership, exposing raw input, or observing completion',async()=>{
  const f=await fixture();try{
