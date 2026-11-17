@@ -3,7 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion } = vi.hoisted(() => ({
+const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion, mockReadArchive, mockHasArchive } = vi.hoisted(() => ({
+  mockReadArchive: vi.fn(),
+  mockHasArchive: vi.fn(() => false),
   mockSubmitUserTask: vi.fn(),
   mockAnswerQuestion: vi.fn(),
   mockGetThread: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock('../../renderer/src/api', () => ({
     answerQuestion: mockAnswerQuestion,
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
+    hasLocalLegacyTaskArchive: mockHasArchive,
+    readLocalLegacyTaskArchive: mockReadArchive,
     getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
     getObservationPreconditions: vi.fn().mockResolvedValue({ ready: false }),
     subscribeTask: mockSubscribeTask,
@@ -124,6 +128,7 @@ import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 beforeEach(() => {
+  mockHasArchive.mockReturnValue(false);
   // This suite exercises the wide chat layout. Unlike the global no-op mock,
   // report the measured region so production responsive behavior is exercised.
   vi.stubGlobal('ResizeObserver', class {
@@ -161,6 +166,44 @@ describe('ChatShell draft prompt navigation state', () => {
     mockSubscribeTask.mockImplementation(() => () => {});
     return taskIds;
   }
+  function setupLegacyArchiveHistory(count: number) {
+    const ids = Array.from({ length: count }, (_, i) => `legacy_${i}`);
+    mockGetThread.mockResolvedValue({id:'history',title:'saved legacy',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:ids.at(-1),taskIds:ids,coverage:'unclaimed'});
+    mockHasArchive.mockReturnValue(true);
+    mockRecoverTask.mockImplementation(async id => ({snapshot:{taskId:id,sessionId:`epoch-${id}`,status:'completed',prompt:`PRIVATE RAW ${id}`,events:[],materials:[],createdAt:1,updatedAt:2}}));
+    mockReadArchive.mockImplementation(async id => ({version:1,taskId:id,sourceEpoch:`epoch-${id}`,messages:[{sourceMessageId:'answer',text:`archive ${id}`}]}));
+    return ids;
+  }
+  it('opens four legacy runs first and retains all seventeen archive answers through earlier pages', async () => {
+    const ids=setupLegacyArchiveHistory(17);renderHistory();
+    await screen.findByText('archive legacy_16');
+    expect(mockRecoverTask.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
+    expect(mockReadArchive.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_0');
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.map(id=>`archive ${id}`).join(''));
+    expect(screen.queryByText(/PRIVATE RAW/)).toBeNull();
+    expect(mockSubscribeTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
+  });
+  it('keeps a denied legacy archive page retryable without raw snapshot fallback', async () => {
+    const ids=setupLegacyArchiveHistory(25);renderHistory();
+    await screen.findByText('archive legacy_24');
+    const read=mockReadArchive.getMockImplementation()!;
+    mockReadArchive.mockImplementation(async id=>{if(id==='legacy_2')throw Error('denied');return read(id);});
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/PRIVATE RAW/)).toBeNull();
+    expect(screen.queryByText('archive legacy_1')).toBeNull();
+    expect(screen.getByText('archive legacy_24')).toBeVisible();
+    mockReadArchive.mockImplementation(read);
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_1');
+    if(screen.queryByRole('button',{name:/加载更早记录/}))fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_0');
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.map(id=>`archive ${id}`).join(''));
+    expect(mockSubscribeTask).not.toHaveBeenCalled();
+  });
   it('opens the latest 20 runs, then prepends every older page in order without resubscribing the live task', async () => {
     const ids = setupLongHistory(); renderHistory();
     await screen.findByText('history prompt task_44');
