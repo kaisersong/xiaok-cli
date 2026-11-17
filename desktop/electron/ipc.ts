@@ -1406,6 +1406,13 @@ export async function registerDesktopIpc(
       afterOutputValidation:value=>{if(!value||typeof value!=='object')throw Error('task_history_unavailable');const original=originals.get(value);if(!original)throw Error('task_history_unavailable');recheckTaskActor(original.event,original.actor);services.assertTaskHistoryCurrent(original.value,original.actor);return undefined;},
     });
   }
+  {
+    const originals=new WeakMap<object,{event:IpcMainInvokeEvent;actor:ReturnType<typeof taskActor>;value:Awaited<ReturnType<DesktopServices['readLocalLegacyTaskArchive']>>}>();
+    registerIpcHandler({registrar:ipcMain,channel:'desktop:readLocalLegacyTaskArchive',input:z.object({taskId:z.string().min(1).max(256)}).strict(),output:z.object({taskId:z.string().min(1),sourceEpoch:z.string().min(1),messages:z.array(z.object({sourceMessageId:z.string(),role:z.literal('assistant'),text:z.string()}).strict())}).strict(),sourceFile:'context-continuity/local-legacy-task-archive.ts',rolloutRound:38,riskTags:['fs-read'],
+      beforeInput:event=>{taskActor(event);return undefined;},handler:async(input,event)=>{const actor=taskActor(event),value=await services.readLocalLegacyTaskArchive(input.taskId,actor);recheckTaskActor(event,actor);services.assertLocalLegacyTaskArchiveCurrent(value,actor);originals.set(value,{event,actor,value});return value;},
+      afterOutputValidation:value=>{if(!value||typeof value!=='object')throw Error('local_legacy_archive_unavailable');const original=originals.get(value);if(!original)throw Error('local_legacy_archive_unavailable');recheckTaskActor(original.event,original.actor);services.assertLocalLegacyTaskArchiveCurrent(original.value,original.actor);return undefined;},
+    });
+  }
   registerUserTaskSubmissionIpc(ipcMain, (event,input)=>{const actor=taskActor(event);return services.submitUserTask(input,actor,()=>recheckTaskActor(event,actor));}, event=>{taskActor(event);});
   registerRoomConversionCaptureIpc(ipcMain,services,taskActor);
   registerDiagnosticsIpc(ipcMain, services);

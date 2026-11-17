@@ -7,7 +7,8 @@ import ts from 'typescript';
 // Prior source 64b1365c59a30d781f898f5abc5be58e406cdfb3286b8485bf401ba998cffb65; both observed candidate functions are byte-identical.
 // Reviewed 1.6.5 inventory-only startup change; both target functions remain byte-identical.
 // Equivalence: handoff/desktop-history-candidate-source-equivalence.json; prior pin retained there.
-export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='f2b9d3623d342329f52d6f0cc901669a89d06c69016bd07d6f51b9269d9a2ac9';
+// Reviewed local archive wiring; both observed target functions are byte-identical to dd510154.
+export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='de91e86501e38e8821c0ff14607c0ee7343993335e22f33f4844be8c8ead8e13';
 const alias='__fixedOriginalCandidateObservation';
 const targets=[['runKSwarmHandoffTask','kswarm_direct'],['runWorkspaceProjectTask','room_project']];
 function prefix(url){

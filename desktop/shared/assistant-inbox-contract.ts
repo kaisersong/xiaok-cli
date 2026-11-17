@@ -3,8 +3,10 @@ import {ASSISTANT_CALENDAR_EVENT_SCHEMA} from './assistant-calendar-contract.js'
 import {KIM_JUDGMENT_SCHEMA} from './kim-decision-ipc-contract.js';
 export const ASSISTANT_MESSAGE_SCHEMA=z.object({id:z.string().min(1).max(256),kind:z.enum(['morning','test']),createdAt:z.number().finite().nonnegative(),title:z.string().min(1).max(200),text:z.string().min(1).max(10000)}).strict();
 export type AssistantMessage=z.infer<typeof ASSISTANT_MESSAGE_SCHEMA>;
-export const ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111111';
-export const isAssistantThread = (id: unknown): id is string => typeof id === 'string' && (id === ASSISTANT_CHAT_THREAD || /^a0c22222-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id));
+export const LEGACY_ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111111';
+/** A fresh chat identity; the legacy chat and its unknown executions remain intact. */
+export const ASSISTANT_CHAT_THREAD = 'a0c11111-1111-4111-8111-111111111112';
+export const isAssistantThread = (id: unknown): id is string => typeof id === 'string' && (id === ASSISTANT_CHAT_THREAD || id === LEGACY_ASSISTANT_CHAT_THREAD || /^a0c22222-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id));
 export type AssistantSource = 'mail'|'yzj_message'|'yzj_calendar'|'ai_news'|'internal';
 export type AssistantActor = 'user'|'agent'|'scheduler';
 export const SOURCE_SCHEMA=z.enum(['mail','yzj_message','yzj_calendar','ai_news','internal']);

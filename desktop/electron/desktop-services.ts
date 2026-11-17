@@ -11,6 +11,7 @@ import {ContinuitySdkCustody} from './context-continuity/sdk-custody.js';
 import type {GoalControlReceipt} from '../shared/goal-control.js';
 import {createOriginalCanonicalMainSource} from './context-continuity/canonical-service-source.js';
 import {createContinuityHistoryPort} from './context-continuity/history-port.js';
+import {createLocalLegacyTaskArchive} from './context-continuity/local-legacy-task-archive.js';
 import {readCurrentOriginalTaskRunnerResourceContext,readOriginalTaskRunnerResourceContextForHost} from '../../src/runtime/task-host/task-runtime-host.js';
 import {createContinuityMainBinding} from './context-continuity/main-binding.js';
 import {markMintedLocalThread} from './context-continuity/history.js';
@@ -3941,6 +3942,22 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   let continuityReadsClosed=false;
   const continuityHistory=createContinuityHistoryPort({store:snapshotStore,runtime:contextContinuity,
     assertOpen:()=>{if(continuityReadsClosed)throw Error('task_history_unavailable');},authorize:authorizeLocalTaskActor,assertSnapshot:assertContinuitySnapshot});
+  const assertLocalArchiveActor=(actor:NativeActor)=>{
+    if(continuityReadsClosed||actor?.requestSource!=='user'||actor.actorId!==continuityReadActor.actorId)throw Error('task_actor_forbidden');
+    if(!options.mainIdentity?.continuity||contextContinuity.port().actor.profileId!==options.mainIdentity.continuity.profileId)throw Error('task_scope_forbidden');
+  };
+  const localLegacyArchive=createLocalLegacyTaskArchive({store:snapshotStore,
+    assertOpen:()=>{if(continuityReadsClosed)throw Error('local_legacy_archive_unavailable');},
+    authorize:async(taskId,actor)=>{assertLocalArchiveActor(actor);if(!/^task_[A-Za-z0-9_-]+$/.test(taskId))throw Error('invalid_task_id');await multiAgentReady;assertLocalArchiveActor(actor);contextContinuity.assertTaskReadable(taskId);},
+    assertSnapshot:(snapshot,actor)=>{
+      assertLocalArchiveActor(actor);contextContinuity.assertTaskReadable(snapshot.taskId);
+      if(snapshot.executionScope||snapshot.inputPreparation||codexTasks.owns(snapshot.taskId))throw Error('local_legacy_archive_unavailable');
+      const historicalThread=snapshot.context?.threadId?multiAgentStore?.getThread(snapshot.context.threadId):null;
+      if(historicalThread&&(historicalThread.profileId!==multiAgentProfileId||(historicalThread.deleteState??'none')!=='none'))throw Error('task_scope_forbidden');
+      const p=contextContinuity.port();p.service.store.transaction(()=>{
+        for(const table of ['task_bindings','task_public_inputs','task_presentation_sources','guarded_effect_runs'])if(p.service.store.db.prepare(`SELECT 1 FROM ${table} WHERE task_id=?`).get(snapshot.taskId))throw Error('local_legacy_archive_unavailable');
+      });
+    }});
 
   contextContinuity.configureLegacy(async(taskId,threadId)=>{
     if(continuityReadsClosed||!/^task_[A-Za-z0-9_-]+$/.test(taskId)||codexTasks.owns(taskId))throw Error('source_offline');
@@ -4108,7 +4125,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       if (!activityCloseError && executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) {
         if(dshLease)await finishOriginalMainDshServiceStore(dshLease);else multiAgentStore?.close();
       }
-      const continuityErrors:unknown[]=[];for(const close of [()=>activityDisclosure?.close(),()=>canonicalSource?.close(),()=>continuityControlSdk.waitKnown(),()=>continuityAuditSdk.waitKnown(),()=>continuityHistory.close(),()=>continuityBinding.close()])try{await close();}catch(raw){continuityErrors.push(raw);}
+      const continuityErrors:unknown[]=[];for(const close of [()=>activityDisclosure?.close(),()=>canonicalSource?.close(),()=>continuityControlSdk.waitKnown(),()=>continuityAuditSdk.waitKnown(),()=>continuityHistory.close(),()=>localLegacyArchive.close(),()=>continuityBinding.close()])try{await close();}catch(raw){continuityErrors.push(raw);}
       const continuityFailure=continuityErrors.length?{raw:continuityErrors.length===1?continuityErrors[0]:new AggregateError(continuityErrors,'continuity_owners_close_unconfirmed',{cause:continuityErrors[0]})}:undefined;
       if(activityCloseError&&continuityFailure)throw new AggregateError([activityCloseError,continuityFailure.raw],'desktop_continuity_close_unconfirmed',{cause:activityCloseError});
       if(continuityFailure)throw continuityFailure.raw;
@@ -4121,7 +4138,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     stopAuxiliary:()=>{
       if(dshStartup)dshStartup.state.close();
       if(dshStartup?.lifecycle)dshStartup.lifecycle.stopOriginalMainDshRuntimeComposition(originalServices,options.dshServiceSources!);
-      continuityReadsClosed=true;continuityHistory.stop();continuityBinding.stopIngress();
+      continuityReadsClosed=true;continuityHistory.stop();localLegacyArchive.stop();continuityBinding.stopIngress();
       stopHarness();void nativeActivity?.close().catch(()=>{});sealKSwarmWorkflowScriptJobs(options.kswarmService);
     },quiesceAuxiliary:async()=>{
       const results=await Promise.allSettled([quiesceHarness(),nativeActivity?.close(),roomConversions.drain(),conversationProjects.drainOriginalTaskReads(),sealAndDrainKSwarmWorkflowScriptJobs(options.kswarmService)]);
@@ -4144,6 +4161,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const originalServices = {
     readTaskHistory:(taskId:string,actor:NativeActor=continuityReadActor)=>continuityHistory.readTask(taskId,actor),
     assertTaskHistoryCurrent:(value:import('../shared/task-history.js').TaskHistoryRead,actor:NativeActor=continuityReadActor)=>continuityHistory.assertCurrent(value,actor),
+    readLocalLegacyTaskArchive:(taskId:string,actor:NativeActor)=>localLegacyArchive.read(taskId,actor),
+    assertLocalLegacyTaskArchiveCurrent:(value:import('../shared/local-legacy-task-archive.js').LocalLegacyTaskArchive,actor:NativeActor)=>localLegacyArchive.assertCurrent(value,actor),
     prepareCanonicalSource:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[])=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).prepareCanonicalSource(device,ids),
     prepareCanonicalSourceDraft:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[])=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).prepareCanonicalSourceDraft(device,ids),
     bootstrapCanonicalSource:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[],source:{requestSource:'user'|'agent'|'scheduler'})=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).bootstrapCanonicalSource(device,ids,source),

@@ -3,7 +3,7 @@ import {mergeAssistantMessages} from '../lib/assistant-message-timeline';
 import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
 import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
 import {pendingTaskQuestion} from '../lib/pending-task-question';
-import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
+import { isAssistantThread,ASSISTANT_CHAT_THREAD,LEGACY_ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import {emptyNativeQuestionPresentation,nativeQuestionNamespace,nativeQuestionPresentationFromSnapshot,reduceNativeQuestionPresentation,type NativeQuestionPresentation} from '../lib/native-question-state.js';
 import type {UserTaskSubmissionInput} from '../../../shared/user-task-submission-contract.js';
@@ -323,7 +323,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   // Wait for the bound task before choosing its execution-state subscription.
   // Native Codex events already arrive through the standard task stream.
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
-    thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
+    !!thread && thread.id === taskId && thread.coverage!=='unclaimed' && !thread.currentTaskId?.startsWith('task_codex_'));
   const [repetitionStopped, setRepetitionStopped] = useState(false);
   const repetitionRequestRef = useRef<{ text: string; files?: Array<{ filePath: string; name: string }> } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -344,6 +344,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [localArchivePresent,setLocalArchivePresent]=useState(false);
   const [loadRevision, setLoadRevision] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
@@ -1399,6 +1400,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setLocalArchivePresent(false);
     setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     const refreshing = historyRefresh?.scope === renderScope && historyRefresh.attempt === capturedIntent;
@@ -1450,9 +1452,14 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           if (!loadCurrent()) return;
 
           try {
-            const { snapshot, presentation, recoveredFromTaskId } = await recoverForDisplay(api, tid,
-              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent);
+            const { snapshot, presentation, recoveredFromTaskId,archive } = await recoverForDisplay(api, tid,
+              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,threadData.coverage==='unclaimed'||!!threadData.legacyTaskIds?.includes(tid));
             if (!loadCurrent()) return;
+            if(archive){
+              setLocalArchivePresent(true);
+              allMessages.push(...archive.messages.map(message=>({id:`local-archive-${tid}-${message.sourceMessageId}`,role:'assistant' as const,content:message.text})));
+              continue;
+            }
             if (snapshot) {
               if (refreshing && snapshot.taskId !== tid) throw new Error('task_identity_mismatch');
               const titlePrompt = presentation === undefined ? snapshot.prompt : presentation?.includeUser ? presentation.prompt : undefined;
@@ -1710,7 +1717,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setActionError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed);return false;}
       finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
-    if (thread?.coverage === 'unclaimed' || thread?.legacyTaskIds?.length) { setGoalError(t.contextContinuity.legacyMustClaim); return false; }
+    if ((thread?.coverage === 'unclaimed' && (thread.taskIds.length>0||thread.currentTaskId)) || thread?.legacyTaskIds?.length) { setActionError(t.contextContinuity.legacyMustClaim); return false; }
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
@@ -2278,6 +2285,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         <p>{actionError}</p>
         <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
       </div>}
+      {localArchivePresent&&<aside role="note" className="mx-4 mt-3 shrink-0 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]"><p>{t.contextContinuity.localArchiveReadOnly}</p><button type="button" className="mt-2 text-[var(--c-accent)]" onClick={()=>navigate('/')}>{t.newTask}</button></aside>}
       {status === 'failed' && repetitionStopped && repetitionRequestRef.current && (
         <button type="button" className="px-4 py-2 text-[var(--c-accent)]" onClick={() => {
           setRepetitionStopped(false);
@@ -2290,7 +2298,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
         emptyContent={emptyContent}
         conversationHeader={conversationHeader}
-        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
+        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD&&taskId!==LEGACY_ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}
         assistantFocusKey={assistantFocusKey}
         onAssistantFocusHandled={onAssistantFocusHandled}
