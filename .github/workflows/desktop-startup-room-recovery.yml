@@ -191,7 +191,7 @@ jobs:
 
       - name: Persisted inbox and large history startup regressions
         working-directory: desktop
-        run: node ../.github/scripts/run-desktop-test-list.mjs desktop-history-tests --environment node --maxWorkers=1 --minWorkers=1
+        run: node scripts/run-test-list.mjs desktop-history-tests --environment node --maxWorkers=1 --minWorkers=1
 
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop

@@ -61,8 +61,8 @@ it('gives every fresh protection Worker compile in the cross-platform CI list th
   const desktopRoot = fileURLToPath(new URL('../../', import.meta.url));
   const workflow = readFileSync(join(desktopRoot, '../.github/workflows/desktop-cross-platform.yml'), 'utf8');
   const step = workflow.slice(workflow.indexOf('name: Run cross-platform path tests'));
-  expect(step.slice(0, step.indexOf('- name:', 1))).toContain('node ../.github/scripts/run-desktop-test-list.mjs desktop-path-tests');
-  const listed = readFileSync(join(desktopRoot, '../.github/ci/desktop-path-tests.txt'), 'utf8').trim().split(/\r?\n/);
+  expect(step.slice(0, step.indexOf('- name:', 1))).toContain('node scripts/run-test-list.mjs desktop-path-tests');
+  const listed = readFileSync(join(desktopRoot, 'tests/ci/desktop-path-tests.txt'), 'utf8').trim().split(/\r?\n/);
   expect(new Set(listed).size).toBe(listed.length);
   const hooks = new Set(['beforeAll', 'beforeEach', 'it', 'test']);
   const sites: Array<{ file: string; hook: string; timeout: string }> = [];

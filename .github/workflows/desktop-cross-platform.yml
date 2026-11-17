@@ -169,7 +169,7 @@ jobs:
 
       - name: Run cross-platform path tests
         working-directory: desktop
-        run: node ../.github/scripts/run-desktop-test-list.mjs desktop-path-tests
+        run: node scripts/run-test-list.mjs desktop-path-tests
 
       - name: Continuity owner qualification retained-config tests (#233)
         working-directory: desktop
