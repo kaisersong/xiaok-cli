@@ -224,6 +224,8 @@ jobs:
           tests/renderer/scheduled-page-conflict.test.tsx
           tests/renderer/scheduled-task-delivery.test.tsx
           tests/renderer/thread-list-read-failure.test.tsx
+          tests/renderer/chat-shell-draft-prompt.test.tsx
+          tests/renderer/chat-view-empty-state.test.tsx
 
       - name: Managed Python runtime regression
         run: cd desktop && npm run test -- --run tests/main/python-runtime.test.ts tests/main/deploy-bundled-plugins.test.ts

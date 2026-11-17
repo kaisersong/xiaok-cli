@@ -48,6 +48,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas,
     onAnswer,
     historyContent,
+    emptyContent,
   }: {
     prompt: string;
     currentQuestion?: {questionId:string}|null;
@@ -68,8 +69,10 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas?: () => void;
     onAnswer?: (choiceId:string)=>void;
     historyContent?: ReactNode;
+    emptyContent?: ReactNode;
   }) => (
     <div>
+      {emptyContent}
       {historyContent}
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
@@ -148,15 +151,36 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
-  function HistoryNavigation() {
+  function HistoryNavigation({emptyContent}: {emptyContent?:ReactNode}) {
     const navigate = useNavigate();
-    return <><button onClick={() => navigate('/t/other')}>switch conversation</button><ChatShell /></>;
+    return <><button onClick={() => navigate('/t/other')}>switch conversation</button><ChatShell emptyContent={emptyContent} /></>;
   }
-  function renderHistory() {
+  function renderHistory(emptyContent?:ReactNode) {
     return render(<MemoryRouter initialEntries={['/t/history']}><LocaleProvider><Routes>
-      <Route path="/t/:taskId" element={<HistoryNavigation />} />
+      <Route path="/t/:taskId" element={<HistoryNavigation emptyContent={emptyContent} />} />
+      <Route path="/automations/schedules" element={<p>Automation destination</p>} />
+      <Route path="/" element={<p>New task destination</p>} />
     </Routes></LocaleProvider></MemoryRouter>);
   }
+  function setupEmptyCompleteHistory() {
+    mockGetThread.mockResolvedValue({id:'history',title:'Saved entry',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'complete'});
+  }
+  it('shows an explicit display-only state for a saved empty record and navigates without dispatching',async()=>{
+    setupEmptyCompleteHistory();renderHistory();
+    expect(await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。')).toBeVisible();
+    expect(mockRecoverTask).not.toHaveBeenCalled();expect(mockSubmitUserTask).not.toHaveBeenCalled();expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'自动化'}));expect(await screen.findByText('Automation destination')).toBeVisible();
+  });
+  it('preserves an unsent draft while explaining an empty saved record',async()=>{
+    setupEmptyCompleteHistory();localStorage.setItem('xiaok.threadDraft.history',JSON.stringify({draftPrompt:'My unsent draft'}));renderHistory();
+    await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。');
+    expect(screen.getByLabelText('chat-input')).toHaveValue('My unsent draft');expect(mockSubmitUserTask).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'新建任务'}));expect(await screen.findByText('New task destination')).toBeVisible();
+  });
+  it('keeps the caller supplied welcome instead of replacing it with the saved-record state',async()=>{
+    setupEmptyCompleteHistory();renderHistory(<p>Custom welcome</p>);expect(await screen.findByText('Custom welcome')).toBeVisible();
+    expect(screen.queryByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。')).not.toBeInTheDocument();
+  });
   function setupLongHistory() {
     const taskIds = Array.from({ length: 45 }, (_, index) => `task_${index}`);
     mockGetThread.mockImplementation(async id => ({ id, title: 'saved title', status: 'idle', mode: 'work',

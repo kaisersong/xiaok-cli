@@ -3479,6 +3479,7 @@ followUpAcceptedDraft:string;
     historyRecovered: (taskId: string) => string;
     historyLoadEarlier: (remaining: number) => string;
     historyLoading: string;
+    historyEmptyCurrent: string;
     taskCreateFailed: string;
     submissionConflict: string;
     submissionNotPrepared: string;
