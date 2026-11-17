@@ -127,3 +127,41 @@ it.each(['checksum','salt','truncated','garbage'] as const)('denies %s WAL witho
     expect(existsSync(join(value,'continuity-profile.json'))).toBe(false);expect(readFileSync(file+'-wal')).toEqual(bytes);
   }finally{if(original)writeFileSync(file+'-wal',original);db.close();}
 },12000);
+function reusedWalFixture(pageSize=4096){
+ const value=root();mkdirSync(join(value,'multi-agent'));const file=join(value,'multi-agent/groups.sqlite'),db=new DatabaseSync(file),legacy=createHash('sha256').update(resolve(value)).digest('hex'),domain=randomUUID();
+ db.exec('PRAGMA page_size='+pageSize+';PRAGMA journal_mode=WAL;PRAGMA wal_autocheckpoint=0;PRAGMA user_version=4;CREATE TABLE thread_bindings(profile_id TEXT);BEGIN');
+ const insert=db.prepare('INSERT INTO thread_bindings VALUES (?)');for(let i=0;i<1000;i++)insert.run(legacy);db.exec('COMMIT');
+ const previous=readFileSync(file+'-wal');expect(db.prepare('PRAGMA wal_checkpoint(RESTART)').get()?.busy).toBe(0);
+ insert.run(legacy);const olderHeader=readFileSync(file+'-shm').subarray(0,96);insert.run(domain);
+ const wal=readFileSync(file+'-wal'),shm=readFileSync(file+'-shm');expect(wal.length).toBe(previous.length);expect(wal.subarray(16,24)).not.toEqual(previous.subarray(16,24));
+ return {value,file,db,legacy,domain,wal,shm,olderHeader};
+}
+it.each([4096,65536])('reads actual reused WAL allocation at %s-byte pages without releasing the parent writer lock',pageSize=>{
+ const f=reusedWalFixture(pageSize);try{
+  f.db.exec('BEGIN IMMEDIATE');expect(readProfileDomainCensus(f.value)).toEqual({domains:[f.legacy,f.domain],migrated:false});
+  const observer=new DatabaseSync(f.file);try{expect(()=>observer.exec('BEGIN IMMEDIATE')).toThrow(/locked/);}finally{observer.close();}
+  expect(readFileSync(f.file+'-wal')).toEqual(f.wal);expect(readFileSync(f.file+'-shm').subarray(0,96)).toEqual(f.shm.subarray(0,96));f.db.exec('ROLLBACK');
+ }finally{f.db.close();}
+},12000);
+it.each(['older-header','unequal-header','header-checksum','committed-checksum','committed-salt','missing-shm'] as const)('rejects %s in real reused WAL without silently adopting an older legacy-only identity',mode=>{
+ const f=reusedWalFixture();let moved=false;try{
+  const shm=Buffer.from(f.shm),wal=Buffer.from(f.wal);
+  if(mode==='older-header')f.olderHeader.copy(shm,0);
+  if(mode==='unequal-header')shm[48]^=1;
+  if(mode==='header-checksum'){shm[40]^=1;shm[88]^=1;}
+  if(mode==='committed-checksum')wal[32+16]^=1;
+  if(mode==='committed-salt')wal[32+8]^=1;
+  if(mode==='missing-shm'){renameSync(f.file+'-shm',f.file+'-shm-held');moved=true;}else writeFileSync(f.file+'-shm',shm);
+  writeFileSync(f.file+'-wal',wal);
+  expect(()=>readProfileDomainCensus(f.value)).toThrow('profile_identity_unavailable');expect(()=>resolveDesktopProfile(f.value)).toThrow('profile_identity_unavailable');expect(existsSync(join(f.value,'continuity-profile.json'))).toBe(false);
+  expect(readFileSync(f.file+'-wal')).toEqual(wal);
+ }finally{writeFileSync(f.file+'-wal',f.wal);if(moved)renameSync(f.file+'-shm-held',f.file+'-shm');writeFileSync(f.file+'-shm',f.shm);f.db.close();}
+},12000);
+it('still rejects a real uncommitted current-generation spill instead of treating it as old allocation',()=>{
+ const f=reusedWalFixture();try{
+  f.db.exec('PRAGMA cache_size=1;PRAGMA cache_spill=ON;BEGIN IMMEDIATE;INSERT INTO thread_bindings SELECT profile_id FROM thread_bindings');
+  const spilled=readFileSync(f.file+'-wal');expect(spilled).not.toEqual(f.wal);
+  expect(()=>readProfileDomainCensus(f.value)).toThrow('profile_identity_unavailable');expect(readFileSync(f.file+'-wal')).toEqual(spilled);
+  f.db.exec('ROLLBACK');
+ }finally{if(f.db.isTransaction)f.db.exec('ROLLBACK');f.db.close();}
+},12000);

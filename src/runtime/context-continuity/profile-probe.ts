@@ -14,6 +14,7 @@ let pendingProfileProbe:{directory:string|undefined}|undefined;
 export const PROFILE_DOMAIN_PROBE_PROGRAM = String.raw`
 import fs from 'node:fs';
 import {join, dirname} from 'node:path';
+import {endianness} from 'node:os';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 const {dataRoot, snapshotRoot}=JSON.parse(process.argv[1]);
@@ -59,15 +60,41 @@ function readPass(item,destination){
 function exactRead(fd,size,position){const b=Buffer.alloc(size);let n=0;while(n<size){const count=fs.readSync(fd,b,n,size-n,position+n);if(count<1||count>size-n)fail();n+=count;}return b;}
 // SQLite fileformat2.html sections4.1/4.2. Refuse a damaged/uncommitted tail
 // rather than let recovery silently choose an older commit for an identity.
-function validateWal(item){
+function committedWalIndex(shm,h,page,frames,nPage,s0,s1){
+ if(!shm||shm.before.size<32768n||shm.before.size%32768n!==0n)fail();
+ const b=exactRead(shm.fd,96,0),little=endianness()==='LE';
+ const u32=(offset)=>little?b.readUInt32LE(offset):b.readUInt32BE(offset);
+ const szPage=little?b.readUInt16LE(14):b.readUInt16BE(14);
+ if(!b.subarray(0,48).equals(b.subarray(48,96))||!b.equals(exactRead(shm.fd,96,0))
+   ||u32(0)!==3007000||u32(4)!==0||b[12]!==1||b[13]!== (h.readUInt32BE(0)&1)
+   ||szPage!==(page===65536?1:page)||u32(16)!==frames||frames<1||u32(20)!==nPage||nPage<1
+   ||u32(24)!==s0||u32(28)!==s1||!b.subarray(32,40).equals(h.subarray(16,24)))fail();
+ let c0=0,c1=0;for(let n=0;n<40;n+=8){c0=(c0+u32(n)+c1)>>>0;c1=(c1+u32(n+4)+c0)>>>0;}
+ if(c0!==u32(40)||c1!==u32(44))fail();
+ return {item:shm,header:b};
+}
+function assertWalIndexCurrent(witness){if(witness&&!witness.header.equals(exactRead(witness.item.fd,96,0)))fail();}
+function validateWal(item,shm){
  if(!item||item.before.size===0n)return;
  const size=Number(item.before.size);if(size<32)fail();const h=exactRead(item.fd,32,0),magic=h.readUInt32BE(0),page=h.readUInt32BE(8);
  if(![0x377f0682,0x377f0683].includes(magic)||h.readUInt32BE(4)!==3007000||page<512||page>65536||(page&(page-1))!==0||(size-32)%(24+page)!==0)fail();
  let s0=0,s1=0;const checksum=b=>{if(b.length%8)fail();for(let n=0;n<b.length;n+=8){s0=(s0+(magic===0x377f0682?b.readUInt32LE(n):b.readUInt32BE(n))+s1)>>>0;s1=(s1+(magic===0x377f0682?b.readUInt32LE(n+4):b.readUInt32BE(n+4))+s0)>>>0;}};
  checksum(h.subarray(0,24));if(s0!==h.readUInt32BE(24)||s1!==h.readUInt32BE(28))fail();
- let commit=false;
- for(let n=32;n<size;n+=24+page){const frame=exactRead(item.fd,24+page,n);if(frame.readUInt32BE(0)===0||frame.readUInt32BE(8)!==h.readUInt32BE(16)||frame.readUInt32BE(12)!==h.readUInt32BE(20))fail();checksum(frame.subarray(0,8));checksum(frame.subarray(24));if(s0!==frame.readUInt32BE(16)||s1!==frame.readUInt32BE(20))fail();commit=frame.readUInt32BE(4)>0;}
+ let commit=false,nPage=0,witness;
+ for(let n=32;n<size;n+=24+page){
+  const frame=exactRead(item.fd,24+page,n);if(frame.readUInt32BE(0)===0)fail();
+  const currentSalt=frame.subarray(8,16).equals(h.subarray(16,24));
+  if(!currentSalt){
+   // SQLite reuses WAL allocation. Accept only an old-generation suffix
+   // after the exact, independently checked current committed prefix.
+   if(!witness){if(!commit)fail();witness=committedWalIndex(shm,h,page,(n-32)/(24+page),nPage,s0,s1);}
+   continue;
+  }
+  if(witness)fail(); // Never discard a current-generation tail or commit.
+  checksum(frame.subarray(0,8));checksum(frame.subarray(24));if(s0!==frame.readUInt32BE(16)||s1!==frame.readUInt32BE(20))fail();nPage=frame.readUInt32BE(4);commit=nPage>0;
+ }
  if(!commit)fail();
+ assertWalIndexCurrent(witness);return witness;
 }
 for(let index=0;index<probes.length;index++){
  const [relative,versions,tables]=probes[index],file=join(dataRoot,...relative.split('/')),parent=dirname(file);
@@ -81,10 +108,11 @@ for(let index=0;index<probes.length;index++){
   if((wal&&!shm)||stat(file+'-journal'))fail();
   const destination=join(snapshotRoot,String(index)+'.sqlite');
   const first=readPass(source,destination),walFirst=wal?readPass(wal,destination+'-wal'):null;
-  validateWal(wal);
+  const walWitness=validateWal(wal,shm);
   if(first!==readPass(source)||first!==readPass(source)||wal&&(walFirst!==readPass(wal)||walFirst!==readPass(wal)))fail();
   for(const item of held){const now=stat(item.file);if(!now||!(item===shm?same(item.before,now):stable(item.before,now))||!(item===shm?same(item.binding,fs.fstatSync(item.fd,{bigint:true})):stable(item.binding,fs.fstatSync(item.fd,{bigint:true}))))fail();if(process.platform==='win32'&&now.dev===0n){const probe=fs.openSync(item.file,fs.constants.O_RDONLY);try{if(!(item===shm?same(item.binding,fs.fstatSync(probe,{bigint:true})):stable(item.binding,fs.fstatSync(probe,{bigint:true}))))fail();}finally{fs.closeSync(probe);}}}
   if(Boolean(stat(file+'-wal'))!==Boolean(wal)||Boolean(stat(file+'-shm'))!==Boolean(shm)||stat(file+'-journal')||!sameDirectory(parentBefore,directory(parent)))fail();
+  assertWalIndexCurrent(walWitness);
   // Open only the owned copy, with no URI dependency. Private WAL recovery
   // may create private sidecars; original files are never opened by SQLite.
   db=new DatabaseSync(destination);db.exec('BEGIN');
@@ -95,6 +123,11 @@ for(let index=0;index<probes.length;index++){
    if(typeof row.profile!=='string'||row.profile.length>256)fail();domains.add(row.profile.replace(/^desktop-user:/,''));if(domains.size>2)fail();
   }
   if(!tables.some(([table])=>names.has(table))&&!names.has('profile_identity_migrations'))fail();
+  if(walWitness){
+   assertWalIndexCurrent(walWitness);
+   for(const item of held){const now=stat(item.file),fd=fs.fstatSync(item.fd,{bigint:true});if(!now||!(item===shm?same(item.before,now):stable(item.before,now))||!(item===shm?same(item.binding,fd):stable(item.binding,fd)))fail();}
+   if(Boolean(stat(file+'-wal'))!==Boolean(wal)||Boolean(stat(file+'-shm'))!==Boolean(shm)||stat(file+'-journal')||!sameDirectory(parentBefore,directory(parent)))fail();
+  }
  }finally{
   let failed=false;try{db?.close();}catch{failed=true;}
   for(const item of held)try{fs.closeSync(item.fd);}catch{failed=true;}
