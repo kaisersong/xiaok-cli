@@ -6,7 +6,7 @@ import {writeWindowsPrivateFile} from '../../../src/runtime/windows-owner-securi
 import {createHash,randomUUID} from 'node:crypto';
 import {tmpdir,userInfo} from 'node:os';
 import {join,resolve} from 'node:path';
-import {chmodSync,existsSync,linkSync,lstatSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,renameSync,rmSync,symlinkSync,unlinkSync,writeFileSync} from 'node:fs';
+import {chmodSync,closeSync,existsSync,linkSync,lstatSync,mkdirSync,mkdtempSync,openSync,readSync,readFileSync,readdirSync,renameSync,rmSync,symlinkSync,unlinkSync,writeFileSync} from 'node:fs';
 import {loadContinuityProfile,resolveDesktopProfile} from '../../../src/runtime/context-continuity/profile.js';
 import {readContinuityProfile} from '../../../src/runtime/context-continuity/profile-identity.js';
 import {readProfileDomainCensus} from '../../../src/runtime/context-continuity/profile-probe.js';
@@ -136,15 +136,28 @@ function reusedWalFixture(pageSize=4096){
  const wal=readFileSync(file+'-wal'),shm=readFileSync(file+'-shm');expect(wal.length).toBe(previous.length);expect(wal.subarray(16,24)).not.toEqual(previous.subarray(16,24));
  return {value,file,db,legacy,domain,wal,shm,olderHeader};
 }
+function readWalIndexHeaders(file:string){
+ // Windows SQLite locks bytes in the SHM lock region, outside both headers.
+ const fd=openSync(file,'r'),bytes=Buffer.alloc(96);try{expect(readSync(fd,bytes,0,96,0)).toBe(96);return bytes;}finally{closeSync(fd);}
+}
+function detachedReusedWalFixture(){
+ const original=reusedWalFixture();try{
+  // Mutate a private byte-for-byte copy, not a file mapped by SQLite. Windows
+  // forbids truncating/renaming the live SHM file, independently of the census.
+  const value=root();mkdirSync(join(value,'multi-agent'));const file=join(value,'multi-agent/groups.sqlite');
+  writeFileSync(file,readFileSync(original.file));writeFileSync(file+'-wal',original.wal);writeFileSync(file+'-shm',original.shm);
+  return {...original,value,file};
+ }finally{original.db.close();}
+}
 it.each([4096,65536])('reads actual reused WAL allocation at %s-byte pages without releasing the parent writer lock',pageSize=>{
  const f=reusedWalFixture(pageSize);try{
   f.db.exec('BEGIN IMMEDIATE');expect(readProfileDomainCensus(f.value)).toEqual({domains:[f.legacy,f.domain],migrated:false});
   const observer=new DatabaseSync(f.file);try{expect(()=>observer.exec('BEGIN IMMEDIATE')).toThrow(/locked/);}finally{observer.close();}
-  expect(readFileSync(f.file+'-wal')).toEqual(f.wal);expect(readFileSync(f.file+'-shm').subarray(0,96)).toEqual(f.shm.subarray(0,96));f.db.exec('ROLLBACK');
+  expect(readFileSync(f.file+'-wal')).toEqual(f.wal);expect(readWalIndexHeaders(f.file+'-shm')).toEqual(f.shm.subarray(0,96));f.db.exec('ROLLBACK');
  }finally{f.db.close();}
 },12000);
 it.each(['older-header','unequal-header','header-checksum','committed-checksum','committed-salt','missing-shm'] as const)('rejects %s in real reused WAL without silently adopting an older legacy-only identity',mode=>{
- const f=reusedWalFixture();let moved=false;try{
+ const f=detachedReusedWalFixture();let moved=false;try{
   const shm=Buffer.from(f.shm),wal=Buffer.from(f.wal);
   if(mode==='older-header')f.olderHeader.copy(shm,0);
   if(mode==='unequal-header')shm[48]^=1;
@@ -155,7 +168,7 @@ it.each(['older-header','unequal-header','header-checksum','committed-checksum',
   writeFileSync(f.file+'-wal',wal);
   expect(()=>readProfileDomainCensus(f.value)).toThrow('profile_identity_unavailable');expect(()=>resolveDesktopProfile(f.value)).toThrow('profile_identity_unavailable');expect(existsSync(join(f.value,'continuity-profile.json'))).toBe(false);
   expect(readFileSync(f.file+'-wal')).toEqual(wal);
- }finally{writeFileSync(f.file+'-wal',f.wal);if(moved)renameSync(f.file+'-shm-held',f.file+'-shm');writeFileSync(f.file+'-shm',f.shm);f.db.close();}
+ }finally{writeFileSync(f.file+'-wal',f.wal);if(moved)renameSync(f.file+'-shm-held',f.file+'-shm');writeFileSync(f.file+'-shm',f.shm);}
 },12000);
 it('still rejects a real uncommitted current-generation spill instead of treating it as old allocation',()=>{
  const f=reusedWalFixture();try{
