@@ -54,6 +54,7 @@ const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']);
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
 const HISTORY_PAGE_SIZE = 20;
+const LEGACY_INITIAL_PAGE_SIZE = 4;
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
 function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
@@ -1298,14 +1299,22 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     const ids = page.remaining.slice(-HISTORY_PAGE_SIZE);
     const olderMessages: ChatMessage[] = [];
     const olderEvents: DesktopTaskEvent[] = [];
+    let hasArchive = false;
     const missing: string[] = [];
     for (const id of ids) {
       if (!current()) return;
       try {
-        const { snapshot } = await api.recoverTask(id);
+        const storedThread = threadRef.current;
+        const { snapshot, presentation, archive } = await recoverForDisplay(api, id, undefined, current,
+          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id));
         if (!current()) return;
+        if (archive) {
+          hasArchive = true;
+          olderMessages.push(...archive.messages.map(message => ({ id: `local-archive-${id}-${message.sourceMessageId}`, role: 'assistant' as const, content: message.text })));
+          continue;
+        }
         if (!snapshot) throw Error('history_snapshot_unavailable');
-        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, undefined, true);
+        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, presentation, true);
         olderMessages.push(...replay.msgs);
         olderEvents.push(...replay.events);
       } catch { if (!current()) return; missing.push(id); }
@@ -1313,6 +1322,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (!current()) return;
     page.loading = false;
     if (!missing.length) {
+      if (hasArchive) setLocalArchivePresent(true);
       page.remaining = page.remaining.slice(0, -ids.length);
       allEventsRef.current = [...olderEvents, ...allEventsRef.current];
       setMessages(previous => [...olderMessages, ...previous]);
@@ -1447,7 +1457,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
-        for (const tid of allTaskIds.slice(-HISTORY_PAGE_SIZE)) {
+        const initialPageSize = threadData.coverage === 'unclaimed' ? LEGACY_INITIAL_PAGE_SIZE : HISTORY_PAGE_SIZE;
+        for (const tid of allTaskIds.slice(-initialPageSize)) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
@@ -1518,7 +1529,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
         // Now set all state atomically after final check
         setThread(threadData);
-        olderHistoryRef.current.remaining = allTaskIds.slice(0, -HISTORY_PAGE_SIZE);
+        olderHistoryRef.current.remaining = allTaskIds.slice(0, -initialPageSize);
         setOlderHistory({ remaining: olderHistoryRef.current.remaining.length, loading: false, error: '' });
         threadRef.current = threadData;
         if (allMessages.length > 0) {
@@ -1802,6 +1813,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       const release = retainObserver(source, api.subscribeTask(newTaskId, (event, coordinate) => handleEvent(event, source, coordinate)));
       if (!current()) { release(); return false; }
       promoteSource(source, release, false);
+      // Main may have established the fixed assistant conversation during the
+      // first submission. Refresh its actual record rather than inferring ownership.
+      void api.getThread(taskId).then(record => {
+        if (!current() || !record || record.id !== taskId || !record.taskIds.includes(newTaskId)) return;
+        threadRef.current = record;
+        setThread(record);
+      }).catch(() => {});
       if(taskId===ASSISTANT_CHAT_THREAD){
         // Main's task creation time is the shared live/replay timeline anchor.
         // Metadata failure leaves an un-timed pending turn; never invent now().
