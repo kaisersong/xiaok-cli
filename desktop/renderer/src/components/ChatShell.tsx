@@ -1813,6 +1813,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       const release = retainObserver(source, api.subscribeTask(newTaskId, (event, coordinate) => handleEvent(event, source, coordinate)));
       if (!current()) { release(); return false; }
       promoteSource(source, release, false);
+      // Main may have established the fixed assistant conversation during the
+      // first submission. Refresh its actual record rather than inferring ownership.
+      void api.getThread(taskId).then(record => {
+        if (!current() || !record || record.id !== taskId || !record.taskIds.includes(newTaskId)) return;
+        threadRef.current = record;
+        setThread(record);
+      }).catch(() => {});
       if(taskId===ASSISTANT_CHAT_THREAD){
         // Main's task creation time is the shared live/replay timeline anchor.
         // Metadata failure leaves an un-timed pending turn; never invent now().

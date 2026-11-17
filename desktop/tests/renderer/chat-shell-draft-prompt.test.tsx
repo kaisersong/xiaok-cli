@@ -1124,6 +1124,45 @@ describe('ChatShell draft prompt navigation state', () => {
     else await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledOnce());
   });
 
+  it.each(['complete','unclaimed','rejected'] as const)('refreshes first-submit ownership from the actual thread record (%s)', async coverage => {
+    const empty={id:'history',title:'new',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'unclaimed'};
+    mockGetThread.mockResolvedValueOnce(empty);
+    if(coverage==='rejected')mockGetThread.mockRejectedValue(Error('read_unavailable'));
+    else mockGetThread.mockResolvedValue({...empty,coverage,currentTaskId:'task-first',taskIds:['task-first']});
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('second_submission_reached'));
+    let handler:((event:any)=>void)|undefined;
+    mockSubscribeTask.mockImplementation((_id,callback)=>{handler=callback;return()=>{};});
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockSubscribeTask).toHaveBeenCalledWith('task-first',expect.any(Function)));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
+    act(()=>handler?.({type:'result',result:{summary:'first complete',artifacts:[]}}));
+    await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    if(coverage==='complete')await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
+    else{expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).toHaveBeenCalledOnce();}
+  });
+
+  it('discards an ownership refresh after navigating to another thread', async () => {
+    const empty={id:'history',title:'new',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'unclaimed'};
+    let finish!:(value:unknown)=>void;
+    mockGetThread.mockImplementation(id=>id==='other'?Promise.resolve({...empty,id,coverage:'complete'}):Promise.resolve(empty));
+    mockGetThread.mockResolvedValueOnce(empty).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('other_submission_reached'));
+    mockSubscribeTask.mockImplementation(()=>()=>{});
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button',{name:'switch conversation'}));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledWith('other'));
+    await act(async()=>finish({...empty,coverage:'complete',currentTaskId:'task-first',taskIds:['task-first']}));
+    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
+    expect(mockSubmitUserTask.mock.calls[1][0].input.context).toEqual({threadId:'other'});
+  });
+
   it('replays persisted quota failures and restores failed status', async () => {
     const failureReason = '429 您已达到每周/每月使用上限，您的限额将在 2026-07-15 14:18:50 重置。';
     mockGetThread.mockResolvedValue({
