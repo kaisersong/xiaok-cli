@@ -1,7 +1,7 @@
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {lstatSync,readFileSync} from 'node:fs';
 import {join,resolve} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerIdentity,assertRootProtectedFile} from './installed-identity.js';
 import {parseInstalledDeploymentManifest} from './deployment-manifest.js';
 import {canonicalVerificationJson} from './protocol.js';

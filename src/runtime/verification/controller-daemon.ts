@@ -1,8 +1,9 @@
+import BuiltinDatabase from '../../utils/builtin-sqlite.js';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, lstatSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { syncDirectoryTreeStrict } from '../../utils/atomic-file.js';
 import { canonicalVerificationJson } from './protocol.js';
 import { ControllerGrantStore, type ControllerGrant, type ControllerCaller, type ControllerRequestSource } from './controller-grants.js';
@@ -38,7 +39,7 @@ export async function createControllerDaemon(options: { root: string; handlers?:
   const lockPath = join(root, 'controller-owner.sqlite');
   for (const path of [lockPath, lockPath + '-journal', lockPath + '-wal', lockPath + '-shm']) if (existsSync(path) && (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink() || lstatSync(path).nlink !== 1)) throw Error('controller_lock_path');
   if (existsSync(lockPath + '-wal') || existsSync(lockPath + '-shm')) throw Error('controller_lock_wal');
-  const NativeDatabase = createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+  const NativeDatabase = BuiltinDatabase as typeof BuiltinDatabase;
   const lock: Database = new NativeDatabase(lockPath, { timeout: 0 });
   let grants: ControllerGrantStore | undefined; let journal: ExecutionJournal | undefined;
   let ipc: Awaited<ReturnType<typeof startControllerIpc>> | undefined;

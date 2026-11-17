@@ -3,7 +3,7 @@ import {rmSync,statSync,readFileSync} from 'node:fs';
 import {join,dirname,basename,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {compileBrokerCustody,createOriginalBrokerRoom} from '../../support/broker-room-source-fixture.js';
 import {startProfileSourceCapture,readProfileSqliteLosslessRows,type ProfileCaptureSource} from '../../../src/runtime/verification/profile-source-capture.js';
 const environment=await vi.hoisted(async()=>{

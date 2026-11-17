@@ -1,5 +1,5 @@
 import {vi} from 'vitest';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as root from '../../src/runtime/verification/installed-controller.js';
 import * as sharedCapacity from '../../src/runtime/verification/installed-shared-capacity.js';
 import * as profileOwnerRegistry from '../../src/runtime/verification/profile-owner-registry.js';
@@ -128,7 +128,7 @@ export interface PrimitiveMaterialHarness {
  stagingRoot:string;
  stagePlan(invocation:ValidationMaterialInvocation,command:{argv:string[];cwdRelative:string}):Promise<{plan:any;scopeDigest:string}>;
 }
-export function createPrimitiveMaterialHarness(input:{database:import('better-sqlite3').Database;authorityId:string;ownerKey?:string;engineBinding:{engineId:string;incarnation:string};deletion?:Options['deletion'];wallNow?:()=>number;assertCleanup?():void;readPageFault?():void}):PrimitiveMaterialHarness{
+export function createPrimitiveMaterialHarness(input:{database:import('../../src/utils/builtin-sqlite.js').Database;authorityId:string;ownerKey?:string;engineBinding:{engineId:string;incarnation:string};deletion?:Options['deletion'];wallNow?:()=>number;assertCleanup?():void;readPageFault?():void}):PrimitiveMaterialHarness{
  const owner=createPrimitiveBlobAuthority({database:input.database,authorityId:input.authorityId,assertCurrent(){},deletion:input.deletion??{assertDeleted(){throw Error('no physical deletion receipt');}}});
  const stagingRoot=mkdtempSync(join(tmpdir(),'primitive-material-'));
  const body=Buffer.from(input.authorityId+' material'),materialHash=createHash('sha256').update(body).digest('hex');
@@ -148,7 +148,7 @@ export function createPrimitiveInputArchiveEngine(){
 /** Standalone shared-capacity primitive for capacity-algorithm harness tests:
  * real createSharedBlobCapacity/createAuthorityBlobBudget over a synthetic
  * authority token, without the full installed owner composition. */
-export function createPrimitiveSharedCapacityHarness(input:{database:import('better-sqlite3').Database;authorityId:string;assertCurrent?():void;deletion?:Options['deletion']}){
+export function createPrimitiveSharedCapacityHarness(input:{database:import('../../src/utils/builtin-sqlite.js').Database;authorityId:string;assertCurrent?():void;deletion?:Options['deletion']}){
  install();
  const token=Object.freeze({});
  primitives.set(token,{options:{database:input.database,authorityId:input.authorityId,assertCurrent:input.assertCurrent??(()=>{}),deletion:input.deletion??{assertDeleted(){throw Error('no physical deletion receipt');}}},layers:new Map([['installed-owner',{phase:'constructing'}]])});

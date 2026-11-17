@@ -4,7 +4,7 @@ import { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import Database from 'better-sqlite3';
+import Database from '../../src/utils/builtin-sqlite.js';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MemoryStore } from '../../src/ai/memory/store.js';

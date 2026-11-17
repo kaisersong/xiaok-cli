@@ -2,7 +2,7 @@ import {inspectRawReservationCommand,executeRawReservationCommand} from '../isol
 import {inspectMountedProbeCommand,executeMountedProbeCommand} from '../isolated-execution/mounted-engine-probe.js';
 import {inspectBlackboxPreparationCommand,executeBlackboxPreparationCommand} from './approved-blackbox-executor.js';
 import {inspectVerificationPreparationCommand,executeVerificationPreparationCommand} from './approved-verification-operation.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {inspectMaterialExecutionCommand,executeMaterialExecutionCommand} from './installed-execution-controller.js';
 export interface ExecutionWriteContext {readonly __executionWriteContext?:never}
 export function inspectExecutionPreparationCommand(command:object,raw:object,database:Database):void{

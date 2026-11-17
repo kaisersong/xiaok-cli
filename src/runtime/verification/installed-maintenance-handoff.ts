@@ -2,7 +2,7 @@ import {inspectQualificationCleanupHandoffCommand} from './installed-engine-qual
 import {inspectMaintenanceProbeHandoffCommand} from './maintenance-execution.js';
 import {createHash} from 'node:crypto';
 import {readInstalledMaintenanceSeal} from './installed-controller.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';

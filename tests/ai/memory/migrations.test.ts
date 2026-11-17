@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import { runMigrations, getSchemaVersion } from '../../../src/ai/memory/migrations.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

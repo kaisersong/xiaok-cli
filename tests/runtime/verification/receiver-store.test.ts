@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +54,7 @@ describe('P3-R real SQLite receiver transaction', () => {
   });
   it('rolls back visible output if terminal persistence fails in the real database', () => {
     const t = fixture('artifact'); store.stage(t, 'artifact');
-    const Database = createRequire(import.meta.url)('better-sqlite3'); const other = new Database(join(root, 'authority.sqlite'));
+    const Database = BuiltinDatabase; const other = new Database(join(root, 'authority.sqlite'));
     try { other.exec("CREATE TRIGGER fail_terminal BEFORE UPDATE ON receiver_operations BEGIN SELECT RAISE(ABORT,'injected_failure'); END"); }
     finally { other.close(); }
     expect(() => store.commit(t, hashVerificationTuple(t), 1)).toThrow('injected_failure');
@@ -101,7 +102,7 @@ describe('P3-R real SQLite receiver transaction', () => {
     if(mode==='cancel'){store.cancel(t,h);expect(store.commit(t,h,1).status).toBe('cancelled');expect(store.readBusinessCompletion(owner,t.operationId,h)).toBeUndefined();return;}
     if(mode==='overflow'){expect(()=>store.commit(t,h,1)).toThrow('receiver_business_revision');expect(store.query(t,h)?.status).toBe('prepared');expect(store.readBusinessCompletion(owner,t.operationId,h)).toBeUndefined();return;}
     if(mode==='failure'||mode==='terminal-failure'){
-      const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(join(root,'authority.sqlite'));
+      const Database=BuiltinDatabase,db=new Database(join(root,'authority.sqlite'));
       try{db.exec(mode==='failure'?"CREATE TRIGGER fail_business BEFORE INSERT ON receiver_business_completions BEGIN SELECT RAISE(ABORT,'business_failure'); END":"CREATE TRIGGER fail_terminal BEFORE UPDATE ON receiver_operations BEGIN SELECT RAISE(ABORT,'business_failure'); END");}finally{db.close();}
       expect(()=>store.commit(t,h,1)).toThrow('business_failure');expect(store.query(t,h)?.status).toBe('prepared');expect(store.readVisible(t.operationId)).toBeUndefined();expect(store.readBusinessCompletion(owner,t.operationId,h)).toBeUndefined();return;
     }

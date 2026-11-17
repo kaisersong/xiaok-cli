@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {inspectSharedBlobLedgerCommand,executeSharedBlobLedgerCommand} from './shared-blob-capacity.js';
 export interface SharedCapacityWriteContext {readonly __sharedCapacityWriteContext?:never}
 export function inspectSharedCapacityCommand(command:object,ledger:object,database:Database){const facts=inspectSharedBlobLedgerCommand(command,ledger,database);if(!facts)throw Error('shared_capacity_command_brand');return facts;}

@@ -2,6 +2,7 @@
 """Assemble pinned local archives only; never install, sign, or launch a service.
 
 Python >=3.12; archive-dir contains <sha256>.archive files from the reviewed lock.
+Run npm run prepare:sqlite-source before this offline assembler.
 The resulting runtime is an input to the whole controller package, not authority.
 """
 import argparse
@@ -188,8 +189,8 @@ def prepare(archive_dir, output, lock_path):
         (output / 'vm' / 'engine-files.json').write_text(json.dumps(binaries, indent=2) + '\n')
 
     copy_file(archives[lock['workerImage']['sha256']], output / 'vm' / 'worker.tar')
-    sqlite_source = pathlib.Path(__file__).resolve().parents[2] / 'node_modules/better-sqlite3/deps/sqlite3'
-    for filename, expected in [('sqlite3.c', '6a2805f8c1ef020a7086e62258519323cf98b219e9fe87a42065d916cfebaefc'), ('sqlite3.h', '919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d')]:
+    sqlite_source = pathlib.Path(__file__).resolve().parents[2] / 'native/sqlite-source/build/3.53.4'
+    for filename, expected in [('sqlite3.c', 'b1dd5d74ec7f29055a6684fa06fb3c2f6821c87dd38f9a458dfd2e8a1db28189'), ('sqlite3.h', '919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d')]:
         if digest(sqlite_source / filename) != expected:
             raise ValueError('source custody SQLite implementation requires review')
         copy_file(sqlite_source / filename, output / 'native/sqlite' / filename)
@@ -199,7 +200,6 @@ def prepare(archive_dir, output, lock_path):
     flags_bytes = json.dumps({'amalgamation': sqlite_flags, 'helper': helper_flags}, sort_keys=True, separators=(',', ':')).encode()
     sqlite_provenance = {'version': 1, 'sqliteVersion': '3.53.4', 'sourceSha256': digest(sqlite_source / 'sqlite3.c'), 'headerSha256': digest(sqlite_source / 'sqlite3.h'), 'compileFlags': json.loads(flags_bytes), 'compileFlagsSha256': hashlib.sha256(flags_bytes).hexdigest()}
     (output / 'native/sqlite/provenance.json').write_text(json.dumps(sqlite_provenance, sort_keys=True, indent=2) + '\n')
-    copy_file(sqlite_source.parents[1] / 'LICENSE', output / 'licenses/source-custody/better-sqlite3-LICENSE')
     # The complete copied amalgamation retains SQLite's own public-domain notice.
     subprocess.run(['/usr/bin/cc', *sqlite_flags, '-c', str(sqlite_source / 'sqlite3.c'), '-o', str(sqlite_object)], check=True)
     for helper in ['process-observation', 'secure-read', 'socket-peer', 'socket-audit-peer', 'broker-user-reader', 'broker-authorize', 'broker-enroll-authorize', 'broker-mainroot-enroll-authorize', 'broker-publish-authorize', 'broker-archive-authorize', 'broker-application-authorize', 'broker-source-authorize', 'broker-source-lock-custody', 'broker-source-cleanup', 'broker-source-sqlite-custody', 'broker-root-nmp-custody', 'continuous-clock', 'account-generation']:

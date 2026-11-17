@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {inspectMetadataPrepareCommand,executeMetadataPrepareCommand} from './controller-metadata-capacity.js';
 import {inspectMetadataArchivePrepareCommand,executeMetadataArchivePrepareCommand} from './installed-metadata-target-prepare.js';
 export interface MetadataWriteContext {readonly __metadataWriteContext?:never}

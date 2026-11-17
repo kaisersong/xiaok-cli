@@ -5,7 +5,7 @@ import * as metadataModule from '../../../src/runtime/verification/installed-met
 import {chmodSync,statSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,realpathSync,mkdirSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {createHash,generateKeyPairSync,createPrivateKey,createPublicKey,randomUUID,type KeyObject} from 'node:crypto';
@@ -68,7 +68,7 @@ it('rejects a caller assembly before any metadata prepare action',async()=>{
  await expect(Promise.resolve().then(()=>installed.prepareInstalledMetadataTarget({}, {}, {}, {},new AbortController().signal))).rejects.toThrow('installed_assembly_identity');
 });
 const nativeRoot=realpathSync(mkdtempSync(join(tmpdir(),'metadata-prepare-native-'))),directoryHelper=join(nativeRoot,'directory'),sqliteHelper=join(nativeRoot,'sqlite');
-beforeAll(()=>{const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(nativeRoot,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
+beforeAll(()=>{const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(nativeRoot,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
 afterAll(()=>rmSync(nativeRoot,{recursive:true,force:true}));
 async function capturedFixture(){
  const f=await installedControllerFixture();try{const {FileTaskSnapshotStore}=await import('../../../src/runtime/task-host/snapshot-store.js'),{FileSessionStore}=await import('../../../src/ai/runtime/session-store/file-store.js'),{AgentSessionState}=await import('../../../src/ai/runtime/session.js'),{FileGoalStore}=await import('../../../src/runtime/goal/file-store.js'),{createGoalState}=await import('../../../src/runtime/goal/reducer.js'),{createGoalCompletionIntent}=await import('../../../src/runtime/goal/completion-intent.js'),api=await import('../../../src/runtime/verification/profile-source-capture.js'),{cleanupOriginalSourceLocks}=await import('../../../src/runtime/verification/source-lock-cleanup.js');

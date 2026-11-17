@@ -62,12 +62,12 @@ try {
   } else { $failures.Add("no exit result: $result") }
   if (Test-Path $tmpPid) { $failures.Add('serve.pid not removed after exit') } else { Write-Host 'CHECK serve.pid removed after exit' }
 
-  # Reopen memory.db with node + better-sqlite3 from the repo and look for the probe row.
+  # Reopen memory.db with the actual Node built-in SQLite and look for the probe row.
   $db = Join-Path $cfg 'memory.db'
-  $js = "const D=require(process.argv[1]);const d=new D(process.argv[2],{readonly:true});" +
-    "const r=d.prepare('select count(*) n from memory_l0_raw where session_id=? and content=?').get('yzj-dry-run-probe',process.argv[3]);" +
+  $js = "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.argv[1],{readOnly:true});" +
+    "const r=d.prepare('select count(*) n from memory_l0_raw where session_id=? and content=?').get('yzj-dry-run-probe',process.argv[2]);" +
     "console.log('ROWS '+r.n);d.close();process.exit(r.n>0?0:1)"
-  & $node -e $js (Join-Path $Repo 'node_modules\better-sqlite3') $db $probeText | Out-Host
+  & $node -e $js $db $probeText | Out-Host
   if ($LASTEXITCODE -ne 0) { $failures.Add('probe row not found in memory.db') } else { Write-Host 'CHECK probe row present in memory.db' }
 } catch {
   $failures.Add("error: $_")

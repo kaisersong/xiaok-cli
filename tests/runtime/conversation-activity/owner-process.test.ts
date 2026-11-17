@@ -41,7 +41,12 @@ describe('independent activity process lifecycle', () => {
       const restarted = await ensureConversationActivityOwner(config, { instanceId: 'instance', entryPath });
       const next = await restarted.request<{ pid: number; ownerEpoch: string }>('status'); pid = next.pid;
       expect(next.ownerEpoch).not.toBe(firstEpoch);
-      expect(await observer.request('list', { threadId: 'session' })).toEqual(before);
+      const after=await observer.request<any[]>('list', { threadId: 'session' });
+      // A real restarted collector can refresh liveness before this request.
+      // Compare every durable field, and require both live counters never to regress.
+      const durable=(rows:any[])=>rows.map(row=>{if(!row.projection)return row;const {revision,lastHeartbeatAt,...projection}=row.projection;return {...row,projection};});
+      expect(durable(after)).toEqual(durable(before));
+      for(let i=0;i<before.length;i++){const prior=before[i].projection,current=after[i].projection;if(!prior)continue;expect(current.revision).toBeGreaterThanOrEqual(prior.revision);expect(current.lastHeartbeatAt===null||(Number.isSafeInteger(current.lastHeartbeatAt)&&current.lastHeartbeatAt>=0)).toBe(true);if(prior.lastHeartbeatAt!==null)expect(current.lastHeartbeatAt).toBeGreaterThanOrEqual(prior.lastHeartbeatAt);}
       expect((await observer.request<any[]>('list', { threadId: 'session' })).filter(row => row.kind === 'completed')).toHaveLength(1);
       restarted.dispose();
 

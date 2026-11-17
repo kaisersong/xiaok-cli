@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {assertInstalledRootBrokerClient,type createInstalledRootBrokerClient} from './root-broker-client.js';
 import {assertSharedBlobCapacityDatabase,type createSharedBlobCapacity} from './shared-blob-capacity.js';

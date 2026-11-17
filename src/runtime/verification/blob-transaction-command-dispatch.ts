@@ -1,5 +1,5 @@
 import {inspectDockerTransactionCommand,executeDockerTransactionCommand} from '../isolated-execution/docker-runner.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {inspectQualificationTransactionCommand,executeQualificationTransactionCommand} from './installed-engine-qualification.js';
 export interface BlobTransactionWriteContext {readonly __blobTransactionContext?:never}
 export function inspectBlobTransactionCommand(command:object,budget:object,database:Database):void{

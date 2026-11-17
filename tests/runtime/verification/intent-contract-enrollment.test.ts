@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {withIntentSqlParsingContext} from '../../../src/runtime/verification/intent-sql-parsing-context.js';
 import {afterEach,expect,it} from 'vitest';
 import {createHash,generateKeyPairSync} from 'node:crypto';

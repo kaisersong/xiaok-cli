@@ -1,7 +1,7 @@
 import {createPrimitiveCapacityLedger as createSharedCapacityLedger} from '../../support/capacity-primitive-ledger.js';
 import {sharedCommandFault} from '../../support/shared-command-fault.js';
 import {it,expect} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,rmSync,writeFileSync,unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join} from 'node:path';
 

@@ -10,7 +10,7 @@ export async function deleteObservationSession(input: { requestSource: 'user' | 
   if (typeof input.sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(input.sessionId)) throw new Error('SOL_PI_DELETE_INVALID_SESSION_ID');
   // Native receipt dependencies must not load on ordinary CLI startup or before the platform gate.
   const [{ FileSessionStore }, { ReferenceDeletionReceiptStore }, { reconcileProductObservationReferences }, { default: Database }] = await Promise.all([
-    import('../ai/runtime/session-store/file-store.js'), import('../runtime/sol-pi/reference-lifecycle.js'), import('../runtime/sol-pi/product-bootstrap.js'), import('better-sqlite3'),
+    import('../ai/runtime/session-store/file-store.js'), import('../runtime/sol-pi/reference-lifecycle.js'), import('../runtime/sol-pi/product-bootstrap.js'), import('../utils/builtin-sqlite.js'),
   ]);
   const profileRoot = getConfigDir('observation-profile');
   mkdirSync(profileRoot, { recursive: true, mode: 0o700 });
@@ -20,7 +20,7 @@ export async function deleteObservationSession(input: { requestSource: 'user' | 
     try { const stat = lstatSync(candidate); if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('SOL_PI_DELETE_UNSAFE_PROFILE'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
-  let lock: import('better-sqlite3').Database | undefined;
+  let lock: import('../utils/builtin-sqlite.js').Database | undefined;
   try { lock = new Database(lockPath, { timeout: 0 }); lock.exec('BEGIN EXCLUSIVE'); }
   catch { lock?.close(); throw new Error('SOL_PI_DELETE_OWNER_ACTIVE_OR_UNAVAILABLE'); }
   // Same SQLite OS lock as ObservationService, held over the complete deletion

@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {writeFileSync} from 'node:fs';
 import {assertStorageOwnerSchema,prepareStorageOwnerSchema,recordKSwarmStorageFeature} from '../../../src/runtime/verification/storage-owner-schema.js';
 import * as nativeMetadata from '../../../src/runtime/verification/installed-metadata-source.js';
@@ -64,8 +65,8 @@ it.each(['orphan','duplicate-registration','duplicate-nested','unknown-owner','m
 
 it.each(['DELETE','WAL'] as const)('reads one actual SQLite snapshot across native attribution queries: %s',async journal=>{
  const {readInstalledMetadataSessions}=await import('../../../src/runtime/verification/installed-metadata-source.js');
- const {createRequire}=await import('node:module');const Connection=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
- const f=fixture();let writer:import('better-sqlite3').Database|undefined;let restore:(()=>void)|undefined;
+ const {createRequire}=await import('node:module');const Connection=BuiltinDatabase as typeof BuiltinDatabase;
+ const f=fixture();let writer:import('../../../src/utils/builtin-sqlite.js').Database|undefined;let restore:(()=>void)|undefined;
  try{
   seedSessions(f);f.database.pragma('journal_mode='+journal);writer=new Connection(join(f.root,'authority.sqlite'),{timeout:0});
   const receipt=f.database.prepare('SELECT owner_key,invocation_json,logical_owner_key,registration_json FROM owner_enrollment_invocation_receipts LIMIT 1').get() as {owner_key:string;invocation_json:string;logical_owner_key:string;registration_json:string};

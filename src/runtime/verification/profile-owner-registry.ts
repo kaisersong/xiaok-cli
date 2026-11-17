@@ -4,7 +4,7 @@ import {captureKSwarmEnrollmentData} from './kswarm-enrollment-data.js';
 import {parseKSwarmHostSubject,kswarmHostSubjectOwner,isKSwarmOwnerIdentity,type KSwarmHostSubject} from './kswarm-host-subject.js';
 import {assertIntentContractEnrollmentInput} from './intent-contract-enrollment.js';
 import {randomUUID,createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ControllerPeer} from './controller-public-daemon.js';
 import type {ValidationMaterialInvocation} from './product-material-authorization.js';
 import type {VerificationOwner} from './proof-authority.js';

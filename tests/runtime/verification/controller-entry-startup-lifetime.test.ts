@@ -5,7 +5,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as wait} from 'node:timers/promises';
-import Native from 'better-sqlite3';
+import Native from '../../../src/utils/builtin-sqlite.js';
 const entry=fileURLToPath(new URL('../../../src/runtime/verification/controller-entry.ts',import.meta.url)),loader=fileURLToPath(new URL('./controller-entry-startup-loader.mjs',import.meta.url));
 async function child(mode:string){
  const root=mkdtempSync(join(tmpdir(),'eh-')),child=spawn(process.execPath,['--import',loader,'--import','tsx',entry],{env:{...process.env,SOLPI_ENTRY_TEST_MODE:mode,SOLPI_ENTRY_TEST_ROOT:root},stdio:['ignore','ignore','pipe','ipc']});

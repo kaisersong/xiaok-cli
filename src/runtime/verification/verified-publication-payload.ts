@@ -2,7 +2,7 @@ import {ownDataJSONParse,ownDataObjectKeys,ownDataObjectFreeze,ownDataBufferProt
 import {assertIntentParentPublication,intentParentPublicationVector,type IntentPublicationOwnerObservation} from './intent-parent-publication.js';
 import {assertIntentApplicationArtifacts} from './intent-application-artifacts.js';
 import {createHash,randomUUID,createPublicKey,verify,type KeyObject} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {createIndependentVerifierRecipes,RecipeEvaluation} from './independent-recipes.js';
 import type {VerificationOwner} from './proof-authority.js';
 import {parseActiveBusinessApplicationBinding,businessApplicationOwner} from './business-application-binding.js';

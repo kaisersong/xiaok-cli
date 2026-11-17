@@ -66,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
         shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     # Includes both complete Intent inventories and the nine source suites.
@@ -94,7 +94,7 @@ jobs:
         run: bash .github/scripts/retry.sh npm ci --ignore-scripts
       - name: Prepare the original native SQLite dependency
         shell: bash
-        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3
+        run: bash .github/scripts/retry.sh node -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(':memory:');db.prepare('SELECT 1').get();db.close()"
       - name: Run the nine complete source wholes
         if: matrix.shard == 1
         run: >-
@@ -181,7 +181,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
           ${{ github.event.pull_request.head.sha || github.sha }}
-          ubuntu-latest-node-22.14.0-publication:3,ubuntu-latest-node-22.14.0-completion:3,ubuntu-latest-node-24-publication:3,ubuntu-latest-node-24-completion:3,macos-15-node-22.14.0-publication:3,macos-15-node-22.14.0-completion:3,macos-15-node-24-publication:3,macos-15-node-24-completion:3 3
+          ubuntu-latest-node-22.22.1-publication:3,ubuntu-latest-node-22.22.1-completion:3,ubuntu-latest-node-24-publication:3,ubuntu-latest-node-24-completion:3,macos-15-node-22.22.1-publication:3,macos-15-node-22.22.1-completion:3,macos-15-node-24-publication:3,macos-15-node-24-completion:3 3
       - name: Preserve original nine blocking suites and evidence gates
         shell: bash
         env:

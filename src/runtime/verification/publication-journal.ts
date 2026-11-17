@@ -1,6 +1,6 @@
 import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';
 import { randomBytes } from 'node:crypto';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { openPrivateVerificationDatabase } from './private-database.js';
 import { canonicalVerificationJson, hashVerificationTuple, parseVerificationTuple, VERIFICATION_BUDGET, type VerificationTuple } from './protocol.js';
 import type { ReceiverClockEvidence } from './receiver-store.js';

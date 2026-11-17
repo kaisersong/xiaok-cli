@@ -19,7 +19,7 @@ import { mergeProtectedObservationClosures, type ProtectedObservationClosure } f
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../utils/builtin-sqlite.js';
 import type { Message } from '../../../types.js';
 import type {
   StoredSessionSnapshot,

@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     defaults:
       run:
         working-directory: xiaok-cli

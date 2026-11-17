@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ArchiveResourceReview} from './archive-operation-review.js';
 import type {VerificationOwner} from './proof-authority.js';
 import type {OwnerEnrollmentReview} from './owner-enrollment-review.js';

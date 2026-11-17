@@ -29,29 +29,7 @@ const DARWIN_ARM64_EDGE_SPECIFICATIONS = Object.freeze([
       '../bin/napi-v6/darwin/arm64/onnxruntime_binding.node',
     ]),
   }),
-  Object.freeze({
-    importerRelativePath: 'node_modules/better-sqlite3/lib/binding.js',
-    astLocation: '14:10',
-    pattern:
-      "requireFunc(path.resolve(nativeBinding).replace(/(\\.node)?$/, '.node'))",
-    targets: Object.freeze(['../prebuilds/darwin-arm64.node']),
-  }),
-  Object.freeze({
-    importerRelativePath: 'node_modules/better-sqlite3/lib/binding.js',
-    astLocation: '30:26',
-    pattern: 'require(filename)',
-    targets: Object.freeze([
-      '../prebuilds/darwin-arm64.node',
-    ]),
-  }),
-  Object.freeze({
-    importerRelativePath: 'node_modules/better-sqlite3/lib/binding.js',
-    astLocation: '38:25',
-    pattern: 'require(filename)',
-    targets: Object.freeze([
-      '../prebuilds/darwin-arm64.node',
-    ]),
-  }),
+
 ]);
 
 function fail(code) {

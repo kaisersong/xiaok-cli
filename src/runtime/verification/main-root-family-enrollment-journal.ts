@@ -1,5 +1,5 @@
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json, VERIFICATION_BUDGET} from './protocol.js';
 import {assertVerificationDatabaseBudget} from './storage-budget.js';
 import {migrationProfileDirectoryName} from './migration-markers.js';

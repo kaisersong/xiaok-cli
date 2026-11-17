@@ -16,7 +16,7 @@ it.skipIf(process.platform==='win32')('saves after a deleted sqlite source ident
   const session={sessionId:'sess_inode_reuse',cwd:root,createdAt:1,updatedAt:1,lineage:['sess_inode_reuse'],messages:[],usage:{inputTokens:0,outputTokens:0},compactions:[],memoryRefs:[],approvalRefs:[],backgroundJobRefs:[]};
   store=new SQLiteSessionStore(join(a,'sessions.sqlite'));await store.save(session);store.dispose();store=undefined;rmSync(a,{recursive:true});mkdirSync(b);
   // Make B's database before constructing its store, which registers on open.
-  const {default:Database}=await import('better-sqlite3');const db=new Database(join(b,'sessions.sqlite'));db.close();
+  const {default:Database}=await import('../../../src/utils/builtin-sqlite.js');const db=new Database(join(b,'sessions.sqlite'));db.close();
   const path=join(root,'.xiaok','profile-sources','registry.json'),raw=decodeOrdinaryProfileSourceStorage(JSON.parse(readFileSync(path,'utf8'))) as {uid:number;sources:OrdinaryProfileSource[]};
   expect(raw.sources.some(row=>row.directory.canonicalPath===a&&row.database)).toBe(true);
   const dir=lstatSync(b,{bigint:true}),file=lstatSync(join(b,'sessions.sqlite'),{bigint:true});

@@ -2,7 +2,7 @@ import './installed-controller-fixture.js';
 import {vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as controller from '../../src/runtime/verification/installed-controller.js';
 import type {BlackboxObservation,IndependentRecipeSpec} from '../../src/runtime/verification/independent-recipes.js';
 import type {QuiescenceExpectation} from '../../src/runtime/isolated-execution/physical-quiescence.js';

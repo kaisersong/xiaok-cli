@@ -46,7 +46,7 @@ await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
 const registry = `http://127.0.0.1:${server.address().port}`;
 writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'xiaok-cli-install-check', private: true,
   allowScripts: { [`${published.name}@${published.version}`]: true,
-    'node-pty@1.1.0': true, 'better-sqlite3@13.0.3': true, 'nodejieba@3.5.8': true, 'onnxruntime-node@1.30.0': true },
+    'node-pty@1.1.0': true, 'nodejieba@3.5.8': true, 'onnxruntime-node@1.30.0': true },
 }));
 console.log(`Consumer evidence: ${dir}`);
 let output;

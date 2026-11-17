@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 
 const CURRENT_SCHEMA_VERSION = 4;
 

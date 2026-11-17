@@ -21,7 +21,7 @@ function assertPreparedBeforePackaging(body,installStep,buildStep,packStep){
  assert.match(step,/working-directory: desktop/);
 }
 test('path tests keep the exact declared CLI minimum Node',()=>{
- assert.match(job('cross-platform-tests'),/node-version: ['"]22\.14\.0['"]/);
+ assert.match(job('cross-platform-tests'),/node-version: ['"]22\.22\.1['"]/);
 });
 test('packaging uses a fixed supported build toolchain without lowering the KSwarm floor',()=>{
  assert.match(job('windows-kimi-packaged-smoke'),/node-version: ['"]24\.16\.0['"]/);

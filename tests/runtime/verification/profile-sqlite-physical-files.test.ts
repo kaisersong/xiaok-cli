@@ -1,5 +1,5 @@
 import {beforeAll,afterAll,it,expect} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdtempSync,realpathSync,statSync,rmSync,mkdirSync,writeFileSync,readFileSync} from 'node:fs';
@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve,basename} from 'node:path';
 import * as api from '../../../src/runtime/verification/profile-source-capture.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'profile-physical-'))),sqliteHelper=join(root,'sqlite'),directoryHelper=join(root,'directory');let serial=0;
-beforeAll(()=>{const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
+beforeAll(()=>{const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);},40000);
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 const sha=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
 function directory(path:string){const s=statSync(path,{bigint:true});return{canonicalPath:path,device:String(s.dev),inode:String(s.ino)};}

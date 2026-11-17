@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {installedControllerFixture,installedControllerStartupFixture} from '../../support/installed-controller-fixture.js';
 import {it,expect,vi} from 'vitest';
 import {createHash} from 'node:crypto';
@@ -167,7 +168,7 @@ it.each(['confirmed','intent-failure'] as const)('cold initial metadata allocati
    expect(actual.database.pragma('max_page_count',{simple:true})).toBe(before.cap);expect(actual.database.pragma('page_count',{simple:true})).toBe(before.pages);expect(schema()).toEqual(before.schema);
    expectedStartupFailure=rejected!.error;
    await expect(actual.close(true)).rejects.toBe(expectedStartupFailure);expect(actual.database.open).toBe(false);knownClosed=true;
-   const NativeDatabase=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+   const NativeDatabase=BuiltinDatabase as typeof BuiltinDatabase;
    const reopened=new NativeDatabase(join(actual.state,'authority.sqlite'),{readonly:true,fileMustExist:true});
    try{expect(reopened.readonly).toBe(true);expect(capacityRows({database:reopened})).toEqual(before.rows);expect(reopened.prepare('SELECT type,name,tbl_name,sql FROM main.sqlite_master ORDER BY type,name').all()).toEqual(before.schema);expect(reopened.pragma('page_count',{simple:true})).toBe(before.pages);}
    finally{reopened.close();}

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { openPrivateVerificationDatabase } from './private-database.js';
 import { canonicalVerificationJson, VERIFICATION_BUDGET } from './protocol.js';
 import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import { SQLiteSessionStore } from '../../../src/ai/runtime/session-store/sqlite-store.js';
 import { assertKimiK3TargetResumeSupported } from '../../../src/ai/runtime/session-store/store.js';
 import type { Message } from '../../../src/types.js';

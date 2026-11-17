@@ -1,7 +1,7 @@
 import {assertNativeSqliteArrayConstruction} from './native-sqlite-construction-intrinsics.js';
 import {readNativeKSwarmCensus} from './native-sqlite-census.js';
 import {assertKSwarmSqlIntegrity} from './kswarm-sql-integrity.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {VerificationOwner} from './proof-authority.js';
 import type {OwnerEnrollmentReview} from './owner-enrollment-review.js';
 import {parseOwnerEnrollmentRegistration} from './owner-enrollment-review.js';

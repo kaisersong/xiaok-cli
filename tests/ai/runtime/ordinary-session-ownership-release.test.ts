@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -103,7 +104,7 @@ it('preserves a protected source introduced after preflight and before the origi
 
 it('rejects an actual active SQLite execution lock without granting an ordinary release', async () => {
   const f = await fixture(), directory = join(f.root, '.session-execution'); mkdirSync(directory);
-  const Database = createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+  const Database = BuiltinDatabase as typeof BuiltinDatabase;
   const db = new Database(join(directory, createHash('sha256').update('session').digest('hex') + '.sqlite'), { timeout: 0 });
   db.exec('BEGIN EXCLUSIVE');
   try { windows(); const before = f.bytes(); await expect(release(f.store, f.input())).rejects.toThrow(); expect(f.bytes()).toBe(before); }

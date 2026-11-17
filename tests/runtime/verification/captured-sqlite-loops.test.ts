@@ -28,7 +28,7 @@ const closes:Array<()=>unknown>=[];
 afterEach(async()=>{publicationWire.routes.clear();publicationWire.applications.clear();publicationWire.publications.clear();completionWire.mode='ordinary';completionWire.taskId='';for(const close of closes.splice(0).reverse())await close();});
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 beforeAll(()=>{
- const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');
+ const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');
  execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);
@@ -319,7 +319,7 @@ it.each([
  const path=scannerFixture();change(path,sql);const{owner,token}=await captured([path]),{iterateCapturedSQLiteLoopSources}=await import('../../../src/runtime/verification/captured-sqlite-loops.js');expect(()=>[...iterateCapturedSQLiteLoopSources(owner,token)]).toThrow();
 });
 it('uses one actual SQLite parsing connection for exact schema and all declaration passes',async()=>{
- const paths=fixture(),{owner,token}=await captured(paths),{iterateCapturedSQLiteLoopSources}=await import('../../../src/runtime/verification/captured-sqlite-loops.js'),{default:Sqlite}=await import('better-sqlite3');const connections=new Set<object>(),original=Sqlite.prototype.prepare;
+ const paths=fixture(),{owner,token}=await captured(paths),{iterateCapturedSQLiteLoopSources}=await import('../../../src/runtime/verification/captured-sqlite-loops.js'),{default:Sqlite}=await import('../../../src/utils/builtin-sqlite.js');const connections=new Set<object>(),original=Sqlite.prototype.prepare;
  const spy=vi.spyOn(Sqlite.prototype,'prepare').mockImplementation(function(this:object,...args:Parameters<typeof original>){connections.add(this);return original.apply(this,args);});
  try{expect([...iterateCapturedSQLiteLoopSources(owner,token)].at(-1)?.kind).toBe('complete');expect(connections.size).toBe(1);}finally{spy.mockRestore();}
 });

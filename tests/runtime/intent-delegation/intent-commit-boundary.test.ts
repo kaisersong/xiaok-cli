@@ -2,7 +2,7 @@ import {afterEach,beforeEach,it,expect,vi} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 const wire=vi.hoisted(()=>({mode:'ordinary',protectedId:null as string|null}));
 vi.mock('../../../src/runtime/verification/installed-owner-state.js',()=>({readInstalledCurrentOwner:(owner:any)=>wire.mode==='ordinary'&&owner.ownerId!==wire.protectedId?{kind:'ordinary'}:wire.mode==='unavailable'?{kind:'unavailable',reason:'offline'}:{kind:'protected-unregistered',authorityId:'authority',owner:{profileId:'profile',ownerKind:'intent',ownerId:'intent-original'}}}));
 import {FileSessionStore} from '../../../src/ai/runtime/session-store/file-store.js';

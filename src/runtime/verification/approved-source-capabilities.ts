@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertVerificationCompletionDatabase,type createVerificationCompletionComposition} from './completion-composition.js';
 import type {VerificationOwner} from './proof-authority.js';
 import type {DiagnosticCoverageSource} from './independent-recipes.js';

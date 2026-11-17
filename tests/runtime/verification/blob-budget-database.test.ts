@@ -1,6 +1,6 @@
 import '../../support/installed-controller-fixture.js';
 import {it,expect,vi} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {installedControllerFixture} from '../../support/installed-controller-fixture.js';
 import * as capacity from '../../../src/runtime/verification/installed-shared-capacity.js';
 import {assertVerificationBlobBudgetDatabase} from '../../../src/runtime/verification/blob-budget.js';

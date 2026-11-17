@@ -1,4 +1,4 @@
-export const MIN_NODE_VERSION = '22.14.0';
+export const MIN_NODE_VERSION = '22.22.1';
 
 export function isNodeVersionAtLeast(version: string, minimum: string): boolean {
   const actual = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version);
@@ -30,6 +30,6 @@ export function shouldBlockChatOnOldNode(input: {
 }
 
 export function oldNodeMessage(version: string): string {
-  return 'xiaok 需要 Node 22.14.0 或更新版本，你现在用的是 ' + version
+  return 'xiaok 需要 Node 22.22.1+（22.x）或 Node 24+，你现在用的是 ' + version
     + '。请升级 Node 后重新运行，可用 nvm 或官网安装包升级。';
 }

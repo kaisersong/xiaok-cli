@@ -27,7 +27,7 @@ it.each(['unknown','settled','orphan-allocation'] as const)('actual FileStore de
 it('keeps the real descendant execution guard through the deletion receipt and rejects an active child first',async()=>{
  const root=mkdtempSync(join(tmpdir(),'compound-delete-child-')),store=new FileSessionStore(root);
  const authority=(sessionIdentity:string)=>createSessionExecutionAuthority({root,sessionIdentity,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'host',scopeId:'scope'})});
- const parent=authority('source'),child=authority('child'),parentLease=await parent.acquire({invocationId:'parent',kind:'recovery'}),childLease=await child.acquire({invocationId:'child',kind:'recovery'});let receipts=0;let contested=false;const {default:Database}=await import('better-sqlite3');
+ const parent=authority('source'),child=authority('child'),parentLease=await parent.acquire({invocationId:'parent',kind:'recovery'}),childLease=await child.acquire({invocationId:'child',kind:'recovery'});let receipts=0;let contested=false;const {default:Database}=await import('../../../src/utils/builtin-sqlite.js');
  try{
   const created=createOrGetDirectOperation(createCompoundOperationLedger(),{...identity,toolName:'subagent'}),delegation={version:1 as const,admissionId:'admission',childSessionIdentity:'child',childStoreRoot:root,generation:1,state:'live' as const,childPhase:'not_started' as const};
   let ledger=advanceDirectOperation(created.ledger,created.operation.id,{stage:'started',finalInputHash:'b'.repeat(64),delegation});

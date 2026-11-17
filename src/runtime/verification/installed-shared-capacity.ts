@@ -13,7 +13,7 @@ import {assertInstalledEngineQualificationIdentity,assertInstalledQualificationD
 import type {initializeInstalledMacEngine} from './installed-engine.js';
 import type {BlobReservationProposal} from './blob-budget.js';
 type Slot='qualification'|'materials'|'execution'|'transcripts'|'runs'|'maintenance-probe';
-type Entry={authority:object;database:import('better-sqlite3').Database;current():void;slots:Map<Slot,{component:object}>};
+type Entry={authority:object;database:import('../../utils/builtin-sqlite.js').Database;current():void;slots:Map<Slot,{component:object}>};
 const owners=new WeakMap<object,Entry>(),authorityEntries=new WeakMap<object,Entry>();
 export function assertInstalledCapacityDeleted(authority:object,proof:object,proposal:Readonly<BlobReservationProposal>):void{
  const entry=authorityEntries.get(authority);if(!entry)throw Error('capacity_authority_configuration');entry.current();const mapping=readBlobCapacityIssuer(entry.database,proposal);

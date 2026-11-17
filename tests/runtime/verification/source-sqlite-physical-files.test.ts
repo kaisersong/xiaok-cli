@@ -1,5 +1,5 @@
 import {beforeAll,afterAll,it,expect,vi} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {spawn,execFileSync} from 'node:child_process';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve,basename} from 'node:path';
 import * as api from '../../../src/runtime/verification/source-sqlite-process.js';
 const root=realpathSync(mkdtempSync(join(tmpdir(),'physical-sqlite-'))),binary=join(root,'custody');let serial=0;
-beforeAll(()=>{const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',binary]);},40000);
+beforeAll(()=>{const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',binary]);},40000);
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 const sha=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');
 function fixture(mode='DELETE',emptyJournal=false){const path=join(root,'db-'+serial+++'.sqlite'),db=new Database(path);db.pragma('journal_mode='+mode);db.pragma('wal_autocheckpoint=0');db.pragma('busy_timeout=0');db.exec('CREATE TABLE original(bytes BLOB);INSERT INTO original VALUES(zeroblob(196608))');if(emptyJournal)writeFileSync(path+'-journal','');const directory=statSync(root,{bigint:true}),s=statSync(path,{bigint:true}),side=(suffix:string)=>{if(!existsSync(path+suffix))return 'absent';const s=statSync(path+suffix,{bigint:true});return s.dev+':'+s.ino;};const source:api.SqliteCustodySource={snapshotFormat:'goal-sqlite-v1',directory:{canonicalPath:root,device:String(directory.dev),inode:String(directory.ino)},database:{basename:basename(path),device:String(s.dev),inode:String(s.ino)},sidecars:{journal:side('-journal'),wal:side('-wal'),shm:side('-shm')}};return{path,db,source};}

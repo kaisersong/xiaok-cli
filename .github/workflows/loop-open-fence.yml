@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -75,7 +75,7 @@ jobs:
         run: bash .github/scripts/retry.sh npm ci --ignore-scripts
       - name: Prepare the original root native SQLite dependency
         shell: bash
-        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3
+        run: bash .github/scripts/retry.sh node -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(':memory:');db.prepare('SELECT 1').get();db.close()"
       - name: Run the complete root source-route whole
         run: >-
           npm run test:full -- --config vitest.config.ts

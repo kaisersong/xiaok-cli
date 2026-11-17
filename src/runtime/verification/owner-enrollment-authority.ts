@@ -17,7 +17,7 @@ import {goalVerificationRegistration} from '../goal/verification-definition.js';
 import {assertIntentEnrollmentEnvelope} from './intent-contract-enrollment.js';
 import type { OwnerEnrollmentRequest, OwnerEnrollmentRequestObservation, OwnerEnrollmentRequestRecovery, OwnerEnrollmentChallenge } from './owner-enrollment-request.js';
 import {createHash,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ControllerPeer} from './controller-public-daemon.js';
 import type {createCompletionBoundary} from './completion-boundary.js';
 import {createProfileOwnerRegistry,type PublicProfileIndex,type EnrollmentContext,type OwnerEnrollment} from './profile-owner-registry.js';

@@ -3,7 +3,7 @@ import {sharedCommandFault} from '../../support/shared-command-fault.js';
 import {createHash} from 'node:crypto';
 import {canonicalVerificationJson} from '../../../src/runtime/verification/protocol.js';
 import {it,expect,afterEach} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';

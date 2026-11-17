@@ -3,7 +3,7 @@ import {consumeBlobCommandContext} from './blob-budget.js';
 import type {CapacityWriteContext,PreparedCapacityCommandFacts} from './capacity-command.js';
 import {constants,realpathSync,existsSync,mkdirSync,lstatSync,openSync,closeSync,fstatSync,readFileSync,writeFileSync,fsyncSync,unlinkSync} from 'node:fs';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {syncDirectoryTreeStrict} from '../../utils/atomic-file.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';

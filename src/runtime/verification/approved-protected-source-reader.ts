@@ -1,7 +1,7 @@
 import {types} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertVerificationCompletionDatabase,type createVerificationCompletionComposition} from './completion-composition.js';
 import {assertApprovedSourceCapabilitiesDatabase,type createApprovedSourceCapabilities} from './approved-source-capabilities.js';
 import {assertProtectedRunLedgerDatabase,type createProtectedRunLedger} from './protected-run-ledger.js';

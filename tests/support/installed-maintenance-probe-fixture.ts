@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve,relative,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash,generateKeyPairSync,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import type {InstalledControllerLifetime} from '../../src/runtime/verification/installed-controller-lifetime.js';
 import type {QuiescenceExpectation} from '../../src/runtime/isolated-execution/physical-quiescence.js';
 import type {BlobReservationProposal} from '../../src/runtime/verification/blob-budget.js';

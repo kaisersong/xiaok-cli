@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {types} from 'node:util';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ControllerPeer} from './controller-public-daemon.js';
 import type {ReceiverClockEvidence} from './receiver-store.js';
 import type {createMigrationMarkerJournal} from './migration-marker-journal.js';

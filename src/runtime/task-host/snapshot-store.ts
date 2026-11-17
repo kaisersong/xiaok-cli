@@ -947,7 +947,7 @@ export class FileTaskSnapshotStore {
 
   /** Complete durable-file inventory, including terminal tasks and orphan
    * journals. Rows are DATA, not an atomic cross-file snapshot or authority. */
-  async inspectPersistedInventory(): Promise<TaskSnapshot[]> {
+  async inspectPersistedTaskIds(): Promise<string[]> {
     return this.#inspectCurrentRead(async context => {
     const directory = this.#snapshotDir();
     let initial;
@@ -967,8 +967,14 @@ export class FileTaskSnapshotStore {
       if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,255}$/.test(id)) throw new Error('task_inventory_unavailable');
       ids.add(id);
     }
+    return [...ids];
+    });
+  }
+
+  async inspectPersistedInventory(): Promise<TaskSnapshot[]> {
+    return this.#inspectCurrentRead(async () => {
     const snapshots: TaskSnapshot[] = [];
-    for (const id of ids) {
+    for (const id of await this.inspectPersistedTaskIds()) {
       const snapshot = await this.inspectPersistedTask(id);
       if (!snapshot) throw new Error('task_inventory_unavailable');
       snapshots.push(snapshot);

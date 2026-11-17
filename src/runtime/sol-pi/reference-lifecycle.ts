@@ -1,5 +1,5 @@
 import {syncDirectoryTreeStrict} from '../../utils/atomic-file.js';
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import {createHash} from 'node:crypto';
 import {existsSync,lstatSync,mkdirSync} from 'node:fs';
 import {join} from 'node:path';

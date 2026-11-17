@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -45,7 +45,7 @@
     "test": "npm run test:sandbox",
     "test:full": "vitest run",
     "test:watch": "vitest",
-    "test:sandbox:build": "npm run prepare:types && tsc -p tsconfig.tests.json && node scripts/copy-glob-worker.mjs .test-dist/src/ai/tools && node scripts/copy-test-assets.mjs && node -e \"const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));\" && node scripts/verification/prepare-windows-owner-security.mjs test",
+    "test:sandbox:build": "npm run prepare:sqlite-source && tsc -p tsconfig.tests.json && node scripts/copy-glob-worker.mjs .test-dist/src/ai/tools && node scripts/copy-test-assets.mjs && node -e \"const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));\" && node scripts/verification/prepare-windows-owner-security.mjs test",
     "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox:run:cached": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run && npm run eval:intent-delegation && npm run eval:skill-quality && npm run eval:skill-adherence",
@@ -95,9 +95,7 @@
     "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs",
     "test:desktop-service-contract": "node --test tests/package/desktop-service-contract.test.mjs",
     "verify:release-sha": "node scripts/check-release-sha.mjs",
-    "prepare:types": "node scripts/repair-better-sqlite3-types.cjs --apply",
-    "check:types": "node scripts/repair-better-sqlite3-types.cjs --check",
-    "test:types-repair": "node --test tests/package/repair-better-sqlite3-types.test.cjs"
+    "prepare:sqlite-source": "node scripts/verification/prepare-sqlite-source.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
@@ -109,7 +107,6 @@
     "@yunzhijia/cli": "0.1.8",
     "ajv": "8.20.0",
     "beautiful-mermaid": "^1.1.3",
-    "better-sqlite3": "13.0.3",
     "commander": "^12.0.0",
     "cross-spawn": "7.0.6",
     "fast-glob": "^3.3.2",
@@ -127,7 +124,6 @@
     "@gkoreli/ghostty-vt-js": "0.5.0",
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.0",
-    "@types/better-sqlite3": "7.6.13",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
@@ -143,14 +139,13 @@
   "allowScripts": {
     "@yunzhijia/cli@0.1.8": true,
     "node-pty@1.1.0": true,
-    "better-sqlite3@13.0.3": true,
     "esbuild@0.27.4": true,
     "fsevents@2.3.3": true,
     "nodejieba@3.5.8": true,
     "onnxruntime-node@1.26.0": true
   },
   "engines": {
-    "node": ">=22.14.0"
+    "node": "^22.22.1 || >=24.0.0"
   },
   "files": [
     "dist",

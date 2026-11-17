@@ -27,7 +27,7 @@ it('keeps one physical close Promise and only reports the actual original Worker
  const first=store.dispose();expect(store.dispose()).toBe(first);await first;expect(()=>fact.assertTerminated()).not.toThrow();await expect(store.call('read')).rejects.toThrow('optimization_store_unavailable');
 });
 
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {compileBudgetCustody,createOriginalBudgetVersion,createOriginalUnknownBudget} from '../../support/harness-budget-source-fixture.js';
 import {startProfileSourceCapture,readProfileSqliteLosslessRows,readProfileSqliteSchema} from '../../../src/runtime/verification/profile-source-capture.js';
 import {iterateCapturedSQLiteBudgetSources} from '../../../src/runtime/verification/captured-sqlite-budget.js';

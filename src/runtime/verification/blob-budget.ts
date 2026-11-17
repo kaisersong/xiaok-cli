@@ -6,7 +6,7 @@ import {inspectBlobTransactionCommand,executeBlobTransactionCommand,type BlobTra
 import {consumeSharedBlobWholeContext,consumeSharedBlobReserveContext,assertSharedBlobCapacityDatabase,type createSharedBlobCapacity} from './shared-blob-capacity.js';
 import {inspectPreparedCapacityCommand,executePreparedCapacityCommand} from './capacity-command-dispatch.js';
 import type {CapacityWriteContext} from './capacity-command.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createHash} from 'node:crypto';
 import {openPrivateVerificationDatabase} from './private-database.js';
 import {canonicalVerificationJson,VERIFICATION_BUDGET} from './protocol.js';

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { hybridSearch } from '../../../src/ai/memory/retrieval.js';

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
@@ -326,7 +326,7 @@ export class LayeredMemoryStore implements MemoryStore {
     }
     const r1 = this.db.prepare('DELETE FROM memory_l1_extracted WHERE id = ?').run(id);
     const r0 = this.db.prepare('DELETE FROM memory_l0_raw WHERE id = ?').run(id);
-    return (r1.changes + r0.changes) > 0;
+    return (Number(r1.changes) + Number(r0.changes)) > 0;
   }
 
   getPersonaTraits(): { trait: string; confidence: number }[] {
@@ -472,7 +472,7 @@ export class LayeredMemoryStore implements MemoryStore {
   deleteUserMemory(id: string): boolean {
     const del0 = this.db.prepare('DELETE FROM memory_l0_raw WHERE id = ?').run(id).changes;
     const del1 = this.db.prepare('DELETE FROM memory_l1_extracted WHERE id = ?').run(id).changes;
-    return (del0 + del1) > 0;
+    return (Number(del0) + Number(del1)) > 0;
   }
 
   /**

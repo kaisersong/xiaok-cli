@@ -92,14 +92,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the fixed KSwarm test child Node
         uses: actions/setup-node@v4
         with:
           node-version: '22.22.0'
-      - name: Retain the absolute KSwarm test child executable
+      - name: Retain KSwarm child executable
         id: ks_test_node
         run: node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'executable=' + process.execPath + '\n')"
       - uses: actions/setup-node@v4
@@ -109,13 +109,13 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
-      - name: Keep client Node and KSwarm test child Node separate
+      - name: Separate client and KSwarm Node
         env:
           KS_TEST_NODE_EXECUTABLE: ${{ steps.ks_test_node.outputs.executable }}
         run: node -e "const fs=require('node:fs'),path=require('node:path');const child=process.env.KS_TEST_NODE_EXECUTABLE;if(!child||!path.isAbsolute(child))throw Error('ks_test_node_missing');fs.appendFileSync(process.env.GITHUB_ENV,'XIAOK_WORKFLOW_TEST_KSWARM_NODE_EXECUTABLE='+child+'\n');console.log(JSON.stringify({clientNode:process.versions.node,clientExecutable:process.execPath,ksChildExecutable:child}));"
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
-      - name: Install the locked Electron runtime for real module imports
+      - name: Install locked Electron for module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
       - name: Prepare ordinary Windows owner security
@@ -133,6 +133,30 @@ jobs:
       - run: npm run test:sandbox:build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+      - name: Built-in SQLite store, rollback and source custody regressions
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/utils/builtin-sqlite.test.js
+          .test-dist/tests/utils/sqlite-parsing-copy.test.js
+          .test-dist/tests/package/builtin-sqlite-contract.test.js
+          .test-dist/tests/ai/runtime/sqlite-session-store.test.js
+          .test-dist/tests/ai/runtime/file-session-store-crash-lock.test.js
+          .test-dist/tests/ai/memory/migrations.test.js
+          .test-dist/tests/ai/memory/retrieval.test.js
+          .test-dist/tests/runtime/verification/native-sqlite-census.test.js
+          .test-dist/tests/runtime/verification/storage-budget.test.js
+      - name: POSIX durable execution and native registration fences
+        if: runner.os != 'Windows'
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ai/runtime/session-execution-authority.test.js
+          .test-dist/tests/runtime/verification/registration-intrinsic-fences.test.js
+          .test-dist/tests/runtime/verification/private-database-native-capture.test.js
+      - name: Windows unsupported directory durability must refuse authority
+        if: runner.os == 'Windows'
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ai/runtime/windows-directory-durability-refusal.test.js
       - name: Real host recovery ordering and durable receipts
         run: >
           npm run test:sandbox:run --
@@ -164,6 +188,17 @@ jobs:
       - name: Prepare locked Windows absence helper at the source reader layout
         if: runner.os == 'Windows'
         run: node desktop/tests/support/prepare-windows-source-absence.mjs
+
+      - name: Persisted inbox and large history startup regressions
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run --environment node --maxWorkers=1 --minWorkers=1
+          tests/main/assistant-inbox-legacy.test.ts
+          tests/main/assistant-inbox-store.test.ts
+          tests/main/assistant-inbox-service.test.ts
+          tests/main/context-continuity-inventory-scale.test.ts
+          tests/main/context-continuity-inspection-batch.test.ts
+          tests/main/context-continuity-sdk-custody.test.ts
 
       - name: Loop, CodeX and installed SDK owner boundaries
         working-directory: desktop
@@ -312,7 +347,7 @@ jobs:
             desktop/package-lock.json
       - run: npm ci --ignore-scripts
       - run: cd desktop && npm ci --ignore-scripts
-      - name: Install the locked Electron runtime for real module imports
+      - name: Install locked Electron for module imports
         working-directory: desktop
         run: node node_modules/electron/install.js
       - name: Prepare ordinary Windows owner security

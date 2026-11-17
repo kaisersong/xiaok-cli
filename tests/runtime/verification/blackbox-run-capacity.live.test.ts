@@ -1,7 +1,7 @@
 import '../../support/installed-controller-docker-fixture.js';
 import {it,expect} from 'vitest';
 import {randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../../src/utils/builtin-sqlite.js';
 import type {QuiescenceExpectation} from '../../../src/runtime/isolated-execution/physical-quiescence.js';
 import type {IndependentRecipeSpec} from '../../../src/runtime/verification/independent-recipes.js';
 import {installedControllerDockerFixture} from '../../support/installed-controller-docker-fixture.js';

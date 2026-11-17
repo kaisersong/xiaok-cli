@@ -1,16 +1,17 @@
-import { createRequire } from 'node:module';
+import BuiltinDatabase from '../../utils/builtin-sqlite.js';
+import {DatabaseSync,StatementSync} from 'node:sqlite';
 import { mkdirSync, lstatSync, realpathSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import type { Database } from 'better-sqlite3';
+import { join } from 'node:path';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { VERIFICATION_BUDGET } from './protocol.js';
 import { syncDirectoryTreeStrict } from '../../utils/atomic-file.js';
 
 const privateFreeze=Object.freeze;
 const privateCreate=Object.create,privateApply=Reflect.apply,privateDescriptor=Object.getOwnPropertyDescriptor,privatePrototype=Object.getPrototypeOf;
-const privateRequire=createRequire(import.meta.url);
-const NativeDatabase=privateRequire('better-sqlite3') as typeof import('better-sqlite3');
-const privateCppSymbol=privateRequire(join(dirname(privateRequire.resolve('better-sqlite3')),'util.js')).cppdb as symbol;
-const nativeConnections=new WeakMap<Database,Readonly<{cpp:object;symbol:symbol;prepare:Function;open:Function;inTransaction:Function|undefined;statement:Readonly<Record<string,Function>>;databasePrototype:object;cppPrototype:object;statementPrototype:object;fingerprints:readonly Readonly<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>[] }>>();
+const NativeDatabase=BuiltinDatabase,originalDatabasePrototype=DatabaseSync.prototype;
+const originalNativePrepare=DatabaseSync.prototype.prepare;
+const originalNativeStatements=privateFreeze(Object.fromEntries([['raw','setReturnArrays'],['get','get'],['all','all'],['columns','columns'],['safeIntegers','setReadBigInts']].map(([key,nativeKey])=>[key!,privateDescriptor(StatementSync.prototype,nativeKey!)!.value as Function])));
+const nativeConnections=new WeakMap<Database,Readonly<{receiver:object;prepare:Function;open:Function;inTransaction:Function;statement:Readonly<Record<string,Function>>;databasePrototype:object;statementPrototype:object;prototypes:readonly {target:object;prototype:object|null}[];fingerprints:readonly Readonly<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>[] }>>();
 /** Only the actual no-verbose private opener mints this code/data-access context. No authority is supplied. */
 export function readPrivateDatabaseNativeAccess(db:Database){return nativeConnections.get(db);}
 
@@ -25,14 +26,14 @@ export function openPrivateVerificationDatabase(inputRoot: string): Database {
   if (existsSync(path + '-wal') || existsSync(path + '-shm')) throw Error('verification_database_wal');
   const options=privateCreate(null);options.timeout=0;options.verbose=null;options.nativeBinding=null;
   const db = new NativeDatabase(path, options);
-  const cpp=privateDescriptor(db,privateCppSymbol)!.value as object,cppPrototype=privatePrototype(cpp),databasePrototype=privatePrototype(db);
-  const prepare=privateDescriptor(cppPrototype,'prepare')!.value as Function;
-  const probe=privateApply(prepare,cpp,['SELECT 1',db,false,false]),statementPrototype=privatePrototype(probe);
-  const statement:Record<string,Function>={};for(const key of ['raw','get','all','columns','safeIntegers'])statement[key]=privateDescriptor(statementPrototype,key)!.value;
+  const databasePrototype=privatePrototype(db),nativePrototype=originalDatabasePrototype;
+  const prepare=originalNativePrepare;
+  const probe=privateApply(prepare,db,['SELECT 1']),statementPrototype=privatePrototype(probe);
+  const statement=originalNativeStatements;
   const fingerprints:Array<{target:object;key:PropertyKey;descriptor:PropertyDescriptor|undefined}>=[];
-  for(const target of [db,databasePrototype,cpp,cppPrototype])for(const key of ['prepare','pragma','open'])fingerprints.push({target,key,descriptor:privateDescriptor(target,key)});
-  for(const key of Object.keys(statement))fingerprints.push({target:statementPrototype,key,descriptor:privateDescriptor(statementPrototype,key)});
-  const access=privateFreeze({cpp,symbol:privateCppSymbol,prepare,open:privateDescriptor(cpp,'open')!.get!,inTransaction:privateDescriptor(cpp,'inTransaction')?.get,statement:privateFreeze(statement),databasePrototype,cppPrototype,statementPrototype,fingerprints:privateFreeze(fingerprints.map(entry=>privateFreeze({...entry,descriptor:entry.descriptor?privateFreeze({...entry.descriptor}):undefined})))});
+  const targets=[db,databasePrototype,nativePrototype,statementPrototype];
+  for(const target of targets)for(const key of new Set([...Reflect.ownKeys(target),'prepare','pragma','open','close','exec','isOpen','isTransaction']))fingerprints.push({target,key,descriptor:privateDescriptor(target,key)});
+  const access=privateFreeze({receiver:db,prepare,open:privateDescriptor(db,'isOpen')!.get!,inTransaction:privateDescriptor(db,'isTransaction')!.get!,statement:privateFreeze(statement),databasePrototype,statementPrototype,prototypes:privateFreeze(targets.map(target=>privateFreeze({target,prototype:privatePrototype(target)}))),fingerprints:privateFreeze(fingerprints.map(entry=>privateFreeze({...entry,descriptor:entry.descriptor?privateFreeze({...entry.descriptor}):undefined})))});
   try {
     db.pragma('journal_mode=DELETE'); db.pragma('synchronous=FULL');
     const max = Math.floor(VERIFICATION_BUDGET.controlDatabaseBytes / (db.pragma('page_size', { simple: true }) as number));
