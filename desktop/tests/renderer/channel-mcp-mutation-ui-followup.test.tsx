@@ -87,13 +87,13 @@ it.each(cases)('%s/%s successful ACK followed by readonly failure keeps last-goo
  const held=deferred<unknown>();action(kind,name).mockReturnValue(held.promise);await mount(kind);
  try{start(kind,name);read(kind).mockRejectedValue(Error('OWNED_READ_AFTER_ACK'));await finish(held,ack(kind,name));
   expect(await screen.findByText(kind==='channels'?'无法读取消息通道':'无法读取 MCP 安装列表')).toBeInTheDocument();factsVisible(kind);assertOriginalArgs(kind,name);expect(window.alert).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:'重新读取'}));await waitFor(()=>expect(read(kind).mock.calls.length).toBeGreaterThanOrEqual(3));factsVisible(kind);assertOriginalArgs(kind,name);
+  fireEvent.click(screen.getByRole('button',{name:/刷新状态|重试/}));await waitFor(()=>expect(read(kind).mock.calls.length).toBeGreaterThanOrEqual(3));factsVisible(kind);assertOriginalArgs(kind,name);
  }finally{if(!held.settled)await finish(held,ack(kind,name));}
 });
 it.each(cases)('%s/%s rejected action keeps last-good, does not refresh, and manual read cannot clear/resend it',async(kind,name)=>{
  const failure=Error('OWNED_ACTION_FAILURE');action(kind,name).mockRejectedValue(failure);await mount(kind);const reads=read(kind).mock.calls.length;start(kind,name);
  await waitFor(()=>expect(window.alert).toHaveBeenCalledTimes(1));factsVisible(kind);expect(read(kind)).toHaveBeenCalledTimes(reads);assertOriginalArgs(kind,name);
- read(kind).mockRejectedValue(Error('OWNED_READ_FAILURE'));fireEvent.click(screen.getByRole('button',{name:'重新读取'}));expect(await screen.findByText(kind==='channels'?'无法读取消息通道':'无法读取 MCP 安装列表')).toBeInTheDocument();factsVisible(kind);assertOriginalArgs(kind,name);expect(window.alert).toHaveBeenCalledTimes(1);
+ read(kind).mockRejectedValue(Error('OWNED_READ_FAILURE'));fireEvent.click(screen.getByRole('button',{name:/刷新状态|重试/}));expect(await screen.findByText(kind==='channels'?'无法读取消息通道':'无法读取 MCP 安装列表')).toBeInTheDocument();factsVisible(kind);assertOriginalArgs(kind,name);expect(window.alert).toHaveBeenCalledTimes(1);
 });
 it('Channel toggle has a held per-row action owner and repeated clicks cannot duplicate edits',async()=>{
  const held=deferred<unknown>();endpoint.updateChannel.mockReturnValue(held.promise);await mount('channels');
@@ -113,7 +113,7 @@ it.each(['resolve','reject']as const)('held Channel test %s after locale change 
 });
 it('Channel action error and readonly last-good stay independent; a newer successful action clears only the old action error',async()=>{
  endpoint.testChannel.mockResolvedValueOnce({success:false,error:'OWNED_CURRENT_TEST_FAILURE'}).mockResolvedValueOnce({success:true,latencyMs:7});await mount('channels');fireEvent.click(row(channel.name).getByRole('button',{name:'测试'}));await screen.findByText('OWNED_CURRENT_TEST_FAILURE');
- endpoint.listChannels.mockRejectedValue(Error('OWNED_READ_FAILURE'));fireEvent.click(screen.getByRole('button',{name:'重新读取'}));await screen.findByText('无法读取消息通道');expect(screen.getByText('OWNED_CURRENT_TEST_FAILURE')).toBeInTheDocument();factsVisible('channels');expect(endpoint.testChannel).toHaveBeenCalledTimes(1);
+ endpoint.listChannels.mockRejectedValue(Error('OWNED_READ_FAILURE'));fireEvent.click(screen.getByRole('button',{name:/刷新状态|重试/}));await screen.findByText('无法读取消息通道');expect(screen.getByText('OWNED_CURRENT_TEST_FAILURE')).toBeInTheDocument();factsVisible('channels');expect(endpoint.testChannel).toHaveBeenCalledTimes(1);
  fireEvent.click(row(channel.name).getByRole('button',{name:'测试'}));await screen.findByText('连接成功，延迟 7ms');expect(screen.queryByText('OWNED_CURRENT_TEST_FAILURE')).toBeNull();expect(screen.getByText('无法读取消息通道')).toBeInTheDocument();factsVisible('channels');expect(endpoint.testChannel).toHaveBeenCalledTimes(2);
 });
 it('held MCP mutation does not acquire or duplicate the two-second readonly poll owner',async()=>{

@@ -36,7 +36,7 @@ it('actual save rejection retains credentials in the draft, reports failure, and
 it.each(['download', 'uninstall'] as const)('actual %s rejection stays independent of successful readonly retry', async kind => {
   initialRows(kind); mocks[kind].mockRejectedValueOnce(Error('meeting_model_busy')); mount(); await ready(); action(kind);
   await screen.findByText(zh.knowledge.meetingModelActionFailed('meeting_model_busy'));
-  fireEvent.click(screen.getByRole('button', { name: zh.desktopReadonlyRetry })); await waitFor(() => expect(mocks.models).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button', { name: zh.desktopReadonlyRefresh })); await waitFor(() => expect(mocks.models).toHaveBeenCalledTimes(2));
   expect(screen.getByText(zh.knowledge.meetingModelActionFailed('meeting_model_busy'))).toBeInTheDocument(); expect(mocks[kind]).toHaveBeenCalledExactlyOnceWith('owned-model'); expect(mocks.save).not.toHaveBeenCalled();
 });
 it.each(['save', 'download', 'uninstall'] as const)('late %s rejection after locale change uses current locale without repeating work', async kind => {
@@ -64,7 +64,7 @@ it('confirmed save remains successful when the subsequent real readonly owner fa
 });
 it('save failure is retained when a later readonly retry fails, without clearing last-good facts', async () => {
   mocks.save.mockRejectedValueOnce(Error('meeting_mutation_save_failed')); mount(); await ready(); action('save'); await screen.findByText(zh.knowledge.meetingOnlineAsrSaveFailed('meeting_mutation_save_failed'));
-  mocks.asr.mockRejectedValueOnce(Error('owned-private-read-marker')); fireEvent.click(screen.getByRole('button', { name: zh.desktopReadonlyRetry }));
+  mocks.asr.mockRejectedValueOnce(Error('owned-private-read-marker')); fireEvent.click(screen.getByRole('button', { name: zh.desktopReadonlyRefresh }));
   await screen.findByText(zh.meetingAsrReadonlyUnavailable); expect(screen.getByDisplayValue('https://before.invalid')).toBeInTheDocument(); expect(screen.getByText(zh.knowledge.meetingOnlineAsrSaveFailed('meeting_mutation_save_failed'))).toBeInTheDocument(); expect(mocks.save).toHaveBeenCalledTimes(1);
 });
 it.each(['save', 'download', 'uninstall'] as const)('unmounted %s success cannot schedule successor reads or overwrite a fresh VoicePane', async kind => {
