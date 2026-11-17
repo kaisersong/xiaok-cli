@@ -3814,7 +3814,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     }
   }, 20_000);
 
-  it('persists the selected model so the next chat launch can reuse it', async () => {
+  it.each(['unchanged', 'before', 'during', 'cancel'] as const)('persists a model selection against the menu snapshot (%s)', async phase => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-persist-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3854,11 +3854,21 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
     const { ProtectedJsonFile } = await import('../../src/utils/protected-json.js');
     new ProtectedJsonFile(join(configDir, 'config.json')).read();
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
-    mockSelectModel.mockResolvedValue({
+    const expectedDefault = phase === 'during' || phase === 'cancel' ? 'kimi-coding' : 'kimi-k2-thinking';
+    const credentials = JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8')).$xiaokCredentials;
+    const externalUpdate = () => {
+      const raw = JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8'));
+      raw.models['desktop-added'] = { provider: 'kimi', model: 'external-model', label: 'Desktop added' };
+      writeFileSync(join(configDir, 'config.json'), JSON.stringify(raw));
+    };
+    mockSelectModel.mockImplementation(async () => {
+      if (phase === 'during') externalUpdate();
+      return phase === 'cancel' ? null : {
       modelId: 'kimi-k2-thinking',
       provider: 'kimi',
       model: 'kimi-k2-thinking',
       label: 'Kimi K2 Thinking',
+      };
     });
     const { createAdapter } = await import('../../src/ai/models.js');
     vi.mocked(createAdapter).mockImplementation((nextConfig: { defaultModelId?: string; defaultModel?: string }) => (
@@ -3878,22 +3888,28 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
         const pending = trackChat(ownedChats.start(program, ['node', 'xiaok', 'chat'], harness));
 
         await waitForInputTurnReady(harness);
+        if (phase === 'before' || phase === 'cancel') externalUpdate();
         harness.send('/models');
         harness.send('\r');
 
         await waitFor(() => {
           expect(mockSelectModel).toHaveBeenCalledTimes(1);
-          expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K2 Thinking (kimi-k2-thinking)');
+          expect(harness.output.normalized).toContain(phase === 'during' ? 'credential_config_changed' : phase === 'cancel' ? '已取消' : '已切换到：[kimi] Kimi K2 Thinking (kimi-k2-thinking)');
         }, { timeoutMs: 3_000 });
 
+        if (phase === 'before' || phase === 'cancel') expect(mockSelectModel.mock.calls[0][0].models).toHaveProperty('desktop-added');
         const persistedConfig = JSON.parse(
           readFileSync(join(configDir, 'config.json'), 'utf8'),
         ) as {
           defaultProvider?: string;
           defaultModelId?: string;
+          models?: Record<string, unknown>;
+          $xiaokCredentials?: unknown;
         };
         expect(persistedConfig.defaultProvider).toBe('kimi');
-        expect(persistedConfig.defaultModelId).toBe('kimi-k2-thinking');
+        expect(persistedConfig.defaultModelId).toBe(expectedDefault);
+        expect(persistedConfig.$xiaokCredentials).toEqual(credentials);
+        if (phase !== 'unchanged') expect(persistedConfig.models).toHaveProperty('desktop-added');
 
         await waitForInputTurnReady(harness);
         harness.send('/exit');
@@ -3928,7 +3944,7 @@ describe('chat interactive runtime', { timeout: 20_000 }, () => {
 
         await waitForInputTurnReady(secondHarness);
         await waitFor(() => {
-          expect(secondHarness.output.normalized).toContain('kimi-k2-thinking · 0% · project');
+          expect(secondHarness.output.normalized).toContain(`${expectedDefault} · 0% · project`);
         }, { timeoutMs: 3_000 });
 
         secondHarness.send('/exit');

@@ -4713,12 +4713,23 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         scrollRegion.clearOverlayPromptState();
         replRenderer.prepareForInput();
       }
-      const selected = await selectModel(config, { renderer: replRenderer });
+      // Capture the public configuration at the user's selection gesture.
+      // Confirmation still compares this exact revision; cancellation changes nothing.
+      let selectionRuntime: typeof runtimeConfig;
+      let selectionConfig = config;
+      try {
+        selectionRuntime = runtimeConfig ? loadRuntimeConfig() : undefined;
+        selectionConfig = selectionRuntime?.config ?? config;
+      } catch (error) {
+        writeCommandOutput(trimmed, `切换失败：${String(error)}\n\n`);
+        return 'continue';
+      }
+      const selected = await selectModel(selectionConfig, { renderer: replRenderer });
       if (selected) {
-        // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
+        // 如果选的是 provider 目录里的模型（尚未在 selectionConfig.models 中），自动注册
         const providerProfile = getProviderProfile(selected.provider);
         const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
-        const selectedProvider = config.providers[selected.provider];
+        const selectedProvider = selectionConfig.providers[selected.provider];
         const catalogRuntimeEligible = selected.provider !== 'kimi'
           || !isKimiCodingRuntimeModel(variant?.model)
           || (
@@ -4734,21 +4745,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               catalogConstraints: variant.runtimeConstraints,
             }).runtimeOptions
           : undefined;
-        const nextModels = config.models[selected.modelId]
+        const nextModels = selectionConfig.models[selected.modelId]
           ? selected.reasoningEffort
             ? {
-                ...config.models,
+                ...selectionConfig.models,
                 [selected.modelId]: {
-                  ...config.models[selected.modelId],
+                  ...selectionConfig.models[selected.modelId],
                   runtimeOptions: {
-                    ...config.models[selected.modelId].runtimeOptions,
+                    ...selectionConfig.models[selected.modelId].runtimeOptions,
                     reasoningEffort: selected.reasoningEffort,
                   },
                 },
               }
-            : config.models
+            : selectionConfig.models
           : {
-              ...config.models,
+              ...selectionConfig.models,
               [selected.modelId]: {
                 provider: selected.provider,
                 model: variant?.model ?? selected.model,
@@ -4760,18 +4771,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               },
             };
         const newConfig = {
-          ...config,
+          ...selectionConfig,
           models: nextModels,
           defaultProvider: selected.provider,
           defaultModelId: selected.modelId,
         };
         try {
-          const nextRuntime = runtimeConfig ? {...runtimeConfig,config:newConfig} : undefined;
+          const nextRuntime = selectionRuntime ? {...selectionRuntime,config:newConfig} : undefined;
           const nextAdapter = nextRuntime ? createRuntimeAdapter(nextRuntime) : createAdapter(newConfig);
           const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
           const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
           const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
-          if(runtimeConfig){runtimeConfig=runtimeConfig.selectModel(newConfig);adapter=createRuntimeAdapter(runtimeConfig);}else{await saveConfig(newConfig);adapter=nextAdapter;}
+          if(selectionRuntime){runtimeConfig=selectionRuntime.selectModel(newConfig);adapter=createRuntimeAdapter(runtimeConfig);}else{await saveConfig(newConfig);adapter=nextAdapter;}
           modelCapabilities = nextModelCapabilities;
           config = runtimeConfig?.config ?? newConfig;
           intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
