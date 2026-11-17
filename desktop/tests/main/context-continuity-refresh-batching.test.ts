@@ -11,7 +11,9 @@ let root:string, runtime:DesktopContextContinuity;
 beforeEach(()=>{root=mkdtempSync(join(tmpdir(),'continuity-refresh-'));});
 afterEach(async()=>{await runtime?.close();rmSync(root,{recursive:true,force:true,maxRetries:3});});
 async function seed(inspect:(id:string)=>Promise<TaskSnapshot|null>) {
-  runtime=new DesktopContextContinuity(root,inspect);
+  // Main supplies this identity after bootstrap. The real OS identity/custody
+  // checks have their own cross-platform tests; this fixture exercises batching.
+  runtime=new DesktopContextContinuity(root,inspect,{profileId:'refresh-test-profile'});
   const {service,actor}=runtime.port(),conversation=service.createConversation(actor,{operationId:'fixture-conversation'});
   const snapshot={taskId:'task_refresh',sessionId:'session_refresh',prompt:'original input',status:'prepared',events:[],context:{threadId:conversation.id}} as unknown as TaskSnapshot;
   await runtime.bindPrepared({prompt:snapshot.prompt,context:snapshot.context} as never,snapshot.taskId,async()=>snapshot);
@@ -25,6 +27,7 @@ it('batches same-reader requests before a fresh pass and never caches its comple
   expect(reads).toBe(1);
   await runtime.reconcile();
   expect(reads).toBe(2);
+  expect(()=>runtime.assertNativeExecutionAvailable()).toThrow('native_execution_gate_unavailable');
 });
 
 it('puts a request arriving during inspection into a new pass that sees later source data',async()=>{
