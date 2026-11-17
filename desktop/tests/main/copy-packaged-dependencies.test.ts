@@ -44,7 +44,7 @@ describe('production dependency closure copy', () => {
     const { verifyPackagedRuntimeDependencies: verify } = require('../../scripts/verify-packaged-runtime-dependencies.cjs');
     const {shipBrokerRuntime}=require('../../scripts/pack-broker-runtime.cjs');
     const {packNodeChild}=require('../../scripts/pack-node-child.cjs');
-    const cacheRoot=resolve(import.meta.dirname,'../../../.artifacts/broker-runtimes'),target=`${process.platform}-${process.arch}`;
+    const cacheRoot=resolve(import.meta.dirname,'../../../.artifacts/broker-runtimes',require('../../resources/broker-runtime-lock.json').node),target=`${process.platform}-${process.arch}`;
     if(!existsSync(join(cacheRoot,target)))throw new Error('test_pinned_node_cache_missing: run npm run prepare:broker-runtime in desktop');
     shipBrokerRuntime({cacheRoot,resources:f.root,target});
     packNodeChild(f.asarPath);

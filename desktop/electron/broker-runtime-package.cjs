@@ -13,7 +13,7 @@ const manifestKeys = ['schema', 'target', 'node', 'sqlite', 'executable', 'archi
 function targetEntry(target) {
   if (!Object.hasOwn(lock.targets, target)) return null;
   const entry = lock.targets[target];
-  if (lock.schema !== 'xiaok-broker-runtime-lock/v1' || lock.node !== '24.19.0' || lock.sqlite !== '3.53.3') throw Error('broker_runtime_lock');
+  if (lock.schema !== 'xiaok-broker-runtime-lock/v1' || lock.node !== '24.22.3' || lock.sqlite !== '3.54.1') throw Error('broker_runtime_lock');
   const prefix = `node-v${lock.node}-${target === 'win32-x64' ? 'win-x64' : target}`;
   const exe = target === 'win32-x64' ? 'node.exe' : 'node';
   if (!['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'].includes(target) || entry.archive !== `${prefix}.${target === 'win32-x64' ? 'zip' : 'tar.gz'}` || entry.executable !== exe || entry.member !== `${prefix}/${target === 'win32-x64' ? '' : 'bin/'}${exe}` || entry.license !== `${prefix}/LICENSE`) throw Error('broker_runtime_lock');

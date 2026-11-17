@@ -48,7 +48,7 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
  await finished(await asar.createPackage(staging,archive),{cleanup:true});
  for(const [relative,bytes] of expectedFiles)assert.deepEqual(asar.extractFile(archive,path.normalize(relative)),bytes,'fixture ASAR bytes: '+relative);
  const {shipBrokerRuntime}=require('../../desktop/scripts/pack-broker-runtime.cjs');
- shipBrokerRuntime({cacheRoot:path.join(repo,'.artifacts/broker-runtimes'),resources,target:process.platform+'-'+process.arch});
+ shipBrokerRuntime({cacheRoot:path.join(repo,'.artifacts/broker-runtimes',desktopRequire('./resources/broker-runtime-lock.json').node),resources,target:process.platform+'-'+process.arch});
  const physicalApp=require('../../desktop/scripts/pack-node-child.cjs').packNodeChild(archive);
  for(const [relative,bytes] of expectedFiles)assert.deepEqual(fs.readFileSync(path.join(physicalApp,relative)),bytes,'fixture physical bytes: '+relative);
  const preload=path.join(root,'preload.cjs'),preloadCanary=path.join(root,'preloaded'),evalCanary=path.join(root,'evaluated'),report=path.join(root,'report.json');
@@ -67,7 +67,7 @@ test('fused real Electron Main launches fixed Node physical entries and closes a
  assert.equal(actual.status,0,JSON.stringify({root,error:actual.error?.message,stderr:actual.stderr}));
  assert(!fs.existsSync(preloadCanary));assert(!fs.existsSync(evalCanary));assert.doesNotMatch(actual.stderr,/Debugger listening/);
  const result=JSON.parse(fs.readFileSync(report,'utf8'));assert.equal(result.isPackaged,true);assert.equal(result.closed,true);assert.equal(result.code,0,result.stderr);assert.equal(result.signal,null);
- assert.equal(result.message.node,'24.19.0');assert.equal(result.message.sqlite,'3.53.3');assert.equal(result.message.nestedNode,'24.19.0');assert.equal(result.message.nestedStatus,0);assert.equal(result.message.preloadPrefix,2);assert.equal(result.message.cleanEnv,true);assert.equal(fs.realpathSync(result.message.resources),fs.realpathSync(resources));
+ assert.equal(result.message.node,'24.22.3');assert.equal(result.message.sqlite,'3.54.1');assert.equal(result.message.nestedNode,'24.22.3');assert.equal(result.message.nestedStatus,0);assert.equal(result.message.preloadPrefix,2);assert.equal(result.message.cleanEnv,true);assert.equal(fs.realpathSync(result.message.resources),fs.realpathSync(resources));
  const expected=path.join(resources,'services/intent-broker/runtime',process.platform+'-'+process.arch,process.platform==='win32'?'node.exe':'node');assert.equal(fs.realpathSync(result.message.execPath),fs.realpathSync(expected));
  console.log(JSON.stringify({kind:'real-fused-main-runtime-fixture',wire,node:result.message.node,sqlite:result.message.sqlite,mainClosed:true,ipcChildClosed:true,grandchildClosed:true,canariesExecuted:false,originalNativeMainProof:false,rendererSandboxProof:false}));
  fs.rmSync(root,{recursive:true,maxRetries:3});

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron') as string;
-const cacheRoot = join(__dirname, '..', '..', '..', '.artifacts', 'broker-runtimes');
+const cacheRoot = join(__dirname, '..', '..', '..', '.artifacts', 'broker-runtimes', require('../../resources/broker-runtime-lock.json').node);
 const target = process.platform + '-' + process.arch;
 let root: string;
 let input: string;

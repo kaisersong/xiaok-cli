@@ -41,7 +41,7 @@ for(const old of [false,true])it.skipIf(!qualifiedTarget)(old?'preserves an exis
  const launched=new Set<string>(),spawn=vi.fn((command:string,args:string[],options:any)=>{const name=args.includes(f.broker)?'broker':'kswarm';launched.add(name);return new Child(75000+launched.size);});
  vi.stubGlobal('fetch',vi.fn(async(input:any)=>{
   const url=new URL(String(input)),name=url.port===String(f.brokerPort)?'broker':'kswarm',healthy=old||launched.has(name);
-  return new Response(JSON.stringify({ok:true,features:['dynamic_workflows'],agents:[],service:{entryPath:name==='broker'?f.broker:f.ks,runtime:{node:old?'22.22.1':'24.19.0',sqlite:old?'3.51.2':'3.53.3',execPath:f.command,executableSha256:f.sha}}}),{status:url.pathname==='/health'&&!healthy?503:200});
+  return new Response(JSON.stringify({ok:true,features:['dynamic_workflows'],agents:[],service:{entryPath:name==='broker'?f.broker:f.ks,runtime:{node:old?'22.22.1':'24.22.3',sqlite:old?'3.51.2':'3.54.1',execPath:f.command,executableSha256:f.sha}}}),{status:url.pathname==='/health'&&!healthy?503:200});
  }));
  const service=createKSwarmService({spawnProcess:spawn as never,findPortOwner:async()=>null});
  try{
@@ -52,7 +52,7 @@ for(const old of [false,true])it.skipIf(!qualifiedTarget)(old?'preserves an exis
    expect(direct[0]).toBe(f.command);expect(direct[2].env.XIAOK_NODE_CMD).toBeUndefined();expect(direct[2].env.ELECTRON_RUN_AS_NODE).toBeUndefined();
    expect(spawn.mock.calls.find(([,args])=>args.includes(f.ks))![0]).toBe('/ignored-broker-override');
    const config=await service.activityOwnerConfig!(),managed=config.managedSources!.find(source=>source.name==='broker')!;
-   expect(managed.executable).toBe(f.command);expect(managed.expectedHealth).toMatchObject({'service.runtime.node':'24.19.0','service.runtime.sqlite':'3.53.3','service.runtime.executableSha256':f.sha});
+   expect(managed.executable).toBe(f.command);expect(managed.expectedHealth).toMatchObject({'service.runtime.node':'24.22.3','service.runtime.sqlite':'3.54.1','service.runtime.executableSha256':f.sha});
   }
  }finally{
   await service.stop();vi.unstubAllGlobals();vi.unstubAllEnvs();

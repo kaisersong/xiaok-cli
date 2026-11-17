@@ -3,7 +3,7 @@ import {mkdir, mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {resolve, join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const require = createRequire(import.meta.url);
-const {targetEntry, verifyRuntimeDirectory} = require('../electron/broker-runtime-package.cjs');
+const {targetEntry, expectedManifest, verifyRuntimeDirectory} = require('../electron/broker-runtime-package.cjs');
 const {prepareBrokerRuntime} = require('./pack-broker-runtime.cjs');
 const args = process.argv.slice(2);
 if (args.length && !(args.length === 1 && args[0] === '--all')) throw Error('broker_runtime_prepare_arguments');
@@ -13,7 +13,8 @@ const entry = targetEntry(target);
 if (!entry) {
   console.log(JSON.stringify({target, qualified: false, reason: 'legacy_runtime_target'}));
 } else {
-  const cacheRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.artifacts', 'broker-runtimes');
+  const version = expectedManifest(target).node;
+  const cacheRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.artifacts', 'broker-runtimes', version);
   let exists = false;
   try { await import('node:fs/promises').then(fs => fs.lstat(join(cacheRoot, target))); exists = true; }
   catch (raw) { if (raw?.code !== 'ENOENT') throw raw; }
@@ -24,7 +25,7 @@ if (!entry) {
     await mkdir(cacheRoot, {recursive: true, mode: 0o700});
     const staging = await mkdtemp(join(cacheRoot, '.download-'));
     const archive = join(staging, entry.archive);
-    const response = await fetch(`https://nodejs.org/dist/v24.19.0/${entry.archive}`, {redirect: 'error', signal: AbortSignal.timeout(120000)});
+    const response = await fetch(`https://nodejs.org/dist/v${version}/${entry.archive}`, {redirect: 'error', signal: AbortSignal.timeout(120000)});
     if (!response.ok || !response.body) throw Error(`broker_runtime_download_http_${response.status}`);
     const chunks = []; let size = 0;
     for await (const chunk of response.body) {
