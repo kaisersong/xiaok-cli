@@ -2781,6 +2781,7 @@ export interface LocaleStrings {
   sidebarRecent: string;
   sidebarNoResults: string;
   sidebarNoRecent: string;
+  sidebarRecentReadUnavailable: string;
   sidebarRename: string;
   sidebarKnowledge: string;
   // sidebar - update popover

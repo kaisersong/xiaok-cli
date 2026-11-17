@@ -1,4 +1,5 @@
 import { api } from '../api';
+import { getDesktopApi } from '../shared/desktop';
 
 export interface ScheduledThreadRecord {
   id: string;
@@ -102,13 +103,17 @@ export async function ensureAggregatedScheduledThread<T extends ScheduledTaskRun
   const ids = runtimeTaskIds.filter(isRuntimeTaskId).filter((id, index, all) => all.indexOf(id) === index);
   const normalized = normalizeScheduledTaskRuntimeLink(task);
   if (ids.length === 0) return normalized;
+  // Main owns durable task bindings. A runtime id in a schedule projection is
+  // a navigation hint, never permission for renderer to attach that execution.
+  const readOnly = Boolean(getDesktopApi()?.getContextConversation);
 
   const preferredThreadId = normalized.threadId && !isRuntimeTaskId(normalized.threadId)
     ? normalized.threadId
     : undefined;
   if (preferredThreadId) {
-    const existing = await threadApi.getThread(preferredThreadId).catch(() => null);
+    const existing = await threadApi.getThread(preferredThreadId);
     if (existing) {
+      if (readOnly) return { ...normalized, threadId: existing.id, runtimeTaskId: ids[ids.length - 1] };
       try {
         await attachRuntimeTaskIds(existing, ids, threadApi);
         return {
@@ -120,9 +125,10 @@ export async function ensureAggregatedScheduledThread<T extends ScheduledTaskRun
     }
   }
 
-  const threads = await threadApi.listThreads({ limit: 1000 }).catch(() => []);
+  const threads = await threadApi.listThreads({ limit: 1000 });
   const existing = chooseBestThreadForRuntimeIds(threads, ids);
   if (existing) {
+    if (readOnly) return { ...normalized, threadId: existing.id, runtimeTaskId: ids[ids.length - 1] };
     try {
       await attachRuntimeTaskIds(existing, ids, threadApi);
       return {
@@ -133,6 +139,7 @@ export async function ensureAggregatedScheduledThread<T extends ScheduledTaskRun
     } catch (error) { if (!isDeletedThread(error)) throw error; }
   }
 
+  if (readOnly) throw new Error('scheduled_projection_unavailable');
   const created = await threadApi.createThread({ title: (normalized.name || '').slice(0, 40) });
   await attachRuntimeTaskIds(created, ids, threadApi);
   return {

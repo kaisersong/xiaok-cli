@@ -2907,6 +2907,7 @@ export const en: LocaleStrings = {
   sidebarRecent: "Recent",
   sidebarNoResults: "No results",
   sidebarNoRecent: "No recent tasks",
+  sidebarRecentReadUnavailable: "Recent tasks could not be read. Restart the app and try again.",
   sidebarRename: "Rename",
   sidebarKnowledge: "Knowledge",
   // sidebar - update popover

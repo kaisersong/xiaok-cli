@@ -2890,6 +2890,7 @@ export const zh: LocaleStrings = {
   sidebarRecent: "最近",
   sidebarNoResults: "无结果",
   sidebarNoRecent: "暂无最近任务",
+  sidebarRecentReadUnavailable: "最近任务暂时无法读取，请重启应用后重试。",
   sidebarRename: "重命名",
   sidebarKnowledge: "知识库",
   // sidebar - update popover

@@ -46,6 +46,7 @@ import { useAuth } from './auth'
 
 export interface ThreadListContextValue {
   threads: ThreadResponse[]
+  readUnavailable?: boolean
   runningThreadIds: Set<string>
   completedUnreadThreadIds: Set<string>
   privateThreadIds: Set<string>
@@ -165,6 +166,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
   const mountedRef = useRef(true)
 
   const [threads, setThreads] = useState<ThreadResponse[]>([])
+  const [readUnavailable, setReadUnavailable] = useState(false)
   const [runningThreadIds, setRunningThreadIds] = useState<Set<string>>(new Set())
   const runningThreadIdsRef = useRef<Set<string>>(new Set())
   const [completedUnreadThreadIds, setCompletedUnreadThreadIds] = useState<Set<string>>(new Set())
@@ -306,29 +308,35 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const syncThreadList = useCallback(async (token: string) => {
-    const [chatItems, workItems] = await Promise.all([
-      listThreads(token, { limit: 200, mode: 'chat' }),
-      listThreads(token, { limit: 200, mode: 'work' }),
-    ])
-    const migratedItems = await migrateLegacyThreadModes(token)
-    const modeItemsById = new Map<string, ThreadResponse>()
-    for (const thread of [...chatItems, ...workItems, ...migratedItems]) {
-      modeItemsById.set(thread.id, thread)
+    try {
+      const [chatItems, workItems] = await Promise.all([
+        listThreads(token, { limit: 200, mode: 'chat' }),
+        listThreads(token, { limit: 200, mode: 'work' }),
+      ])
+      const migratedItems = await migrateLegacyThreadModes(token)
+      const modeItemsById = new Map<string, ThreadResponse>()
+      for (const thread of [...chatItems, ...workItems, ...migratedItems]) {
+        modeItemsById.set(thread.id, thread)
+      }
+      const sidebarMigration = await migrateLegacySidebarState(token, Array.from(modeItemsById.values()))
+      if (!mountedRef.current) return
+      const itemsById = new Map<string, ThreadResponse>()
+      for (const thread of [...modeItemsById.values(), ...sidebarMigration.migratedItems]) {
+        itemsById.set(thread.id, thread)
+      }
+      const items = sortThreadsByActivity(Array.from(itemsById.values()))
+      mirrorSidebarStateToLocal(items, sidebarMigration.failedThreadIds)
+      const nextRunning = new Set(items.filter((t) => t.active_run_id != null).map((t) => t.id))
+      const completedThreadIds = Array.from(runningThreadIdsRef.current).filter((threadId) => !nextRunning.has(threadId))
+      setThreads(items)
+      setReadUnavailable(false)
+      replaceRunningThreadIds(nextRunning)
+      if (completedThreadIds.length > 0) addCompletedUnread(completedThreadIds)
+      if (nextRunning.size > 0) clearCompletedUnread(nextRunning)
+    } catch (error) {
+      if (mountedRef.current) setReadUnavailable(true)
+      throw error
     }
-    const sidebarMigration = await migrateLegacySidebarState(token, Array.from(modeItemsById.values()))
-    if (!mountedRef.current) return
-    const itemsById = new Map<string, ThreadResponse>()
-    for (const thread of [...modeItemsById.values(), ...sidebarMigration.migratedItems]) {
-      itemsById.set(thread.id, thread)
-    }
-    const items = sortThreadsByActivity(Array.from(itemsById.values()))
-    mirrorSidebarStateToLocal(items, sidebarMigration.failedThreadIds)
-    const nextRunning = new Set(items.filter((t) => t.active_run_id != null).map((t) => t.id))
-    const completedThreadIds = Array.from(runningThreadIdsRef.current).filter((threadId) => !nextRunning.has(threadId))
-    setThreads(items)
-    replaceRunningThreadIds(nextRunning)
-    if (completedThreadIds.length > 0) addCompletedUnread(completedThreadIds)
-    if (nextRunning.size > 0) clearCompletedUnread(nextRunning)
   }, [addCompletedUnread, clearCompletedUnread, migrateLegacySidebarState, migrateLegacyThreadModes, replaceRunningThreadIds])
 
   useEffect(() => {
@@ -355,7 +363,9 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
       if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
         // 降级为低频全量轮询
         retryTimer = setTimeout(() => {
-          void syncThreadList(streamAccessToken).finally(() => {
+          void syncThreadList(streamAccessToken).catch(() => {
+            // The sync owner retains the current rows and exposes its failure.
+          }).finally(() => {
             consecutiveFailures = 0  // 成功后重置
             scheduleReconnect(connect)
           })
@@ -561,6 +571,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ThreadListContextValue>(() => ({
     threads,
+    readUnavailable,
     runningThreadIds,
     completedUnreadThreadIds,
     privateThreadIds,
@@ -580,6 +591,7 @@ export function ThreadListProvider({ children }: { children: ReactNode }) {
     getFilteredThreads,
   }), [
     threads,
+    readUnavailable,
     runningThreadIds,
     completedUnreadThreadIds,
     privateThreadIds,
