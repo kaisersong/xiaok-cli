@@ -855,24 +855,30 @@ describe('InProcessTaskRuntimeHost', () => {
       createSessionId: () => `sess_${taskOrd}`,
     });
 
-    await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
-    await waitFor(() => firstRunnerReady);
-    await host.cancelTask('task_1');
-    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
-    // Let finally block complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
+      await waitFor(() => firstRunnerReady);
+      await host.cancelTask('task_1');
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
+      await host.drain();
 
-    await host.createTask({
-      prompt: '不是mac定时任务，是xiaok定时任务',
-      materials: [{ materialId: material.materialId }],
-      context: { threadId: 'thread-a', taskIds: ['task_1'] },
-    });
-    await waitFor(async () => callCount === 2, 5000);
-    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
+      await host.createTask({
+        prompt: '不是mac定时任务，是xiaok定时任务',
+        materials: [{ materialId: material.materialId }],
+        context: { threadId: 'thread-a', taskIds: ['task_1'] },
+      });
+      await waitFor(async () => callCount === 2, 5000);
+      await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
 
-    expect(historyOnSecondCall.length).toBe(2);
-    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
-    expect(historyOnSecondCall[1].role).toBe('assistant');
+      expect(historyOnSecondCall.length).toBe(2);
+      expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
+      expect(historyOnSecondCall[1].role).toBe('assistant');
+    } finally {
+      // A visible terminal snapshot precedes the original execution/IO tail.
+      // Join both owners before afterEach removes this fixture's directory.
+      await host.drain();
+      await snapshotStore.closeAndDrain();
+    }
   });
 
   it('skips missing non-terminal and self context task ids with an audit trail', async () => {
