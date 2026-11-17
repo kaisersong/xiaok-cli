@@ -31,6 +31,8 @@ tests/main/context-continuity-navigation.test.ts
 tests/main/context-continuity-navigation-race.test.ts
 tests/main/context-continuity-profile.test.ts
 tests/main/context-continuity-profile-custody.test.ts
+tests/main/context-continuity-refresh-batching.test.ts
+tests/main/context-continuity-sdk-custody.test.ts
 tests/main/packaged-segmentation-smoke.test.ts
 tests/main/windows-kimi-packaged-smoke-contract.test.ts
 tests/main/kimi-harness-contract.test.ts
