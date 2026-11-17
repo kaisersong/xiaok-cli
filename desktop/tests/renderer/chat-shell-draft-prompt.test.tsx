@@ -1071,6 +1071,15 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.queryByText(/The API Key appears/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Failed:/)).not.toBeInTheDocument();
   });
+  it.each([false,true])('keeps legacy refusal visible without a Goal panel and allows an empty unclaimed draft (legacy=%s)',async legacy=>{
+    mockGetThread.mockResolvedValue({id:'thread-unclaimed',title:'Legacy fixture',status:'idle',mode:'work',createdAt:1,updatedAt:2,starred:false,gtdBucket:'inbox',pinnedAt:null,currentTaskId:legacy?'task_legacy':null,taskIds:legacy?['task_legacy']:[],coverage:'unclaimed'});
+    mockRecoverTask.mockResolvedValue({snapshot:{taskId:'task_legacy',sessionId:'legacy_epoch',prompt:'old',status:'completed',materials:[],events:[],createdAt:1,updatedAt:2}});
+    mockSubmitUserTask.mockRejectedValue(Error('new_task_submission_reached'));
+    render(<MemoryRouter initialEntries={['/t/thread-unclaimed']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    if(legacy){expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).not.toHaveBeenCalled();}
+    else await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledOnce());
+  });
 
   it('replays persisted quota failures and restores failed status', async () => {
     const failureReason = '429 您已达到每周/每月使用上限，您的限额将在 2026-07-15 14:18:50 重置。';

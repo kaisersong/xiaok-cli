@@ -72,6 +72,7 @@ import type { GoalCompletionObservation } from '../shared/host-observation-types
 import type { ConversationActivity, WorkWatch, ConversationWorkView, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { TaskHistoryRead } from '../shared/task-history.js';
+import type {LocalLegacyTaskArchive} from '../shared/local-legacy-task-archive.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -247,6 +248,7 @@ export const PRELOAD_API_KEYS = [
   'getActiveTask',
   'recoverTask',
   'readTaskHistory',
+  'readLocalLegacyTaskArchive',
   'openArtifact',
   'openFileInSystemApp',
   'readFileContent',
@@ -717,6 +719,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getActiveTask: 'desktop:getActiveTask',
   recoverTask: 'desktop:recoverTask',
   readTaskHistory: 'desktop:readTaskHistory',
+  readLocalLegacyTaskArchive:'desktop:readLocalLegacyTaskArchive',
   openArtifact: 'desktop:openArtifact',
   openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
@@ -1512,6 +1515,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi, Cont
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }>;
   readTaskHistory(taskId: string): Promise<TaskHistoryRead>;
+  readLocalLegacyTaskArchive(taskId:string):Promise<LocalLegacyTaskArchive>;
   openArtifact(artifactId: string): Promise<void>;
   openFileInSystemApp(filePath: string): Promise<OpenFileResult>;
   readFileContent(filePath: string): Promise<ReadFileResult>;
@@ -2059,6 +2063,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt }) as ReturnType<DesktopApi['recoverTask']>,
     readTaskHistory: taskId => ipcRenderer.invoke('desktop:readTaskHistory', { taskId }) as ReturnType<DesktopApi['readTaskHistory']>,
+    readLocalLegacyTaskArchive:taskId=>ipcRenderer.invoke('desktop:readLocalLegacyTaskArchive',{taskId}) as ReturnType<DesktopApi['readLocalLegacyTaskArchive']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<OpenFileResult>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<ReadFileResult>,

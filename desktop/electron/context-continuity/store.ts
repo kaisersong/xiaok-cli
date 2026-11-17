@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import {openContinuityDatabase} from './database-owner.js';
+import {openContinuityDatabase,withContinuityDatabaseRouteScope} from './database-owner.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, chmodSync, mkdirSync, openSync, closeSync, constants } from 'node:fs';
 import { dirname } from 'node:path';
@@ -242,6 +242,9 @@ export class ContinuityStore {
   /** All main-owned policy changes share this actual transaction owner. */
   policyMutation<T>(fn: () => T): T { return this.transaction(fn); }
   transaction<T>(fn: () => T): T {
+    return withContinuityDatabaseRouteScope(this.#database,()=>this.transactionInRouteScope(fn));
+  }
+  private transactionInRouteScope<T>(fn: () => T): T {
     if(this.closed)throw new Error('continuity_store_closed');
     if(this.#bindAttempted&&(this.#faulted||this.#pendingBind))throw new ContinuityPolicyUnavailable('canonical_sync_unavailable');
     const nested = this.depth > 0, point = `continuity_${++this.savepoint}`;
