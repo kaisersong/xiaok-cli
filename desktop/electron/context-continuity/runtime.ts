@@ -17,6 +17,7 @@ import { ContinuityMcpController } from './mcp-control.js';
 import { CliArchiveImporter } from './cli-archive.js';
 import { getConfigDir } from '../../../src/utils/config.js';
 import type {ContinuityStore} from './store.js';
+import {ContinuityReconciliationQueue,type ReconciliationReader} from './reconciliation-queue.js';
 const cloneInventorySnapshot=structuredClone;
 export interface OriginalRuntimeSourceContext {readonly service:ContinuityService;readonly store:ContinuityStore;readonly actor:Readonly<ContinuityIpcPort['actor']>;}
 let originalSourceContext:(runtime:DesktopContextContinuity)=>OriginalRuntimeSourceContext;
@@ -36,6 +37,7 @@ export class DesktopContextContinuity {
   private scopePolicy?: (id: string) => 'readable' | 'blocked' | 'deleted';
   private deletionGuard?:()=>void;
   private pending = new Set<Promise<unknown>>();
+  readonly #reconciliationQueue=new ContinuityReconciliationQueue(this.pending,()=>this.closed,inspect=>this.#reconcilePass(inspect));
   private inputDependencies?:InputOwnerDependencies;
   private inputOwner?:ContinuityInputJournal;
   private inputAdmittedSources=new Map<string,string>();
@@ -143,16 +145,15 @@ export class DesktopContextContinuity {
   }
   async reconcile(inspect = this.inspect): Promise<void> {
     if (this.closed || !this.current || !inspect) return;
-    const run = (async () => {
-      const tasks = this.current!.service.store.db.prepare('SELECT task_id FROM task_bindings WHERE revoked=0').all();
-      for (const task of tasks) {
-        if (this.closed) return;
-        try { const snapshot = await this.#sdk.invoke<TaskSnapshot|null>(inspect,undefined,[String(task.task_id)]); if (!this.closed && snapshot) {try{this.source!.capture(snapshot,{physicallySettled:true});}catch{this.capture(snapshot);}} }
-        catch { /* missing/unreadable owner does not grant access or mutate execution */ }
-      }
-    })();
-    this.pending.add(run);
-    try { await run; } finally { this.pending.delete(run); }
+    await this.#reconciliationQueue.reconcile(inspect);
+  }
+  async #reconcilePass(inspect:ReconciliationReader):Promise<void>{
+    const tasks=this.current!.service.store.db.prepare('SELECT task_id FROM task_bindings WHERE revoked=0').all();
+    for(const task of tasks){
+      if(this.closed)return;
+      try { const snapshot = await this.#sdk.invoke<TaskSnapshot|null>(inspect,undefined,[String(task.task_id)]); if (!this.closed && snapshot) {try{this.source!.capture(snapshot,{physicallySettled:true});}catch{this.capture(snapshot);}} }
+      catch { /* missing/unreadable owner does not grant access or mutate execution */ }
+    }
   }
   assertTaskHistoryReadable(taskId: string, conversationId?: string): void {
     this.assertTaskReadable(taskId);
