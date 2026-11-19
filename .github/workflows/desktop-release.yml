@@ -179,8 +179,8 @@ jobs:
       - name: Package signed macOS app
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false -c.afterPack="$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
         env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          CSC_KEYCHAIN: ${{ env.MACOS_SIGNING_KEYCHAIN }}
+          CSC_NAME: "Developer ID Application: Kai Song (Y9YR86UG94)"
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Notarize macOS app
         timeout-minutes: 135
@@ -197,8 +197,8 @@ jobs:
       - name: Package macOS distributables
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dmg zip --arm64 --publish never --prepackaged release/mac-arm64/xiaok.app -c.mac.notarize=false
         env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          CSC_KEYCHAIN: ${{ env.MACOS_SIGNING_KEYCHAIN }}
+          CSC_NAME: "Developer ID Application: Kai Song (Y9YR86UG94)"
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: ZIP permissions
         run: python3 -c 'import glob,stat,zipfile; p=glob.glob("desktop/release/*-mac.zip"); assert len(p)==1; z=zipfile.ZipFile(p[0]); denied=[e.filename for e in z.infolist() if (stat.S_ISREG(e.external_attr>>16) or stat.S_ISDIR(e.external_attr>>16)) and not (e.external_attr>>16)&0o200]; assert not denied,denied; print("All ZIP regular files/directories permit owner quarantine removal")'
