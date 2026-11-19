@@ -171,6 +171,47 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(mockRecoverTask).not.toHaveBeenCalled();expect(mockSubmitUserTask).not.toHaveBeenCalled();expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button',{name:'自动化'}));expect(await screen.findByText('Automation destination')).toBeVisible();
   });
+  it('opens a selected schedule’s old run from an empty recent conversation without attaching it', async () => {
+    setupEmptyCompleteHistory();
+    const scheduleA = { id: 'schedule-a', title: 'Saved entry', executor: { kind: 'agent_task' }, createdAt: 1000, runCount: 2 };
+    const scheduleB = { ...scheduleA, id: 'schedule-b', createdAt: 100000 };
+    const latest = { actionId: scheduleB.id, runId: 'newer', executorKind: 'agent_task', startedAt: 400000, runtimeTaskId: 'task_newer' };
+    const older = { ...latest, runId: 'older', startedAt: 200000, runtimeTaskId: 'task_older' };
+    const getTimedActionRuns = vi.fn().mockResolvedValue([
+      { ...latest, actionId: scheduleA.id, runId: 'wrong', runtimeTaskId: 'task_wrong' },
+      older,
+      latest,
+    ]);
+    window.xiaokDesktop = {
+      getGoal: vi.fn().mockResolvedValue(null),
+      onGoalChanged: vi.fn(() => () => {}),
+      onGoalTaskPrepared: vi.fn(() => () => {}),
+      getTimedActions: vi.fn().mockResolvedValue([scheduleA, scheduleB]),
+      getTimedActionRuns,
+    } as unknown as NonNullable<typeof window.xiaokDesktop>;
+    mockHasArchive.mockReturnValue(true);
+    mockReadArchive.mockImplementation(async (taskId: string) => ({
+      taskId, sourceEpoch: 'archive-epoch',
+      messages: [{ sourceMessageId: 'assistant:0', role: 'assistant', text: `Saved output for ${taskId}` }],
+    }));
+    renderHistory();
+
+    const candidates = await screen.findByLabelText('选择定时任务');
+    expect(within(candidates).getAllByRole('option')).toHaveLength(3);
+    expect(getTimedActionRuns).not.toHaveBeenCalled();
+    fireEvent.change(candidates, { target: { value: scheduleB.id } });
+    expect(await screen.findByText('Saved output for task_newer')).toBeVisible();
+    const runs = screen.getByLabelText('运行记录');
+    expect(within(runs).getAllByRole('option')).toHaveLength(2);
+    fireEvent.change(runs, { target: { value: 'older' } });
+    expect(await screen.findByText('Saved output for task_older')).toBeVisible();
+    expect(screen.queryByText('Saved output for task_newer')).not.toBeInTheDocument();
+    expect(getTimedActionRuns).toHaveBeenCalledExactlyOnceWith(scheduleB.id);
+    expect(mockReadArchive.mock.calls).toEqual([['task_newer'], ['task_older']]);
+    expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
+    expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
+  });
   it('preserves an unsent draft while explaining an empty saved record',async()=>{
     setupEmptyCompleteHistory();localStorage.setItem('xiaok.threadDraft.history',JSON.stringify({draftPrompt:'My unsent draft'}));renderHistory();
     await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。');
