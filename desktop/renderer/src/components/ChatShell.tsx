@@ -38,6 +38,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { recoverForDisplay } from '../lib/recover-for-display';
+import { ScheduledRunHistory } from './ScheduledRunHistory';
 import type { TaskPublicPresentation } from '../../../shared/task-history';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
@@ -2317,13 +2318,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         emptyContent={emptyContent !== undefined ? emptyContent : (
           !isAssistantThread(taskId) && thread.coverage === 'complete' && thread.taskIds.length === 0 &&
           !thread.currentTaskId && !thread.legacyTaskIds?.length && assistantTimeline.length === 0 && status === 'idle'
-            ? <div className="mx-auto max-w-[800px] px-14 py-8 text-sm text-[var(--c-text-secondary)]">
+            ? <ScheduledRunHistory key={JSON.stringify([thread.id, thread.title])} title={thread.title ?? ''} fallback={<div className="mx-auto max-w-[800px] px-14 py-8 text-sm text-[var(--c-text-secondary)]">
               <p>{t.chatShell.historyEmptyCurrent}</p>
               <div className="mt-3 flex gap-4 text-[var(--c-accent)]">
                 <button type="button" onClick={() => navigate('/automations/schedules')}>{t.sidebarAutomations}</button>
                 <button type="button" onClick={() => navigate('/')}>{t.newTask}</button>
               </div>
-            </div> : undefined
+            </div>} /> : undefined
         )}
         conversationHeader={conversationHeader}
         assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD&&taskId!==LEGACY_ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}

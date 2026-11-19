@@ -3312,6 +3312,16 @@ followUpAcceptedDraft:string;
   scheduledPaused: string;
   scheduledRun: string;
   scheduledView: string;
+  scheduledHistory: {
+    title: string;
+    choose: string;
+    open: (name: string) => string;
+    created: (date: string) => string;
+    runs: string;
+    empty: string;
+    noOutput: string;
+    unavailable: string;
+  };
   scheduledPause: string;
   scheduledResume: string;
   scheduledDeleteConfirm: string;
