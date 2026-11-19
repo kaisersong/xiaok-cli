@@ -1,55 +1,26 @@
-name: Desktop Release
+name: Desktop Release using macOS 26
 on:
-  push:
-    tags:
-      - 'desktop-v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.6.3)'
+        description: Exact Desktop 1.6.8 release tag
         required: true
-        default: 'desktop-v1.6.3'
 permissions:
   contents: write
+  actions: write
 env:
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag }}
+  RELEASE_SHA: 6681e0e4c3be9ac321fcde87b94cef82a885dc1e
 concurrency:
-  group: desktop-release-${{ github.event.inputs.tag || github.ref_name }}
+  group: desktop-release-macos26-1.6.8
   cancel-in-progress: false
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.identity.outputs.sha }}
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.22.1'
-      - name: Validate tag
-        run: node -e 'if(!/^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(process.env.RELEASE_TAG||""))process.exit(1)'
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
-          fetch-depth: 0
-      - name: Resolve source
-        id: identity
-        run: node scripts/desktop-release-identity.mjs resolve
-      - name: Check sibling pins
-        run: node scripts/check-desktop-sibling-pins.mjs
-      - name: Create draft
-        run: node scripts/desktop-release-identity.mjs draft
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ steps.identity.outputs.sha }}
   build-mac:
-    needs: create-release
-    runs-on: macos-15
-    env:
-      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-release.outputs.sha }}
+          ref: refs/tags/desktop-v1.6.8
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -60,7 +31,9 @@ jobs:
             desktop/package-lock.json
       - name: Source provenance
         shell: bash
-        run: &source_provenance |
+        run: |
+          test "$RELEASE_TAG" = desktop-v1.6.8
+          node scripts/desktop-release-identity.mjs check
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=normal)"
           node scripts/set-build-info.mjs release
@@ -202,7 +175,7 @@ jobs:
             --identity "Developer ID Application: Kai Song (Y9YR86UG94)" \
             --keychain "$MACOS_SIGNING_KEYCHAIN"
       - name: Load distribution hook
-        run: git show "${GITHUB_WORKFLOW_SHA}:.github/scripts/macos-update-permissions.cjs" > "$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
+        run: git show "${RELEASE_SHA}:.github/scripts/macos-update-permissions.cjs" > "$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
       - name: Package signed macOS app
         run: cd desktop && npx electron-builder --config electron-builder.json --mac dir --arm64 --publish never -c.mac.forceCodeSigning=true -c.mac.notarize=false -c.afterPack="$RUNNER_TEMP/xiaok-macos-update-permissions.cjs"
         env:
@@ -216,7 +189,7 @@ jobs:
           APPLE_API_KEY: ${{ runner.temp }}/AuthKey_${{ secrets.APPLE_API_KEY_ID }}.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          NOTARY_ARCHIVE_KEY: ${{ github.sha }}
+          NOTARY_ARCHIVE_KEY: ${{ env.RELEASE_SHA }}
           NOTARY_TIMEOUT_SECONDS: "7200"
           NOTARY_POLL_INTERVAL_SECONDS: "30"
           NOTARY_REUSE_IN_PROGRESS: "true"
@@ -255,146 +228,28 @@ jobs:
             console.log(JSON.stringify(BUILD_INFO));
           })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
-      - name: Upload to GitHub Release
-        run: node scripts/desktop-release-identity.mjs upload-mac
+      - name: Complete the existing release draft
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  build-windows:
-    needs: create-release
-    runs-on: windows-2022
-    env:
-      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.create-release.outputs.sha }}
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            desktop/package-lock.json
-      - name: Source provenance
-        shell: bash
-        run: *source_provenance
-      - name: Node headers
-        uses: ./.github/actions/node-headers
-      - name: Compile Windows helper
-        shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
-          node scripts/verification/build-windows-absence.mjs --target x64
-          node scripts/verification/test-windows-absence.mjs
-      - name: Root dependencies
-        shell: bash
-        run: bash .github/scripts/retry.sh npm ci
-      - name: Desktop dependencies
-        shell: bash
-        run: cd desktop && bash ../.github/scripts/retry.sh npm ci
-      - name: Prepare Yunzhijia
-        working-directory: desktop
-        run: node scripts/prepare-packaged-yzj-cli.cjs
-      - name: CLI lifecycle
-        run: node --test tests/scripts/prepare-packaged-yzj-cli.test.mjs
-      - name: Broker runtime
-        run: cd desktop && node scripts/prepare-broker-runtime.mjs
-      - name: Test packaged runtime dependency gate
-        run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
-      - name: SQLite binding
-        shell: bash
-        run: |
-          node -e "const d=new (require('node:sqlite').DatabaseSync)(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
-          cd desktop && node -e "const d=new (require('node:sqlite').DatabaseSync)(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
-      - name: Clone sidecars
-        run: |
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
-          git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin 9f969b7912cc94e660643d390184bd0c6f00058f
-          git -C ../kswarm checkout --detach FETCH_HEAD
-          git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
-          git -C ../intent-broker checkout --detach FETCH_HEAD
-      - uses: ./.github/actions/install-desktop-sidecars
-      - name: Build report renderer
-        shell: bash
-        run: bash .github/scripts/build-report-renderer.sh
-      - name: Build canvas
-        shell: bash
-        run: bash .github/scripts/build-canvas-bundles.sh
-      - name: Download Python wheels (Windows)
-        run: ./.github/scripts/download-windows-slide-wheels.ps1
-      - name: Vendor Windows runtimes
-        run: |
-          cd ../kai-xiaok-plugins
-          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
-          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
-      - name: Artifact helper
-        env:
-          XIAOK_EXPORT_PACKAGE_INTEGRATION: '1'
-        run: |
-          node scripts/verification/prepare-artifact-export-toolchain.mjs
-          node scripts/verification/build-artifact-export-helper.mjs --target win32-x64
-          cd desktop && npm run test -- --run tests/main/artifact-export-package.test.ts
-      - name: Audit source
-        shell: bash
-        run: *audit_source
-      - name: Build desktop
-        run: cd desktop && npm run build
-        env:
-          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
-      - name: Package Windows installer
-        run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
-      - name: ASAR source identity
-        shell: bash
-        env:
-          PROVENANCE_ASAR: desktop/release/win-unpacked/resources/app.asar
-        run: *verify_packaged_provenance
-      - name: Run packaged Windows Kimi K3 smoke
-        shell: pwsh
-        run: |
-          $smokeRoot = Join-Path $env:RUNNER_TEMP 'xiaok-kimi-packaged-smoke'
-          $resultPath = Join-Path $smokeRoot 'result.json'
-          $appData = Join-Path $smokeRoot 'appdata'
-          $localAppData = Join-Path $smokeRoot 'localappdata'
-          $tempDir = Join-Path $smokeRoot 'temp'
-          New-Item -ItemType Directory -Force -Path $appData, $localAppData, $tempDir | Out-Null
-          $env:XIAOK_KIMI_PACKAGED_SMOKE_RESULT = $resultPath
-          $env:XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE = '1'
-          $env:APPDATA = $appData
-          $env:LOCALAPPDATA = $localAppData
-          $env:TEMP = $tempDir
-          $env:TMP = $tempDir
-          $executable = Resolve-Path 'desktop/release/win-unpacked/xiaok.exe'
-          $process = Start-Process -FilePath $executable -PassThru -Wait
-          if ($process.ExitCode -ne 0) {
-            throw "Packaged Kimi smoke exited with code $($process.ExitCode)"
-          }
-          if (-not (Test-Path -LiteralPath $resultPath)) {
-            throw 'Packaged Kimi smoke did not write its result'
-          }
-          node scripts/verify-packaged-kimi-smoke-result.mjs $resultPath $smokeRoot
-      - name: Upload to GitHub Release
-        run: node scripts/desktop-release-identity.mjs upload-windows
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  verify-release:
-    needs: [create-release, build-mac, build-windows]
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_SHA: ${{ needs.create-release.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.create-release.outputs.sha }}
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.22.1'
-      - name: Verify draft assets
-        run: node scripts/desktop-release-identity.mjs verify-draft
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          repo=kaisersong/xiaok-cli
+          original=44585561675
+          state=$(gh run view "$original" -R "$repo" --json status,jobs)
+          if jq -e '.jobs | any(.name == "build-mac" and .conclusion == "success")' <<<"$state" >/dev/null; then
+            echo 'The original signed macOS artifacts are already available.'
+          else
+            if [[ $(jq -r .status <<<"$state") != completed ]]; then
+              gh run cancel "$original" -R "$repo"
+            fi
+            for attempt in $(seq 1 36); do
+              state=$(gh run view "$original" -R "$repo" --json status,jobs)
+              [[ $(jq -r .status <<<"$state") != completed ]] || break
+              sleep 5
+            done
+            [[ $(jq -r .status <<<"$state") == completed ]]
+            if ! jq -e '.jobs | any(.name == "build-mac" and .conclusion == "success")' <<<"$state" >/dev/null; then
+              node scripts/desktop-release-identity.mjs upload-mac
+            fi
+          fi
+          node scripts/desktop-release-identity.mjs verify-draft
