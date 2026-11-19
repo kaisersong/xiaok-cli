@@ -1,4 +1,5 @@
-import {activityOwnerStartupLabels} from '../shared/activity-owner-startup-labels.js';
+import {activityOwnerRuntimeUpgradeLabels, activityOwnerStartupLabels} from '../shared/activity-owner-startup-labels.js';
+import {ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED} from './activity-owner-runtime-upgrade.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
 
 /** The only text a user sees when the background follow-up component cannot be attached.
@@ -24,7 +25,12 @@ export function createOnceNotice(show: (text: string) => void | Promise<void>,lo
   return failureKey => {
     if (shown.has(failureKey)) return false;
     shown.add(failureKey);
-    try { void Promise.resolve(show(failureKey==='activity_source_start_timeout:local_connection_unavailable'?activityOwnerStartupLabels[locale].localConnectionUnavailable:failureKey==='activity_owner_config_mismatch'||failureKey==='activity_owner_profile_mismatch'?activityOwnerStartupLabels[locale].versionMismatch:activityOwnerStartupLabels[locale].unavailable)).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
+    const labels = activityOwnerStartupLabels[locale];
+    const message = failureKey === ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED ? activityOwnerRuntimeUpgradeLabels[locale]
+      : failureKey === 'activity_source_start_timeout:local_connection_unavailable' ? labels.localConnectionUnavailable
+      : failureKey === 'activity_owner_config_mismatch' || failureKey === 'activity_owner_profile_mismatch' ? labels.versionMismatch
+      : labels.unavailable;
+    try { void Promise.resolve(show(message)).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
     return true;
   };
 }

@@ -14,17 +14,42 @@ import { activityOwnerAddress, readActivityOwnerCredentials, ACTIVITY_OWNER_GENE
 import { ACTIVITY_STORAGE_NAMES, chmodPrivateActivityFile, ensurePrivateActivityFile } from '../../src/runtime/conversation-activity/storage-permissions.js';
 import { buildActivityOwnerEnv } from '../../src/runtime/conversation-activity/owner-launcher.js';
 import { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
+import { ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED, activityOwnerRuntimeUpgradeRequired } from './activity-owner-runtime-upgrade.js';
 import type { writerLaunchContext, Status, LaunchState } from './activity-owner-writer-launcher.js';
 export async function runMainLaunch(state:LaunchState,config:ActivityOwnerConfig, context:writerLaunchContext):Promise<void>{
  assertOriginalWriterImplementationContext(context,'launch');
  const {NativePromise,apply,weakGet,freeze,stateFor,originalLaunchConnected,nonce,same,data,probeSocket,assertPreparationConstructorPorts,writeOwnerLaunchConfig,deliveries,createRelay}=context;
  if(!same(state.scope,readKSwarmOwnedControlServiceScope(state.service,state.source.admission)))throw Error('WRITER_CONTROL_NATIVE_BOOTSTRAP_REQUIRED');
  const address=activityOwnerAddress(config.dataRoot),normalized={...config,dataRoot:address.dataRoot},digest=activityOwnerConfigDigest(normalized);state.digest=digest;
- async function attach(){const client=new ConversationActivityOwnerClient(address.dataRoot,'producer');try{const status=await client.request<Status>('status');if(status.profileId!==config.profileId)throw Error('activity_owner_profile_mismatch');if(typeof status.generation==='number'&&status.generation>=ACTIVITY_OWNER_GENERATION&&status.configDigest!==digest)throw Error('activity_owner_config_mismatch');if(status.ready===false)throw Error('activity_owner_initializing');if(config.identity.kind==='desktop'&&status.nativeSourceProtocol===1)try{const connection=await client.authorizeNativeSource();client.assertNativeConnectionCurrent(connection);}catch(error){console.warn('[conversation-activity] Native source unavailable:',error);}return {client,status};}catch(error){client.dispose();throw error;}}
+ async function attach(checkInstalledUpgrade = false) {
+  const client = new ConversationActivityOwnerClient(address.dataRoot, 'producer');
+  try {
+   const status = await client.request<Status>('status');
+   if (status.profileId !== config.profileId) throw Error('activity_owner_profile_mismatch');
+   if (typeof status.generation === 'number' && status.generation >= ACTIVITY_OWNER_GENERATION
+       && status.configDigest !== digest) {
+    const knownUpgrade = checkInstalledUpgrade && activityOwnerRuntimeUpgradeRequired(normalized, status.configDigest);
+    throw Error(knownUpgrade ? ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED : 'activity_owner_config_mismatch');
+   }
+   if (status.ready === false) throw Error('activity_owner_initializing');
+   if (config.identity.kind === 'desktop' && status.nativeSourceProtocol === 1) {
+    try {
+     const connection = await client.authorizeNativeSource();
+     client.assertNativeConnectionCurrent(connection);
+    } catch (error) {
+     console.warn('[conversation-activity] Native source unavailable:', error);
+    }
+   }
+   return { client, status };
+  } catch (error) {
+   client.dispose();
+   throw error;
+  }
+ }
  // Malformed/private credential failures remain errors even if a socket is gone.
  try{readActivityOwnerCredentials(address);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
  const present=await probeSocket(address.socketPath);if(state.observationUnknown)return;
- if(present){const attached=await attach();state.closed=true;(apply(weakGet,deliveries,[state]) as (client:ConversationActivityOwnerClient)=>void)(attached.client);return;}
+ if(present){const attached=await attach(true);state.closed=true;(apply(weakGet,deliveries,[state]) as (client:ConversationActivityOwnerClient)=>void)(attached.client);return;}
  if(state.closed)throw Error('WRITER_CONFIG_LAUNCH_CLOSED');
  if(state.preparation){try{const binding=await import('./default-dispatch-preparation-composition-bootstrap.js');if(state.closed)throw Error('DEFAULT_DISPATCH_PREPARATION_LAUNCH_CLOSED');state.preparation.composition=binding.consumeDesktopPreparationCompositionCapsule(state.preparation.capsule,state);}catch(error){state.preparation.failure={error};}}
  const {consumeDesktopWriterControlLaunchCapsule}=await import('./kswarm-writer-control-native-bootstrap.js');if(state.observationUnknown)return;

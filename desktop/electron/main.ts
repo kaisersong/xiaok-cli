@@ -132,6 +132,7 @@ import {
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
 import { createOnceNotice } from './activity-owner-startup.js';
+import { ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED } from './activity-owner-runtime-upgrade.js';
 import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -1006,6 +1007,10 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   },app.getLocale().toLowerCase().startsWith('zh')?'zh':'en');
   let desktopServicesDegradedNoticeShown = false;
   const desktopServicesDegradedNoticeOnce = (code: string) => {
+    if (code === ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED) {
+      activityOwnerNoticeOnce(code);
+      return;
+    }
     if (desktopServicesDegradedNoticeShown) return;
     desktopServicesDegradedNoticeShown = true;
     try { void Promise.resolve(createElectronDesktopNotificationPort().show({ title: 'xiaok', body: `后台服务未能启动，已降级运行 / Background services unavailable, running in limited mode (${code})`, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } })).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
