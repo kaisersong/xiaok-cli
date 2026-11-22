@@ -99,7 +99,7 @@ jobs:
               BASE="$(git rev-parse "$HEAD^")"
             fi
           fi
-          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/scripts/(build-(report-renderer|canvas-bundles)\.sh|download-windows-slide-wheels\.ps1)|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
+          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/scripts/(after-pack|pack-node-child|prune-node-child|verify-packaged-node-children)\.cjs|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/scripts/(build-(report-renderer|canvas-bundles)\.sh|download-windows-slide-wheels\.ps1)|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
           # Fail-closed: if git diff cannot run (bad/missing objects), force smoke on.
           # Previously a failed diff landed in the else branch → run_smoke=false (M1).
           if ! DIFF_OUT="$(git diff --name-only "$BASE" "$HEAD" 2>/tmp/packaged-kimi-diff.err)"; then

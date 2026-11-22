@@ -11,6 +11,7 @@ const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dep
 const verifyPackagedContinuitySource = require('./verify-packaged-continuity-source.cjs');
 const verifyPackagedYzjCli = require('./verify-packaged-yzj-cli.cjs');
 const packNodeChild=require('./pack-node-child.cjs');
+const pruneNodeChild=require('./prune-node-child.cjs');
 const verifyPackagedNodeChildren=require('./verify-packaged-node-children.cjs');
 const flipPackagedFuses=require('./flip-packaged-fuses.cjs');
 const packBrokerRuntime = require('./pack-broker-runtime.cjs');
@@ -24,6 +25,7 @@ module.exports = async function afterPack(context) {
   await packBrokerRuntime(context);
   await packNodeChild(context);
   await verifyPackagedRuntimeDependencies(context);
+  await pruneNodeChild(context);
   await verifyPackagedContinuitySource(context);
   await verifyPackagedYzjCli(context);
   await verifyPackagedNodeChildren(context);

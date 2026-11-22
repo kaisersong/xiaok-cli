@@ -7,6 +7,8 @@ on:
       - 'desktop/tests/main/packaged-runtime-dependencies.test.ts'
       - 'desktop/scripts/verify-packaged-runtime-dependencies.cjs'
       - 'desktop/scripts/pack-node-child.cjs'
+      - 'desktop/scripts/prune-node-child.cjs'
+      - 'desktop/tests/main/prune-node-child.test.ts'
       - 'desktop/scripts/pack-broker-runtime.cjs'
       - 'desktop/electron/node-child-*'
       - 'desktop/electron/broker-runtime-*'
@@ -52,4 +54,4 @@ jobs:
       - name: Prepare the verified fixed child Node runtime
         run: node desktop/scripts/prepare-broker-runtime.mjs
       - name: Exercise all original package import and dependency contracts
-        run: npm run test --prefix desktop -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
+        run: npm run test --prefix desktop -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts tests/main/prune-node-child.test.ts
