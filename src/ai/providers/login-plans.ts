@@ -1,4 +1,4 @@
-import { getProviderModelVariant, getProviderProfile } from './registry.js';
+import { GLM_CODING_BASE_URL, getProviderModelVariant, getProviderProfile } from './registry.js';
 import type { ProviderModelVariant } from './types.js';
 
 export interface ProviderLoginPlan {
@@ -18,7 +18,7 @@ export function getProviderLoginPlans(providerId: string): ProviderLoginPlan[] {
     {id:'api',label:'Kimi 开放平台 API（按量计费）',baseUrl:'https://api.moonshot.cn/v1',keyPortal:'https://platform.moonshot.cn/console/api-keys',defaultModel:getProviderModelVariant('kimi','kimi-k2.6')!},
   ];
   if (providerId === 'glm') return [
-    {id:'coding',label:'GLM Coding Plan（编码套餐）',baseUrl:'https://open.bigmodel.cn/api/coding/paas/v4',keyPortal:'https://www.bigmodel.cn/console/overview',defaultModel:getProviderModelVariant('glm','GLM-5.3')!},
+    {id:'coding',label:'GLM Coding Plan（编码套餐）',baseUrl:GLM_CODING_BASE_URL,keyPortal:'https://www.bigmodel.cn/console/overview',defaultModel:getProviderModelVariant('glm','GLM-5.3')!},
     {id:'api',label:'GLM 标准 API（按量计费）',baseUrl:profile.baseUrl!,keyPortal:'https://open.bigmodel.cn/usercenter/apikeys',defaultModel:profile.defaultModel},
   ];
   if (providerId === 'minimax') return [

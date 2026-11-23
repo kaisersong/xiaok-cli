@@ -54,6 +54,8 @@ export interface ProviderModelVariant {
   purpose?: 'generation' | 'embedding' | 'decision';
   runtimeOptions?: ModelRuntimeOptions;
   runtimeConstraints?: ModelRuntimeConstraints;
+  /** Endpoints that offer this variant in the built-in pickers. */
+  catalogBaseUrls?: readonly string[];
 }
 
 export interface ProviderProfile {
