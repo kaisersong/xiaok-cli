@@ -36,6 +36,24 @@ describe('desktop services model catalog', () => {
     }
   });
 
+  it('offers and persists GLM 5.4 from a configured Coding Plan endpoint', async () => {
+    services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    const models = async () => (await services!.getModelConfig()).providerProfiles
+      .find(profile => profile.id === 'glm')?.availableModels;
+    expect((await models())?.some(model => model.model === 'glm-5.4')).toBe(false);
+    const baseUrl = 'https://open.bigmodel.cn/api/coding/paas/v4';
+    await services.saveModelConfig({ providerId: 'glm', baseUrl }, undefined, 'user');
+    const selected = (await models())!.find(model => model.model === 'glm-5.4')!;
+    expect(selected).toMatchObject({ modelId: 'glm-5.4', label: 'GLM 5.4' });
+    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: selected.model, label: selected.label }, undefined, 'user');
+    expect(snapshot.models.find(model => model.isDefault)).toMatchObject({
+      model: 'glm-5.4', label: 'GLM 5.4',
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: { contextLimit: 1_000_000 },
+    });
+    expect(snapshot.providers.find(provider => provider.id === 'glm')?.baseUrl).toBe(baseUrl);
+  });
+
   it.each(['k3.1-pro', 'k3.1-pro-highspeed', 'kimi-for-coding'])('persists %s catalog capabilities and native runtime choices', async modelName => {
     services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
     await services.saveModelConfig({ providerId: 'kimi', modelName }, undefined, 'user');

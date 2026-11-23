@@ -126,7 +126,7 @@ import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js'
 import type { ModelInvocationOptions, StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
 import { createDesktopPromptCacheAffinity } from '../../src/ai/runtime/prompt-cache-affinity.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
-import { findCatalogModel, getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
+import { findCatalogModel, getAvailableProviderModels, getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import {
   isOfficialKimiK3OpenAIEndpoint,
   resolveModelRuntimeOptions,
@@ -6711,7 +6711,7 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
       defaultModel: profile.defaultModel.model,
       defaultModelLabel: profile.defaultModel.label,
       capabilities: cloneStrings(profile.defaultModel.capabilities),
-      availableModels: profile.availableModels?.map(m => ({
+      availableModels: getAvailableProviderModels(profile, config.providers[profile.id])?.map(m => ({
         modelId: m.modelId,
         model: m.model,
         label: m.label,

@@ -44,6 +44,20 @@ const configFixture = {
 };
 
 describe('buildModelOptions', () => {
+  it.each([
+    ['https://open.bigmodel.cn/api/coding/paas/v4', true],
+    ['https://api.z.ai/api/coding/paas/v4/', true],
+    ['https://open.bigmodel.cn/api/paas/v4', false],
+    ['https://proxy.example/api/coding/paas/v4', false],
+    ['https://open.bigmodel.cn/api/coding/paas/v4?proxy=1', false],
+  ])('offers GLM 5.4 for Coding Plan endpoint %s: %s', (baseUrl, available) => {
+    const config = normalizeConfig({
+      ...configFixture,
+      providers: { ...configFixture.providers, glm: { type: 'first_party', protocol: 'openai_legacy', baseUrl } },
+    });
+    expect(buildModelOptions(config).some(option => option.model === 'glm-5.4')).toBe(available);
+  });
+
   it('changes only a supported model effort with left/right and returns it on confirmation', async () => {
     const config = {
       ...configFixture,

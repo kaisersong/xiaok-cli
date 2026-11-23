@@ -1,8 +1,10 @@
 import { findLegacyProviderModel } from './legacy-models.js';
-import type { FirstPartyProviderId, ProviderModelVariant, ProviderProfile } from './types.js';
+import type { FirstPartyProviderId, ProviderConfig, ProviderModelVariant, ProviderProfile } from './types.js';
 
 /** Explicitly maintained; the clock must never silently change user model access. */
 export const MODEL_CATALOG_YEAR = 2026;
+
+export const GLM_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4';
 
 function createKimiK3Variant(
   modelId: string,
@@ -133,6 +135,12 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
+      {
+        releaseYear: 2026, modelId: 'glm-5.4', model: 'glm-5.4', label: 'GLM 5.4',
+        outputModalities: ['text'], purpose: 'generation', capabilities: ['tools', 'thinking', 'image_in'],
+        runtimeOptions: { contextLimit: 1_000_000 },
+        catalogBaseUrls: [GLM_CODING_BASE_URL, 'https://api.z.ai/api/coding/paas/v4'],
+      },
       // GLM-5.3-Flash（https://docs.z.ai/guides/vlm/glm-5.3-flash，2026-08-26 查证）：
       // 官方 wire model 为全小写 `glm-5.3-flash`；1M 上下文，原生多模态，
       // 支持工具调用且思考始终开启。reasoning_effort 支持 low/high/max，厂商推荐 max，xiaok 默认中档 high。
@@ -306,4 +314,19 @@ export function getProviderModelVariant(
 
 export function listProviderProfiles(): ProviderProfile[] {
   return Object.values(PROVIDER_REGISTRY);
+}
+
+/** Catalog choices use the configured transport. Explicit model names still work as supplied. */
+export function getAvailableProviderModels(
+  profile: ProviderProfile,
+  provider?: ProviderConfig,
+): ProviderModelVariant[] | undefined {
+  let endpoint: string | undefined;
+  if (provider?.type === 'first_party' && provider.protocol === profile.protocol) {
+    const baseUrl = provider.baseUrl ?? profile.baseUrl;
+    const url = baseUrl ? URL.parse(baseUrl) : null;
+    if (url) endpoint = url.href.replace(/\/$/, '');
+  }
+  return profile.availableModels?.filter(variant => !variant.catalogBaseUrls
+    || (endpoint !== undefined && variant.catalogBaseUrls.includes(endpoint)));
 }

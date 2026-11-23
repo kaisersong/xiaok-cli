@@ -2,7 +2,7 @@ import { normalizeEnhancedKeys } from './keyboard-protocol.js';
 import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import type { Config } from '../types.js';
-import { getProviderProfile } from '../ai/providers/registry.js';
+import { getAvailableProviderModels, getProviderProfile } from '../ai/providers/registry.js';
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../ai/providers/model-reasoning-effort.js';
 import { resolveProviderTransport } from '../ai/providers/auth-resolver.js';
 import type { ModelReasoningEffort } from '../ai/providers/types.js';
@@ -56,10 +56,10 @@ export function buildModelOptions(config: Config): ModelOption[] {
   for (const [providerId, providerConfig] of Object.entries(config.providers)) {
     if (providerConfig.type !== 'first_party') continue;
     const profile = getProviderProfile(providerId);
-    if (!profile?.availableModels) continue;
+    if (!profile) continue;
 
     const providerLabel = profile.label;
-    for (const variant of profile.availableModels) {
+    for (const variant of getAvailableProviderModels(profile, providerConfig) ?? []) {
       if (seen.has(variant.modelId)) continue;
       seen.add(variant.modelId);
       result.push({

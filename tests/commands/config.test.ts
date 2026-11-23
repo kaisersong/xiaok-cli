@@ -1,3 +1,4 @@
+import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -169,6 +170,25 @@ describe('config commands', () => {
       });
       expect(entry.capabilities).not.toBe(variant?.capabilities);
       expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
+    });
+
+    it('saves GLM 5.4 using the Coding Plan URL and exact wire model', async () => {
+      const baseUrl = 'https://open.bigmodel.cn/api/coding/paas/v4';
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'model', 'glm/glm-5.4', '--base-url', baseUrl,
+      ]);
+      const config = await loadConfig();
+      expect(config.providers.glm?.baseUrl).toBe(baseUrl);
+      expect(config.models[config.defaultModelId]).toMatchObject({
+        provider: 'glm', model: 'glm-5.4', label: 'GLM 5.4',
+        capabilities: ['tools', 'thinking', 'image_in'],
+        runtimeOptions: { contextLimit: 1_000_000 },
+      });
+      expect(resolveRuntimeModelBinding(config, undefined, false)).toMatchObject({
+        baseUrl, wireModel: 'glm-5.4',
+        capabilities: ['tools', 'thinking', 'image_in'],
+        runtimeOptions: { contextLimit: 1_000_000 },
+      });
     });
 
     it('copies GLM-5.3-Flash catalog metadata for an explicit glm/model value', async () => {

@@ -134,7 +134,7 @@ export function registerConfigCommands(program: Command): void {
   configSet
     .command('model <value>')
     .description('设置默认 AI 模型（provider、modelId 或 provider/model）')
-    .option('--base-url <url>', '自定义模型 base URL（model=custom 时使用）')
+    .option('--base-url <url>', '指定模型服务的 base URL')
     .option('--api-key <key>', '同时设置该模型的 API Key')
     .action(async (value: string, opts: { baseUrl?: string; apiKey?: string }) => {
       const cfg = await loadConfig();
