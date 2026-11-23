@@ -8,7 +8,8 @@ import ts from 'typescript';
 // Reviewed 1.6.5 inventory-only startup change; both target functions remain byte-identical.
 // Equivalence: handoff/desktop-history-candidate-source-equivalence.json; prior pin retained there.
 // Reviewed local archive wiring; both observed target functions are byte-identical to dd510154.
-export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='de91e86501e38e8821c0ff14607c0ee7343993335e22f33f4844be8c8ead8e13';
+// GLM catalog filtering changes the model snapshot. Both observed candidate functions remain byte-identical.
+export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='66c12f59009ac7e8b13ae989086db6a3cb3cdd4ce579ed75d91d3f83e507f449';
 const alias='__fixedOriginalCandidateObservation';
 const targets=[['runKSwarmHandoffTask','kswarm_direct'],['runWorkspaceProjectTask','room_project']];
 function prefix(url){
