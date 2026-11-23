@@ -47,3 +47,7 @@ it('shows the validated v2 action reason without turning malformed action data i
  expect(read(recommendation)).toEqual([{id:'morning:0',title:'Review',summary:'Human-readable next action'}]);
  expect(read({...recommendation,action:{...recommendation.action,permissionMode:'yolo'}})).toEqual([]);
 });
+
+it('keeps the actual morning observation time when refreshed later',()=>{const out=listLatestMorningSuggestions({listRuns:()=>[{id:'morning',status:'success',finishedAt:100}],listEvidence:()=>[{metadata:{assistantKind:'morning',output:{recommendations:[{title:'Review daily report',reasonCode:'triage',evidenceRefs:[{kind:'task',id:'task-old'}]}]}}}]});expect(out[0].observedAt).toBe(100);});
+
+it('selects the newest successful observation even with unordered input',()=>{const result=listLatestMorningSuggestions({listRuns:()=>[{id:'old',status:'success',finishedAt:10},{id:'new',status:'success',finishedAt:20}],listEvidence:id=>[{metadata:{assistantKind:'morning',output:{recommendations:[{title:id,reasonCode:'check',evidenceRefs:[{kind:'task',id:'task'}]}]}}}]});expect(result[0].title).toBe('new');});

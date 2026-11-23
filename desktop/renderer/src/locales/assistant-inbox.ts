@@ -2,6 +2,7 @@ import type { AssistantSource,AttentionItem,AssistantCoverage } from '../../../s
 export interface AssistantInboxLabels {
  testMessage:string;
  morningSuggestionsTitle:string;
+ historicalSuggestion:(at:string)=>string;
  calendarDraft:string;calendarTitle:string;calendarStart:string;calendarEnd:string;calendarZone:string;calendarDescription:string;calendarDestination:string;calendarCreate:string;calendarRefuse:string;calendarAccepted:string;calendarRefused:string;calendarFailed:string;calendarUnknown:string;calendarSubmitting:string;
  title:string;now:string;later:string;working:string;brief:string;calendar:string;coverage:string;incomplete:string;unavailable:string;refresh:string;refreshing:string;empty:string;allDone:string;
  start:string;open:string;hide:string;resolve:string;snooze:string;retry:string;showAll:string;needsInput:string;ready:string;unknownTask:string;
@@ -16,6 +17,7 @@ export interface AssistantInboxLabels {
 export const assistantInboxZh:AssistantInboxLabels={
  testMessage:'发送测试消息',
  morningSuggestionsTitle:'最近一次晨间建议',
+ historicalSuggestion:at=>`历史建议 · ${at}；当前状态请核对最新任务记录`,
  calendarDraft:'确认创建云之家日程',calendarTitle:'日程标题',calendarStart:'开始时间',calendarEnd:'结束时间',calendarZone:'显示时区',calendarDescription:'日程说明',calendarDestination:'将创建到当前登录人的云之家主日历。',calendarCreate:'确认创建日程',calendarRefuse:'不创建',calendarAccepted:'日程已创建并回读核验。',calendarRefused:'本次日程未创建。',calendarFailed:'日程未能创建，请检查连接后重新准备。',calendarUnknown:'创建结果待核对。请先查看云之家日历，不要重复创建。',calendarSubmitting:'正在创建日程…',
  briefUnavailable:'今日简报未能生成',briefPartial:'已检查部分来源，暂未发现需要你处理的事项。',
  coverageStates:{ok:'已检查',partial:'仅检查了部分内容',unavailable:'本次未能检查',failed:'本次检查未完成',stale:'检查结果已过期，请刷新来源。'},
@@ -29,6 +31,7 @@ export const assistantInboxZh:AssistantInboxLabels={
 export const assistantInboxEn:AssistantInboxLabels={
  testMessage:'Send a test message',
  morningSuggestionsTitle:'Latest morning suggestions',
+ historicalSuggestion:at=>`Historical suggestion · ${at}; check the latest task record for current status`,
  calendarDraft:'Confirm CloudHub calendar event',calendarTitle:'Event title',calendarStart:'Start time',calendarEnd:'End time',calendarZone:'Display time zone',calendarDescription:'Description',calendarDestination:'Create in the signed-in user’s primary CloudHub calendar.',calendarCreate:'Create event',calendarRefuse:'Do not create',calendarAccepted:'Calendar event created and verified.',calendarRefused:'This event was not created.',calendarFailed:'The event could not be created. Check the connection and prepare it again.',calendarUnknown:'The creation result is unknown. Check the calendar before trying again.',calendarSubmitting:'Creating the calendar event…',
  briefUnavailable:'Today’s brief could not be prepared',briefPartial:'Some sources were checked; no items needing you were found in that scope.',
  coverageStates:{ok:'Checked',partial:'Partially checked',unavailable:'Could not check this time',failed:'Check did not finish',stale:'Check results are out of date. Refresh sources.'},
