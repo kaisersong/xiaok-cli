@@ -16,3 +16,24 @@ describe('persisted legacy Kim judgments',()=>{
 it('rolls back archive creation and earlier updates when a later write fails',()=>fixture((file,_item,original,brief)=>{const d=new DatabaseSync(file);d.exec("CREATE TRIGGER reject_brief_migration BEFORE UPDATE ON attention_briefs BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END");d.close();expect(()=>new AssistantInboxStore(file)).toThrow('fixture_write_failure');const after=new DatabaseSync(file);try{expect(after.prepare('SELECT data FROM attention_items').get()?.data).toBe(original);expect(after.prepare('SELECT data FROM attention_briefs').get()?.data).toBe(brief);expect(after.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='assistant_inbox_legacy_payloads'").get()?.n).toBe(0);}finally{after.close();}}));
 for(const only of ['category','scores'])it(`accepts a single zero-valued legacy field in ${only}`,()=>fixture((file,item)=>{const d=new DatabaseSync(file);const old=structuredClone(item);if(only==='category'){delete old.kimJudgment.scores.unknown_prob;old.kimJudgment.scores.category.unknown=0;}else{delete old.kimJudgment.scores.category.unknown;old.kimJudgment.scores.unknown_prob=0;}d.prepare('UPDATE attention_items SET data=?').run(JSON.stringify(old));d.close();const s=new AssistantInboxStore(file);try{expect(s.get(item.id)?.kimJudgment).toBeUndefined();}finally{s.close();}}));
 it('lets actual startup recovery mark an interrupted legacy attempt unknown',async()=>{const {AssistantInboxService}=await import('../../electron/assistant-inbox-service.js');fixture((file,item)=>{const d=new DatabaseSync(file);d.prepare('UPDATE attention_items SET data=?').run(JSON.stringify({...item,status:'working',attemptId:'10000000-1111-4111-8111-111111111111'}));d.close();const store=new AssistantInboxStore(file);const service=new AssistantInboxService({store,read:async()=>({records:[],coverage:[]}),triage:async()=>[],profile:()=>({active:true,timeZone:'Asia/Shanghai'}),launch:async()=>{throw Error('unexpected_launch');},outbox:{list:()=>[]}});try{expect(()=>service.recover([],'scheduler')).not.toThrow();expect(store.get(item.id)?.status).toBe('unknown');expect(store.db.prepare('SELECT count(*) n FROM assistant_inbox_legacy_payloads').get()?.n).toBe(2);}finally{service.dispose();store.close();}});});
+
+it('keeps validated v4 judgments in items and briefs across reopen',()=>fixture((file,item)=>{
+ const current={...item,kimJudgment:{...item.kimJudgment,scores:{...item.kimJudgment.scores,scoreVersion:4}}};
+ const db=new DatabaseSync(file);
+ const brief=JSON.parse(String(db.prepare('SELECT data FROM attention_briefs').get()!.data));
+ brief.needsYou=[current];
+ db.prepare('UPDATE attention_items SET data=?').run(JSON.stringify(current));
+ db.prepare('UPDATE attention_briefs SET data=?').run(JSON.stringify(brief));
+ db.close();
+ const store=new AssistantInboxStore(file);
+ try {
+  expect(store.get(item.id)?.kimJudgment).toEqual(current.kimJudgment);
+  expect(store.snapshot(100).briefs[0].needsYou[0].kimJudgment).toEqual(current.kimJudgment);
+  expect(store.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='assistant_inbox_legacy_payloads'").get()?.n).toBe(0);
+ } finally {store.close();}
+}));
+it('rejects an uncalibrated current v4 judgment instead of treating it as legacy',()=>{
+ const scores={...judgment.scores,scoreVersion:4,unknown_prob:0.9};
+ expect(()=>ATTENTION_ITEM_SCHEMA.parse({...raw,id:'a'.repeat(64),revision:1,status:'suggested',updatedAt:100,
+  kimJudgment:{...judgment,scores}})).toThrow();
+});

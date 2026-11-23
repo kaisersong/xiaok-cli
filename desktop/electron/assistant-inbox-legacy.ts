@@ -5,7 +5,7 @@ const object=(value:unknown):value is Record<string,unknown>=>value!==null&&type
 function currentItem(value:unknown):{value:unknown;changed:boolean} {
   if(!object(value))return {value:ATTENTION_ITEM_SCHEMA.parse(value),changed:false};
   const judgment=value.kimJudgment,scores=object(judgment)?judgment.scores:undefined;
-  if(!object(scores))return {value:ATTENTION_ITEM_SCHEMA.parse(value),changed:false};
+  if(!object(scores)||Object.hasOwn(scores,'scoreVersion'))return {value:ATTENTION_ITEM_SCHEMA.parse(value),changed:false};
   const category=scores.category,categoryLegacy=object(category)&&Object.hasOwn(category,'unknown'),scoreLegacy=Object.hasOwn(scores,'unknown_prob');
   if(!categoryLegacy&&!scoreLegacy)return {value:ATTENTION_ITEM_SCHEMA.parse(value),changed:false};
   for(const legacy of [...(categoryLegacy?[category.unknown]:[]),...(scoreLegacy?[scores.unknown_prob]:[])])if(typeof legacy!=='number'||!Number.isFinite(legacy)||legacy<0||legacy>1)throw Error('assistant_legacy_judgment_invalid');
