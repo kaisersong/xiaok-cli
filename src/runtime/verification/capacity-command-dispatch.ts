@@ -1,5 +1,5 @@
 import {inspectQualificationPrepareCommand,executeQualificationPrepareCommand} from './installed-engine-qualification.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {CapacityWriteContext,PreparedCapacityCommandFacts} from './capacity-command.js';
 import {inspectTranscriptPrepareCommand,executeTranscriptPrepareCommand} from './execution-transcripts.js';
 import {inspectRunPrepareCommand,executeRunPrepareCommand} from './protected-run-ledger.js';

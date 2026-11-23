@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import type {
   CreateReminderInput,
   ReminderDeliveryPolicy,
@@ -208,7 +208,7 @@ export class SQLiteReminderStore {
       SET status = 'cancelled', cancelled_at = ?, updated_at = ?
       WHERE reminder_id = ? AND status IN ('pending', 'retry_wait')
     `).run(now, now, reminderId);
-    count += selfResult.changes;
+    count += Number(selfResult.changes);
 
     if (source.recurrence) {
       const chainResult = this.db.prepare(`
@@ -218,7 +218,7 @@ export class SQLiteReminderStore {
           AND content = ? AND task_type = 'scheduled_task'
           AND schedule_at > ? AND status IN ('pending', 'retry_wait')
       `).run(now, now, source.sessionId, source.creatorUserId, source.content, source.scheduleAt);
-      count += chainResult.changes;
+      count += Number(chainResult.changes);
     }
     return count;
   }

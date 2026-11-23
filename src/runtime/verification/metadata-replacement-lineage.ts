@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import type {CapacityRecord,CapacityMetadataReplacementFacts,CapacityAttributionRecord,CapacityMetadataReplacementCommitResult} from './shared-capacity-ledger.js';
 function fail():never{throw Error('shared_capacity_replacement_changed');}

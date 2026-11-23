@@ -59,22 +59,29 @@ describe('InProcessTaskRuntimeHost', () => {
 
   it('delegates liveness to a real tool budget without imposing the shorter host idle timeout', async () => {
     let finish!:(value:string)=>void;
+    let entered!:()=>void,delegated:Promise<unknown>|undefined;
+    const toolEntered=new Promise<void>(resolve=>{entered=resolve;});
     let toolSignal!:AbortSignal;
     let rootSignal!:AbortSignal;
-    const registry=new ToolRegistry({autoMode:true,toolIdleTimeoutMs:400},[{permission:'safe',definition:{name:'long',description:'test',inputSchema:{}},execute:async(_input,ctx)=>{toolSignal=ctx!.signal!;return new Promise(resolve=>{finish=resolve;});}}]);
+    const registry=new ToolRegistry({autoMode:true,toolIdleTimeoutMs:400},[{permission:'safe',definition:{name:'long',description:'test',inputSchema:{}},execute:async(_input,ctx)=>{toolSignal=ctx!.signal!;entered();return new Promise(resolve=>{finish=resolve;});}}]);
     const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,taskIdleTimeoutMs:150,createTaskId:()=> 'delegated',runner:async input=>{
       rootSignal=input.signal;
       await registry.executeTool('long',{}, {taskId:input.taskId,signal:input.signal,session:new AgentSessionState().exportSnapshot(),messages:[],systemPrompt:'',toolDefinitions:[],
-        onExecutionHealth:state=>{void input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:'turn',invocationId:'tool',state});}});
+        onExecutionHealth:state=>{const acknowledgement=input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:'turn',invocationId:'tool',state});if(state==='running'&&!delegated)delegated=acknowledgement;}});
     }});
     try {
+      // Control timer dispatch, never OS identity or SDK return values.
+      // The 150/400ms deadlines and every midpoint/settlement assertion remain.
+      vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});
       await host.createTask({prompt:'long tool',materials:[]});
-      await vi.waitFor(()=>expect(toolSignal).toBeDefined());
-      await new Promise(resolve=>setTimeout(resolve,200));
+      await toolEntered;expect(toolSignal).toBeDefined();
+      expect(delegated).toBeDefined();await delegated;
+      await vi.advanceTimersByTimeAsync(200);
       expect(rootSignal.aborted).toBe(false);expect(toolSignal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
       await vi.waitFor(()=>expect(toolSignal.aborted).toBe(true));
       expect(host.isExecutingForTest('delegated')).toBe(true);
-    }finally{finish?.('settled');await host.drain();registry.dispose();}
+    }finally{try{finish?.('settled');await host.drain();registry.dispose();}finally{vi.useRealTimers();}}
   });
 
   it('detects a stalled runner, preserves executing ownership until settlement, and excludes approval waits', async () => {
@@ -848,24 +855,30 @@ describe('InProcessTaskRuntimeHost', () => {
       createSessionId: () => `sess_${taskOrd}`,
     });
 
-    await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
-    await waitFor(() => firstRunnerReady);
-    await host.cancelTask('task_1');
-    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
-    // Let finally block complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      await host.createTask({ prompt: '每天晚上11点同步mydocs', materials: [{ materialId: material.materialId }] });
+      await waitFor(() => firstRunnerReady);
+      await host.cancelTask('task_1');
+      await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'cancelled');
+      await host.drain();
 
-    await host.createTask({
-      prompt: '不是mac定时任务，是xiaok定时任务',
-      materials: [{ materialId: material.materialId }],
-      context: { threadId: 'thread-a', taskIds: ['task_1'] },
-    });
-    await waitFor(async () => callCount === 2, 5000);
-    await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
+      await host.createTask({
+        prompt: '不是mac定时任务，是xiaok定时任务',
+        materials: [{ materialId: material.materialId }],
+        context: { threadId: 'thread-a', taskIds: ['task_1'] },
+      });
+      await waitFor(async () => callCount === 2, 5000);
+      await waitFor(async () => (await host.recoverTask('task_2')).snapshot.status === 'completed', 5000);
 
-    expect(historyOnSecondCall.length).toBe(2);
-    expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
-    expect(historyOnSecondCall[1].role).toBe('assistant');
+      expect(historyOnSecondCall.length).toBe(2);
+      expect(historyOnSecondCall[0]).toEqual({ role: 'user', content: '每天晚上11点同步mydocs' });
+      expect(historyOnSecondCall[1].role).toBe('assistant');
+    } finally {
+      // A visible terminal snapshot precedes the original execution/IO tail.
+      // Join both owners before afterEach removes this fixture's directory.
+      await host.drain();
+      await snapshotStore.closeAndDrain();
+    }
   });
 
   it('skips missing non-terminal and self context task ids with an audit trail', async () => {

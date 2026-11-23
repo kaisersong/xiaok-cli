@@ -26,6 +26,6 @@ int main(int argc,char **argv){
 #else
  char *args[]={(char*)MI_BROKER_EXEC,(char*)MI_BROKER_ENTRY,NULL};
 #endif
- char *environment[]={"PATH=/usr/bin:/bin","LC_ALL=C","ELECTRON_RUN_AS_NODE=1","NODE_CHANNEL_FD=3","NODE_CHANNEL_SERIALIZATION_MODE=json",NULL};
+ char *environment[]={"PATH=/usr/bin:/bin","LC_ALL=C","NODE_CHANNEL_FD=3","NODE_CHANNEL_SERIALIZATION_MODE=json",NULL};
  execve(MI_BROKER_EXEC,args,environment);return errno==ENOENT?78:77;
 }

@@ -5,7 +5,7 @@ import {assertInstalledVerificationAssembly,assertInstalledVerificationCurrent,r
 import {assertPreparedProtectedSourceOwner,assertApprovedProtectedSourceReaderDatabase,assertPreparedProtectedSourceCurrent,bindPreparedProtectedSourceAttempt,type createApprovedProtectedSourceReader} from './approved-protected-source-reader.js';
 import {parseVerificationOperationPrepareRequest,parseVerificationOperationRequestQuery,parseVerificationOperationRetireRequest,parseVerificationOperationRequestObservation,parseVerificationOperationTerminalResult,type VerificationOperationRequestQuery,type VerificationOperationRequestObservation} from './verification-operation-request.js';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertVerificationCompletionDatabase,type createVerificationCompletionComposition} from './completion-composition.js';
 import {assertControllerMaterialPipelineDatabase,type createControllerMaterialPipeline} from './material-pipeline.js';
 import {assertDockerRunnerDatabase,readDockerReservationHandoff,type createDockerRunner} from '../isolated-execution/docker-runner.js';

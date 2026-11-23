@@ -1,5 +1,6 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {  readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +10,7 @@ import { ACTIVITY_STORAGE_NAMES } from '../../../src/runtime/conversation-activi
 // Like process fixtures, workers use emitted production modules, including in source Vitest.
 const production = await import(pathToFileURL(join(process.cwd(), '.test-dist/src/runtime/conversation-activity/owner-retire.js')).href);
 it.each(['pending', 'completed', 'failed', 'cancelled', 'empty', 'corrupt', 'schema', 'missing', 'no_projection'])('reads %s without modifying SQLite files', async kind => {
-  const root = mkdtempSync(join(tmpdir(), 'activity-read-only-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-read-only-'));
   const file = join(root, ACTIVITY_STORAGE_NAMES.database);
   try {
     if (kind === 'corrupt') writeFileSync(file, 'broken database');
@@ -35,7 +36,7 @@ it.each(['pending', 'completed', 'failed', 'cancelled', 'empty', 'corrupt', 'sch
 });
 
 it('reads pending facts from a live WAL without changing database or WAL bytes/mtime', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'activity-live-read-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-live-read-'));
   const file = join(root, ACTIVITY_STORAGE_NAMES.database);
   const store = new ConversationActivityStore(file);
   try {
@@ -49,7 +50,7 @@ it('reads pending facts from a live WAL without changing database or WAL bytes/m
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 it('fails closed when WAL exists without shared memory instead of creating a sidecar', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'activity-wal-no-shm-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-wal-no-shm-'));
   const file = join(root, ACTIVITY_STORAGE_NAMES.database);
   try {
     const store = new ConversationActivityStore(file); store.close(); writeFileSync(`${file}-wal`, 'unverified WAL');

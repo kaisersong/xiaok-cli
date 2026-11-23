@@ -9,7 +9,7 @@ import {createOwnerDependencyGraph} from './owner-dependency-graph.js';
 import type {RecipeBinding} from './independent-recipes.js';
 import { createHash, randomUUID, sign, type KeyObject } from 'node:crypto';
 import type { PhysicalQuiescenceReceipt, QuiescenceExpectation, QuiescenceAuthority } from '../isolated-execution/physical-quiescence.js';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { openPrivateVerificationDatabase } from './private-database.js';
 import { canonicalVerificationJson, parseVerificationTuple, compareVerificationDependencies, VERIFICATION_BUDGET, type VerificationDependency, type VerificationTuple } from './protocol.js';
 import { assertVerificationDatabaseBudget, runVerificationTransaction } from './storage-budget.js';

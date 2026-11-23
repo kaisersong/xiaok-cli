@@ -2,7 +2,7 @@
  * Process start identity (design v58 §4.4).
  *
  * A bare pid is not an identity: pids are reused, so a stale claim/pin whose pid
- * happens to be alive again must not look live. POSIX reads the start time with
+ * happens to be alive again must not look live. Linux reads kernel boot/start ticks; other POSIX reads the start time with
  * fixed `ps` arguments; Windows reads CreationDate/ParentProcessId through a
  * fixed-allowlist PowerShell CIM query. When the probe itself is unavailable we
  * fail closed (return `unknown`) rather than guessing "dead", because guessing
@@ -10,12 +10,31 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import {readFileSync} from 'node:fs';
 import type { ProcessIdentity } from './plugin-claim-lock.js';
 
 export type IdentityProbeResult =
   | { kind: 'alive'; identity: ProcessIdentity }
   | { kind: 'dead' }
   | { kind: 'unknown'; diagnostic: string };
+
+/** Kernel start ticks plus boot identity avoid both PID reuse and host reboot. */
+function probeLinux(pid:number):IdentityProbeResult {
+  try {
+    const boot=readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim();
+    const raw=readFileSync(`/proc/${pid}/stat`,'utf8');
+    if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(boot)||raw.length>8192||!raw.startsWith(`${pid} (`))throw Error('invalid proc identity');
+    const end=raw.lastIndexOf(')'),fields=raw.slice(end+1).trim().split(/\s+/);
+    if(end<3||fields.length<20||!/^\d{1,32}$/.test(fields[19]!)||BigInt(fields[19]!)===0n||!/^[RSDZTWtXxKWPI]$/.test(fields[0]!))throw Error('invalid proc identity');
+    if(['Z','X','x'].includes(fields[0]!))return {kind:'unknown',diagnostic:'proc process exiting'};
+    return {kind:'alive',identity:{pid,startIdentity:`linux-proc-v1:${boot}:${fields[19]}`}};
+  }catch(error){
+    if((error as NodeJS.ErrnoException).code==='ENOENT'){
+      try{process.kill(pid,0);}catch(probe){if((probe as NodeJS.ErrnoException).code==='ESRCH')return {kind:'dead'};}
+    }
+    return {kind:'unknown',diagnostic:'proc identity unavailable'};
+  }
+}
 
 /** POSIX: `ps -o lstart= -o etime= -p <pid>` is stable across macOS and Linux. */
 function probePosix(pid: number): IdentityProbeResult {
@@ -54,7 +73,7 @@ export function probeProcessIdentity(pid: number): IdentityProbeResult {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return { kind: 'unknown', diagnostic: `invalid pid ${pid}` };
   }
-  return process.platform === 'win32' ? probeWindows(pid) : probePosix(pid);
+  return process.platform === 'linux'?probeLinux(pid):process.platform === 'win32' ? probeWindows(pid) : probePosix(pid);
 }
 
 export function selfProcessIdentity(): ProcessIdentity {

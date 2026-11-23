@@ -1,7 +1,7 @@
 import { ownPendingClose, type PendingCloseOwner } from './pending-close-owner.js';
-import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { writePrivateActivityFile } from './storage-permissions.js';
 import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
-import { readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createTaskSessionEndpointId } from '@modelcontextprotocol/ext-tasks/client';
@@ -61,7 +61,7 @@ export class ActivityOwnerMcp {
     this.endpoints.set(endpoint.endpointId, endpoint);
     const file = join(this.options.root, ACTIVITY_STORAGE_NAMES.endpoints), tmp = `${file}.${process.pid}.tmp`, encoded = JSON.stringify([...this.endpoints.values()]);
     if (Buffer.byteLength(encoded) > 192 * 1024) throw new Error('activity_mcp_config_capacity');
-    writeFileSync(tmp, encoded, { mode: 0o600 }); chmodPrivateActivityFile(tmp); renameSync(tmp, file);
+    writePrivateActivityFile(tmp, encoded); renameSync(tmp, file);
     await this.connect(endpoint);
   }
   async restore(): Promise<void> {

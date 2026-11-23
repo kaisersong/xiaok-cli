@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import * as crypto from 'node:crypto';
 import { OnnxEmbeddingEngine, type OnnxStatus } from './onnx-engine.js';
 

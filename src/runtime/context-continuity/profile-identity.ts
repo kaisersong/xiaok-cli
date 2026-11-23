@@ -1,10 +1,12 @@
+import {readWindowsContinuityProfile} from './windows-profile.js';
 import {userInfo} from 'node:os';
 import {createHash,Hash} from 'node:crypto';
 import {readCapturedProfileJson} from './profile-file.js';
 
 /** Read-only consumers never initialize identity or create a missing directory. */
 export function readContinuityProfile(dataRoot:string):string {
-  const info=userInfo(),osOwner=process.platform==='win32'?info.username:String(info.uid);
+  if(process.platform==='win32')return readWindowsContinuityProfile(dataRoot);
+  const info=userInfo(),osOwner=String(info.uid);
   try {
     const record=readCapturedProfileJson(dataRoot,'continuity-profile.json') as {version?:unknown;profileId?:unknown;osOwner?:unknown};
     if(!record||typeof record!=='object'||Array.isArray(record)||!['version','profileId','osOwner'].every(key=>Object.hasOwn(record,key)))throw Error();

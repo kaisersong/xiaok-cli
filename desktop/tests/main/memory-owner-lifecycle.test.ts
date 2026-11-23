@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import { LayeredMemoryStore } from '../../../src/ai/memory/layered-store.js';
 import { EmbeddingClient, getLiveEmbeddingModelIds } from '../../../src/ai/memory/embedding.js';
 import {MemorySettingsService} from '../../electron/memory-settings-service.js';

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import { EmbeddingClient } from './embedding.js';
 import { segmentQueryAsync } from './segment.js';
 

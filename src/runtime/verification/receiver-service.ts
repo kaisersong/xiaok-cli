@@ -3,6 +3,7 @@ import {createReceiverUploadSigner} from './receiver-upload-authentication.js';
 import type {Socket} from 'node:net';
 import type {readControllerSocketAuditPeer} from './socket-peer.js';
 import {startControllerIpc} from './controller-ipc.js';
+import {RECEIVER_RPC_LIVENESS_MS} from './receiver-liveness.js';
 import {canonicalVerificationJson as json,parseVerificationTuple,hashVerificationTuple} from './protocol.js';
 import {createReceiverReplySigner,type Identity} from './receiver-authentication.js';
 import type {VerificationReceiverStore} from './receiver-store.js';
@@ -14,7 +15,7 @@ export async function startReceiverService(input:{socketPath:string;controllerSe
  const signer=createReceiverReplySigner({...input.identity,privateKey:input.privateKey}),uploadSigner=createReceiverUploadSigner({...input.identity,privateKey:input.privateKey});let closed=false,closing:Promise<void>|undefined;
  function current(){if(closed)throw Error('receiver_service_closed');try{const value:unknown=assertCurrent();if(value!==undefined){void Promise.resolve(value).catch(()=>{});throw Error('receiver_service_current_sync');}}catch(error){closed=true;throw error;}}
  current();
- const server=await startControllerIpc({socketPath,publicPeerAuthenticated:true,
+ const server=await startControllerIpc({socketPath,requestTimeoutMs:RECEIVER_RPC_LIVENESS_MS,publicPeerAuthenticated:true,
   acceptPeer(socket){current();const peer=readPeer(socket);if(peer&&typeof (peer as unknown as {then?:unknown}).then==='function'){void Promise.resolve(peer).catch(()=>{});throw Error('receiver_service_peer');}if(!peer||Object.keys(peer).sort().join(',')!=='auditSessionId,gid,pid,uid'||peer.uid!==controllerServiceUid||!Number.isSafeInteger(peer.gid)||peer.gid<0||!Number.isSafeInteger(peer.auditSessionId)||peer.auditSessionId<1||!Number.isSafeInteger(peer.pid)||peer.pid<1)throw Error('receiver_service_peer');current();return Object.freeze({...peer});},
   async dispatch(bytes,signal,peer){
    current();signal.throwIfAborted();if((peer as {uid:number})?.uid!==controllerServiceUid)throw Error('receiver_service_peer');

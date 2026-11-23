@@ -75,7 +75,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-2022, macos-15]
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
         shard: [1, 2, 3]
         # Windows cases are ~8-10s each. Linux/macOS restore the full single
         # case set: extra preparation and shared-runner queue outweighed sharding.
@@ -110,7 +110,7 @@ jobs:
           key: nodejieba-${{ runner.os }}-${{ runner.arch }}-node${{ matrix.node }}-${{ hashFiles('package-lock.json') }}
       # Memory search assertions exercise Chinese/English token boundaries.
       - shell: bash
-        run: bash .github/scripts/retry.sh npm rebuild better-sqlite3 node-pty
+        run: bash .github/scripts/retry.sh npm rebuild node-pty
       - shell: bash
         if: steps.nodejieba-cache.outputs.cache-hit != 'true'
         run: bash .github/scripts/retry.sh npm rebuild nodejieba
@@ -169,6 +169,9 @@ jobs:
           .test-dist/tests/commands/version.test.js
           .test-dist/tests/commands/registry.test.js
           .test-dist/tests/runtime/conversation-activity/activity-owner-teardown.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-teardown-budgets.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-teardown-cleanup.test.js
+          .test-dist/tests/runtime/conversation-activity/activity-owner-status-events.test.js
           .test-dist/tests/runtime/conversation-activity/owner-replacement-probe.test.js
           .test-dist/tests/ui/image-input.test.js
           .test-dist/tests/ui/transcript-buffer.test.js
@@ -252,7 +255,7 @@ jobs:
         run: >-
           node .github/scripts/ci-plan.mjs aggregate ci-shard-downloads
           ${{ github.sha }}
-          ubuntu-latest-node-22.14.0:1,ubuntu-latest-node-24:1,windows-2022-node-22.14.0:3,windows-2022-node-24:3,macos-15-node-22.14.0:1,macos-15-node-24:1 3
+          ubuntu-latest-node-22.22.1:1,ubuntu-latest-node-24:1,windows-2022-node-22.22.1:3,windows-2022-node-24:3,macos-15-node-22.22.1:1,macos-15-node-24:1 3
       - name: Preserve original blocking suite status
         shell: bash
         env:

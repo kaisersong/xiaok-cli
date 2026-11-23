@@ -1,7 +1,7 @@
 import {isDeepStrictEqual as initialIsDeepStrictEqual} from 'node:util';
 const isDeepStrictEqual=initialIsDeepStrictEqual;
 
-import type {Database,Statement} from 'better-sqlite3';
+import type {Database,Statement} from '../../utils/builtin-sqlite.js';
 import {assertNativeSqliteArrayConstruction} from './native-sqlite-construction-intrinsics.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {freezeCapturedData} from './captured-source-json.js';

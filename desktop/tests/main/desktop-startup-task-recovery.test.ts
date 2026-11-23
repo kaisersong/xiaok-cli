@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { makePrivateTestTempDir } from '../../../tests/support/private-temp.js';
+import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 import { withDesktopBootstrapWriter } from '../../electron/desktop-bootstrap-writer.js';
 
 it.each([false, true])('keeps actual authenticated agent IPC behind real initialization (failure=%s)', async fail => {
-  const root = mkdtempSync(join(tmpdir(), 'desktop-startup-gate-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'desktop-startup-gate-'));
   const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
   const createSession = vi.fn(), runner = vi.fn();
   const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator(), createSession });
@@ -119,7 +120,7 @@ it('wires the initial production window after renderer load, with no early recov
 
 it.each([[false, false], [false, true], [true, false], [true, true]])(
   'owns real MA initialization after shutdown during renderer load (loadFailure=%s initFailure=%s)', async (loadFailure, initFailure) => {
-    const root = mkdtempSync(join(tmpdir(), 'desktop-startup-load-'));
+    const root = makePrivateTestTempDir(join(tmpdir(), 'desktop-startup-load-'));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
     const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator(), createSession: vi.fn() });
     const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),

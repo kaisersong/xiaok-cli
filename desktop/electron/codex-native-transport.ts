@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { types } from 'node:util';
 import { hasOriginalMainSdkBridgeInstallation } from '../../src/runtime/verification/original-main-sdk-bridge.js';
@@ -19,7 +20,8 @@ export function readOriginalCodexProcessLaunch(probe:unknown) {
 
 export function resolveLaunch(entry: string, args: string[] = [], platform: string = process.platform) {
   if (platform === 'win32' && /\.(cmd|bat)$/i.test(entry)) throw new Error('Use a real JS/executable entry, not a Windows shim');
-  return /\.[cm]?js$/i.test(entry) ? { command: process.execPath, args: [entry, ...args] } : { command: entry, args };
+  const runtime=resolveNodeChildRuntime();
+  return /\.[cm]?js$/i.test(entry) ? { command: runtime.command, args: nodeChildArgs(runtime,[entry,...args]),env:runtime.env } : { command: entry, args,env:runtime.env };
 }
 
 export interface NativeEvent { method: string; params: any; seq?: number }
@@ -61,7 +63,7 @@ export class SessionProbe {
       const prefixArgs=this.options.prefixArgs?Object.freeze([...this.options.prefixArgs]):undefined;
       const fixed=Object.freeze({...this.options,prefixArgs}) as NativeOptions & {timeoutMs:number};this.options=fixed;this.#qualifiedOptions=fixed;
       const launch=resolveLaunch(fixed.executable,prefixArgs?[...prefixArgs]:[]);
-      const argv=Object.freeze([...launch.args]),env=Object.freeze({...process.env,ELECTRON_RUN_AS_NODE:'1'});
+      const argv=Object.freeze([...launch.args]),env=Object.freeze({...launch.env});
       const spawnOptions=Object.freeze({cwd:fixed.cwd,stdio:'pipe' as const,detached:process.platform!=='win32',windowsHide:true,env});
       let retired=false;
       const assertLocal=()=>{if(retired||launchDescriptor(this,'options')?.value!==fixed||this.#closing||this.#failurePresent){retired=true;throw Error('CODEX_PROCESS_ORIGINAL_LAUNCH_RETIRED');}};
@@ -147,7 +149,7 @@ export class SessionProbe {
       const handle=created.handle;
       if(!handle.stdin||!handle.stdout||!handle.stderr)throw Error('CODEX_PROCESS_STDIO_REQUIRED');
       this.#child=handle as ChildProcessWithoutNullStreams;
-    }else this.#child = spawn(launch.command, launch.args, { cwd: this.#settings().cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+    }else this.#child = spawn(launch.command, launch.args, { cwd: this.#settings().cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true, env:launch.env });
     const listen=(endpoint:'child'|'stdin'|'stdout'|'stderr',event:string,handler:(...args:any[])=>void)=>{
       if(this.#processAttempt)listenOriginalToolProcess(this.#processAttempt,endpoint,event,handler);
       else (endpoint==='child'?this.#child!:this.#child![endpoint]).on(event,handler);

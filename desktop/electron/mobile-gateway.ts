@@ -4,141 +4,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
-import { createMobileDisclosureGate, encodeStrictMobileJson, MobileDisclosureError, type MobileDisclosureOptions } from './mobile-disclosure.js';
+import { createMobileDisclosureGate, encodeStrictMobileJson, MobileDisclosureError } from './mobile-disclosure.js';
 
-export type MobileDesktopHealth = 'online' | 'degraded' | 'offline';
-
-export interface MobileChatMessage {
-  id: string;
-  conversationId?: string;
-  role: 'user' | 'assistant' | 'system';
-  text: string;
-  createdAt: string;
-  deliveryStatus?: 'sending' | 'sent' | 'failed';
-}
-
-export interface MobileConversationSummary {
-  id: string;
-  title: string;
-  status: 'running' | 'waiting' | 'completed' | 'failed';
-  lastMessagePreview: string;
-  updatedAt: string;
-  messageCount: number;
-}
-
-export interface MobileRunningTurn {
-  id: string;
-  title: string;
-  status: 'running' | 'waiting' | 'finished';
-}
-
-export interface MobileSnapshot {
-  desktopName: string;
-  health: MobileDesktopHealth;
-  lastSyncSequence: number;
-  runningTurn: MobileRunningTurn | null;
-  messages: MobileChatMessage[];
-  conversations: MobileConversationSummary[];
-  projects: unknown[];
-  approvals: unknown[];
-  loops: unknown[];
-  artifacts: unknown[];
-}
-
-export interface MobileArtifactPreview {
-  artifact: unknown;
-  contentType: string;
-  text?: string;
-  fileName?: string;
-  dataBase64?: string;
-}
-
-export interface MobileDesktopHello {
-  desktopId: string;
-  desktopName: string;
-  protocol: 'mobile-v1';
-  health: MobileDesktopHealth;
-  reachableURLs: string[];
-}
-
-export type MobileEvent =
-  | { type: 'chat.message_appended'; sequence: number; message: MobileChatMessage }
-  | { type: 'turn.started'; sequence: number; turn: MobileRunningTurn }
-  | { type: 'turn.finished'; sequence: number; turnId: string }
-  | { type: 'snapshot.required'; sequence: number };
-
-export type MobileApprovalDecision = 'approve' | 'reject';
-
-export interface MobileGatewayOptions extends MobileDisclosureOptions {
-  host?: string;
-  port?: number;
-  desktopName: string;
-  desktopId?: string;
-  mobileAccessToken?: string;
-  getHello?: () => MobileDesktopHello | Promise<MobileDesktopHello>;
-  getSnapshot?: () => MobileSnapshot | Promise<MobileSnapshot>;
-  sendMessage?: (text: string) => MobileEvent[] | Promise<MobileEvent[]>;
-  respondToApproval?: (input: { id: string; decision: MobileApprovalDecision }) => unknown | Promise<unknown>;
-  getArtifactPreview?: (artifactId: string) => MobileArtifactPreview | null | Promise<MobileArtifactPreview | null>;
-  onRequest?: (event: {
-    method: string;
-    pathname: string;
-    remoteAddress: string | undefined;
-    userAgent: string | undefined;
-  }) => void;
-}
-
-export interface MobileGatewayStatus {
-  running: boolean;
-  host: string;
-  port: number;
-  baseURL: string;
-  reachableURLs: string[];
-}
-
-export interface MobileGateway {
-  start(): Promise<MobileGatewayStatus>;
-  stop(): Promise<void>;
-  getStatus(): MobileGatewayStatus;
-}
-
-export interface MobileDesktopIdentity {
-  desktopId: string;
-  mobileAccessToken: string;
-  mobileRelayRoomSecret: string;
-  createdAt: string;
-}
-
-export interface MobilePairingPayload {
-  desktopId: string;
-  desktopName: string;
-  gatewayURL: string;
-  reachableURLs: string[];
-  relayUrl?: string;
-  relayJwt?: string;
-  relayRoomSecret: string;
-  deepLink: string;
-}
-
-export interface MobileBonjourAdvertiserStatus {
-  running: boolean;
-  supported: boolean;
-}
-
-export interface MobileBonjourAdvertiser {
-  start(input: {
-    name: string;
-    port: number;
-    txt: Record<string, string>;
-  }): void;
-  stop(): void;
-  getStatus(): MobileBonjourAdvertiserStatus;
-}
-
-export type MobileBonjourSpawnProcess = (
-  command: string,
-  args: string[],
-) => Pick<ChildProcess, 'kill'> | null;
+export type * from './mobile-gateway-types.js';
+import type {MobileDesktopHealth, MobileChatMessage, MobileConversationSummary, MobileRunningTurn, MobileSnapshot, MobileArtifactPreview, MobileDesktopHello, MobileEvent, MobileApprovalDecision, MobileGatewayOptions, MobileGatewayStatus, MobileGateway, MobileDesktopIdentity, MobilePairingPayload, MobileBonjourAdvertiserStatus, MobileBonjourAdvertiser, MobileBonjourSpawnProcess} from './mobile-gateway-types.js';
 
 interface NetworkInterfaceLike {
   address: string;
@@ -204,9 +73,18 @@ export function buildMobilePairingPayload(input: {
   };
 }
 
+export function resolveMobileGatewayHost(host?: string, platform: NodeJS.Platform = process.platform): string {
+  return host?.trim() || (platform === 'win32' ? '127.0.0.1' : '0.0.0.0');
+}
+
+export function startMobileGatewayDiscovery(advertiser: Pick<MobileBonjourAdvertiser, 'start'>, status: MobileGatewayStatus): void {
+  if (!status.running || !status.reachableURLs.some(isMobileDirectGatewayUrl)) return;
+  advertiser.start({name: 'Xiaok Desktop', port: status.port, txt: {protocol: 'mobile-v1'}});
+}
+
 export function createMobileGateway(options: MobileGatewayOptions): MobileGateway {
   const disclosure = createMobileDisclosureGate(options);
-  const configuredHost = options.host ?? '0.0.0.0';
+  const configuredHost = resolveMobileGatewayHost(options.host);
   const configuredPort = options.port ?? 47891;
   let server: Server | null = null;
   let currentStatus: MobileGatewayStatus = buildStatus(false, configuredHost, configuredPort);
@@ -223,7 +101,7 @@ export function createMobileGateway(options: MobileGatewayOptions): MobileGatewa
 
     try {
       if (method === 'GET' && isHelloPath(url.pathname)) {
-        sendJson(response, 200, await buildHello(options, currentStatus.port));
+        sendJson(response, 200, await buildHello(options, currentStatus.port, configuredHost));
         return;
       }
 
@@ -509,14 +387,14 @@ function parseIPv4(address: string): [number, number, number, number] | null {
   return octets as [number, number, number, number];
 }
 
-async function buildHello(options: MobileGatewayOptions, port: number): Promise<MobileDesktopHello> {
+async function buildHello(options: MobileGatewayOptions, port: number, host: string): Promise<MobileDesktopHello> {
   if (options.getHello) return await options.getHello();
   return {
     desktopId: options.desktopId ?? 'desktop_unconfigured',
     desktopName: options.desktopName,
     protocol: 'mobile-v1',
     health: 'online',
-    reachableURLs: buildMobileGatewayReachableUrls({ port }),
+    reachableURLs: buildStatus(true, host, port).reachableURLs,
   };
 }
 
@@ -582,6 +460,8 @@ function buildStatus(running: boolean, host: string, port: number): MobileGatewa
     host,
     port,
     baseURL: `http://${baseHost}:${port}`,
-    reachableURLs: buildMobileGatewayReachableUrls({ port }),
+    reachableURLs: ['127.0.0.1', 'localhost', '::1'].includes(host) ? []
+      : ['0.0.0.0', '::'].includes(host) ? buildMobileGatewayReachableUrls({ port })
+      : [`http://${host.includes(':') ? '[' + host + ']' : host}:${port}`],
   };
 }

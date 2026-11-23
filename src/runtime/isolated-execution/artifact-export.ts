@@ -48,7 +48,7 @@ export function extractSingleArtifact(input:Buffer,relativePath:string):Buffer{
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,lstatSync,realpathSync,openSync,constants,writeFileSync,fsyncSync,closeSync,readFileSync,fstatSync,readdirSync,unlinkSync,rmdirSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson} from '../verification/protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from '../verification/storage-budget.js';
 import {assertVerificationBlobBudgetDatabase,type createVerificationBlobBudget,type BlobReservationProposal} from '../verification/blob-budget.js';

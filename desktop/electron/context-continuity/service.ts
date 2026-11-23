@@ -31,6 +31,7 @@ export interface RecordMessageInput {
   executionState: ContinuityMessage['executionState'];
 }
 const originalSyncRead=ContinuityStore.prototype.assertSyncScopeReadable,originalSyncMutation=ContinuityStore.prototype.assertSyncScopeForMutation,originalLocalExecution=ContinuityStore.prototype.assertLocalExecution;
+const originalNoInspectionRows=ContinuityStore.prototype.hasNoInspectionRows,originalUnclaimedInspectionState=ContinuityStore.prototype.assertUnclaimedInspectionState;
 const originalCurrentInputExecution=ContinuityInputJournal.prototype.assertCurrentExecution;
 export class ContinuityService {
   readonly store: ContinuityStore;
@@ -83,6 +84,18 @@ export class ContinuityService {
   inspectConversations(actor: ContinuityActor, ids: string[]): Array<{ id: string; state: 'active' | 'missing' | 'blocked' | 'deleted' }> {
     this.assertActor(actor, true);
     if (!Array.isArray(ids) || ids.length > 200) throw new Error('invalid_argument');
+    for(const id of ids)key(id);
+    if(!ids.length)return [];
+    if(originalNoInspectionRows.call(this.store,ids)===true){
+      const absent=ids.map(id=>{
+        let blocked=false;
+        try{originalUnclaimedInspectionState.call(this.store);this.assertExternalScopePolicy(id);}catch{blocked=true;}
+        return {id,state:blocked?'blocked' as const:'missing' as const};
+      });
+      // Policy callbacks can import or tombstone a row. Re-read through the
+      // original guarded DB; never publish stale absence after such a change.
+      if(originalNoInspectionRows.call(this.store,ids)===true)return absent;
+    }
     return ids.map(id => {
       key(id); let blocked = false;
       try { this.assertScopeReadable(id); } catch { blocked = true; }

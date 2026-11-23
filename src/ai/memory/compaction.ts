@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import * as crypto from 'node:crypto';
 
 export interface L1CompactionResult { extracted: number }

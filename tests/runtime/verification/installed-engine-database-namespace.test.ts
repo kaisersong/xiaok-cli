@@ -2,7 +2,7 @@ import {it,expect} from 'vitest';
 import {mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../../src/utils/builtin-sqlite.js';
 import {openPrivateVerificationDatabase} from '../../../src/runtime/verification/private-database.js';
 import {assertInstalledEngineDatabaseNamespaces} from '../../../src/runtime/verification/installed-engine.js';
 

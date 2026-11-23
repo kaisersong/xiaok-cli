@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { finished } from 'node:stream/promises';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron') as string;
+const cacheRoot = join(__dirname, '..', '..', '..', '.artifacts', 'broker-runtimes', require('../../resources/broker-runtime-lock.json').node);
+const target = process.platform + '-' + process.arch;
 let root: string;
 let input: string;
 beforeEach(() => {
@@ -29,6 +31,9 @@ async function fixture(code: string, dependencies = {}, extra = {}, unpack = fal
   // ASAR resolves with an ending Writable; wait for its payload to flush.
   const output = await createPackageWithOptions(input, asarPath, unpack ? { unpackDir: 'node_modules' } : {});
   await finished(output, { cleanup: true });
+  if (!existsSync(join(cacheRoot, target))) throw new Error('Prepare the locked fixture runtime: node desktop/scripts/prepare-broker-runtime.mjs');
+  require('../../scripts/pack-broker-runtime.cjs').shipBrokerRuntime({ cacheRoot, resources: root, target });
+  require('../../scripts/pack-node-child.cjs').packNodeChild(asarPath);
   return { asarPath, electronPath };
 }
 function verify(options: object) {

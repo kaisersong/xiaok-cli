@@ -1,6 +1,8 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 const f=vi.hoisted(()=>({present:false,badPath:'',badKind:'',changed:false,changeOnSpawn:false,stdout:'drwxr-xr-x root wheel directory\n',status:0,signal:null as string|null,error:undefined as Error|undefined,calls:[] as Array<{path:string,args:string[],options:any}>,stats:[] as string[]}));
 const macAncestors=['/Library/Application Support','/Library','/'];
+// These cases emulate a POSIX installation, including on Windows runners.
+vi.mock('node:path',async load=>{const actual=await load<typeof import('node:path')>();return {...actual,...actual.posix};});
 vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,lstatSync(path:any,options?:any){
  const value=String(path);if(['/Library/Application Support/xiaok-verification','/var/lib/xiaok-verification'].includes(value)){if(!f.present)throw Object.assign(Error('absent'),{code:'ENOENT'});return {isDirectory:()=>true,isSymbolicLink:()=>false};}
  if(value==='/Library/Application Support/test-service'||value==='/Library/Application Support/test-service/marker.json')return {uid:501,mode:value.endsWith('.json')?0o100644:0o40755,nlink:1,isDirectory:()=>!value.endsWith('.json'),isFile:()=>value.endsWith('.json'),isSymbolicLink:()=>false};

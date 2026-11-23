@@ -64,10 +64,13 @@ function verifyPackagedRuntimeDependencies({ asarPath, electronPath, platform = 
   // executes this same hook; do not claim a runtime smoke for a cross-build.
   const runtimeVerified = platform === process.platform;
   if (runtimeVerified && sorted.length) {
-    const result = spawnSync(electronPath, [
+    const resources=path.dirname(asarPath);
+    const runtime=require('../electron/node-child-package.cjs').resolveNodeChildPackage(resources,process.env);
+    const physical=path.join(resources,'node-child','app');
+    const result = spawnSync(runtime.command, [...runtime.argsPrefix,
       '--experimental-import-meta-resolve', '--input-type=module', '--eval', probe,
-      JSON.stringify({ asarPath, specifiers: sorted }),
-    ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+      JSON.stringify({ asarPath:physical, specifiers: sorted }),
+    ], { env:runtime.env, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
     if (result.error || result.status !== 0) throw new Error(
       `packaged runtime verification failed: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`,
     );
@@ -88,7 +91,7 @@ function packagedRuntimePaths(context) {
 
 module.exports = async function afterPack(context) {
   const result = verifyPackagedRuntimeDependencies({ ...packagedRuntimePaths(context), platform: context.electronPlatformName });
-  process.stdout.write(`packaged runtime dependencies: ${result.specifiers.length} imports; ${result.runtimeVerified ? 'Electron smoke passed' : 'declaration audit only; cross-build runtime unverified'}\n`);
+  process.stdout.write(`packaged runtime dependencies: ${result.specifiers.length} imports; ${result.runtimeVerified ? 'pinned Node physical closure smoke passed' : 'declaration audit only; cross-build runtime unverified'}\n`);
 };
 module.exports.verifyPackagedRuntimeDependencies = verifyPackagedRuntimeDependencies;
 module.exports.packagedRuntimePaths = packagedRuntimePaths;

@@ -652,6 +652,8 @@ export const api = {
   hasTaskHistoryPresentation(): boolean {
     return typeof window.xiaokDesktop?.readTaskHistory === 'function';
   },
+  hasLocalLegacyTaskArchive():boolean{return typeof window.xiaokDesktop?.readLocalLegacyTaskArchive==='function';},
+  readLocalLegacyTaskArchive:(taskId:string)=>window.xiaokDesktop.readLocalLegacyTaskArchive(taskId),
 
   getLoopPublicationConfiguration: (loopId:string) => window.xiaokDesktop.getLoopPublicationConfiguration(loopId),
   getLoopPublicationState: (runId:string) => window.xiaokDesktop.getLoopPublicationState(runId),

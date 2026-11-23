@@ -1,3 +1,4 @@
+import {prepareWindowsOwnedDatabase} from '../../src/runtime/windows-owner-security.js';
 import { createCodexOrdinaryWriter } from './codex-ordinary-writer.js';
 import { findCodexEntry, type NativeActor, type NativeServiceOptions, type NativeTaskTurn, type NativeApprovalInventory, type Session } from './codex-native-support.js';
 export {findCodexEntry} from './codex-native-support.js';
@@ -30,7 +31,7 @@ function originalService(value:unknown){
 }
 const acceptedClients = new WeakMap<object, WeakSet<object>>();
 const acceptedHas=WeakSet.prototype.has,acceptedAdd=WeakSet.prototype.add;
-/** Fixed negative/projection consumer; never returns maps, clients or a grant. */
+/** Projection only: no mutable state, clients or grants. */
 export function assertOriginalCodexNativeLifecycle(owner: unknown, session?: unknown, client?: unknown): void {
   const row = originalService(owner);
   if (session !== undefined) {
@@ -42,9 +43,9 @@ export function assertOriginalCodexNativeLifecycle(owner: unknown, session?: unk
     if (!clients || !processApply(acceptedHas,clients,[client])) throw Error('CODEX_PROCESS_ORIGINAL_CLIENT_REQUIRED');
   }
 }
-/** Denial-only peer check; no Source/turn proof or mutable state is returned. */
+/** Peer denial only; no Source/turn proof or state. */
 export function assertOriginalCodexNativeWriter(owner:unknown):void {originalService(owner).writer.assertOpen();}
-/** Only connect() publishes this exact original client/session incarnation. */
+/** connect() alone publishes the original client/session. */
 export function readOriginalCodexProcessSession(probe: unknown): Readonly<{ context: object; assertCurrent(): void; assertLocal(): void }> {
   const row = processApply(processGet, processSessions, [probe]) as Readonly<{ context: object; assertCurrent(): void; assertLocal(): void }> | undefined;
   if (!row) throw Error('CODEX_PROCESS_ORIGINAL_SESSION_REQUIRED');
@@ -68,6 +69,7 @@ export class CodexNativeService {
   constructor(private options: NativeServiceOptions) {
     assertOrdinarySourceWriterRoute();
     this.writer.bind(options.dbPath);this.writer.assertOpen();
+    prepareWindowsOwnedDatabase(options.dbPath);
     mkdirSync(dirname(options.dbPath), {recursive:true});
     this.db = new DatabaseSync(options.dbPath);
     try {
@@ -85,7 +87,7 @@ export class CodexNativeService {
     processApply(processSet,acceptedClients,[this,new WeakSet<object>()]);
     } catch(error) {this.writer.hold(error);try{this.writer.stock.syncVoid(this.db.close,this.db,[]);}catch(cleanup){this.writer.hold(this.db);this.writer.fail(cleanup);}throw error;}
   }
-  /** Synchronous construction rollback only; after any admitted use, normal drain is required. */
+  /** Rollback before admission; admitted work needs normal drain. */
   closeBeforeUse(){return closeNativeBeforeUse(this);}
   private authorize(actor: NativeActor) { if(hasOriginalMainSdkBridgeInstallation())originalService(this);if (this.disposed || actor.requestSource !== 'user' || actor.actorId !== this.options.profileId) throw new Error('native_access_denied'); this.used=true; }
   private owned(actor: NativeActor, id: string) { this.authorize(actor); const s=this.sessions.get(id); if(!s) throw new Error('native_session_denied'); return s; }

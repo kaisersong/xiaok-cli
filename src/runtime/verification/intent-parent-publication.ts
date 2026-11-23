@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {VerificationOwner} from './proof-authority.js';
 import {parseIntentApplicationBinding,type IntentApplicationBinding} from './intent-application-binding.js';
 import {intentHostSubjectOwner} from './intent-host-subject.js';

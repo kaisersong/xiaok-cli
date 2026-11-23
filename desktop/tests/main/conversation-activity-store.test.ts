@@ -1,5 +1,6 @@
+import {inspectWindowsOwnerPath} from '../../../src/runtime/windows-owner-security.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -22,6 +23,24 @@ describe('durable conversation activity', () => {
   beforeEach(() => { now = 1000; root = mkdtempSync(join(tmpdir(), 'xiaok-activity-')); store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now }); });
   afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
+  it.skipIf(process.platform!=='win32')('creates fresh SQLite WAL and SHM with the actual current SID owner',()=>{
+    for(const suffix of ['-wal','-shm']){
+      const facts=inspectWindowsOwnerPath(join(root,'activity.sqlite')+suffix);
+      expect(facts.ownerSid).toBe(facts.currentSid);expect(facts.protected).toBe(true);
+      expect(facts.allowSids).toEqual([facts.currentSid]);
+    }
+  });
+  it.skipIf(process.platform!=='win32')('keeps the actual owner journal identity through writes and releases it before SQLite rollback cleanup',()=>{
+    const journal=join(root,'activity.sqlite.owner.sqlite-journal');expect(existsSync(journal)).toBe(true);
+    const before=inspectWindowsOwnerPath(journal);bind();
+    for(let sequence=1;sequence<=100;sequence++)store.ingest('watch',event(sequence));
+    store.ingest('watch',event(101,'completed'));
+    expect(inspectWindowsOwnerPath(journal).identity).toBe(before.identity);
+    store.close();expect(existsSync(journal)).toBe(false);
+    store=new ConversationActivityStore(join(root,'activity.sqlite'),{now:()=>now});
+    expect(store.getProjection('watch')?.sourceSequence).toBe(101);
+    expect(store.getProjection('watch')?.executionState).toBe('completed');
+  });
   it('does not invent an unread activity or move the read cursor on heartbeat/freshness-only updates', () => {
     bind(); store.ingest('watch', event(1, 'started'));
     const through = store.listActivities('profile', 'thread').at(-1)!.localSeq; store.markRead('profile', 'thread', through);
@@ -123,6 +142,8 @@ describe('durable conversation activity', () => {
     expect(store.getDiagnostics().sourceEvents).toBe(2);
   });
 
+  // Release-plan quality review: Windows ACL/identity IO and macOS hosted fsync variance.
+  // This runner budget changes no product clock, population, or assertion.
   it('bounds a 10000-progress storm while retaining the critical terminal and replay cursor', () => {
     bind();
     for (let sequence = 1; sequence <= 10_000; sequence++) store.ingest('watch', event(sequence));
@@ -133,6 +154,32 @@ describe('durable conversation activity', () => {
     expect(store.ingest('watch', event(1))).toMatchObject({ duplicate: true });
     expect(store.getProjection('watch')?.sourceSequence).toBe(10_001);
     expect(store.getProjection('watch')?.executionState).toBe('completed');
+  },process.platform==='win32'||process.platform==='darwin'?12_000:5_000);
+
+  it('retains the exact mixed progress window and rebuilds its indexed compaction plan on reopen', () => {
+    bind();
+    store.ingest('watch', event(1, 'input_required'));
+    for (let sequence = 2; sequence <= 301; sequence++) {
+      store.ingest('watch', event(sequence, sequence % 2 ? 'heartbeat' : 'progress'));
+    }
+    let db = new DatabaseSync(join(root, 'activity.sqlite'));
+    try {
+      const retained = db.prepare("SELECT json_extract(content_json,'$.sourceSequence') AS sequence FROM source_events WHERE json_extract(content_json,'$.kind') IN ('progress','heartbeat') ORDER BY sequence").all();
+      expect(retained.map(row => row.sequence)).toEqual(Array.from({length: 256}, (_, i) => i + 46));
+      expect(db.prepare("SELECT COUNT(*) AS count FROM source_events WHERE json_extract(content_json,'$.kind')='input_required'").get()?.count).toBe(1);
+      const compact = "EXPLAIN QUERY PLAN SELECT event_key FROM source_events WHERE watch_id=? AND json_extract(content_json,'$.kind') IN ('progress','heartbeat') ORDER BY json_extract(content_json,'$.sourceSequence') DESC,rowid DESC LIMIT -1 OFFSET ?";
+      const plan = () => db.prepare(compact).all('watch', 255).map(row => row.detail).join('\n');
+      expect(plan()).toContain('source_progress_sequence');
+      expect(plan()).not.toContain('TEMP B-TREE');
+      db.exec('DROP INDEX source_progress_sequence');
+      expect(plan()).toContain('TEMP B-TREE');
+      store.close();
+      db.close();
+      store = new ConversationActivityStore(join(root, 'activity.sqlite'), {now: () => now});
+      db = new DatabaseSync(join(root, 'activity.sqlite'));
+      expect(plan()).toContain('source_progress_sequence');
+      expect(plan()).not.toContain('TEMP B-TREE');
+    } finally { db.close(); }
   });
 
   it('rejects saturated critical capacity without acknowledging or advancing the source cursor', () => {

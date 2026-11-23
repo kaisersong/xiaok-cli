@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../utils/builtin-sqlite.js';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -33,10 +34,10 @@ function readSaveLock(path: string,context?:object) {
 }
 function clearDeadSaveLock(path: string,context?:object) {
   // Optional only for stale-lock recovery. Fresh ordinary saves remain pure JS.
-  let database: import('better-sqlite3').Database | undefined;
+  let database: import('../../../utils/builtin-sqlite.js').Database | undefined;
   let bodyFailure:{error:unknown}|undefined;
   try {
-    const Database = call<typeof import('better-sqlite3')>(context,'callable',requireOptional,['better-sqlite3']);
+    const Database = call<typeof BuiltinDatabase>(context,'callable',()=>BuiltinDatabase,[]);
     const cleanupPath = `${path}.cleanup.sqlite`;
     if (call(context,'boolean',originalExists,[cleanupPath]) && statKind(call(context,'stat',originalLstat,[cleanupPath]),'symlink',context)) throw new Error('session_save_locked');
     database = call(context,'db-open',()=>new Database(cleanupPath,{timeout:0}),[]);

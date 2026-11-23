@@ -8,7 +8,7 @@ import {assertStorageOwnerSchema} from './storage-owner-schema.js';
 import {createHash} from 'node:crypto';
 import {lstatSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {parseOwnerEnrollmentRegistration} from './owner-enrollment-review.js';

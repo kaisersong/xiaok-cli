@@ -4,6 +4,7 @@ import 'vitest';
 declare module 'vitest' {
   interface ProvidedContext {
     profileTestAccountRoot: string;
+    profileTestTempRoot: string | null;
     installedSlidePythonRuntime: { python: string; marker: string };
   }
 }

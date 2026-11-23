@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';

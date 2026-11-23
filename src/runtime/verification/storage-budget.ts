@@ -1,9 +1,7 @@
-import { createRequire } from 'node:module';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../../utils/builtin-sqlite.js';
 import { VERIFICATION_BUDGET } from './protocol.js';
-// Capture the actual installed driver's error class; text properties alone
-// cannot classify an ordinary callback error as settled SQLite exhaustion.
-const NativeSqliteError=createRequire(import.meta.url)('better-sqlite3').SqliteError as typeof import('better-sqlite3').SqliteError;
+// node:sqlite has no distinct, unforgeable SqliteError class. A caller-supplied
+// Error/code cannot certify settled exhaustion; retain the unconfirmed outcome.
 const headroomNotReadyErrors=new WeakMap<object,Database>();
 function headroomNotReady(database:Database,message:string,cause?:unknown):Error{const error=cause===undefined?Error(message):Error(message,{cause});headroomNotReadyErrors.set(error,database);return error;}
 export function isVerificationHeadroomNotReady(error:unknown,database:Database):boolean{return !!error&&typeof error==='object'&&headroomNotReadyErrors.get(error)===database;}
@@ -140,7 +138,7 @@ export function assertVerificationDatabaseBudget(db: Database, options: { additi
 export function runVerificationTransaction<T>(db: Database, work: () => T): T {
   try { return db.transaction(work).immediate(); }
   catch (error) {
-    if ((error as { code?: unknown })?.code === 'SQLITE_FULL') {if(error instanceof NativeSqliteError&&db.open&&!db.inTransaction)throw headroomNotReady(db,'verification_capacity_exhausted',error);throw new Error('verification_capacity_exhausted', { cause: error });}
+    if ((error as { code?: unknown })?.code === 'SQLITE_FULL' || (error as {code?:unknown;errcode?:unknown})?.code==='ERR_SQLITE_ERROR' && (error as {errcode?:unknown}).errcode===13) throw new Error('verification_capacity_exhausted', {cause:error});
     throw error;
   }
 }

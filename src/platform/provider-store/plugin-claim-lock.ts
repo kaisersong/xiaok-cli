@@ -105,6 +105,20 @@ function writeClaimFile(path: string, payload: unknown): void {
   }
 }
 
+const KERNEL_IDENTITY=/^linux-proc-v1:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}:\d{1,32}$/;
+function encodeClaimIdentity(identity:string):string|{version:3;kernelStart:string} {
+  if(!identity.startsWith('linux-proc-v1:'))return identity;
+  if(!KERNEL_IDENTITY.test(identity))throw new PluginLockFailClosedError('invalid kernel identity');
+  // Old clients reject a non-string instead of mistaking a new format for PID reuse.
+  return {version:3,kernelStart:identity};
+}
+function decodeClaimIdentity(raw:unknown):string|undefined {
+  if(typeof raw==='string'&&!raw.startsWith('linux-proc-v1:'))return raw;
+  if(!raw||typeof raw!=='object')return;
+  const value=raw as Record<string,unknown>;
+  if(Object.keys(value).sort().join(',')==='kernelStart,version'&&value.version===3&&typeof value.kernelStart==='string'&&KERNEL_IDENTITY.test(value.kernelStart))return value.kernelStart;
+}
+
 function parseClaim(claimsDir: string, fileName: string): ClaimFile | null {
   const isChoosing = fileName.endsWith(CHOOSING_SUFFIX);
   const isSettled = fileName.endsWith(CLAIM_SUFFIX);
@@ -121,7 +135,8 @@ function parseClaim(claimsDir: string, fileName: string): ClaimFile | null {
   } catch {
     throw new PluginLockFailClosedError(`corrupt claim ${fileName}`);
   }
-  if (typeof parsed.token !== 'string' || typeof parsed.pid !== 'number' || typeof parsed.startIdentity !== 'string') {
+  const startIdentity=decodeClaimIdentity(parsed.startIdentity);
+  if (typeof parsed.token !== 'string' || typeof parsed.pid !== 'number' || startIdentity===undefined) {
     throw new PluginLockFailClosedError(`invalid claim schema ${fileName}`);
   }
   const ticket = isSettled ? Number(fileName.split('-')[0]) : null;
@@ -132,7 +147,7 @@ function parseClaim(claimsDir: string, fileName: string): ClaimFile | null {
     fileName,
     token: parsed.token,
     ticket,
-    identity: { pid: parsed.pid, startIdentity: parsed.startIdentity },
+    identity: { pid: parsed.pid, startIdentity },
   };
 }
 
@@ -178,6 +193,7 @@ export class PluginClaimLock {
   private isLive(claim: ClaimFile): boolean {
     const identity = this.deps.probeIdentity(claim.identity.pid);
     if (!identity) return false;
+    if(identity.startIdentity.startsWith('linux-proc-v1:')!==claim.identity.startIdentity.startsWith('linux-proc-v1:'))throw new PluginLockFailClosedError('legacy process identity cannot be compared to kernel ticks');
     return identity.startIdentity === claim.identity.startIdentity;
   }
 
@@ -206,8 +222,9 @@ export class PluginClaimLock {
     const choosingName = `${token}${CHOOSING_SUFFIX}`;
 
     writeClaimFile(join(this.claimsDir, choosingName), {
-      token, pid: self.pid, startIdentity: self.startIdentity, createdAt: this.deps.now(),
+      token, pid: self.pid, startIdentity: encodeClaimIdentity(self.startIdentity), createdAt: this.deps.now(),
     });
+    try {
     fsyncDir(this.claimsDir);
 
     // Ticket selection: strictly after every settled ticket we can see.
@@ -245,6 +262,7 @@ export class PluginClaimLock {
       }
       await this.deps.sleep(this.pollIntervalMs);
     }
+    } catch(error) {this.releaseByToken(token);throw error;}
   }
 
   release(capability: PluginLockCapability): void {

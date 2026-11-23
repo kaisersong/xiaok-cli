@@ -1,6 +1,8 @@
+import {resolveDesktopMainIdentity} from '../../electron/desktop-main-identity.js';
+import {ownedProfileTempDir as mkdtempSync,ownedProfileDirectory,seedProfileGroups} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,expect,it} from 'vitest';
-import {mkdirSync,mkdtempSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {createServer,type Server} from 'node:net';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {mkdirSync,realpathSync,rmSync,symlinkSync,writeFileSync} from 'node:fs';import {createServer,type Server} from 'node:net';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {existsSync} from 'node:fs';
 import {DesktopContextContinuity} from '../../electron/context-continuity/runtime.js';
 import {resolveDesktopServiceScope} from '../../electron/desktop-service-scope.js';
@@ -21,9 +23,9 @@ function tempDir(prefix:string){const dir=mkdtempSync(join(tmpdir(),prefix));cle
 async function symlinkedProfile(){
  const real=tempDir('ports-legacy-real-'),parent=tempDir('ports-legacy-link-'),link=join(parent,'tmp');
  symlinkSync(real,link,process.platform==='win32'?'junction':'dir');
- mkdirSync(join(real,'xiaok-desktop'));const dataRoot=join(link,'xiaok-desktop');
+ ownedProfileDirectory(join(real,'xiaok-desktop'));const dataRoot=join(link,'xiaok-desktop');
  const runtime=new DesktopContextContinuity(dataRoot);runtime.port();cleanups.push(()=>runtime.close());
- mkdirSync(join(dataRoot,'multi-agent'),{recursive:true});writeFileSync(join(dataRoot,'multi-agent','groups.sqlite'),'');
+ seedProfileGroups(dataRoot,resolveDesktopMainIdentity(dataRoot).profileId);
  return {dataRoot,address:activityOwnerAddress(dataRoot)};
 }
 // The 1.6.2 writer: id from the path Main was given, dataRoot normalized to realpath, no profileRoot.
@@ -41,7 +43,7 @@ it('a 1.6.2 config under a symlinked data root with no live owner is treated as 
  expect(()=>readProtectedOwnerQualification(address.dataRoot)).toThrow('activity_owner_qualification_unavailable');
  await expect(activeOwnerServicePorts(dataRoot)).resolves.toBeUndefined();
  // What the launcher then writes (desktop-services -> mainActivityOwnerConfig -> writeOwnerLaunchConfig).
- const scope=resolveDesktopServiceScope({dataRoot}),config=mainActivityOwnerConfig(dataRoot,scope.profileId,{});
+ const scope=resolveDesktopServiceScope({dataRoot,profileId:resolveDesktopMainIdentity(dataRoot).profileId}),config=mainActivityOwnerConfig(dataRoot,scope.profileId,{});
  writeOwnerLaunchConfig(address.dataRoot,'u'.repeat(32),{...config,dataRoot:address.dataRoot});
  expect(readProtectedOwnerQualification(address.dataRoot)).toMatchObject({profileId:scope.profileId});
 });

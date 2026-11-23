@@ -1,8 +1,9 @@
+import { makePrivateTestTempDir } from '../../support/private-temp.js';
 import { afterAll, afterEach, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import {  mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConversationActivityStore } from '../../../src/runtime/conversation-activity/store.js';
@@ -10,7 +11,7 @@ import { ensureConversationActivityOwner } from '../../../src/runtime/conversati
 
 const privateConfig = await vi.hoisted(async () => {
   const fs = await import('node:fs'), path = await import('node:path'), os = await import('node:os');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-owner-start-config-'));
+  const root = (await import('../../support/private-temp.js')).makePrivateTestTempDir(path.join(os.tmpdir(), 'activity-owner-start-config-'));
   fs.chmodSync(root, 0o700);
   const previous = process.env.XIAOK_CONFIG_DIR;
   process.env.XIAOK_CONFIG_DIR = root;
@@ -26,7 +27,7 @@ const roots: string[] = [];
 const children: Array<{ child: ChildProcess; done: Promise<void>; record: { pid?: number; root: string; code?: number | null; signal?: string | null } }> = [];
 const stores: ConversationActivityStore[] = [];
 const entry = join(process.cwd(), '.test-dist/tests/runtime/conversation-activity/fixtures/owner-lock-start-entry.js');
-function root() { const value = mkdtempSync(join(tmpdir(), 'activity-owner-start-')); roots.push(value); return value; }
+function root() { const value = makePrivateTestTempDir(join(tmpdir(), 'activity-owner-start-')); roots.push(value); return value; }
 function own(child: ChildProcess, path: string) {
   const record = { pid: child.pid, root: path, code: undefined as number | null | undefined, signal: undefined as string | null | undefined };
   const done = new Promise<void>(resolve => child.once('exit', (code, signal) => {

@@ -1,3 +1,4 @@
+import {inspectWindowsOwnerPath,type WindowsOwnerFacts} from '../windows-owner-security.js';
 import {closeSync,constants,fstatSync,lstatSync,openSync,readSync,realpathSync,type BigIntStats} from 'node:fs';
 import {join,resolve,dirname,basename} from 'node:path';
 import {readContinuityProfile} from '../context-continuity/profile-identity.js';
@@ -17,9 +18,16 @@ const unavailable=()=>Error('activity_owner_qualification_unavailable');
 function canonicalRoutingPath(path:string):string{let current=resolve(path);const tail:string[]=[];for(;;){try{return join(realpathSync(current),...tail.reverse());}catch(raw){if((raw as NodeJS.ErrnoException).code!=='ENOENT')throw raw;const parent=dirname(current);if(parent===current)throw raw;tail.push(basename(current));current=parent;}}}
 function present(path:string):boolean{try{lstatSync(path);return true;}catch(raw){if((raw as NodeJS.ErrnoException).code==='ENOENT')return false;throw raw;}}
 export function hasCanonicalActivityProfile(root:string):boolean{return ['continuity-profile.json','continuity-profile-migration.json','continuity.sqlite'].some(name=>present(join(root,name)));}
+function windowsConfig(path:string):WindowsOwnerFacts|undefined {
+ if(process.platform!=='win32')return;
+ const facts=inspectWindowsOwnerPath(path);
+ if(facts.directory||facts.ownerSid!==facts.currentSid||!facts.allowSids.length||facts.allowSids.some(sid=>![facts.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid)))throw unavailable();
+ return facts;
+}
 function readConfig(root:string):ActivityOwnerConfig{
  if(unknown.has(root))throw unavailable();const parent=assertProfileDirectory(root),path=join(root,ACTIVITY_STORAGE_NAMES.config),before=lstatSync(path,{bigint:true});
  if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1n||before.size<1n||before.size>262144n||typeof process.getuid==='function'&&(before.uid!==BigInt(process.getuid())||(before.mode&0o077n)!==0n))throw unavailable();
+ const windowsBefore=windowsConfig(path);
  const fd=openSync(path,constants.O_RDONLY|(constants.O_NOFOLLOW??0)|(constants.O_NONBLOCK??0));let first:{raw:unknown}|undefined,value:ActivityOwnerConfig|undefined;
  const check=(binding:BigIntStats)=>{
   const now=lstatSync(path,{bigint:true});if(!stable(before,now))throw unavailable();
@@ -32,6 +40,7 @@ function readConfig(root:string):ActivityOwnerConfig{
   while(count<bytes.length){const n=readSync(fd,bytes,count,bytes.length-count,count);if(!Number.isSafeInteger(n)||n<0||n>bytes.length-count)throw unavailable();if(!n)break;count+=n;}
   if(count!==Number(before.size)||!stable(binding,fstatSync(fd,{bigint:true})))throw unavailable();check(binding);
   const after=assertProfileDirectory(root);if(parent.dev!==after.dev||parent.ino!==after.ino||parent.uid!==after.uid||parent.mode!==after.mode)throw unavailable();
+  const windowsAfter=windowsConfig(path);if(windowsBefore&&(!windowsAfter||windowsBefore.identity!==windowsAfter.identity||windowsBefore.sddl!==windowsAfter.sddl||windowsBefore.currentSid!==windowsAfter.currentSid))throw unavailable();
   value=JSON.parse(bytes.subarray(0,count).toString('utf8')) as ActivityOwnerConfig;
  }catch(raw){first={raw};}
  try{closeSync(fd);}catch(raw){retain(root,fd,raw);if(!first)first={raw};}

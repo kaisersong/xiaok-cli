@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../utils/builtin-sqlite.js';
 import {createRequire} from 'node:module';
 import {lstatSync,realpathSync,existsSync,openSync,closeSync,fsyncSync,constants} from 'node:fs';
 import {join} from 'node:path';
@@ -15,7 +16,7 @@ export function acquireControllerLifetimeLock(inputRoot:string){
  for(const name of [path,path+'-journal'])if(existsSync(name)||(()=>{try{lstatSync(name);return true;}catch{return false;}})())file(name);
  if(existsSync(path+'-wal')||existsSync(path+'-shm'))throw Error('controller_lifetime_path');
  if(!existsSync(path)){try{const fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o600);try{fsyncSync(fd);}finally{closeSync(fd);}}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}file(path);}
- const Native=createRequire(import.meta.url)('better-sqlite3') as typeof import('better-sqlite3');
+ const Native=BuiltinDatabase as typeof BuiltinDatabase;
  const db=new Native(path,{timeout:0});let closed=false,invalidated=false;
  try{
   db.pragma('journal_mode=DELETE');db.pragma('synchronous=FULL');

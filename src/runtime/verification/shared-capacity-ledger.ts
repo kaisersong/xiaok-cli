@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {inspectCapacityMetadataCommand,executeCapacityMetadataCommand,type MetadataWriteContext} from './capacity-ledger-command-dispatch.js';
 import {types} from 'node:util';
 import {captureOwnerBindingBatch} from './owner-binding-batch-input.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json,VERIFICATION_BUDGET} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
 const MiB=1024**2;

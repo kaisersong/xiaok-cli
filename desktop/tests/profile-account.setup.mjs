@@ -51,6 +51,15 @@ export function installTestAccountHome(os,accountHome,registerCleanup,synchroniz
  }
  return restore;
 }
+// Worker pools snapshot env before globalSetup; pass the actual private path
+// through ProvidedContext so fixtures and their real children inherit it.
+const privateTemp=inject('profileTestTempRoot');
+if(process.platform==='win32'){
+ if(typeof privateTemp!=='string'||realpathSync(privateTemp)!==privateTemp)throw Error('test_private_temp_required');
+ const previousTemp={TEMP:process.env.TEMP,TMP:process.env.TMP};
+ process.env.TEMP=privateTemp;process.env.TMP=privateTemp;
+ afterAll(()=>{for(const key of ['TEMP','TMP']){if(previousTemp[key]===undefined)delete process.env[key];else process.env[key]=previousTemp[key];}});
+}
 const root=inject('profileTestAccountRoot');
 if(typeof root!=='string'||!root)throw Error('test_profile_account_root_required');
 const ownership=inject('profileTestAccountOwnership');

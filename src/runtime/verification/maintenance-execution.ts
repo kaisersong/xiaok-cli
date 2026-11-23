@@ -4,7 +4,7 @@ export {hasUnresolvedMaintenanceExecutionConstruction} from './maintenance-execu
 import {claimInstalledMaintenanceExecutionConstruction,bindInstalledMaintenanceExecutionConstruction,assertInstalledMaintenanceConstructionReady} from './installed-execution-stack.js';
 import {drainDockerRunnerCleanup} from '../isolated-execution/docker-runner.js';
 import {buildDockerWorkerRequest} from '../isolated-execution/docker-request.js';
-import {createHash} from 'node:crypto';import type {Database} from 'better-sqlite3';
+import {createHash} from 'node:crypto';import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertInstalledControllerLifetime,type InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {readMaintenanceEngineAttachment,type MaintenanceEngineAttachment} from './maintenance-engine-attachment.js';
 import {assertInstalledSharedCapacity,registerInstalledCapacityIssuer,type createInstalledSharedCapacity} from './installed-shared-capacity.js';

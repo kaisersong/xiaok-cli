@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {chmodSync,closeSync,constants,fchmodSync,fstatSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,renameSync,unlinkSync,writeFileSync,type Stats} from 'node:fs';
 import {dirname,join} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {syncDirectoryTreeStrict,readOwnAtomicErrorCode} from '../../utils/atomic-file.js';
 import {canonicalVerificationJson,VERIFICATION_BUDGET} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';

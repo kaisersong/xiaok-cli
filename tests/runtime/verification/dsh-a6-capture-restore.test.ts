@@ -32,7 +32,7 @@ const hash = (raw: Uint8Array) =>
   createHash("sha256").update(raw).digest("hex");
 beforeAll(() => {
   expect(hash(bytes)).toBe(manifest.databaseSha256);
-  const sqlite = resolve("node_modules/better-sqlite3/deps/sqlite3"),
+  const sqlite = resolve("native/sqlite-source/build/3.53.4"),
     object = join(root, "sqlite.o");
   execFileSync(
     "clang",

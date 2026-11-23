@@ -1,7 +1,7 @@
 import { AgentSessionState } from '../../ai/runtime/session.js';
 import type {ObservationReferenceOwnerFacts,ObservationReferenceOwnerResolution} from './reference-lifecycle.js';
 import { writeFileAtomicallySync } from '../../utils/atomic-file.js';
-import Database from 'better-sqlite3';
+import Database from '../../utils/builtin-sqlite.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join, isAbsolute, normalize } from 'node:path';

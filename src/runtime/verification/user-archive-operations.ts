@@ -1,6 +1,6 @@
 import {assertDockerRunnerDatabase,type createDockerRunner} from '../isolated-execution/docker-runner.js';
 import type {QuiescenceAuthority,QuiescenceExpectation,PhysicalQuiescenceReceipt} from '../isolated-execution/physical-quiescence.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {createHash,createHmac,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {parseArchiveOperationReview,archiveReviewBytes,type ArchiveOperationReview,type ArchiveResourceReview} from './archive-operation-review.js';

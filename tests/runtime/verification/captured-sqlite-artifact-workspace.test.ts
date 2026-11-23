@@ -5,7 +5,7 @@ import {mkdtempSync,realpathSync,statSync,rmSync,readFileSync,writeFileSync,mkdi
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve,basename,dirname} from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 const discovery=vi.hoisted(()=>({home:'',route:'ordinary',failSync:false}));
 vi.mock('node:os',async load=>{const actual=await load<typeof import('node:os')>();return {...actual,userInfo:()=>({...actual.userInfo(),homedir:discovery.home})};});
 vi.mock('node:fs',async load=>{const actual=await load<typeof import('node:fs')>();return {...actual,fsyncSync:(fd:number)=>{if(discovery.failSync&&actual.fstatSync(fd).isDirectory())throw Error('registry_fsync_fixture');return actual.fsyncSync(fd);}};});
@@ -16,7 +16,7 @@ import {startProfileSourceCapture,readProfileSourceCapture,readProfileSqliteSche
 const root=realpathSync(mkdtempSync(join(tmpdir(),'captured-workspace-'))),directoryHelper=join(root,'directory'),sqliteHelper=join(root,'sqlite');
 beforeAll(()=>{
  discovery.home=join(root,'account');setProfileTestHome(discovery.home);mkdirSync(discovery.home);
- const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');
+ const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');
  execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);

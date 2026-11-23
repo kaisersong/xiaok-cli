@@ -2,7 +2,7 @@ import {types as utilTypes} from 'node:util';
 import {persistMountedQualificationExpected} from '../verification/installed-engine-qualification.js';
 import type {ExecutionWriteContext} from '../verification/execution-command-dispatch.js';
 import {consumeExecutionCommandContext,assertDockerRunnerDatabase,assertDockerRunnerDeleted} from './docker-runner.js';
-import type {Database} from 'better-sqlite3';import {createHash,randomUUID} from 'node:crypto';
+import type {Database} from '../../utils/builtin-sqlite.js';import {createHash,randomUUID} from 'node:crypto';
 import {createDockerRunner} from './docker-runner.js';import {DockerEngineTransport} from './docker-engine-transport.js';import {extractSingleArtifact} from './artifact-export.js';import {MOUNTED_POLICY_SHA256} from './docker-volume-request.js';
 import type {HostIssuedMountPlan} from './execution-port.js';import type {QuiescenceExpectation} from './physical-quiescence.js';import type {createVerificationBlobBudget} from '../verification/blob-budget.js';import {runVerificationTransaction} from '../verification/storage-budget.js';import {canonicalVerificationJson as json} from '../verification/protocol.js';
 const mountedInstances=new WeakMap<object,{database:Database;runner:object}>();

@@ -1,9 +1,10 @@
+import {prepareWindowsOwnedDatabase} from '../../../src/runtime/windows-owner-security.js';
 import {DatabaseSync,StatementSync} from 'node:sqlite';
 import {constants,openSync,closeSync,lstatSync,fstatSync,mkdirSync,realpathSync} from 'node:fs';
 import {dirname,resolve,join,basename} from 'node:path';
 import {types} from 'node:util';
 import {createRoomTurnCustody} from '../../../src/runtime/verification/original-sdk-custody.js';
-import {assertOrdinarySourceWriterRoute} from '../../../src/runtime/verification/ordinary-source-writer-observation.js';
+import {assertOrdinarySourceWriterRoute,openOrdinarySourceRouteScope,type OrdinarySourceRouteScope} from '../../../src/runtime/verification/ordinary-source-writer-observation.js';
 import {createKnownDirectoryWriterFence} from '../../../src/runtime/verification/known-directory-writer-fence.js';
 import {createProtectedChildCallbackCustody} from '../protected-child-callback-custody.js';
 const NativeDatabase=DatabaseSync,prepare=DatabaseSync.prototype.prepare,exec=DatabaseSync.prototype.exec,close=DatabaseSync.prototype.close;
@@ -30,14 +31,22 @@ function captureConstructor(row:Row):void{
  const box=Object.assign(Object.create(null),{constructorMetadata:project(NativeDatabase,nativeConstructorDescriptors),prototypeMetadata:project(databasePrototype,nativeDatabaseDescriptors,true)});
  const stock=createRoomTurnCustody();row.stocks.push(stock);stock.sdk(()=>box,undefined,[],{accept:value=>value===box,consumer:releaseMetadata,strictProxyGraph:true});stock.consumeResource(releaseMetadata,box,[]);stock.assertPhysicalKnown();row.callbacks.assertPhysicalKnown();
 }
-interface Row{stocks:ReturnType<typeof createRoomTurnCustody>[];callbacks:ReturnType<typeof createProtectedChildCallbackCustody>;database?:DatabaseSync;closed:boolean;failed:boolean;raws:unknown[];unknownFds:{fd:number;raw:unknown}[];closeEntered?:boolean;first?:{raw:unknown};fence?:ReturnType<typeof createKnownDirectoryWriterFence>}
+interface Row{stocks:ReturnType<typeof createRoomTurnCustody>[];callbacks:ReturnType<typeof createProtectedChildCallbackCustody>;database?:DatabaseSync;closed:boolean;failed:boolean;raws:unknown[];unknownFds:{fd:number;raw:unknown}[];closeEntered?:boolean;first?:{raw:unknown};fence?:ReturnType<typeof createKnownDirectoryWriterFence>;routeScope?:OrdinarySourceRouteScope}
 const rows=new WeakMap<object,Row>(),held=new Set<Row>();
 function retain(row:Row,raw:unknown){row.first??={raw};row.raws.push(raw);held.add(row);const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.inventory(raw);}catch(extra){row.failed=true;row.raws.push(extra);}}
 /** A synchronous statement stock whose call returned with no root, tail, held resource or unknown
  * left is final: nothing else references it, so re-asserting it on every later call only made each
  * call O(all prior calls). Stocks that are not yet known stay owned and are still asserted. */
 function releaseKnownStock(row:Row,stock:ReturnType<typeof createRoomTurnCustody>):void{try{stock.assertPhysicalKnown();}catch{return;}const index=row.stocks.lastIndexOf(stock);if(index>=0)row.stocks.splice(index,1);}
-function check(row:Row){if(row.closed||row.failed)throw Error('continuity_database_unavailable',{cause:row.first?.raw});assertOrdinarySourceWriterRoute();row.fence?.assertOpen();for(const stock of row.stocks)stock.assertPhysicalKnown();}
+function check(row:Row){if(row.closed||row.failed)throw Error('continuity_database_unavailable',{cause:row.first?.raw});assertOrdinarySourceWriterRoute(row.routeScope);row.fence?.assertOpen();for(const stock of row.stocks)stock.assertPhysicalKnown();}
+/** Ordinary routing observation for one original synchronous transaction only.
+ * Each native call still checks the writer fence and physical custody. */
+export function withContinuityDatabaseRouteScope<T>(database:DatabaseSync,work:()=>T):T{
+ const row=rows.get(database);if(!row||row.closed||row.failed)throw Error('continuity_database_unavailable');
+ if(row.routeScope)return work();
+ const scope=openOrdinarySourceRouteScope();row.routeScope=scope;
+ try{return work();}finally{row.routeScope=undefined;scope.close();}
+}
 function invoke<T>(row:Row,fn:Function,receiver:unknown,args:unknown[]):T{
  check(row);row.callbacks.capture(fn);let value!:T;
  const stock=createRoomTurnCustody();row.stocks.push(stock);try{stock.syncVoid(()=>{value=apply(fn,receiver,args);},undefined,[]);stock.inventory(value);stock.assertPhysicalKnown();}catch(raw){retain(row,raw);throw raw;}releaseKnownStock(row,stock);return value;
@@ -60,6 +69,7 @@ export function openContinuityDatabase(path:string):DatabaseSync{
  const row:Row={stocks:[],callbacks:createProtectedChildCallbackCustody(),closed:false,failed:false,raws:[],unknownFds:[]};held.add(row);
  let fd:number|undefined;
  try{
+  prepareWindowsOwnedDatabase(path);
   try{fd=openSync(path,constants.O_CREAT|constants.O_EXCL|constants.O_RDWR|(constants.O_NOFOLLOW??0),0o600);}catch(raw){if(types.isProxy(raw)||!(raw instanceof Error)||Object.getOwnPropertyDescriptor(raw,'code')?.value!=='EEXIST')throw raw;fd=openSync(path,constants.O_RDWR|(constants.O_NOFOLLOW??0));}
   const before=identity(path),actual=fstatSync(fd,{bigint:true});same(before,actual as ReturnType<typeof identity>,path,row);row.fence=createKnownDirectoryWriterFence(parent,'sqlite-db');row.fence.assertOpen();
   captureConstructor(row);row.failed=true;row.database=new NativeDatabase(path);row.failed=false;same(before,identity(path),path,row);same(before,fstatSync(fd,{bigint:true}) as ReturnType<typeof identity>,path,row);

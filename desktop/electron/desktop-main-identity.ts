@@ -2,7 +2,7 @@ import {desktopActivityProfileId,desktopContinuityScopeProfileId} from '../../sr
 import {resolveDesktopProfile,type DesktopProfileIdentity} from '../../src/runtime/context-continuity/profile.js';
 import {readProfileDomainCensus} from '../../src/runtime/context-continuity/profile-probe.js';
 import {readCapturedProfileJson} from '../../src/runtime/context-continuity/profile-file.js';
-import {existsSync} from 'node:fs';
+import {existsSync,lstatSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {join} from 'node:path';
 
@@ -14,9 +14,9 @@ export interface DesktopMainIdentity {
   /** 'unavailable': identity failed on a root without legacy data. Fail closed:
    * this run degrades and Services writes no scope row (groups, activity,
    * Native sessions, owner config, project facts, user submissions, DSH,
-   * optimization store). `profileId` is then a random per-run 64-hex value the
-   * startup sources require: never the legacy digest, never stored, and never
-   * seen again by a later start. */
+   * optimization store). `profileId` remains an internal per-run compatibility
+   * value: scoped KSwarm/writer/dispatch sources are omitted and never receive it.
+   * It is never the legacy digest, never stored, or reused by a later start. */
   readonly scope:'continuity'|'legacy'|'unavailable';
   /** Inner reason when continuity identity was refused (main-debug.log evidence). */
   readonly failure?:string;
@@ -31,19 +31,18 @@ export function describeProfileFailure(raw:unknown):string {
 /** Resolve once in Main, before Services writes any scope row, and hand the
  * same value to Services. A profile whose data already carries the legacy
  * data-root digest keeps it (1.6.2 rows are never rewritten): on macOS
- * continuity migrates it, on Windows continuity refuses adoption
- * (profile.ts) and degrades while groups/authorizations stay visible under the
- * legacy scope. Every other profile is scoped by its continuity UUID. */
+ * continuity migrates it; Windows requires current-SID/ACL custody before
+ * recording the same mapping. Unqualified Windows data receives no scope. Every other profile is scoped by its continuity UUID. */
 export function resolveDesktopMainIdentity(dataRoot:string):DesktopMainIdentity {
   try {
     const continuity=Object.freeze({...resolveDesktopProfile(dataRoot)});
     if(continuity.legacyProfileId!==undefined)return Object.freeze({profileId:continuity.legacyProfileId,continuity,scope:'legacy'});
     return Object.freeze({profileId:desktopContinuityScopeProfileId(continuity.profileId),continuity,scope:'continuity'});
   } catch(raw) {
-    const failure=describeProfileFailure(raw),legacy=legacyScopeOf(dataRoot);
-    // Only a root whose data already carries the legacy digest keeps it
-    // (Windows 1.6.2, refused by profile.ts). Any other failure must not mint
-    // legacy rows that a later census would read as 1.6.2 data.
+    const failure=describeProfileFailure(raw),legacy=process.platform==='win32'||['continuity-profile.json','continuity-profile-migration.json','continuity.sqlite'].some(name=>canonicalArtifactPresent(join(dataRoot,name)))?undefined:legacyScopeOf(dataRoot);
+    // A refused canonical identity never falls back to its path digest.
+    // Windows always requires its SID-qualified resolver; untouched POSIX
+    // legacy roots alone may retain the older census-only degraded scope.
     if(legacy!==undefined)return Object.freeze({profileId:legacy,continuity:null,scope:'legacy',failure});
     return Object.freeze({profileId:randomBytes(32).toString('hex'),continuity:null,scope:'unavailable',failure});
   }
@@ -65,3 +64,7 @@ function legacyScopeOf(dataRoot:string):string|undefined {
 }
 /** DSH prepares a profile-scoped optimization runtime under dataRoot: only with a real scope. */
 export function mainDshScopeAvailable(identity:DesktopMainIdentity):boolean {return identity.scope!=='unavailable';}
+
+function canonicalArtifactPresent(path:string):boolean {
+ try{lstatSync(path);return true;}catch(raw){return (raw as NodeJS.ErrnoException).code!=='ENOENT';}
+}

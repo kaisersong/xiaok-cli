@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../utils/builtin-sqlite.js';
 import { acquireSaveLock } from './mutation-lock.js';
 import {sessionReadSdk,sessionReadStatKind,sessionReadMissing} from './source-read-sdk.js';
 const executionSdkGet=Reflect.get;
@@ -68,12 +69,12 @@ export function createSessionExecutionAuthority(options: { root: string; session
     const waiter = queue.shift(); if (!waiter) return;
     waiter.signal?.removeEventListener('abort', waiter.abort!);
     if (waiter.signal?.aborted) { invocations.delete(waiter.invocationId); waiter.reject(waiter.signal.reason); pump(); return; }
-    let db: import('better-sqlite3').Database | undefined;
+    let db: import('../../../utils/builtin-sqlite.js').Database | undefined;
     try {
       const releaseRoot = acquireSaveLock(join(root, '.session-store-lock'));
       try {
       // Optional native import is reached only by explicitly enabled mechanisms.
-      const Database = requireNative('better-sqlite3') as typeof import('better-sqlite3');
+      const Database = BuiltinDatabase as typeof BuiltinDatabase;
       if (!existsSync(path)) { try { const fd = openSync(path, 'wx', 0o600); closeSync(fd); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
       db = new Database(path, { timeout: 0 });
       db.pragma('journal_mode = DELETE'); db.pragma('synchronous = FULL'); db.exec('BEGIN EXCLUSIVE');
@@ -140,8 +141,8 @@ export function acquireSessionStoreExecutionGuard(rootDirectory: string, session
   try { sessionReadSdk(sourceContext,'stat',lstatSync,[path]); exists = true; } catch (error) { if (!sessionReadMissing(error)) throw error; }
   if (!exists) return releaseRoot;
   if (sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[directory]),'symlink') || sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[path]),'symlink') || !sessionReadStatKind(sessionReadSdk(sourceContext,'stat',lstatSync,[path]),'file')) throw Error('session_execution_lock_path');
-  const Database = sessionReadSdk(sourceContext,'callable',requireNative,['better-sqlite3']) as typeof import('better-sqlite3');
-  const db = sessionReadSdk(sourceContext,'db-open',()=>new Database(path, { timeout: 0, fileMustExist: true }),[]) as import('better-sqlite3').Database;
+  const Database = sessionReadSdk(sourceContext,'callable',()=>BuiltinDatabase,[]) as typeof BuiltinDatabase;
+  const db = sessionReadSdk(sourceContext,'db-open',()=>new Database(path, { timeout: 0, fileMustExist: true }),[]) as import('../../../utils/builtin-sqlite.js').Database;
   const close=()=>{if(sourceContext===undefined){db.close();return;}const method=sessionReadSdk(sourceContext,'db-method',executionSdkGet,[db,'close'],db);sessionReadSdk(sourceContext,'db-close',method,[],db);sessionReadSdk(sourceContext,'db-open-state',executionSdkGet,[db,'open'],db);};
   try {if(sourceContext===undefined)db.exec('BEGIN EXCLUSIVE');else{const execute=sessionReadSdk(sourceContext,'callable',executionSdkGet,[db,'exec'],db);sessionReadSdk(sourceContext,'db-exec',execute,['BEGIN EXCLUSIVE'],db);sessionReadSdk(sourceContext,'db-transaction',executionSdkGet,[db,'inTransaction'],db);}}catch(error){try{close();}catch(cleanupError){if(sourceContext!==undefined)throw new AggregateError([error,cleanupError],'source_execution_guard_and_close_failed',{cause:error});throw cleanupError;}throw error;}
   return () => { try { close(); } finally { releaseRoot(); } };

@@ -6,7 +6,7 @@ import {createPrimitiveCapacityLedger} from '../../support/capacity-primitive-le
 import * as replacementLedger from '../../../src/runtime/verification/shared-capacity-ledger.js';
 import {type CapacityMetadataReplacementRequest,type CapacityOwner,type CapacityMetadataReplacementCommitContext} from '../../../src/runtime/verification/shared-capacity-ledger.js';
 import {it,expect,afterEach,vi} from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';

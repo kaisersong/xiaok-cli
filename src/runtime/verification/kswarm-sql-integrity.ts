@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertNativeSqliteProducerTableKinds,assertNativeSqliteStoredProducerColumns} from './native-sqlite-census.js';
 /** The one original controller trigger. External source DB triggers are not admitted here. */
 export const PUBLICATION_SETTLEMENT_FENCE_SQL="CREATE TRIGGER publication_unapproved_settlement_fence BEFORE INSERT ON settlement_decisions\n WHEN EXISTS(SELECT 1 FROM publication_operations p WHERE json_extract(p.review_json,'$.tuple.operationId')=NEW.operation_id AND p.state='not_approved')\n BEGIN SELECT CASE WHEN EXISTS(SELECT 1 FROM publication_operations p WHERE json_extract(p.review_json,'$.tuple.operationId')=NEW.operation_id AND p.state='not_approved' AND p.owner_key=NEW.owner_key AND json_extract(p.review_json,'$.tuple')=NEW.tuple_json) THEN RAISE(ABORT,'publication_operation_not_approved') ELSE RAISE(ABORT,'publication_operation_tuple_binding') END; END";

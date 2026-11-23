@@ -4,7 +4,7 @@ import {PUBLICATION_SETTLEMENT_FENCE_SQL} from './kswarm-sql-integrity.js';
 import {parseIntentHostSubject,intentHostSubjectOwner} from './intent-host-subject.js';
 import {intentContractDependencies} from './intent-contract-enrollment.js';
 import {createHash,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertVerificationCompletionDatabase,assertVerificationCompletionCompositionDatabase,type createVerificationCompletionComposition} from './completion-composition.js';
 import {assertApprovedVerificationOperationsDatabase,type createApprovedVerificationOperations} from './approved-verification-operation.js';
 import type {createReceiverTransport} from './receiver-transport.js';

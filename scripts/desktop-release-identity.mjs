@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { applyMacOSMinimumRelease } from './macos-release-policy.mjs';
 const OWNER = 'kaisersong';
 const NAME = 'xiaok-cli';
 const REPO = OWNER + '/' + NAME;
@@ -154,6 +155,7 @@ export function runReleaseGate(action) {
   } else if (action === 'draft') draft(identity);
   else if (action.startsWith('upload-')) {
     const files = assets(identity, action === 'upload-mac' ? 'mac' : 'windows');
+    if (action === 'upload-mac') applyMacOSMinimumRelease(join('desktop', 'release', 'latest-mac.yml'));
     freshRemote(identity.tag, identity.sha); assertDraft(identity.tag, releaseState(identity.tag));
     gh(['release', 'upload', identity.tag, ...files, '--clobber']);
     try { freshRemote(identity.tag, identity.sha); assertDraft(identity.tag, releaseState(identity.tag)); }

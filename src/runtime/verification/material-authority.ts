@@ -3,7 +3,7 @@ import {readDockerReservationHandoff} from '../isolated-execution/docker-runner.
 import type {QuiescenceExpectation} from '../isolated-execution/physical-quiescence.js';
 import {readBrokerStagingCapacitySource} from '../isolated-execution/broker-staging.js';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import type {ControllerPeer} from './controller-public-daemon.js';
 import type {ReceiverClockEvidence} from './receiver-store.js';
 import {parseValidationMaterialDraft,type ValidationMaterialReview,type PrivateMaterialHandle,type ValidationMaterialInvocation} from './product-material-authorization.js';

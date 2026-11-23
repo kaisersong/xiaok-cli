@@ -1844,13 +1844,13 @@ describe('Intent Broker delegated recovery', () => {
 });
 
 describe('sidecar environment launch boundaries', () => {
-  it('filters both direct spawns and passes complete owner environments', async () => {
+  it.each([true,false])('filters both direct spawns and passes complete owner environments (scoped=%s)', async scoped => {
     const root = mkdtempSync(join(tmpdir(), 'sidecar-env-'));
     const broker = join(root, 'broker.js'), ks = fixtureKSwarmEntry(root, 'ks.js');
     writeFileSync(broker, '// broker'); writeFileSync(ks, '// kswarm');
     for (const [key, value] of Object.entries({ XIAOK_CONFIG_DIR: root, BROKER_SERVER_PATH: broker, KSWARM_SERVER_PATH: ks,
       XIAOK_CONVERSATION_ACTIVITY: '0', GH_TOKEN: 'fake-gh', ANTHROPIC_API_KEY: 'fake-key',
-      KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh' })) vi.stubEnv(key, value);
+      KSWARM_DESKTOP_PROFILE_ID:'forged-parent',KSWARM_DESKTOP_WORKSPACE_ID:'forged-parent',KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh' })) vi.stubEnv(key, value);
     const electron = Object.getOwnPropertyDescriptor(process.versions, 'electron');
     Object.defineProperty(process.versions, 'electron', { value: 'test', configurable: true });
     const launched = new Set<string>();
@@ -1861,7 +1861,7 @@ describe('sidecar environment launch boundaries', () => {
         { status: url.pathname === '/health' && !launched.has(name) ? 503 : 200 });
     }));
     const projectScope={profileId:'a'.repeat(64),workspaceId:'b'.repeat(64)};
-    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null, desktopProjectScope:projectScope });
+    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null, ...(scoped?{desktopProjectScope:projectScope}:{}) });
     projectScope.workspaceId='c'.repeat(64);
     const check = (env: NodeJS.ProcessEnv, name: string) => {
       expect(env).toMatchObject({ KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh', ELECTRON_RUN_AS_NODE: '1' });
@@ -1869,7 +1869,7 @@ describe('sidecar environment launch boundaries', () => {
       expect(env.INTENT_BROKER_KSWARM_TOKEN).toEqual(expect.any(String));
       if (name === 'broker') { expect(env.PORT).toBe('4318'); expect(env.INTENT_BROKER_DESKTOP_TOKEN).toBe(service.getIntentBrokerRoomToken()); }
       else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken());
-        expect(env.KSWARM_DESKTOP_PROFILE_ID).toBe('a'.repeat(64));expect(env.KSWARM_DESKTOP_WORKSPACE_ID).toBe('b'.repeat(64)); }
+        if(scoped){expect(env.KSWARM_DESKTOP_PROFILE_ID).toBe('a'.repeat(64));expect(env.KSWARM_DESKTOP_WORKSPACE_ID).toBe('b'.repeat(64));}else{expect(env).not.toHaveProperty('KSWARM_DESKTOP_PROFILE_ID');expect(env).not.toHaveProperty('KSWARM_DESKTOP_WORKSPACE_ID');} }
     };
     try {
       await service.start(); expect(spawnMock).toHaveBeenCalledTimes(2);

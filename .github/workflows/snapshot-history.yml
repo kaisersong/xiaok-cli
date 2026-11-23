@@ -5,6 +5,7 @@ on:
       - 'src/runtime/task-host/**'
       - 'src/runtime/verification/**'
       - 'tests/runtime/task-host/**'
+      - 'tests/runtime/verification/**'
       - 'package*.json'
       - 'tsconfig*.json'
       - 'vitest*.config.*'
@@ -27,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, windows-2022]
-        node: ['22.14.0', '24.16.0']
+        node: ['22.22.1', '24.16.0']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,5 +55,8 @@ jobs:
           .test-dist/tests/runtime/task-host/snapshot-store-close-physical.test.js
           .test-dist/tests/runtime/task-host/snapshot-store-windows-temp-identity.test.js
           .test-dist/tests/runtime/task-host/snapshot-store-ordinary-acl-scope.test.js
+          .test-dist/tests/runtime/verification/ordinary-route-root-acl-metadata.test.js
+          .test-dist/tests/runtime/verification/ordinary-route-unscoped-acl-darwin.test.js
+          .test-dist/tests/runtime/verification/migration-ancestor-acl.test.js
           .test-dist/tests/runtime/task-host/snapshot-protection-worker.test.js
           --maxWorkers=1 --no-file-parallelism

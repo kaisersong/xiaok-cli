@@ -3,7 +3,12 @@ import {readFileSync} from 'node:fs';
 import {resolve,dirname,basename} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import ts from 'typescript';
-export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='64b1365c59a30d781f898f5abc5be58e406cdfb3286b8485bf401ba998cffb65';
+// Reviewed 1.6.4 fixed-Node launches and credential pre-probe update the file.
+// Prior source 64b1365c59a30d781f898f5abc5be58e406cdfb3286b8485bf401ba998cffb65; both observed candidate functions are byte-identical.
+// Reviewed 1.6.5 inventory-only startup change; both target functions remain byte-identical.
+// Equivalence: handoff/desktop-history-candidate-source-equivalence.json; prior pin retained there.
+// Reviewed local archive wiring; both observed target functions are byte-identical to dd510154.
+export const ORIGINAL_SERVICES_CANDIDATE_SOURCE_SHA256='de91e86501e38e8821c0ff14607c0ee7343993335e22f33f4844be8c8ead8e13';
 const alias='__fixedOriginalCandidateObservation';
 const targets=[['runKSwarmHandoffTask','kswarm_direct'],['runWorkspaceProjectTask','room_project']];
 function prefix(url){

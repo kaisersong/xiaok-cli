@@ -3,7 +3,7 @@ import {assertControllerMaterialPipelineDatabase} from './material-pipeline.js';
 import {consumeExecutionCommandContext} from '../isolated-execution/docker-runner.js';
 import type {ExecutionWriteContext} from './execution-command-dispatch.js';
 import {createApprovedBlackboxStager} from './approved-blackbox-stager.js';
-import type {Database} from 'better-sqlite3';import {createHash,randomBytes,randomUUID} from 'node:crypto';
+import type {Database} from '../../utils/builtin-sqlite.js';import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {assertInstalledMacEngineHandle,assertInstalledEngineDatabase,type initializeInstalledMacEngine} from './installed-engine.js';import {assertInstalledEngineQualification,type createInstalledEngineQualification} from './installed-engine-qualification.js';
 import type {createVerificationBlobBudget} from './blob-budget.js';import type {createControllerMaterialPipeline} from './material-pipeline.js';import type {ControllerPeer} from './controller-public-daemon.js';import type {ValidationMaterialInvocation} from './product-material-authorization.js';import {canonicalVerificationJson as json} from './protocol.js';
 import {DockerEngineTransport} from '../isolated-execution/docker-engine-transport.js';import {createDockerRunner} from '../isolated-execution/docker-runner.js';import type {PhysicalQuiescenceReceipt,QuiescenceAuthority,QuiescenceExpectation} from '../isolated-execution/physical-quiescence.js';

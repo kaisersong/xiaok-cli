@@ -1,7 +1,7 @@
 import {isKSwarmOwnerIdentity} from './kswarm-host-subject.js';
 import {isOrdinaryRouteJobScopeReuseEnabled,ordinaryRouteCachedInJob,readWindowsInstallationAbsence,readWindowsInstallationAbsenceInJob,rememberOrdinaryRouteInJob,type WindowsAbsenceJobScope} from './windows-installation-absence.js';
 import {createHash} from 'node:crypto';
-import {constants,closeSync,fstatSync,lstatSync,openSync,readFileSync,type Stats} from 'node:fs';
+import {constants,closeSync,fstatSync,lstatSync,statfsSync,openSync,readFileSync,type Stats} from 'node:fs';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {canonicalVerificationJson} from './protocol.js';
@@ -47,9 +47,41 @@ function rootAncestors(input:string){
  }
  return paths;
 }
+// Only the fixed, absent-install path may reuse ACL facts. Root-owned APFS/HFS
+// ancestors cannot be changed by the interactive uid without changing their
+// inode metadata. Every call still checks that metadata and installation absence;
+// this is neither a cached route decision nor Source/execution authority.
+let ordinaryAncestorAclMemo:string|undefined;
+function ordinaryAbsentAncestors(base:string,jobScope?:WindowsAbsenceJobScope):string[]{
+ if(jobScope||process.platform!=='darwin'){
+  const paths=rootAncestors(dirname(base));
+  if(probe(base))throw Error('profile_installation_changed');
+  return paths;
+ }
+ try{
+  const rows:Array<{path:string;stat:ReturnType<typeof rootAncestorStat>}>=[];
+  for(let path=dirname(base);;){rows.push({path,stat:rootAncestorStat(path)});const parent=dirname(path);if(parent===path)break;path=parent;}
+  const signature=()=>rows.map(({path,stat})=>[path,stat.dev,stat.ino,stat.uid,stat.gid,stat.mode,stat.ctimeNs].map(String).join(':')).join('|');
+  let localMetadata=rows.every(({stat})=>[stat.dev,stat.ino,stat.uid,stat.gid,stat.mode,stat.ctimeNs].every(value=>typeof value==='bigint'));
+  for(const row of rows){
+   try{const type=statfsSync(row.path,{bigint:true}).type;if(type!==0x1an&&type!==0x11n)localMetadata=false;}
+   catch{localMetadata=false;}
+  }
+  const key=signature(),paths=rows.map(row=>row.path);
+  if(!localMetadata||ordinaryAncestorAclMemo!==key)acl(...paths);
+  for(const row of rows){
+   const current=rootAncestorStat(row.path);
+   if(current.dev!==row.stat.dev||current.ino!==row.stat.ino||current.uid!==row.stat.uid||current.gid!==row.stat.gid
+    ||current.mode!==row.stat.mode||current.ctimeNs!==row.stat.ctimeNs)throw Error('migration_marker_ancestor_changed');
+  }
+  if(probe(base))throw Error('profile_installation_changed');
+  ordinaryAncestorAclMemo=localMetadata?key:undefined;
+  return paths;
+ }catch(error){ordinaryAncestorAclMemo=undefined;throw error;}
+}
 type OrdinaryRouteAclProbeListener=(paths:readonly string[])=>void;
 let ordinaryRouteAclProbeListener:OrdinaryRouteAclProbeListener|undefined;
-/** Test seam: notified when the ordinary-route ancestor ACL probe actually runs (linux included). */
+/** Test seam: ordinary-route ancestor validation (including write-job ACL probes). */
 export function setOrdinaryRouteAclProbeListener(listener?:OrdinaryRouteAclProbeListener):void{ordinaryRouteAclProbeListener=listener;}
 function rootAncestorStat(path:string){
  const stat=lstatSync(path,{bigint:true});
@@ -111,7 +143,8 @@ export function readInstalledCurrentProfile(jobScope?:WindowsAbsenceJobScope):Re
   if(!['darwin','linux'].includes(process.platform))throw Error('profile_installed_platform');
   const base=process.platform==='darwin'?'/Library/Application Support/xiaok-verification':'/var/lib/xiaok-verification';
   if(isOrdinaryRouteJobScopeReuseEnabled()&&jobScope&&ordinaryRouteCachedInJob(jobScope))return Object.freeze({kind:'ordinary'});
-  if(!probe(base)){const paths=rootAncestors(dirname(base));ordinaryRouteAclProbeListener?.(paths);if(jobScope)rememberOrdinaryRouteInJob(jobScope);return Object.freeze({kind:'ordinary'});}
+  if(!probe(base)){const paths=ordinaryAbsentAncestors(base,jobScope);ordinaryRouteAclProbeListener?.(paths);if(jobScope)rememberOrdinaryRouteInJob(jobScope);return Object.freeze({kind:'ordinary'});}
+  if(!jobScope)ordinaryAncestorAclMemo=undefined;
   if(process.platform!=='darwin')throw Error('profile_installed_account_adapter_unavailable');
   const uid=process.getuid?.();if(!uid||process.geteuid?.()!==uid)throw Error('profile_installed_user');
   const manifestPath=join(base,'deployment.json');assertRootProtectedFile(manifestPath);const manifest=parseInstalledDeploymentManifest(readSmall(manifestPath,0,65536));
@@ -124,5 +157,5 @@ export function readInstalledCurrentProfile(jobScope?:WindowsAbsenceJobScope):Re
   const root=join(base,'migrations'),target=join(root,'principals',String(uid)+'.json');assertServiceProtectedMarkerPath(target,{root,serviceUid:manifest.serviceUid,kind:'file'});
   const index=parsePublicProfileIndex(readSmall(target,manifest.serviceUid));if(index.uid!==uid||index.accountId!==identity.accountGeneration.toLowerCase()||index.authorityId!==manifest.authorityId)throw Error('profile_installed_binding');
   assertRootProtectedFile(manifestPath);if(canonicalVerificationJson(parseInstalledDeploymentManifest(readSmall(manifestPath,0,65536)))!==canonicalVerificationJson(manifest))throw Error('profile_installed_changed');return Object.freeze({kind:'protected',index});
- }catch{return Object.freeze({kind:'unavailable',reason:'migration_authority_unavailable'});}
+ }catch{if(!jobScope)ordinaryAncestorAclMemo=undefined;return Object.freeze({kind:'unavailable',reason:'migration_authority_unavailable'});}
 }

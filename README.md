@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Latest release: 1.6.2 (November 5, 2026).** Get Desktop installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2), or install the CLI with `npm install -g xiaokcode@1.6.2`. This release improves Chinese segmentation initialization and memory-store shutdown, and fixes a conversation cleanup crash. Post-release source changes are listed separately in [Version History](#version-history).
+**1.6.5.** This source version fixes Desktop startup with legacy inbox judgments and large historical task inventories. See the [release notes](release-notes/1.6.5.md) for validation and remaining limits. Published Desktop downloads remain available from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest); the published CLI can be installed with `npm install -g xiaokcode`.
 
 ---
 
@@ -126,7 +126,7 @@ The CLI can ask about material delegation choices when interactive input is avai
 
 ### Requirements
 
-- **CLI:** Node.js **22.14 or later**.
+- **CLI:** Node.js **22.22.1+ (22.x), or 24+**.
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
@@ -146,7 +146,7 @@ The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`.
 > **npm >= 11.16 users:** npm blocks dependency install/postinstall scripts by default. If you see a warning like `install scripts not yet covered by allowScripts`, install with:
 >
 > ```bash
-> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
 > ```
 >
 > The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). The example also allows the CLI health check, `node-pty` and SQLite install scripts. For persistent policy, merge the required package names into your existing allowlist; do not overwrite unrelated entries. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
@@ -583,7 +583,7 @@ Build freshness checks identify the owning generated resource; rebuild that owne
 
 | Platform | CLI | Published Desktop | Computer Use |
 |---|---|---|---|
-| macOS Apple Silicon | Supported | DMG / ZIP | Supported with permissions |
+| macOS Apple Silicon (13.5 or later) | Supported | DMG / ZIP | Supported with permissions |
 | macOS Intel | CLI/source use | No Intel asset in the verified latest release | macOS-only runtime requirements apply |
 | Windows x64 | Supported; terminal/hook details vary | Installer | Unavailable |
 | Linux | CLI/source use | Build targets exist; no asset in the verified latest release | Unavailable |
@@ -600,6 +600,10 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.6.4
+
+Windows SID/ACL profile recovery, Kimi public-context resume, pinned Node child processes and Electron fuse hardening, private Windows state creation, local-service diagnostics, connection probes, terminal input and Linux session locks. macOS requires 13.5 or later. See [1.6.4 details](release-notes/1.6.4.md).
 
 ### Main-branch changes (not included in 1.6.2)
 

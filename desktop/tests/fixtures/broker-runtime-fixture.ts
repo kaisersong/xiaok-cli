@@ -5,7 +5,7 @@ const lock=JSON.parse(readFileSync(join(desktopRoot,'resources','broker-runtime-
 /** Ordinary file-identity fixture only; these bytes grant no Native authority. */
 export function populateBrokerRuntimeFixture(dir:string,target:'darwin-arm64'|'win32-x64') {
   const entry=lock.targets[target];
-  const inputs=process.env.XIAOK_TEST_BROKER_RUNTIME_INPUTS??resolve(desktopRoot,'..','.artifacts','broker-runtimes');
+  const inputs=process.env.XIAOK_TEST_BROKER_RUNTIME_INPUTS??resolve(desktopRoot,'..','.artifacts','broker-runtimes',lock.node);
   for(const name of [entry.executable,'LICENSE'])copyFileSync(join(inputs,target,name),join(dir,name),constants.COPYFILE_FICLONE);
   // prepare-broker-runtime writes the cached executable as 0o500, which Windows maps to the
   // read-only attribute and copyFileSync preserves; the fixture must own a writable copy.

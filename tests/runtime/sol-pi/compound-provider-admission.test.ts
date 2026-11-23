@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {afterEach,it,expect,vi} from 'vitest';
 import {createRequire} from 'node:module';
@@ -64,7 +65,7 @@ it('recognizes only this live private issuer reservations and never treats resto
 });
 it('an actual lock-close failure after durable reserve never delivers a usable ticket and records pre-send cancellation',async()=>{
  const {store,binding}=await fixture();
- const Database=createRequire(import.meta.url)('better-sqlite3'),close=Database.prototype.close;let armed=false;
+ const Database=BuiltinDatabase,close=Database.prototype.close;let armed=false;
  const unsubscribe=store.onCommit(snapshot=>{if(snapshot.sessionId==='child'&&snapshot.compoundOperations?.providerAttempts?.some(row=>row.transportState==='reserved'))armed=true;});
  const spy=vi.spyOn(Database.prototype,'close').mockImplementation(function(this:any){const result=close.call(this);if(armed){armed=false;throw Error('injected-reserve-release-error');}return result;});
  try{

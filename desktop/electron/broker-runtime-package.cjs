@@ -13,11 +13,11 @@ const manifestKeys = ['schema', 'target', 'node', 'sqlite', 'executable', 'archi
 function targetEntry(target) {
   if (!Object.hasOwn(lock.targets, target)) return null;
   const entry = lock.targets[target];
-  if (lock.schema !== 'xiaok-broker-runtime-lock/v1' || lock.node !== '24.19.0' || lock.sqlite !== '3.53.3') throw Error('broker_runtime_lock');
-  const prefix = `node-v${lock.node}-${target === 'darwin-arm64' ? 'darwin-arm64' : 'win-x64'}`;
-  const exe = target === 'darwin-arm64' ? 'node' : 'node.exe';
-  if (!['darwin-arm64', 'win32-x64'].includes(target) || entry.archive !== `${prefix}.${target === 'darwin-arm64' ? 'tar.gz' : 'zip'}` || entry.executable !== exe || entry.member !== `${prefix}/${target === 'darwin-arm64' ? 'bin/' : ''}${exe}` || entry.license !== `${prefix}/LICENSE`) throw Error('broker_runtime_lock');
-  if(target==='darwin-arm64'&&entry.minimumDarwinRelease!=='22.6.0')throw Error('broker_runtime_lock');
+  if (lock.schema !== 'xiaok-broker-runtime-lock/v1' || lock.node !== '24.22.3' || lock.sqlite !== '3.54.1') throw Error('broker_runtime_lock');
+  const prefix = `node-v${lock.node}-${target === 'win32-x64' ? 'win-x64' : target}`;
+  const exe = target === 'win32-x64' ? 'node.exe' : 'node';
+  if (!['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'].includes(target) || entry.archive !== `${prefix}.${target === 'win32-x64' ? 'zip' : 'tar.gz'}` || entry.executable !== exe || entry.member !== `${prefix}/${target === 'win32-x64' ? '' : 'bin/'}${exe}` || entry.license !== `${prefix}/LICENSE`) throw Error('broker_runtime_lock');
+  if(target.startsWith('darwin-')&&entry.minimumDarwinRelease!=='22.6.0')throw Error('broker_runtime_lock');
   for (const key of ['archiveSha256', 'executableSha256', 'licenseSha256']) if (!/^[a-f0-9]{64}$/.test(entry[key])) throw Error('broker_runtime_lock');
   for (const key of ['archiveSize', 'executableSize', 'licenseSize']) if (!Number.isSafeInteger(entry[key]) || entry[key] < 1) throw Error('broker_runtime_lock');
   return entry;
@@ -68,7 +68,7 @@ function resolvePackagedBrokerRuntime(options) {
   if (!options.isPackaged) return null;
   const target = `${options.platform ?? process.platform}-${options.arch ?? process.arch}`;
   if (!targetEntry(target)) return null; // Existing unsupported profiles keep the ordinary legacy resolver.
-  if(target==='darwin-arm64'&&process.platform==='darwin'){
+  if(target.startsWith('darwin-')&&process.platform==='darwin'){
     const match=/^(\d+)\.(\d+)\.(\d+)$/.exec(hostRelease());
     // Official Mach-O requires macOS13.5 (Darwin22.6). An unknown/older
     // host retains the existing ordinary resolver, never a pinned compatibility claim.
@@ -83,4 +83,4 @@ function brokerRuntimeMatchesHealth(body, runtime) {
   const actual = body?.service?.runtime;
   return actual?.node === runtime.expected.node && actual.sqlite === runtime.expected.sqlite && actual.executableSha256 === runtime.expected.executableSha256 && typeof actual.execPath === 'string' && samePath(actual.execPath, runtime.command);
 }
-module.exports = Object.freeze({resolvePackagedBrokerRuntime, brokerRuntimeMatchesHealth, assertRuntimeFileReadsKnown, targetEntry, expectedManifest, verifyRuntimeDirectory, packageDirectory});
+module.exports = Object.freeze({resolvePackagedBrokerRuntime, brokerRuntimeMatchesHealth, assertRuntimeFileReadsKnown, targetEntry, expectedManifest, verifyRuntimeDirectory, packageDirectory, sanitizeRuntimeEnv});

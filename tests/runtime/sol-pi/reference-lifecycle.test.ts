@@ -51,7 +51,7 @@ it('dirty recovery starts the storage retention clock once without forging termi
  now=2001+7*86400000;service=createObservationService(options);expect(existsSync(join(root,'observations',unpinned.id+'.body'))).toBe(false);expect(existsSync(join(root,'observations',pinned.id+'.body'))).toBe(true);service.dispose();
 });
 
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 it('rejects oversized pages and unknown WAL without retaining a database owner',()=>{
  const root=mkdtempSync(join(tmpdir(),'solpi-receipt-quota-'));roots.push(root);const file=join(root,'reference-deletions.sqlite');const db=new Database(file);db.exec('CREATE TABLE padding(content BLOB)');db.prepare('INSERT INTO padding(content) VALUES(zeroblob(?))').run(16*1024*1024+128*1024);db.close();
  expect(()=>new ReferenceDeletionReceiptStore(root)).toThrow(/quota/);const other=new Database(file);other.exec('BEGIN EXCLUSIVE');other.exec('ROLLBACK');other.close();

@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import {createAssistantDesktopAdmission} from './assistant-desktop-admission.js';
 import {createAssistantThreadTargets} from './assistant-launch-thread-target.js';
 import {readAssistantTaskSource} from './assistant-task-source.js';
@@ -10,6 +11,7 @@ import {ContinuitySdkCustody} from './context-continuity/sdk-custody.js';
 import type {GoalControlReceipt} from '../shared/goal-control.js';
 import {createOriginalCanonicalMainSource} from './context-continuity/canonical-service-source.js';
 import {createContinuityHistoryPort} from './context-continuity/history-port.js';
+import {createLocalLegacyTaskArchive} from './context-continuity/local-legacy-task-archive.js';
 import {readCurrentOriginalTaskRunnerResourceContext,readOriginalTaskRunnerResourceContextForHost} from '../../src/runtime/task-host/task-runtime-host.js';
 import {createContinuityMainBinding} from './context-continuity/main-binding.js';
 import {markMintedLocalThread} from './context-continuity/history.js';
@@ -2032,10 +2034,11 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
               platform: process.platform,
               preferredPython: managedPythonCommand,
             }) : undefined;
+            const nodeRuntime=isNodeServer?resolveNodeChildRuntime({...process.env,...baseEnv},true):undefined;
             const command = pythonLaunch
               ? pythonLaunch.command
               : isNodeServer
-                ? (process.env.XIAOK_NODE_CMD || process.execPath)
+                ? nodeRuntime!.command
                 : launch.command;
             resolvedCommand = command;
             // Design v58 §6.1: no Xiaok-owned daemon launch. The official
@@ -2043,15 +2046,15 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
             // auto-relaunch, so a second `open -n` owner is removed here.
             const runtimeEnv = pythonLaunch
               ? pythonLaunch.env
-              : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
-                ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
+              : isNodeServer
+                ? nodeRuntime!.env
                 : isCuaServer && process.platform === 'win32'
                   ? { ...(baseEnv ?? {}), CUA_DRIVER_RS_TELEMETRY_ENABLED: 'false', CUA_DRIVER_RS_UPDATE_CHECK: 'false', CUA_DRIVER_TELEMETRY_HOME: join(servicesOptions.dataRoot, 'runtime', 'cua-telemetry') } : baseEnv;
             if (isCuaServer) computerUseActivationSignal?.throwIfAborted();
             const connection = await createMcpClientConnection(server.name, {
               type: 'stdio',
               command,
-              args: pythonLaunch?.args ?? launch.args,
+              args: pythonLaunch?.args ?? (nodeRuntime?nodeChildArgs(nodeRuntime,launch.args):launch.args),
               env: runtimeEnv,
               timeout: server.timeout,
               protocol: server.protocol,
@@ -2547,7 +2550,18 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
   contextContinuity.requireEffectInventory();
-  const multiAgentReady=(dshStartup?dshStartup.state.recoveryReady:(multiAgentService?.initialize(host)??Promise.resolve())).then(()=>contextContinuity.auditEffectInventory(async()=>{if(legacyEffectInventoryFailure)throw legacyEffectInventoryFailure.raw;return continuityAuditSdk.invoke<TaskSnapshot[]>(FileTaskSnapshotStore.prototype.inspectPersistedInventory,snapshotStore,[]);},legacyEffectOwnerPresent));
+  const multiAgentReady=(dshStartup?dshStartup.state.recoveryReady:(multiAgentService?.initialize(host)??Promise.resolve())).then(()=>contextContinuity.auditEffectInventory(async accept=>{
+    if(legacyEffectInventoryFailure)throw legacyEffectInventoryFailure.raw;
+    const ids=await continuityAuditSdk.invoke<string[]>(FileTaskSnapshotStore.prototype.inspectPersistedTaskIds,snapshotStore,[]);
+    for(const id of ids){
+      const snapshot=await continuityAuditSdk.invoke<TaskSnapshot|null>(FileTaskSnapshotStore.prototype.inspectPersistedTask,snapshotStore,[id]);
+      if(!snapshot)throw new Error('task_inventory_unavailable');
+      accept(snapshot);
+    }
+    const finalIds=await continuityAuditSdk.invoke<string[]>(FileTaskSnapshotStore.prototype.inspectPersistedTaskIds,snapshotStore,[]);
+    const expected=new Set(ids);
+    if(finalIds.length!==ids.length||finalIds.some(id=>!expected.has(id)))throw new Error('task_inventory_changed');
+  },legacyEffectOwnerPresent));
   // Existing ready remains recovery-complete. Native A construction/schema is
   // separate so the original Root composition never waits on its own recovery.
   const dshReady:Promise<void>|undefined=dshStartup?modelProbeApply(modelProbeThen,multiAgentReady,[()=>dshStartup.state.constructionReady]) as Promise<void>:undefined;
@@ -3928,6 +3942,22 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   let continuityReadsClosed=false;
   const continuityHistory=createContinuityHistoryPort({store:snapshotStore,runtime:contextContinuity,
     assertOpen:()=>{if(continuityReadsClosed)throw Error('task_history_unavailable');},authorize:authorizeLocalTaskActor,assertSnapshot:assertContinuitySnapshot});
+  const assertLocalArchiveActor=(actor:NativeActor)=>{
+    if(continuityReadsClosed||actor?.requestSource!=='user'||actor.actorId!==continuityReadActor.actorId)throw Error('task_actor_forbidden');
+    if(!options.mainIdentity?.continuity||contextContinuity.port().actor.profileId!==options.mainIdentity.continuity.profileId)throw Error('task_scope_forbidden');
+  };
+  const localLegacyArchive=createLocalLegacyTaskArchive({store:snapshotStore,
+    assertOpen:()=>{if(continuityReadsClosed)throw Error('local_legacy_archive_unavailable');},
+    authorize:async(taskId,actor)=>{assertLocalArchiveActor(actor);if(!/^task_[A-Za-z0-9_-]+$/.test(taskId))throw Error('invalid_task_id');await multiAgentReady;assertLocalArchiveActor(actor);contextContinuity.assertTaskReadable(taskId);},
+    assertSnapshot:(snapshot,actor)=>{
+      assertLocalArchiveActor(actor);contextContinuity.assertTaskReadable(snapshot.taskId);
+      if(snapshot.executionScope||snapshot.inputPreparation||codexTasks.owns(snapshot.taskId))throw Error('local_legacy_archive_unavailable');
+      const historicalThread=snapshot.context?.threadId?multiAgentStore?.getThread(snapshot.context.threadId):null;
+      if(historicalThread&&(historicalThread.profileId!==multiAgentProfileId||(historicalThread.deleteState??'none')!=='none'))throw Error('task_scope_forbidden');
+      const p=contextContinuity.port();p.service.store.transaction(()=>{
+        for(const table of ['task_bindings','task_public_inputs','task_presentation_sources','guarded_effect_runs'])if(p.service.store.db.prepare(`SELECT 1 FROM ${table} WHERE task_id=?`).get(snapshot.taskId))throw Error('local_legacy_archive_unavailable');
+      });
+    }});
 
   contextContinuity.configureLegacy(async(taskId,threadId)=>{
     if(continuityReadsClosed||!/^task_[A-Za-z0-9_-]+$/.test(taskId)||codexTasks.owns(taskId))throw Error('source_offline');
@@ -4095,7 +4125,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
       if (!activityCloseError && executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) {
         if(dshLease)await finishOriginalMainDshServiceStore(dshLease);else multiAgentStore?.close();
       }
-      const continuityErrors:unknown[]=[];for(const close of [()=>activityDisclosure?.close(),()=>canonicalSource?.close(),()=>continuityControlSdk.waitKnown(),()=>continuityAuditSdk.waitKnown(),()=>continuityHistory.close(),()=>continuityBinding.close()])try{await close();}catch(raw){continuityErrors.push(raw);}
+      const continuityErrors:unknown[]=[];for(const close of [()=>activityDisclosure?.close(),()=>canonicalSource?.close(),()=>continuityControlSdk.waitKnown(),()=>continuityAuditSdk.waitKnown(),()=>continuityHistory.close(),()=>localLegacyArchive.close(),()=>continuityBinding.close()])try{await close();}catch(raw){continuityErrors.push(raw);}
       const continuityFailure=continuityErrors.length?{raw:continuityErrors.length===1?continuityErrors[0]:new AggregateError(continuityErrors,'continuity_owners_close_unconfirmed',{cause:continuityErrors[0]})}:undefined;
       if(activityCloseError&&continuityFailure)throw new AggregateError([activityCloseError,continuityFailure.raw],'desktop_continuity_close_unconfirmed',{cause:activityCloseError});
       if(continuityFailure)throw continuityFailure.raw;
@@ -4108,7 +4138,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     stopAuxiliary:()=>{
       if(dshStartup)dshStartup.state.close();
       if(dshStartup?.lifecycle)dshStartup.lifecycle.stopOriginalMainDshRuntimeComposition(originalServices,options.dshServiceSources!);
-      continuityReadsClosed=true;continuityHistory.stop();continuityBinding.stopIngress();
+      continuityReadsClosed=true;continuityHistory.stop();localLegacyArchive.stop();continuityBinding.stopIngress();
       stopHarness();void nativeActivity?.close().catch(()=>{});sealKSwarmWorkflowScriptJobs(options.kswarmService);
     },quiesceAuxiliary:async()=>{
       const results=await Promise.allSettled([quiesceHarness(),nativeActivity?.close(),roomConversions.drain(),conversationProjects.drainOriginalTaskReads(),sealAndDrainKSwarmWorkflowScriptJobs(options.kswarmService)]);
@@ -4131,6 +4161,8 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
   const originalServices = {
     readTaskHistory:(taskId:string,actor:NativeActor=continuityReadActor)=>continuityHistory.readTask(taskId,actor),
     assertTaskHistoryCurrent:(value:import('../shared/task-history.js').TaskHistoryRead,actor:NativeActor=continuityReadActor)=>continuityHistory.assertCurrent(value,actor),
+    readLocalLegacyTaskArchive:(taskId:string,actor:NativeActor)=>localLegacyArchive.read(taskId,actor),
+    assertLocalLegacyTaskArchiveCurrent:(value:import('../shared/local-legacy-task-archive.js').LocalLegacyTaskArchive,actor:NativeActor)=>localLegacyArchive.assertCurrent(value,actor),
     prepareCanonicalSource:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[])=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).prepareCanonicalSource(device,ids),
     prepareCanonicalSourceDraft:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[])=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).prepareCanonicalSourceDraft(device,ids),
     bootstrapCanonicalSource:(device:import('./context-continuity/sync-device-runtime.js').DesktopSyncDevice,ids:readonly string[],source:{requestSource:'user'|'agent'|'scheduler'})=>(canonicalSource??=createOriginalCanonicalMainSource(originalServices)).bootstrapCanonicalSource(device,ids,source),
@@ -5446,6 +5478,10 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
         if(event.storageScope.profileId!==binding.storageScope.profileId||event.storageScope.workspaceId!==binding.storageScope.workspaceId||event.principalId!==binding.principalId||event.body.providerId!==captured.providerId||event.body.modelId!==(captured.modelId??null))throw Error('MAIN_MODEL_PROBE_OPERATION_CONFLICT');
         event.assertCurrent();event.assertLocal();
         const path=binding.configPath!;if(modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
+        // Normalize legacy plaintext credentials before freezing the probe snapshot.
+        // The guarded second read still rejects real concurrent config changes.
+        await op.configSdk.sdk<Awaited<ReturnType<typeof loadConfig>>>(loadConfig,undefined,[]);
+        event.assertCurrent();event.assertLocal();
         const before=modelProbeConfigBytes(op.configSdk,path),config=await op.configSdk.sdk<Awaited<ReturnType<typeof loadConfig>>>(loadConfig,undefined,[]);
         const after=modelProbeConfigBytes(op.configSdk,path);if(before!==after||modelProbeResolve(modelProbeConfigPath())!==path)throw Error('MAIN_MODEL_PROBE_CONFIG_CHANGED');
         const providerId=normalizeProviderId(captured.providerId),provider=config.providers[providerId];if(!provider?.apiKey)throw Error('MAIN_MODEL_PROBE_CONFIG_REQUIRED');
@@ -7092,14 +7128,12 @@ async function renderReportArtifactViaBundledMcp({
 }): Promise<Record<string, unknown>> {
   signal?.throwIfAborted();
   mkdirSync(dirname(outputPath), { recursive: true });
-  const command = process.env.XIAOK_NODE_CMD || process.execPath;
-  const runtimeEnv = !process.env.XIAOK_NODE_CMD && process.versions.electron
-    ? { ELECTRON_RUN_AS_NODE: '1' }
-    : undefined;
+  const runtime=resolveNodeChildRuntime(process.env,true);
+  const command=runtime.command,runtimeEnv=runtime.env;
   const connection = await createMcpClientConnection('report-renderer', {
     type: 'stdio',
     command,
-    args: [serverBundlePath],
+    args: nodeChildArgs(runtime,[serverBundlePath]),
     env: runtimeEnv,
     protocol: { mode: 'modern', version: '2026-07-28' },
     timeout: { startup: 30_000, call: 30_000 },

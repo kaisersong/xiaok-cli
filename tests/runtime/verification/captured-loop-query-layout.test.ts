@@ -12,7 +12,7 @@ const closes:Array<()=>unknown>=[];
 afterEach(async()=>{for(const close of closes.splice(0).reverse())await close();});
 afterAll(()=>rmSync(root,{recursive:true,force:true}));
 beforeAll(()=>{
- const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o');
+ const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o');
  execFileSync('clang',['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object],{timeout:30000});
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);
  execFileSync('clang',['-Wall','-Wextra','-Werror','-std=c11',resolve('src/runtime/verification/native/source-lock-custody.c'),'-o',directoryHelper]);

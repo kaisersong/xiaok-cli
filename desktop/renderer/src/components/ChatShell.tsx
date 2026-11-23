@@ -3,7 +3,7 @@ import {mergeAssistantMessages} from '../lib/assistant-message-timeline';
 import {isTaskExecutionInterruption} from '../../../shared/task-interruption';
 import {readTaskInterruption, type InterruptedTask} from '../lib/interrupted-task';
 import {pendingTaskQuestion} from '../lib/pending-task-question';
-import { isAssistantThread,ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
+import { isAssistantThread,ASSISTANT_CHAT_THREAD,LEGACY_ASSISTANT_CHAT_THREAD } from '../../../shared/assistant-inbox-contract';
 import { AssistantWorkOutbox } from './assistant/AssistantWorkOutbox';
 import {emptyNativeQuestionPresentation,nativeQuestionNamespace,nativeQuestionPresentationFromSnapshot,reduceNativeQuestionPresentation,type NativeQuestionPresentation} from '../lib/native-question-state.js';
 import type {UserTaskSubmissionInput} from '../../../shared/user-task-submission-contract.js';
@@ -38,6 +38,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { recoverForDisplay } from '../lib/recover-for-display';
+import { ScheduledRunHistory } from './ScheduledRunHistory';
 import type { TaskPublicPresentation } from '../../../shared/task-history';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
@@ -54,6 +55,7 @@ const log = createLogger('ChatShell');
 const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'html', 'image', 'text', 'a2ui', 'other']);
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
 const HISTORY_PAGE_SIZE = 20;
+const LEGACY_INITIAL_PAGE_SIZE = 4;
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
 function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
@@ -323,7 +325,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   // Wait for the bound task before choosing its execution-state subscription.
   // Native Codex events already arrive through the standard task stream.
   const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
-    thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
+    !!thread && thread.id === taskId && thread.coverage!=='unclaimed' && !thread.currentTaskId?.startsWith('task_codex_'));
   const [repetitionStopped, setRepetitionStopped] = useState(false);
   const repetitionRequestRef = useRef<{ text: string; files?: Array<{ filePath: string; name: string }> } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -344,6 +346,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [localArchivePresent,setLocalArchivePresent]=useState(false);
   const [loadRevision, setLoadRevision] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
@@ -1297,14 +1300,22 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     const ids = page.remaining.slice(-HISTORY_PAGE_SIZE);
     const olderMessages: ChatMessage[] = [];
     const olderEvents: DesktopTaskEvent[] = [];
+    let hasArchive = false;
     const missing: string[] = [];
     for (const id of ids) {
       if (!current()) return;
       try {
-        const { snapshot } = await api.recoverTask(id);
+        const storedThread = threadRef.current;
+        const { snapshot, presentation, archive } = await recoverForDisplay(api, id, undefined, current,
+          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id));
         if (!current()) return;
+        if (archive) {
+          hasArchive = true;
+          olderMessages.push(...archive.messages.map(message => ({ id: `local-archive-${id}-${message.sourceMessageId}`, role: 'assistant' as const, content: message.text })));
+          continue;
+        }
         if (!snapshot) throw Error('history_snapshot_unavailable');
-        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, undefined, true);
+        const replay = replaySnapshot({ ...snapshot, taskId: snapshot.taskId || id }, true, presentation, true);
         olderMessages.push(...replay.msgs);
         olderEvents.push(...replay.events);
       } catch { if (!current()) return; missing.push(id); }
@@ -1312,6 +1323,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     if (!current()) return;
     page.loading = false;
     if (!missing.length) {
+      if (hasArchive) setLocalArchivePresent(true);
       page.remaining = page.remaining.slice(0, -ids.length);
       allEventsRef.current = [...olderEvents, ...allEventsRef.current];
       setMessages(previous => [...olderMessages, ...previous]);
@@ -1399,6 +1411,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setThread(null);
     setStatus('idle');
     setLoadError(null);
+    setLocalArchivePresent(false);
     setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     const refreshing = historyRefresh?.scope === renderScope && historyRefresh.attempt === capturedIntent;
@@ -1445,14 +1458,20 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
-        for (const tid of allTaskIds.slice(-HISTORY_PAGE_SIZE)) {
+        const initialPageSize = threadData.coverage === 'unclaimed' ? LEGACY_INITIAL_PAGE_SIZE : HISTORY_PAGE_SIZE;
+        for (const tid of allTaskIds.slice(-initialPageSize)) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
           try {
-            const { snapshot, presentation, recoveredFromTaskId } = await recoverForDisplay(api, tid,
-              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent);
+            const { snapshot, presentation, recoveredFromTaskId,archive } = await recoverForDisplay(api, tid,
+              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,threadData.coverage==='unclaimed'||!!threadData.legacyTaskIds?.includes(tid));
             if (!loadCurrent()) return;
+            if(archive){
+              setLocalArchivePresent(true);
+              allMessages.push(...archive.messages.map(message=>({id:`local-archive-${tid}-${message.sourceMessageId}`,role:'assistant' as const,content:message.text})));
+              continue;
+            }
             if (snapshot) {
               if (refreshing && snapshot.taskId !== tid) throw new Error('task_identity_mismatch');
               const titlePrompt = presentation === undefined ? snapshot.prompt : presentation?.includeUser ? presentation.prompt : undefined;
@@ -1511,7 +1530,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
         // Now set all state atomically after final check
         setThread(threadData);
-        olderHistoryRef.current.remaining = allTaskIds.slice(0, -HISTORY_PAGE_SIZE);
+        olderHistoryRef.current.remaining = allTaskIds.slice(0, -initialPageSize);
         setOlderHistory({ remaining: olderHistoryRef.current.remaining.length, loading: false, error: '' });
         threadRef.current = threadData;
         if (allMessages.length > 0) {
@@ -1710,7 +1729,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       catch(error){const secret=error instanceof Error&&error.message.includes('credential_secure_input_required');if(secret)setPrompt('');setActionError(secret?t.secureCredentials.errors.credential_secure_input_required:t.chatShell.answerFailed);return false;}
       finally{if(admissionPending.current===renderScope)admissionPending.current=null;}
     }
-    if (thread?.coverage === 'unclaimed' || thread?.legacyTaskIds?.length) { setGoalError(t.contextContinuity.legacyMustClaim); return false; }
+    if ((thread?.coverage === 'unclaimed' && (thread.taskIds.length>0||thread.currentTaskId)) || thread?.legacyTaskIds?.length) { setActionError(t.contextContinuity.legacyMustClaim); return false; }
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
@@ -1795,6 +1814,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       const release = retainObserver(source, api.subscribeTask(newTaskId, (event, coordinate) => handleEvent(event, source, coordinate)));
       if (!current()) { release(); return false; }
       promoteSource(source, release, false);
+      // Main may have established the fixed assistant conversation during the
+      // first submission. Refresh its actual record rather than inferring ownership.
+      void api.getThread(taskId).then(record => {
+        if (!current() || !record || record.id !== taskId || !record.taskIds.includes(newTaskId)) return;
+        threadRef.current = record;
+        setThread(record);
+      }).catch(() => {});
       if(taskId===ASSISTANT_CHAT_THREAD){
         // Main's task creation time is the shared live/replay timeline anchor.
         // Metadata failure leaves an un-timed pending turn; never invent now().
@@ -2278,6 +2304,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         <p>{actionError}</p>
         <button type="button" className="shrink-0 text-xs text-[var(--c-accent)]" onClick={() => setActionError(null)}>{t.chatShell.dismissError}</button>
       </div>}
+      {localArchivePresent&&<aside role="note" className="mx-4 mt-3 shrink-0 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]"><p>{t.contextContinuity.localArchiveReadOnly}</p><button type="button" className="mt-2 text-[var(--c-accent)]" onClick={()=>navigate('/')}>{t.newTask}</button></aside>}
       {status === 'failed' && repetitionStopped && repetitionRequestRef.current && (
         <button type="button" className="px-4 py-2 text-[var(--c-accent)]" onClick={() => {
           setRepetitionStopped(false);
@@ -2288,9 +2315,19 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       <ChatView
         localCommands={hideObservationControls ? undefined : [{name: 'observation', description: t.observation.commandHint}]}
         inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
-        emptyContent={emptyContent}
+        emptyContent={emptyContent !== undefined ? emptyContent : (
+          !isAssistantThread(taskId) && thread.coverage === 'complete' && thread.taskIds.length === 0 &&
+          !thread.currentTaskId && !thread.legacyTaskIds?.length && assistantTimeline.length === 0 && status === 'idle'
+            ? <ScheduledRunHistory key={JSON.stringify([thread.id, thread.title])} title={thread.title ?? ''} fallback={<div className="mx-auto max-w-[800px] px-14 py-8 text-sm text-[var(--c-text-secondary)]">
+              <p>{t.chatShell.historyEmptyCurrent}</p>
+              <div className="mt-3 flex gap-4 text-[var(--c-accent)]">
+                <button type="button" onClick={() => navigate('/automations/schedules')}>{t.sidebarAutomations}</button>
+                <button type="button" onClick={() => navigate('/')}>{t.newTask}</button>
+              </div>
+            </div>} /> : undefined
+        )}
         conversationHeader={conversationHeader}
-        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
+        assistantContent={assistantContent??(isAssistantThread(taskId)&&taskId!==ASSISTANT_CHAT_THREAD&&taskId!==LEGACY_ASSISTANT_CHAT_THREAD?<AssistantWorkOutbox taskId={thread?.currentTaskId}/>:undefined)}
         assistantHasMessages={assistantHasMessages}
         assistantFocusKey={assistantFocusKey}
         onAssistantFocusHandled={onAssistantFocusHandled}

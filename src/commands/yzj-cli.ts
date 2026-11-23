@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../runtime/node-child-runtime.js';
 import { spawn } from 'node:child_process';
 import type { Command } from 'commander';
 import { ensureBundledYzjCli, getYzjCliLaunchArgs } from '../runtime/bundled-yzj-cli.js';
@@ -5,8 +6,9 @@ import { ensureBundledYzjCli, getYzjCliLaunchArgs } from '../runtime/bundled-yzj
 export async function runYzjCli(args: string[]): Promise<number> {
   const cli = ensureBundledYzjCli();
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [...getYzjCliLaunchArgs(cli), ...args], {
-      shell: false, stdio: 'inherit', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    const runtime=resolveNodeChildRuntime();
+    const child = spawn(runtime.command, nodeChildArgs(runtime,[...getYzjCliLaunchArgs(cli), ...args]), {
+      shell: false, stdio: 'inherit', env:runtime.env,
     });
     const onInterrupt = () => { child.kill('SIGINT'); };
     const onTerminate = () => { child.kill('SIGTERM'); };

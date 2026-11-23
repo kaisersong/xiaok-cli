@@ -1,5 +1,6 @@
-import { chmodSync, lstatSync, readdirSync, mkdirSync } from 'node:fs';
+import { chmodSync, lstatSync, readdirSync, mkdirSync, writeFileSync,openSync,closeSync } from 'node:fs';
 import { basename, dirname, resolve, parse, join } from 'node:path';
+import {inspectWindowsOwnerPath,protectWindowsOwnerDirectory,createWindowsPrivateDirectory,protectWindowsOwnerFile,createWindowsActivityPermissions,type WindowsActivityPermissions,writeWindowsPrivateFile,ensureWindowsPrivateFile} from '../windows-owner-security.js';
 
 export const ACTIVITY_STORAGE_NAMES = {
   database: 'conversation-activity.sqlite', ownerPrefix: 'activity-owner.',
@@ -16,19 +17,32 @@ export function isActivityStorageEntry(name: string): boolean {
     .some(([key, prefix]) => key !== 'snapshots' && name.startsWith(prefix));
 }
 export function chmodPrivateActivityFile(path: string): void {
-  if (process.platform === 'win32') return;
   try {
+    if(process.platform==='win32'){protectWindowsOwnerFile(path);return;}
     const state = lstatSync(path);
     if (!state.isFile() || state.isSymbolicLink() || state.uid !== process.getuid?.()) throw new Error();
     chmodSync(path, 0o600);
   } catch { throw new Error('activity_storage_not_private'); }
+}
+/** An ordinary, owned permission context; it grants no Source or authority. */
+export function createActivityFilePermissions(file:string):WindowsActivityPermissions {
+  const context=createWindowsActivityPermissions(file);
+  return Object.freeze({verify(){try{return context.verify();}catch(cause){throw new Error('activity_storage_not_private',{cause});}},close(){context.close();}});
+}
+export function writePrivateActivityFile(path:string,content:string,exclusive=false):void {
+  if(process.platform==='win32'){writeWindowsPrivateFile(path,content,exclusive);return;}
+  writeFileSync(path,content,{mode:0o600,flag:exclusive?'wx':'w'});chmodPrivateActivityFile(path);
+}
+export function ensurePrivateActivityFile(path:string):void {
+  if(process.platform==='win32'){ensureWindowsPrivateFile(path);return;}
+  closeSync(openSync(path,'a',0o600));chmodPrivateActivityFile(path);
 }
 
 /** Bounds work on untrusted or unexpectedly large legacy storage trees. */
 const MAX_STORAGE_ENTRIES = 100_000;
 /** Tighten legacy storage before any persistent write; never follow links. */
 export function secureActivityStorage(root: string, options: { chmodSync?: typeof chmodSync; maxEntries?: number; platform?: NodeJS.Platform } = {}): void {
-  if ((options.platform ?? process.platform) === 'win32') return;
+  const windows=(options.platform??process.platform)==='win32';
   try {
     // Ancestors above the activity tree (home, config dir, macOS /var -> /private/var)
     // belong to the user's environment and may legitimately be links. Only the
@@ -36,7 +50,7 @@ export function secureActivityStorage(root: string, options: { chmodSync?: typeo
     root = resolve(root);
     const parent = dirname(root);
     const dedicated = activityStorageLayout(root) === 'dedicated';
-    const paths = dedicated ? [parent, root] : readdirSync(root).filter(isActivityStorageEntry).map(name => join(root, name));
+    const paths = dedicated ? windows?[root]:[parent, root] : readdirSync(root).filter(isActivityStorageEntry).map(name => join(root, name));
     const verified: Array<[string, number]> = [];
     let count = 0;
     while (paths.length) {
@@ -47,6 +61,15 @@ export function secureActivityStorage(root: string, options: { chmodSync?: typeo
       // disable ordinary activity or change a linked/unrelated target.
       if (path === join(root, ACTIVITY_STORAGE_NAMES.nativeSourceCredential)) continue;
       const state = lstatSync(path);
+      if(windows){
+        if(state.isSymbolicLink()||!state.isDirectory()&&!state.isFile())throw new Error();
+        if(state.isDirectory()){
+          if(!dedicated&&dirname(path)===root&&basename(path)!==ACTIVITY_STORAGE_NAMES.snapshots)throw new Error();
+          protectWindowsOwnerDirectory(path);
+          for(const name of readdirSync(path))paths.push(join(path,name));
+        }else protectWindowsOwnerFile(path);
+        continue;
+      }
       if (state.isSymbolicLink() || state.uid !== process.getuid?.()) throw new Error();
       if (state.isSocket() && dedicated) continue;
       if (!dedicated && state.isDirectory() && dirname(path) === root && basename(path) !== ACTIVITY_STORAGE_NAMES.snapshots) throw new Error();
@@ -87,10 +110,17 @@ export function createPrivateActivityDirectory(root: string): void {
       missing.push(path);
     }
     for (const path of missing.reverse()) {
-      try { mkdirSync(path, { mode: 0o700 }); }
+      try { if(process.platform==='win32')createWindowsPrivateDirectory(path);else mkdirSync(path, { mode: 0o700 }); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; else continue; }
       if (process.platform !== 'win32') chmodSync(path, 0o700);
     }
     secureActivityStorage(root);
   } catch { throw new Error('activity_storage_not_private'); }
+}
+
+/** SQLite inherits its parent ACL. SYSTEM and elevated Administrators are trusted
+ * OS principals; never tighten the shared config root or accept ordinary users. */
+export function assertWindowsPrivateActivityParent(file:string):void {
+  const facts=inspectWindowsOwnerPath(dirname(file));
+  if(!facts.directory||!facts.protectionOwnerEligible||facts.allowSids.length===0||facts.allowSids.some(sid=>![facts.currentSid,'S-1-5-18','S-1-5-32-544'].includes(sid))||!facts.currentUserInheritableFullControl)throw Error('activity_storage_not_private');
 }

@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.14.0', '24']
+        node: ['22.22.1', '24']
     defaults:
       run:
         working-directory: xiaok-cli
@@ -27,13 +27,13 @@ jobs:
         with:
           path: xiaok-cli
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Require the readonly private sibling checkout token
+      - name: Require a readonly private sibling credential
         shell: bash
         env:
-          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          DSH_HAS_READ_CREDENTIAL: ${{ secrets.DSH_SIBLING_READ_TOKEN != '' || secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY != '' }}
         run: |
-          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
-            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+          if [ "$DSH_HAS_READ_CREDENTIAL" != "true" ]; then
+            echo "Configure a readonly mydocs token or its dedicated readonly deploy key."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -41,7 +41,9 @@ jobs:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
-          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN || github.token }}
+          ssh-key: ${{ secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY }}
+          ssh-strict: true
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -79,13 +81,19 @@ jobs:
           ref: ${{ inputs.kswarm_ref || github.head_ref || github.ref_name }}
           path: kswarm
           persist-credentials: false
-      - name: Require the readonly private sibling checkout token
+      - uses: actions/checkout@v4
+        with:
+          repository: kaisersong/intent-broker
+          ref: 21defd02854fc38ae7526cdff9de3f46bf137311
+          path: intent-broker
+          persist-credentials: false
+      - name: Require a readonly private sibling credential
         shell: bash
         env:
-          DSH_SIBLING_READ_TOKEN: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          DSH_HAS_READ_CREDENTIAL: ${{ secrets.DSH_SIBLING_READ_TOKEN != '' || secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY != '' }}
         run: |
-          if [ -z "$DSH_SIBLING_READ_TOKEN" ]; then
-            echo "Configure DSH_SIBLING_READ_TOKEN with contents:read for kaisersong/mydocs."
+          if [ "$DSH_HAS_READ_CREDENTIAL" != "true" ]; then
+            echo "Configure a readonly mydocs token or its dedicated readonly deploy key."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -93,7 +101,9 @@ jobs:
           repository: kaisersong/mydocs
           ref: ${{ inputs.mydocs_ref || github.head_ref || github.ref_name }}
           path: mydocs
-          token: ${{ secrets.DSH_SIBLING_READ_TOKEN }}
+          token: ${{ secrets.DSH_SIBLING_READ_TOKEN || github.token }}
+          ssh-key: ${{ secrets.DSH_MYDOCS_READONLY_DEPLOY_KEY }}
+          ssh-strict: true
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -105,9 +115,10 @@ jobs:
           python-version: '3.x'
       - run: npm ci --ignore-scripts
       - run: npm ci --ignore-scripts --prefix ../kswarm
+      - run: npm ci --ignore-scripts --prefix ../intent-broker
       - name: Retain actual cross-repository identities
         run: >-
-          node --input-type=module -e "import fs from 'node:fs';import {execFileSync} from 'node:child_process';const rows={};for(const name of ['xiaok-cli','kswarm','mydocs'])rows[name]=execFileSync('git',['rev-parse','HEAD'],{cwd:'../'+name,encoding:'utf8'}).trim();fs.writeFileSync('dsh-producer-source-shas.json',JSON.stringify(rows));console.log(JSON.stringify(rows));"
+          node --input-type=module -e "import fs from 'node:fs';import {execFileSync} from 'node:child_process';const rows={};for(const name of ['xiaok-cli','kswarm','mydocs','intent-broker'])rows[name]=execFileSync('git',['rev-parse','HEAD'],{cwd:'../'+name,encoding:'utf8'}).trim();fs.writeFileSync('dsh-producer-source-shas.json',JSON.stringify(rows));console.log(JSON.stringify(rows));"
       - name: Preserve every original frozen requirement and case
         run: python ../mydocs/xiaok-cli/design/dsh-implementation/generate-indexes.py --check
       - name: Exact original runtime surface and same registration

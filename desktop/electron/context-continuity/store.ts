@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import {openContinuityDatabase} from './database-owner.js';
+import {openContinuityDatabase,withContinuityDatabaseRouteScope} from './database-owner.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, chmodSync, mkdirSync, openSync, closeSync, constants } from 'node:fs';
 import { dirname } from 'node:path';
@@ -195,6 +195,23 @@ export class ContinuityStore {
     const owner=this.#syncOwner;if(this.closed||this.#faulted||this.#pendingBind||this.#phase!=='idle'||this.depth||this.#database.isTransaction||!owner)throw new ContinuityPolicyUnavailable('canonical_source_bootstrap_unavailable');
     return owner.bootstrapSource(device,services,draft,controls);
   }
+  /** Metadata-only negative observation for one synchronous inspection call.
+   * null declines optimization; no result is an authorization or cached scope. */
+  hasNoInspectionRows(ids:readonly string[]):boolean|null{
+    if(this.closed||this.#pendingBind||this.#faulted)return null;
+    if(!Array.isArray(ids)||ids.length>200)throw new Error('invalid_argument');
+    for(const id of ids)key(id);
+    if(!ids.length)return true;
+    const placeholders=ids.map(()=>'?').join(',');
+    const row=this.#database.prepare('SELECT 1 AS present FROM conversations WHERE id IN ('+placeholders+') UNION ALL SELECT 1 AS present FROM sync_scopes WHERE conversation_id IN ('+placeholders+') LIMIT 1').get(...ids,...ids);
+    if(this.closed||this.#pendingBind||this.#faulted)return null;
+    return row===undefined;
+  }
+  /** Same initial state refusals as assertSyncScopeReadable; no SQL or grant. */
+  assertUnclaimedInspectionState():void{
+    if(this.closed)throw new ContinuityPolicyUnavailable('canonical_store_closed');
+    if(this.#pendingBind||this.#faulted)throw new ContinuityPolicyUnavailable('canonical_sync_unavailable');
+  }
   #affected(id:string):boolean{return !!this.#database.prepare('SELECT 1 FROM sync_scopes WHERE conversation_id=?').get(id);}
   assertSyncScopeReadable(id:string):void{
     if(this.closed)throw new ContinuityPolicyUnavailable('canonical_store_closed');
@@ -225,6 +242,9 @@ export class ContinuityStore {
   /** All main-owned policy changes share this actual transaction owner. */
   policyMutation<T>(fn: () => T): T { return this.transaction(fn); }
   transaction<T>(fn: () => T): T {
+    return withContinuityDatabaseRouteScope(this.#database,()=>this.transactionInRouteScope(fn));
+  }
+  private transactionInRouteScope<T>(fn: () => T): T {
     if(this.closed)throw new Error('continuity_store_closed');
     if(this.#bindAttempted&&(this.#faulted||this.#pendingBind))throw new ContinuityPolicyUnavailable('canonical_sync_unavailable');
     const nested = this.depth > 0, point = `continuity_${++this.savepoint}`;

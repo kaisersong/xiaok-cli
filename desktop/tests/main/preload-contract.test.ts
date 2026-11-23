@@ -251,6 +251,7 @@ describe('preload API contract', () => {
       'getActiveTask',
       'recoverTask',
       'readTaskHistory',
+      'readLocalLegacyTaskArchive',
       'openArtifact',
       'openFileInSystemApp',
       'readFileContent',

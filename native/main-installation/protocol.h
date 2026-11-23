@@ -52,8 +52,14 @@
 #ifndef MI_KSWARM_LAUNCHER_EXEC
 #define MI_KSWARM_LAUNCHER_EXEC MI_MAIN_BUNDLE "/Contents/Resources/native/kswarm-child-launcher"
 #endif
+/* Fixed bundle-owned Node. No JS runtime/path selector enters Native birth. */
+#if defined(__arm64__) || defined(__aarch64__)
+#define MI_PACKAGED_NODE_EXEC MI_MAIN_BUNDLE "/Contents/Resources/services/intent-broker/runtime/darwin-arm64/node"
+#else
+#define MI_PACKAGED_NODE_EXEC MI_MAIN_BUNDLE "/Contents/Resources/services/intent-broker/runtime/darwin-x64/node"
+#endif
 #ifndef MI_KSWARM_EXEC
-#define MI_KSWARM_EXEC MI_MAIN_EXEC
+#define MI_KSWARM_EXEC MI_PACKAGED_NODE_EXEC
 #endif
 #ifndef MI_KSWARM_ENTRY
 #define MI_KSWARM_ENTRY MI_MAIN_BUNDLE "/Contents/Resources/services/kswarm/src/server/original-authority-bootstrap.js"

@@ -23,7 +23,7 @@ export interface LocaleStrings {
   cliArchive:{open:string;close:string;notice:string;loading:string;failed:string;retry:string;empty:string;unavailable:string;more:string;preview:(count:number)=>string;claim:string;imported:(count:number)=>string};
   historySearch: { keepGrant:string; keepNotice:string; saving:string; open:string; close:string; query:string; submit:string; searching:string; coverage:string; consent:string; consentNotice:string; consentFailed:string; failed:string; empty:string; reference:string };
   contextContinuity: {
-    queueAuthorizationChanged: string; queuePreparationFailed: string; queueInputUnavailable: string; queueUnknown: string; effectUnsettled: string; mcpResetPort: string; mcpConnect: string; mcpNotice: string; mcpListening: string; mcpDisabled: string; mcpUnavailable: string; mcpIssue: string; mcpConfig: string; mcpOneTime: string; mcpCopy: string; mcpCopied: string; mcpStart: string; mcpStop: string; mcpRevoke: string; navigationNotice: string; legacyTitle: string; legacyNotice: (count: number) => string; archiveUnknown: string; legacyUnavailable: string; claimArchive: string; inspectLegacy: string; legacyMustClaim: string; copyConversation: string; copyMessage: string; copied: string; copyFailed: string; reference: string; expand: string; more: string; attach: string; revoke: string; unavailable: string; openSource: string; snapshot: (revision: number) => string };
+    queueAuthorizationChanged: string; queuePreparationFailed: string; queueInputUnavailable: string; queueUnknown: string; effectUnsettled: string; mcpResetPort: string; mcpConnect: string; mcpNotice: string; mcpListening: string; mcpDisabled: string; mcpUnavailable: string; mcpIssue: string; mcpConfig: string; mcpOneTime: string; mcpCopy: string; mcpCopied: string; mcpStart: string; mcpStop: string; mcpRevoke: string; navigationNotice: string; localArchiveReadOnly: string; legacyTitle: string; legacyNotice: (count: number) => string; archiveUnknown: string; legacyUnavailable: string; claimArchive: string; inspectLegacy: string; legacyMustClaim: string; copyConversation: string; copyMessage: string; copied: string; copyFailed: string; reference: string; expand: string; more: string; attach: string; revoke: string; unavailable: string; openSource: string; snapshot: (revision: number) => string };
   diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
@@ -2090,6 +2090,26 @@ export interface LocaleStrings {
     connectorCancelEdit: string;
     connectorTestConnection: string;
     connectorTestSaveFirst: string;
+    // tools pane zero-config summaries
+    toolsAdvancedToggle: string;
+    toolsFreeAvailable: string;
+    toolsSummaryNoConfig: string;
+    toolsSummaryFreeNoKey: string;
+    toolsSummaryKeyRecommended: string;
+    toolsSummaryKeyConfigured: string;
+    toolsSummaryKeyRequired: string;
+    toolsSummaryKeyFromModel: string;
+    // computer use section (tools pane)
+    computerUseTitle: string;
+    computerUseDesc: string;
+    computerUseUnavailable: string;
+    computerUseRefresh: string;
+    computerUseUnsupported: string;
+    computerUseInstall: string;
+    computerUseDriverMissing: (name: string) => string;
+    computerUseCustomPath: (path: string) => string;
+    computerUseExternalUpdateBlocked: string;
+    computerUseTaskRunning: string;
     // System One decision model (tools pane)
     systemOneTitle: string;
     systemOneDesc: string;
@@ -2761,6 +2781,7 @@ export interface LocaleStrings {
   sidebarRecent: string;
   sidebarNoResults: string;
   sidebarNoRecent: string;
+  sidebarRecentReadUnavailable: string;
   sidebarRename: string;
   sidebarKnowledge: string;
   // sidebar - update popover
@@ -2842,6 +2863,8 @@ export interface LocaleStrings {
     watches: Record<'ai_news' | 'yzj_messages' | 'yzj_calendar' | 'important_email', { title: string; description: string; cadence: string; requirement: string }>;
 
     operationUnknown: string;
+    operationRecheckApplied: string;
+    operationRecheckNotApplied: string;
     refreshStatus: string;
     title: string;
     morningScheduleName: string;
@@ -3289,6 +3312,16 @@ followUpAcceptedDraft:string;
   scheduledPaused: string;
   scheduledRun: string;
   scheduledView: string;
+  scheduledHistory: {
+    title: string;
+    choose: string;
+    open: (name: string) => string;
+    created: (date: string) => string;
+    runs: string;
+    empty: string;
+    noOutput: string;
+    unavailable: string;
+  };
   scheduledPause: string;
   scheduledResume: string;
   scheduledDeleteConfirm: string;
@@ -3321,7 +3354,7 @@ followUpAcceptedDraft:string;
     nativeApprove:string;nativeDeny:string;nativeSubmitting:string;nativeAnswered:string;nativeAnswerUnconfirmed:string;nativeRefresh:string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
-    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string; localConnectionUnavailable: string;
     report: (state: string, ago: string) => string; noReport: string;
     unread: (count: number) => string;
     sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;
@@ -3456,6 +3489,7 @@ followUpAcceptedDraft:string;
     historyRecovered: (taskId: string) => string;
     historyLoadEarlier: (remaining: number) => string;
     historyLoading: string;
+    historyEmptyCurrent: string;
     taskCreateFailed: string;
     submissionConflict: string;
     submissionNotPrepared: string;

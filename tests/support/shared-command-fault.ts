@@ -1,5 +1,5 @@
 import {vi} from 'vitest';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../src/utils/builtin-sqlite.js';
 import * as dispatcher from '../../src/runtime/verification/shared-capacity-command-dispatch.js';
 import {consumeSharedCapacityCommandContext,type CapacityOwner,type CapacityProposal,type CapacityRecord,type CapacityTransaction,type CapacityReservationBatch, type createSharedCapacityLedger} from '../../src/runtime/verification/shared-capacity-ledger.js';
 type Ledger=ReturnType<typeof createSharedCapacityLedger>;

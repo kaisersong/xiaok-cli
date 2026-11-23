@@ -1,22 +1,23 @@
+import { makePrivateTestTempDir, cleanupPrivateTestTempDir } from '../../support/private-temp.js';
 import { describe, it, expect, vi } from 'vitest';
-// Only the birth lookup (execFile) can be made to fail; spawn stays real.
-const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[]}));
-vi.mock('node:child_process',async importOriginal=>{
-  const real=await importOriginal<typeof import('node:child_process')>();
-  return {...real,execFile:((file:string,args:string[],options:{timeout?:number},callback:(error:Error|null,stdout:string,stderr:string)=>void)=>{
-    const step=birthFault.plan.shift();
-    if(!birthFault.fail&&(step===undefined||step==='real'))return (real.execFile as unknown as (...a:unknown[])=>unknown)(file,args,options,callback);
-    const pid=Number(/(\d+)/.exec(args.join(' '))?.[1]);birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(options.timeout??0);
-    if(step&&typeof step==='object'){
-      // A slow lookup: answers after `delay`, unless execFile's timeout kills it first.
-      const limit=options.timeout??Infinity;
-      if(step.delay<limit)setTimeout(()=>callback(null,'639300000000000000\r\n',''),step.delay);
-      else setTimeout(()=>callback(Object.assign(new Error('Command failed: lookup timed out'),{killed:true,signal:'SIGTERM',code:null}),'',''),limit);
-    }else setImmediate(()=>callback(Object.assign(new Error('injected birth lookup failure'),{killed:false,code:1}),'',''));
-    return undefined;
-  }) as unknown as typeof real.execFile};
+// Fault/delay injection wraps the actual platform birth implementation. The
+// original private context and OS birth query still run; spawn stays real.
+const birthFault=vi.hoisted(()=>({fail:false,pids:[] as number[],plan:[] as Array<'missing'|'real'|{delay:number}>,calls:0,timeouts:[] as number[],actual:new Map<number,string>()}));
+vi.mock('../../../src/runtime/conversation-activity/source-supervisor-birth.js',async original=>{
+  const real=await original<typeof import('../../../src/runtime/conversation-activity/source-supervisor-birth.js')>();
+  return {...real,async readProcessBirth(...args:Parameters<typeof real.readProcessBirth>){
+    const [pid,timeoutMs]=args,step=birthFault.plan.shift();
+    if(!birthFault.fail&&(step===undefined||step==='real'))return real.readProcessBirth(...args);
+    birthFault.pids.push(pid);birthFault.calls++;birthFault.timeouts.push(timeoutMs);
+    const birth=await real.readProcessBirth(...args);birthFault.actual.set(pid,birth);
+    if(step&&typeof step==='object')return new Promise<string>((resolve,reject)=>{
+      if(step.delay<timeoutMs)setTimeout(()=>resolve(birth),step.delay);
+      else setTimeout(()=>reject(Error('activity_source_birth_unavailable')),timeoutMs);
+    });
+    throw Error('activity_source_birth_unavailable');
+  }};
 });
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import {  writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join,resolve,dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
@@ -27,7 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { ActivitySourceSupervisor, readProcessBirth, SOURCE_START_DEADLINE_MS } from '../../../src/runtime/conversation-activity/source-supervisor.js';
 
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'activity-supervisor-'));
+  const root = makePrivateTestTempDir(join(tmpdir(), 'activity-supervisor-'));
   const listener = createServer(); await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
   const address = listener.address(); if (!address || typeof address === 'string') throw new Error('no port');
   await new Promise<void>(resolve => listener.close(() => resolve()));
@@ -47,10 +48,22 @@ function kswarmTestNode():string{
   console.log(JSON.stringify({test:'supervisor-actual-ks-node',executable,version,fromEnv:Boolean(set)}));
   return executable;
 }
+async function closeFixtureSupervisors(root:string,owners:ActivitySourceSupervisor[],primary?:{raw:unknown}):Promise<void>{
+  try{
+    const outcomes=await Promise.allSettled(owners.map(owner=>owner.sealAndDrainSpawned()));
+    const failure=outcomes.find(row=>row.status==='rejected');
+    if(failure?.status==='rejected')throw failure.reason;
+    cleanupPrivateTestTempDir(root);
+  }catch(raw){
+    if(!primary)throw raw;
+    // Preserve the body failure; unknown cleanup never becomes a passing test.
+    try{console.error('supervisor_fixture_cleanup_failed');}catch{}
+  }
+}
 describe('native source supervisor process ownership', () => {
   it('preserves a healthy external Broker and ensures a new owned instance after it disappears', async () => {
     const f = await fixture();
-    const observerRoot = mkdtempSync(join(tmpdir(), 'activity-external-broker-'));
+    const observerRoot = makePrivateTestTempDir(join(tmpdir(), 'activity-external-broker-'));
     const source = { ...f.source, name: 'broker' as const };
     const original = new ActivitySourceSupervisor(f.root, 'original');
     const observer = new ActivitySourceSupervisor(observerRoot, 'observer');
@@ -72,8 +85,8 @@ describe('native source supervisor process ownership', () => {
         try { process.kill(pid, 'SIGTERM'); } catch {}
         await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
       }
-      rmSync(f.root, { recursive: true, force: true });
-      rmSync(observerRoot, { recursive: true, force: true });
+      cleanupPrivateTestTempDir(f.root);
+      cleanupPrivateTestTempDir(observerRoot);
     }
   }, 15_000);
   it('an idle parent can still exit after unref of its actual supervised child',async()=>{
@@ -118,12 +131,11 @@ describe('native source supervisor process ownership', () => {
     try{
       const receipt=await supervisor.ensure({...f.source,name:'broker'});pid=receipt.pid;const elapsed=Date.now()-started;
       console.log(JSON.stringify({test:'supervisor-birth-slow',pid,birth:receipt.birth,lookupTimeoutMs:birthFault.timeouts[0],elapsedMs:elapsed}));
-      expect(receipt).toMatchObject({pid,birth:'639300000000000000',external:false,ownerEpoch:'birth-slow'});
+      expect(receipt).toMatchObject({pid,birth:birthFault.actual.get(pid),external:false,ownerEpoch:'birth-slow'});
       expect(birthFault.calls).toBe(1);expect(birthFault.timeouts[0]).toBeGreaterThan(5000);expect(birthFault.timeouts[0]).toBeLessThanOrEqual(SOURCE_START_DEADLINE_MS);
       expect(elapsed).toBeLessThan(SOURCE_START_DEADLINE_MS);
     }finally{
-      // The injected birth is not the child's real birth, so stopOwned would refuse it;
-      // this test's own child is signalled directly, then the spawn barrier drains.
+      // Stop only this fixture's recorded child, then join its spawn barrier.
       birthFault.plan=[];if(pid){try{process.kill(pid,'SIGTERM');}catch{}}await supervisor.sealAndDrainSpawned();
       if(pid)expect(()=>process.kill(pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});
     }
@@ -154,32 +166,32 @@ describe('native source supervisor process ownership', () => {
     }finally{if(receipt)await supervisor.stopOwned('kswarm','real-ks');await supervisor.sealAndDrainSpawned();if(receipt)expect(()=>process.kill(receipt.pid,0)).toThrow();rmSync(f.root,{recursive:true,force:true});}
   },15000);
   it('single-flights launch, persists birth and entry identity, transfers only verified ownership and rejects an old stop lease', async () => {
-    const f = await fixture(); let pid: number | undefined;
+    const f = await fixture(); let pid: number | undefined,primary:{raw:unknown}|undefined;const owners:ActivitySourceSupervisor[]=[];
     try {
-      const first = new ActivitySourceSupervisor(f.root, 'first');
+      const first = new ActivitySourceSupervisor(f.root, 'first');owners.push(first);
       const [a,b] = await Promise.all([first.ensure(f.source), first.ensure(f.source)]); pid = a.pid;
       expect(a).toEqual(b); expect(a.external).toBe(false); expect(await first.protectedPid(a.pid)).toBe(true);
-      const restored = new ActivitySourceSupervisor(f.root, 'second');
+      const restored = new ActivitySourceSupervisor(f.root, 'second');owners.push(restored);
       expect(await restored.ensure(f.source)).toMatchObject({ pid: a.pid, birth: a.birth, ownerEpoch: 'second' });
       await expect(first.stopOwned('kswarm','first')).rejects.toThrow('activity_source_stale_lease');
       await expect(restored.stopOwned('kswarm','first')).rejects.toThrow('activity_source_stale_lease');
       await restored.stopOwned('kswarm','second');
       expect(() => process.kill(a.pid,0)).toThrow();
-    } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+    } catch(raw){primary={raw};throw raw;} finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } await closeFixtureSupervisors(f.root,owners,primary); }
   },15_000);
   it('restarts a confirmed dead owned source without treating a reused PID or altered entry as takeover permission', async () => {
-    const f = await fixture(); let pid: number | undefined;
+    const f = await fixture(); let pid: number | undefined,primary:{raw:unknown}|undefined;const owners:ActivitySourceSupervisor[]=[];
     try {
-      const first = new ActivitySourceSupervisor(f.root,'first'); const a = await first.ensure(f.source); pid = a.pid;
+      const first = new ActivitySourceSupervisor(f.root,'first');owners.push(first); const a = await first.ensure(f.source); pid = a.pid;
       process.kill(a.pid,'SIGTERM'); await vi.waitFor(() => expect(() => process.kill(a.pid,0)).toThrow());
-      const restored = new ActivitySourceSupervisor(f.root,'second'); await new ActivitySourceSupervisor(f.root,'first').stopOwned('kswarm','first'); const b = await restored.ensure(f.source); pid = b.pid;
+      const restored = new ActivitySourceSupervisor(f.root,'second');owners.push(restored); await new ActivitySourceSupervisor(f.root,'first').stopOwned('kswarm','first'); const b = await restored.ensure(f.source); pid = b.pid;
       expect(b.pid).not.toBe(a.pid); expect(b.external).toBe(false);
       writeFileSync(f.source.entryPath,readFileSync(f.source.entryPath,'utf8')+'\n// changed');
       await expect(restored.ensure(f.source)).rejects.toThrow('activity_source_identity_mismatch');
       await restored.stopOwned('kswarm','second');
-    } finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+    } catch(raw){primary={raw};throw raw;} finally { if (pid) { try { process.kill(pid,'SIGTERM'); } catch {} } await closeFixtureSupervisors(f.root,owners,primary); }
   },15_000);
-  it('kills a spawned source that never answers health within the start budget and releases its port', async () => {
+  it.each(['response-stall','response-invalid','transport-failure'] as const)('kills an unhealthy source and releases its port (%s)', async mode => {
     const f = await fixture();
     const port = Number(new URL(f.source.healthUrl).port), pidFile = join(f.root, 'unhealthy.pid');
     // Listens like a slow cold-start Broker but never completes a /health response.
@@ -189,7 +201,8 @@ describe('native source supervisor process ownership', () => {
     const supervisor = new ActivitySourceSupervisor(f.root, 'owner');
     let pid: number | undefined;
     try {
-      await expect(supervisor.ensure(source)).rejects.toThrow('activity_source_start_timeout');
+      if(mode!=='response-stall')vi.stubGlobal('fetch',mode==='transport-failure'?vi.fn().mockRejectedValue(Error('fixture connection refused')):vi.fn(async()=>new Response('{',{status:200})));
+      await expect(supervisor.ensure(source)).rejects.toMatchObject({message:process.platform==='win32'&&mode!=='response-invalid'?'activity_source_start_timeout:local_connection_unavailable':'activity_source_start_timeout'});
       pid = Number(readFileSync(pidFile, 'utf8'));
       expect(pid).toBeGreaterThan(0);
       expect(() => process.kill(pid!, 0)).toThrow();
@@ -198,6 +211,6 @@ describe('native source supervisor process ownership', () => {
       const probe = createServer();
       await new Promise<void>((resolve, reject) => { probe.once('error', reject); probe.listen(port, '127.0.0.1', resolve); });
       await new Promise<void>(resolve => probe.close(() => resolve()));
-    } finally { if (pid) { try { process.kill(pid,'SIGKILL'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
+    } finally { vi.unstubAllGlobals();await supervisor.sealAndDrainSpawned();if (pid) { try { process.kill(pid,'SIGKILL'); } catch {} } rmSync(f.root,{recursive:true,force:true}); }
   },20_000);
 });

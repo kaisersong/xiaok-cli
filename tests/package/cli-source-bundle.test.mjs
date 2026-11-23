@@ -126,7 +126,8 @@ test('merged manifest preserves native source lifecycle and all original helper 
   for (const name of ['build', 'build:rollback', 'build:release']) {
     const absence = ' && node scripts/verification/copy-windows-absence.mjs cli' + (name === 'build:release' ? ' --require-all' : '');
     assert(manifest.scripts[name].includes(absence + ledger), name + ': ordered original absence and RootLedger helper gates');
-    assert(manifest.scripts[name].endsWith(ledger), name + ': RootLedger final gate');
+    const security = ' && node scripts/verification/prepare-windows-owner-security.mjs cli' + (name === 'build:release' ? ' --require-all' : '');
+    assert(manifest.scripts[name].endsWith(ledger + security), name + ': RootLedger then Windows security final gates');
   }
   for (const name of ['scripts/prepare-cli-pty.mjs', 'scripts/prepare-cli-native.mjs']) assert(manifest.files.includes(name), name);
   assert.equal(manifest.devDependencies['adm-zip'], '0.5.17');

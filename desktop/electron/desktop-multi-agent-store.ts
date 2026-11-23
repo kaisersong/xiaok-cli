@@ -1,3 +1,4 @@
+import {prepareWindowsOwnedDatabase} from '../../src/runtime/windows-owner-security.js';
 import {readOriginalMainDshBrokerReply,type OriginalMainDshBrokerReply} from './main-dsh-broker-control-source.js';
 import {readBrokerBaselineReceipt,readBrokerFenceReceipt,projectDshBrokerControlTarget,brokerAdmissionDigest} from '../../src/runtime/multi-agent/dsh-broker-control-data.js';
 import {readDshAuthorityColdRow} from '../../src/runtime/multi-agent/dsh-admission-cold-data.js';
@@ -10945,7 +10946,7 @@ export class DesktopMultiAgentStore {
     };
     knownWriterSet(knownMultiAgentWriters,this,{fence:databaseBundle||dbPath===':memory:'||dbPath===''?undefined:createKnownDirectoryWriterFence(dirname(dbPath),'sqlite-db'),bodies});
     admitKnownMultiAgentWriter(this);
-    if(!databaseBundle)mkdirSync(dirname(dbPath), { recursive: true });
+    if(!databaseBundle){prepareWindowsOwnedDatabase(dbPath);mkdirSync(dirname(dbPath), { recursive: true });}
     this.db = databaseBundle?new databaseBundle.Database():new DatabaseSync(dbPath);
     const admission=birthDshAdmissionChild(this,this.db,source,userSource,budgetBinding,ownerBinding,this.bootId,this.maxBytes,this.reserveBytes,databaseBundle);aApply(aWS,aChildren,[this,admission]);
     try {

@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type Database from '../../utils/builtin-sqlite.js';
 import {parseIntentContractEnrollment,type IntentContractEnrollment} from './intent-contract-enrollment.js';
 import {parseIntentHostSubject} from './intent-host-subject.js';
 import {canonicalVerificationJson as json} from './protocol.js';

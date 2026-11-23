@@ -23,7 +23,10 @@ export function fixture({ annotated = false, tag = 'desktop-v1.6.3' } = {}) {
  git('config','user.name','Release Gate Fixture');git('config','user.email','release-fixture@example.invalid');git('config','commit.gpgsign','false');git('config','tag.gpgsign','false');
  mkdirSync(join(repo,'desktop'));writeFileSync(join(repo,'package.json'),JSON.stringify({version:'1.6.3'}));writeFileSync(join(repo,'desktop','package.json'),JSON.stringify({version:'1.6.3'}));
  // Copy the actual production CLI, never a reimplementation. Missing before TDD stays missing.
- if(existsSync(helper)){mkdirSync(join(repo,'scripts'));copyFileSync(helper,join(repo,'scripts','desktop-release-identity.mjs'));}
+ if(existsSync(helper)){
+  mkdirSync(join(repo,'scripts'));copyFileSync(helper,join(repo,'scripts','desktop-release-identity.mjs'));
+  copyFileSync(join(project,'scripts','macos-release-policy.mjs'),join(repo,'scripts','macos-release-policy.mjs'));
+ }
  git('add','.');git('commit','-m','fixture initial');git('remote','add','origin',origin);git('push','origin','master');
  if(annotated)git('tag','-a',tag,'-m','annotated fixture');else git('tag',tag);
  git('push','origin','refs/tags/'+tag);

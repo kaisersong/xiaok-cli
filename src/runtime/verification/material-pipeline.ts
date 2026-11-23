@@ -1,7 +1,7 @@
 import type {QuiescenceExpectation} from '../isolated-execution/physical-quiescence.js';
 import {createMaterialCapacityBinding} from './shared-blob-capacity.js';
 import {basename,dirname} from 'node:path';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertVerificationBlobBudgetDatabase,type createVerificationBlobBudget} from './blob-budget.js';
 import type {createInstalledRootBrokerClient} from './root-broker-client.js';
 import type {ControllerPeer} from './controller-public-daemon.js';

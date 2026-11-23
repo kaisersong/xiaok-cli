@@ -99,7 +99,7 @@ jobs:
               BASE="$(git rev-parse "$HEAD^")"
             fi
           fi
-          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
+          PATTERN='^(src/ai/providers/kimi-models\.ts|src/ai/memory/segment\.ts|src/ai/memory/layered-store\.ts|desktop/electron-builder\.json|desktop/scripts/(after-pack|pack-node-child|prune-node-child|verify-packaged-node-children)\.cjs|desktop/package(-lock)?\.json|desktop/electron/kimi-packaged-smoke\.ts|desktop/electron/packaged-segmentation-smoke\.ts|scripts/read-kimi-coding-models\.mjs|scripts/verify-packaged-kimi-smoke-result\.mjs|\.github/scripts/(build-(report-renderer|canvas-bundles)\.sh|download-windows-slide-wheels\.ps1)|\.github/workflows/desktop-(cross-platform|release)\.yml)$'
           # Fail-closed: if git diff cannot run (bad/missing objects), force smoke on.
           # Previously a failed diff landed in the else branch → run_smoke=false (M1).
           if ! DIFF_OUT="$(git diff --name-only "$BASE" "$HEAD" 2>/tmp/packaged-kimi-diff.err)"; then
@@ -127,7 +127,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.14.0'
+          node-version: '22.22.1'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -160,6 +160,7 @@ jobs:
           node ../scripts/copy-harness-runtime.mjs
           node ../scripts/copy-glob-worker.mjs dist/main/src/ai/tools
           node scripts/copy-broker-runtime-package.cjs
+          node scripts/prepare-broker-runtime.mjs
           test -f dist/main/desktop/electron/broker-runtime-package.cjs
           test -f dist/main/desktop/electron/broker-runtime-file.cjs
           test -f dist/main/desktop/resources/broker-runtime-lock.json
@@ -167,76 +168,8 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Run cross-platform path tests
-        run: >
-          cd desktop && npm run test -- --run
-          tests/renderer/file-path.test.ts
-          tests/renderer/chat-input-clipboard.test.tsx
-          tests/main/clipboard-file-paths.test.ts
-          tests/main/skill-runtime-path-escape.test.ts
-          tests/renderer/changed-files-tree-relativize.test.ts
-          tests/main/cross-platform-path-guard.test.ts
-          tests/main/bundled-yzj-cli-package.test.ts
-          tests/main/bundled-yzj-cli-runtime.test.ts
-          tests/main/bundled-yzj-cli-command.test.ts
-          tests/main/enterprise-cli-runtime.test.ts
-          tests/main/enterprise-cli-service.test.ts
-          tests/main/enterprise-cli-ipc.test.ts
-          tests/renderer/enterprise-cli-connectors.test.tsx
-          tests/main/yzj-cli-auth-service.test.ts
-          tests/main/yzj-cli-auth-ipc.test.ts
-          tests/renderer/yzj-cli-auth-card.test.tsx
-          tests/renderer/project-artifact-actions.test.tsx
-          tests/main/read-file-content-binary.test.ts
-          tests/main/file-ipc-schema.test.ts
-          tests/main/ipc-handler-test-injection.test.ts
-          tests/main/shutdown-aware-ipc-main.test.ts
-          tests/main/desktop-text-repetition.test.ts
-          tests/renderer/chat-shell-repetition.test.tsx
-          tests/renderer/chat-shell-repetition-structured.test.tsx
-          tests/renderer/chat-shell-repetition-history.test.tsx
-          tests/main/desktop-task-stream-recovery.test.ts
-          tests/main/kimi-packaged-smoke.test.ts
-          tests/main/desktop-memory-store-close.test.ts
-          tests/main/context-continuity-projection.test.ts
-          tests/main/context-continuity-navigation.test.ts
-          tests/main/context-continuity-navigation-race.test.ts
-          tests/main/context-continuity-profile.test.ts
-          tests/main/context-continuity-profile-custody.test.ts
-          tests/main/packaged-segmentation-smoke.test.ts
-          tests/main/windows-kimi-packaged-smoke-contract.test.ts
-          tests/main/kimi-harness-contract.test.ts
-          tests/main/kimi-reasoning-admission.test.ts
-          tests/main/desktop-provider-stream-lifecycle.test.ts
-          tests/main/desktop-startup-task-recovery.test.ts
-          tests/main/desktop-tool-execution-policy.test.ts
-          tests/main/desktop-multi-agent-catalog-bridge.bdd.test.ts
-          tests/main/desktop-multi-agent-capabilities.bdd.test.ts
-          tests/main/desktop-protection-ordinary-read.test.ts
-          tests/main/desktop-protection-worker-compiled-entry.test.ts
-          tests/main/project-stream-reconnect-regression.test.ts
-          tests/renderer/chat-helpers-error-sanitization.test.ts
-          tests/renderer/chat-shell-draft-prompt.test.tsx
-          tests/main/conversation-activity-ipc.test.ts
-          tests/main/artifact-export-package.test.ts
-          tests/main/copy-packaged-dependencies.test.ts
-          tests/main/active-owner-service-ports-first-start.test.ts
-          tests/main/active-owner-service-ports-legacy-symlink.test.ts
-          tests/main/activity-owner-launch-config-qualification.test.ts
-          tests/main/desktop-services-degrade-no-dialog.test.ts
-          tests/main/activity-owner-main-profile-qualification.test.ts
-          tests/main/desktop-profile-scope-restarts.test.ts
-          tests/main/desktop-profile-scope-guards.test.ts
-          tests/main/desktop-profile-scope-identity-failure.test.ts
-          tests/renderer/thread-deletion-continuity-unavailable.test.ts
-          tests/main/scheduled-task-delivery.test.ts
-          tests/renderer/scheduled-task-delivery.test.tsx
-          tests/main/scheduled-preload.test.ts
-          tests/main/remote-debugging.test.ts
-          tests/main/room-scheduled-context.test.ts
-          tests/renderer/scheduled-sidebar-selection.test.tsx
-          tests/renderer/chat-approval-scroll.test.tsx
-          tests/renderer/channel-mcp-mutation-ui.test.tsx
-          tests/renderer/channel-mcp-mutation-ui-followup.test.tsx
+        working-directory: desktop
+        run: node scripts/run-test-list.mjs desktop-path-tests
 
       - name: Continuity owner qualification retained-config tests (#233)
         working-directory: desktop
@@ -276,6 +209,23 @@ jobs:
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
+
+      - name: Scheduled history stays read-only under Main continuity
+        working-directory: desktop
+        run: >-
+          node node_modules/vitest/vitest.mjs run
+          tests/renderer/scheduled-thread-continuity-readonly.test.ts
+          tests/renderer/scheduled-task-threads.test.ts
+          tests/renderer/context-continuity-thread-bridge.test.ts
+          tests/renderer/scheduled-bootstrap-failure.test.tsx
+          tests/renderer/scheduled-bootstrap-continuity.test.tsx
+          tests/renderer/scheduled-sidebar-failure.test.tsx
+          tests/renderer/scheduled-sidebar-selection.test.tsx
+          tests/renderer/scheduled-page-conflict.test.tsx
+          tests/renderer/scheduled-task-delivery.test.tsx
+          tests/renderer/thread-list-read-failure.test.tsx
+          tests/renderer/chat-shell-draft-prompt.test.tsx
+          tests/renderer/chat-view-empty-state.test.tsx
 
       - name: Managed Python runtime regression
         run: cd desktop && npm run test -- --run tests/main/python-runtime.test.ts tests/main/deploy-bundled-plugins.test.ts
@@ -344,10 +294,10 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd282c63829ba802f5e58a1d453090948b59779e
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin dd1315fb961e80f18f14f35d8511dcc2c6aac3ed
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin fdafa5a1558e8fd791aee1e97f9951e8841b99dd
+          git -C ../kswarm fetch --depth 1 origin 9f969b7912cc94e660643d390184bd0c6f00058f
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
           git -C ../intent-broker fetch --depth 1 origin 21defd02854fc38ae7526cdff9de3f46bf137311
@@ -357,39 +307,15 @@ jobs:
 
       - name: Build report-renderer bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
-          bash "$retry" npm ci
-          npm run build
-          npm run build:bundle
+        run: bash .github/scripts/build-report-renderer.sh
 
       - name: Build canvas frontend and MCP bundle
         shell: bash
-        run: |
-          retry="$PWD/.github/scripts/retry.sh"
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
-          bash "$retry" npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
-          npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+        run: bash .github/scripts/build-canvas-bundles.sh
 
       - name: Download Python wheels (Windows)
         shell: pwsh
-        run: |
-          $wheelDir = Join-Path (Resolve-Path ..\kai-xiaok-plugins\plugins\kai-slide-creator).Path 'bundled-wheels'
-          Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $wheelDir | Out-Null
-          foreach ($py in @('311', '312', '313', '314')) {
-            python -m pip download mcp==2.3.0 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
-              -d $wheelDir `
-              --only-binary=:all: `
-              --platform win_amd64 `
-              --implementation cp `
-              --python-version $py `
-              --abi "cp$py" `
-              --abi abi3 `
-              --abi none
-          }
+        run: ./.github/scripts/download-windows-slide-wheels.ps1
 
       - name: Vendor self-contained provider runtimes (Windows)
         run: |

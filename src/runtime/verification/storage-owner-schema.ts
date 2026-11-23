@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertNativeSqliteProducerTableKinds,assertNativeSqliteStoredProducerColumns} from './native-sqlite-census.js';
 import type {InstalledDeploymentManifest} from './deployment-manifest.js';
 const SQL='CREATE TABLE verification_storage_features(feature TEXT PRIMARY KEY NOT NULL,minimum_schema INTEGER NOT NULL)';

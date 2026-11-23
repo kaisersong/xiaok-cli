@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 /** Private same-database graph; serialized edges confer no authority. */
 export function createOwnerDependencyGraph(db:Database){
  db.exec('CREATE TABLE IF NOT EXISTS verification_owner_dependencies(parent_key TEXT NOT NULL,child_key TEXT NOT NULL,PRIMARY KEY(parent_key,child_key));CREATE INDEX IF NOT EXISTS verification_dependency_children ON verification_owner_dependencies(child_key,parent_key);');

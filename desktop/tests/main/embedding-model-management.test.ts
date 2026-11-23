@@ -5,7 +5,7 @@ import {DEFAULT_CONFIG,type Config} from '../../../src/types.js';
 import {MODEL_REGISTRY,getModelDir,downloadModel,isModelDownloaded} from '../../../src/ai/memory/model-registry.js';
 import {MemorySettingsService} from '../../electron/memory-settings-service.js';
 import {EmbeddingClient} from '../../../src/ai/memory/embedding.js';
-import Database from 'better-sqlite3';
+import Database from '../../../src/utils/builtin-sqlite.js';
 import {LayeredMemoryStore} from '../../../src/ai/memory/layered-store.js';
 import {acquireSaveLock} from '../../../src/ai/runtime/session-store/mutation-lock.js';
 vi.mock('node:fs',async importOriginal=>{const original=await importOriginal<typeof import('node:fs')>();return{...original,rmSync:vi.fn(original.rmSync),unlinkSync:vi.fn(original.unlinkSync)};});

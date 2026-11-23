@@ -36,7 +36,7 @@ export async function createOriginalBudgetVersion(path:string,v:number,withSourc
  const cold=new HarnessOptimizationStore(budgetStoreData(directory,false),()=>{});try{await cold.ready;}finally{await cold.dispose();}
 }
 export function compileBudgetCustody(root:string){
- const sqlite=resolve('node_modules/better-sqlite3/deps/sqlite3'),object=join(root,'sqlite.o'),sqliteHelper=join(root,'sqlite'),directoryHelper=join(root,'directory');
+ const sqlite=resolve('native/sqlite-source/build/3.53.4'),object=join(root,'sqlite.o'),sqliteHelper=join(root,'sqlite'),directoryHelper=join(root,'directory');
  function run(args:string[]){const result=spawnSync('clang',args,{encoding:'utf8',timeout:30000});if(process.env.XIAOK_BUDGET_SOURCE_PID_LOG)appendFileSync(process.env.XIAOK_BUDGET_SOURCE_PID_LOG,JSON.stringify({pid:result.pid,command:'clang',args,status:result.status,signal:result.signal})+'\n');if(result.error||result.status!==0)throw new Error(result.stderr||'compile_failed',{cause:result.error});}
  run(['-O2','-DSQLITE_THREADSAFE=0','-DSQLITE_OMIT_LOAD_EXTENSION=1','-DSQLITE_TEMP_STORE=3','-DSQLITE_ENABLE_DBPAGE_VTAB=1','-c',join(sqlite,'sqlite3.c'),'-o',object]);
  run(['-Wall','-Wextra','-Werror','-std=c11','-I',sqlite,resolve('src/runtime/verification/native/source-sqlite-custody.c'),object,'-o',sqliteHelper]);

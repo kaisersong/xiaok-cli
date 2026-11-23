@@ -1,3 +1,4 @@
+import {resolveNodeChildRuntime,nodeChildArgs} from '../../src/runtime/node-child-runtime.js';
 import { assertBeforeEffects } from '../../src/runtime/verification/before-effects.js';
 import { spawn } from 'node:child_process';
 import { createHash, Hash } from 'node:crypto';
@@ -26,8 +27,7 @@ import {
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_CONCURRENCY = 2;
-const originalExecPath = process.execPath,
-  originalWorkerPath = fileURLToPath(
+const originalWorkerPath = fileURLToPath(
     new NativeURL('./office-parser-worker.mjs', import.meta.url),
   );
 const sourceBufferFrom = Buffer.from,
@@ -83,13 +83,14 @@ function sourceRequest(
   beforeEffects: (() => void) | undefined,
   request: OfficeParserRequestV1,
 ): object {
+  const runtime=resolveNodeChildRuntime(env);
   const options: Readonly<SpawnOptions> = sourceFreeze({
     shell: false,
-    env: sourceFreeze({ ...env }),
+    env: sourceFreeze({ ...runtime.env }),
     stdio: 'pipe',
   });
-  const argv = sourceFreeze([entry]),
-    command = originalExecPath;
+  const argv = sourceFreeze(nodeChildArgs(runtime,[entry])),
+    command = runtime.command;
   const frame = canonicalVerificationJson(request);
   const frameState = sourceHash('sha256');
   sourceApply(sourceUpdate, frameState, [frame]);
@@ -319,7 +320,7 @@ export function buildOfficeWorkerEnv(
     'LC_ALL',
     'LC_CTYPE',
   ];
-  const env: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
+  const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) {
     if (source[key] !== undefined) env[key] = source[key];
   }
@@ -356,11 +357,12 @@ async function runWorker(input: {
     const stdout: Buffer[] = [];
     let forcedResult: OfficeParseResult | undefined;
     let postFailure: { error: unknown } | undefined;
+    const runtime=owned?undefined:resolveNodeChildRuntime(input.env);
     const child =
       owned?.handle ??
-      spawn(process.execPath, [input.workerPath], {
+      spawn(runtime!.command, nodeChildArgs(runtime!,[input.workerPath]), {
         shell: false,
-        env: input.env,
+        env: runtime!.env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     const listen = (

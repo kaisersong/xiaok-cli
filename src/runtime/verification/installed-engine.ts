@@ -1,7 +1,7 @@
 import {types as utilTypes} from 'node:util';
 import {guestInstallationLock,guestArchiveInstall} from './guest-installation-phase.js';
 import {assertPrivateEngineImageStore} from './engine-image-store.js';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {verifyEngineBinaryCensus,ENGINE_BINARY_CENSUS_SCRIPT} from './engine-binary-census.js';
 import {runInstallationCommand,assertInstallationCommandIdle} from './installation-command.js';
 import {readFileSync,lstatSync,existsSync,realpathSync} from 'node:fs';

@@ -73,15 +73,15 @@ describe('deprecated npm dependency contract', () => {
     ) as ProjectPackage;
 
     expect(rootPackage.allowScripts).toEqual({
+      '@yunzhijia/cli@0.1.8': true,
       'node-pty@1.1.0': true,
-      'better-sqlite3@13.0.3': true,
       'esbuild@0.27.4': true,
       'fsevents@2.3.3': true,
       'nodejieba@3.5.8': true,
       'onnxruntime-node@1.26.0': true,
     });
     expect(desktopPackage.allowScripts).toEqual({
-      'better-sqlite3@13.0.3': true,
+      '@yunzhijia/cli@0.1.8': true,
       'electron@39.8.10': true,
       'electron-winstaller@5.4.0': true,
       'esbuild@0.27.7': true,

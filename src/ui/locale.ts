@@ -46,6 +46,7 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 
 const UI_COPY = {
   'zh-CN': {
+    kimiPublicHistoryRecovered: '已用公开上下文恢复 Kimi 会话：保留最近 40KB 可见文字，旧工具操作不会重放；原始历史记录保持不变。',
     sessionStorageDisabled: (path:string,reason:ProfileAccountHomeError['reason']) => `会话存储已停用：配置目录路径 ${path} 未通过安全检查（${({symlink:'符号链接或目标目录不安全',symlink_target_missing:'符号链接目标不存在',symlink_loop:'符号链接层数过多',not_directory:'路径不是目录',owner:'目录不归当前用户所有',mode:'目录可被他人写入',unreadable:'路径无法读取或检查',invalid_path:'路径不是绝对路径，或包含 .. 或非法字符'})[reason]}），本次会话不会保存。请把 XIAOK_CONFIG_DIR（或 HOME）指向真实目录，或确保链接及目标目录只归你本人或 root 所有且他人不可写。`,
     terminalRedrawPending: '终端重绘尚未完成，请稍后重试。',
     approvalTitle: 'xiaok 想要执行以下操作',
@@ -80,6 +81,7 @@ const UI_COPY = {
     hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
   },
   en: {
+    kimiPublicHistoryRecovered: 'Kimi session recovered using public context: recent visible text within 40KB is retained, old tool operations are not replayed, and original history is unchanged.',
     sessionStorageDisabled: (path:string,reason:ProfileAccountHomeError['reason']) => `Session storage disabled: config path ${path} failed the security check (${({symlink:'unsafe symbolic link or target',symlink_target_missing:'symbolic link target missing',symlink_loop:'too many symbolic links',not_directory:'path is not a directory',owner:'directory belongs to another user',mode:'directory is writable by others',unreadable:'path could not be read or checked',invalid_path:'path is not absolute, or contains .. or invalid characters'})[reason]}). This session will not be saved. Point XIAOK_CONFIG_DIR (or HOME) to a physical directory, or ensure the link and target directories belong only to you or root and cannot be written by others.`,
     terminalRedrawPending: 'Terminal redraw is not finished. Please try again shortly.',
     approvalTitle: 'xiaok wants to run',

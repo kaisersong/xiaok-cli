@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import type {BlobReservationProposal} from './blob-budget.js';
 export interface MigratedBlobBinding {sessionKey:string;producerKey:string;ownerKey:string;scopeDigest:string;authorityId:string;bytes:number;engineBinding:{engineId:string;incarnation:string}}

@@ -45,7 +45,9 @@ it.each(['known','unknown','consumer_failure','deadline','commit_known','commit_
  vi.spyOn(DesktopMultiAgentService.prototype,'quiesceShutdown').mockImplementation(function(){let actual=groupObserved.get(this);if(!actual){actual=groupClose.call(this);groupObserved.set(this,actual);void actual.then(()=>physicalOrder.push('group_closed'),()=>{});}return actual;});
  vi.spyOn(DesktopGoalCoordinator.prototype,'sealNativePersistedTail').mockImplementation(function(receipt){seal.call(this,receipt);physicalOrder.push('goal_sealed');});
  const loads=vi.spyOn(SqliteGoalStore.prototype,'load');
- const created=await f.service.createGoal({threadId:'shutdown-goal',objective:'Original shutdown Goal',expectedEvidenceKinds:['answer'],turnLimit:4});await f.service.ackGoalTaskAttached({threadId:'shutdown-goal',attachmentId:created.preparedTask.attachmentId});await ready;
+ const continuity=f.service.continuity.port();
+ const threadId=continuity.service.createConversation(continuity.actor,{operationId:'shutdown-goal',title:'Original shutdown Goal'}).id;
+ const created=await f.service.createGoal({threadId,objective:'Original shutdown Goal',expectedEvidenceKinds:['answer'],turnLimit:4});await f.service.ackGoalTaskAttached({threadId,attachmentId:created.preparedTask.attachmentId});await ready;
  const store=loads.mock.contexts.find(value=>value instanceof SqliteGoalStore)!;
  try{
   const owner=f.service.taskShutdown;
@@ -60,10 +62,10 @@ it.each(['known','unknown','consumer_failure','deadline','commit_known','commit_
    await owner.durable.close();return;
   }
   owner.ingress.stopAccepting();owner.ingress.abortAllActive('app_shutdown');
-  expect(await owner.ingress.drain(10)).toBe(false);expect(close).not.toHaveBeenCalled();expect((await store.load('shutdown-goal'))!.turns).toHaveLength(0);release();
+  expect(await owner.ingress.drain(10)).toBe(false);expect(close).not.toHaveBeenCalled();expect((await store.load(threadId))!.turns).toHaveLength(0);release();
   expect(await owner.ingress.drain(3000)).toBe(qualified);
-  if(qualified){expect(physicalOrder.indexOf('native_closed')).toBeGreaterThanOrEqual(0);expect(physicalOrder.indexOf('group_closed')).toBeGreaterThanOrEqual(0);expect(physicalOrder.indexOf('goal_sealed')).toBeGreaterThan(physicalOrder.indexOf('native_closed'));expect(physicalOrder.indexOf('goal_sealed')).toBeGreaterThan(physicalOrder.indexOf('group_closed'));expect((await store.load('shutdown-goal'))!.turns[0].tokensUsed).toBe(9);await owner.durable.close();expect(close).toHaveBeenCalledOnce();await owner.durable.close();expect(close).toHaveBeenCalledOnce();}
-  else{await expect(owner.durable.close()).rejects.toThrow('desktop_task_shutdown_not_drained');expect(close).not.toHaveBeenCalled();expect((await store.load('shutdown-goal'))!.turns).toHaveLength(commitCrossing?1:known?1:0);}
+  if(qualified){expect(physicalOrder.indexOf('native_closed')).toBeGreaterThanOrEqual(0);expect(physicalOrder.indexOf('group_closed')).toBeGreaterThanOrEqual(0);expect(physicalOrder.indexOf('goal_sealed')).toBeGreaterThan(physicalOrder.indexOf('native_closed'));expect(physicalOrder.indexOf('goal_sealed')).toBeGreaterThan(physicalOrder.indexOf('group_closed'));expect((await store.load(threadId))!.turns[0].tokensUsed).toBe(9);await owner.durable.close();expect(close).toHaveBeenCalledOnce();await owner.durable.close();expect(close).toHaveBeenCalledOnce();}
+  else{await expect(owner.durable.close()).rejects.toThrow('desktop_task_shutdown_not_drained');expect(close).not.toHaveBeenCalled();expect((await store.load(threadId))!.turns).toHaveLength(commitCrossing?1:known?1:0);}
   expect(f.hostCalls.start).toHaveBeenCalledOnce();
  }finally{release();if(!qualified){await expect(f.service.closeTaskSourceWritersForMigration()).rejects.toThrow('task_source_close_unconfirmed');await f.service.disposeMultiAgent();store.close();}}
 },15000);

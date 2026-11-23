@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**最新正式版：1.6.2（2026-11-05）。** Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/tag/desktop-v1.6.2)，CLI 可通过 `npm install -g xiaokcode@1.6.2` 安装。本版改善中文分词初始化与记忆库关闭流程，并修复会话收尾崩溃。主干后续改动与正式版分别说明，详见[版本日志](#版本日志)。
+**1.6.4。** 当前源码包含 Windows 配置恢复、Kimi 公开上下文续接和启动修复；已验证变化及保留限制见[发布说明](release-notes/1.6.4.md)。已发布 Desktop 安装包见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest)，已发布 CLI 可通过 `npm install -g xiaokcode` 安装。
 
 ---
 
@@ -126,10 +126,11 @@ CLI 记忆区分 `user`、`feedback`、`project`、`reference`。Desktop 还提�
 
 ### 环境要求
 
-- **CLI**：Node.js **22.14 或更高版本**。
+- **CLI**：Node.js **22.22.1（22.x）或 24 及以上版本**。
 - **完整源码栈**：Node.js **22.22 或更高版本**，满足 KSwarm 的 engine 要求。
 - **已发布 Desktop 安装包**：macOS Apple Silicon 与 Windows x64。正常使用安装版无需单独安装 Node.js。
 - Computer Use 需要 macOS 及对应辅助功能/屏幕权限。模型和外部服务凭据按实际使用能力配置。
+- CLI 凭据默认存入配置目录的私有文件 `credentials/store.json`，文件模式不宣称加密；macOS/Linux 目录为 0700、文件为 0600。可运行 `xiaok config set credential-store keychain` 显式选择系统凭据存储，旧钥匙串条目按需导入后保留。
 
 ### npm 安装
 
@@ -144,7 +145,7 @@ npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。
 > **npm ≥ 11.16 用户**：npm 默认拦截依赖包的 install/postinstall 脚本。若安装时出现 `install scripts not yet covered by allowScripts` 警告，请改用：
 >
 > ```bash
-> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,nodejieba,onnxruntime-node,@yunzhijia/cli xiaokcode
 > ```
 >
 > `onnxruntime-node` 的脚本用于放置本地 embedding 推理所需的原生二进制，`nodejieba` 用于中文分词。脚本被拦截时 CLI 仍可正常启动，但这两项能力会静默降级（embedding 关闭、中文按整段索引）。上述命令同时允许 CLI 安装检查、`node-pty` 与 SQLite 的安装脚本，仅对本次全局安装生效。若需持久配置，请把需要的包名合并到已有名单，不要覆盖其他条目。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
@@ -578,7 +579,7 @@ npm run test --prefix desktop -- --run \
 
 | 平台 | CLI | 已发布 Desktop | Computer Use |
 |---|---|---|---|
-| macOS Apple Silicon | 支持 | DMG / ZIP | 授权后支持 |
+| macOS Apple Silicon（13.5 及以上） | 支持 | DMG / ZIP | 授权后支持 |
 | macOS Intel | CLI / 源码使用 | 本次核实的最新 release 无 Intel 产物 | 仍需满足 macOS runtime 要求 |
 | Windows x64 | 支持，终端/hook 细节有差异 | 安装程序 | 不支持 |
 | Linux | CLI / 源码使用 | 有 build target，本次核实的最新 release 无安装包 | 不支持 |
@@ -595,6 +596,10 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.6.4
+
+Windows SID/ACL 配置恢复、Kimi 公开上下文续接、固定 Node 子进程与 Electron fuse 加固、Windows 私有状态创建、本机服务诊断、连接测试、终端输入与 Linux 会话锁修复。macOS 最低为 13.5。详见[1.6.4 发布说明](release-notes/1.6.4.md)。
 
 ### 主干更新（尚未包含在 1.6.2）
 

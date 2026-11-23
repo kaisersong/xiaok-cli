@@ -1,8 +1,10 @@
+import {activityOwnerRuntimeUpgradeLabels, activityOwnerStartupLabels} from '../shared/activity-owner-startup-labels.js';
+import {ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED} from './activity-owner-runtime-upgrade.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
 
 /** The only text a user sees when the background follow-up component cannot be attached.
  * It never carries an internal error code (e.g. activity_owner_config_mismatch). */
-export const ACTIVITY_OWNER_UNAVAILABLE_NOTICE = 'xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。';
+export const ACTIVITY_OWNER_UNAVAILABLE_NOTICE = activityOwnerStartupLabels.zh.unavailable;
 
 type OwnerSourceConfig = Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>;
 
@@ -18,12 +20,17 @@ export interface ActivityOwnerStartupDeps {
 }
 
 /** One notice per distinct failure for the lifetime of the process, however often the attach is retried. */
-export function createOnceNotice(show: (text: string) => void | Promise<void>): (failureKey: string) => boolean {
+export function createOnceNotice(show: (text: string) => void | Promise<void>,locale:'zh'|'en'='zh'): (failureKey: string) => boolean {
   const shown = new Set<string>();
   return failureKey => {
     if (shown.has(failureKey)) return false;
     shown.add(failureKey);
-    try { void Promise.resolve(show(ACTIVITY_OWNER_UNAVAILABLE_NOTICE)).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
+    const labels = activityOwnerStartupLabels[locale];
+    const message = failureKey === ACTIVITY_OWNER_RUNTIME_UPGRADE_REQUIRED ? activityOwnerRuntimeUpgradeLabels[locale]
+      : failureKey === 'activity_source_start_timeout:local_connection_unavailable' ? labels.localConnectionUnavailable
+      : failureKey === 'activity_owner_config_mismatch' || failureKey === 'activity_owner_profile_mismatch' ? labels.versionMismatch
+      : labels.unavailable;
+    try { void Promise.resolve(show(message)).catch(() => undefined); } catch { /* a notice failure must not break startup */ }
     return true;
   };
 }

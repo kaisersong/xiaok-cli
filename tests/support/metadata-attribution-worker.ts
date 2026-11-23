@@ -1,5 +1,5 @@
 import {createPrimitiveWorkerAuthority} from './capacity-primitive-worker-bootstrap.mjs';
-import Database from 'better-sqlite3';import {unlinkSync} from 'node:fs';import {dirname,join} from 'node:path';
+import Database from '../../src/utils/builtin-sqlite.js';import {unlinkSync} from 'node:fs';import {dirname,join} from 'node:path';
 import {createSharedCapacityLedger} from '../../src/runtime/verification/shared-capacity-ledger.js';
 const [path,mode,operationId]=process.argv.slice(2);if(!path||!['attribute','archive','release','batch'].includes(mode)||!operationId)throw Error('worker arguments');
 const db=new Database(path),physicalBinding={},beneficiaryBinding={},proof={};let deleted=false;

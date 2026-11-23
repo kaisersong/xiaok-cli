@@ -1,4 +1,4 @@
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
 export interface EngineBootstrapProposal {deploymentHash:string;configHash:string;creationNonce:string;vmName:'xiaok-engine'}

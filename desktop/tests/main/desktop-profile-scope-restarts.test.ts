@@ -1,6 +1,7 @@
+import {ownedProfileTempDir as mkdtempSync,ownedProfileDirectory} from '../support/profile-storage-fixture.js';
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {existsSync,mkdirSync,mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -26,7 +27,8 @@ import {desktopActivityProfileId,desktopContinuityScopeProfileId} from '../../..
 // under test is injected only around the identity steps (Main and the owner),
 // the way the repo's other platform tests do; Services runs on the host.
 type Platform='win32'|'darwin';
-const PLATFORMS:Platform[]=['win32','darwin'];
+// Native SID custody is exercised only on its real OS, never by renaming process.platform.
+const PLATFORMS:Platform[]=[process.platform==='win32'?'win32':'darwin'];
 const cleanups:Array<()=>Promise<void>|void>=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.unstubAllEnvs();});
 function onPlatform<T>(platform:Platform,run:()=>T):T{
@@ -38,7 +40,7 @@ function onPlatform<T>(platform:Platform,run:()=>T):T{
 function fixture(prefix:string){
  const base=mkdtempSync(join(tmpdir(),prefix));cleanups.push(()=>rmSync(base,{recursive:true,force:true}));
  vi.stubEnv('XIAOK_CONFIG_DIR',join(base,'config'));vi.stubEnv('XIAOK_DISABLE_GLOBAL_PLUGINS','1');
- return {base,dataRoot:join(base,'data')};
+ const dataRoot=join(base,'data');ownedProfileDirectory(dataRoot);return {base,dataRoot};
 }
 interface Start{identity:DesktopMainIdentity;services:ReturnType<typeof createDesktopServices>;logs:string[]}
 async function mainStart(platform:Platform,base:string,dataRoot:string,identity?:DesktopMainIdentity):Promise<Start>{
@@ -49,6 +51,7 @@ async function mainStart(platform:Platform,base:string,dataRoot:string,identity?
   kswarmService:mockKSwarmService(),mainIdentity:resolved,continuityLog:line=>logs.push(line),activityOwnerLog:line=>logs.push(line)}));
  let closed=false;const close=async()=>{if(closed)return;closed=true;await closeCreatedDesktopServices(services,artifactStores,base);};
  cleanups.push(close);
+ expect(services.multiAgent,JSON.stringify({identity:resolved,logs})).not.toBeNull();
  await services.multiAgent!.ready;
  return {identity:resolved,services,logs,close} as Start&{close:()=>Promise<void>};
 }
@@ -134,9 +137,12 @@ async function seed162(base:string,dataRoot:string){
   await service.setExecutionAuthorization({access,requestSource:'user',operationId:`exec-auth:${bootId}:${revision}:seed${revision}`,expectedPermissionRevision:revision,executionAllowed,confirm:true});
  }
  expect(service.getExecutionAuthorization()).toMatchObject({permissionRevision:2,executionAllowed:true});
+ // Read while the original owner is open; reopening a closed WAL DB read-only
+ // can itself create elevated Administrators-owned sidecars on Windows.
+ const rows=groupsRows(dataRoot);
  await stop(start);
  for(const name of ['continuity-profile.json','continuity-profile-migration.json'])expect(existsSync(join(dataRoot,name))).toBe(false);
- return {legacy,rows:groupsRows(dataRoot)};
+ return {legacy,rows};
 }
 async function assertLegacyDataUsable(start:Start,legacy:string,n:number){
  const multi=start.services.multiAgent!;
@@ -150,28 +156,11 @@ async function assertLegacyDataUsable(start:Start,legacy:string,n:number){
  expect(multi.service.assertExecutionAdmission('thread-162')).toBe(2);
 }
 
-/** #233 (c): after Main's deletion precheck refused, the session is exactly as before and still sends. */
-async function usableAfterRefusal(start:Start,legacy:string,rows:unknown,dataRoot:string,before:unknown,controlSend:unknown,n:number){
- const multi=start.services.multiAgent!;
- expect(multi.profileId).toBe(legacy);
- const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
- // Start 1: exactly the pre-deletion record. Later starts: the earlier send
- // attempt's own task may have advanced threadRevision; no deletion state exists.
- if(before)expect(multi.service.readThreadDeletion({access}),`start ${n}: revision, deleteState and receipt unchanged`).toEqual(before);
- else expect(multi.service.readThreadDeletion({access}),`start ${n}: no deletion state`).toMatchObject({threadId:'thread-162',deleteState:'none',operation:null});
- expect(multi.service.getSnapshot({access}),`start ${n}: session readable`).toMatchObject({threadId:'thread-162',threadDeleteState:'none'});
- expect(groupsRows(dataRoot),`start ${n}: nothing deleted`).toEqual(rows);
- expect(multi.service.getExecutionAuthorization()).toMatchObject({permissionRevision:2,executionAllowed:true});
- expect(multi.service.assertExecutionAdmission('thread-162'),`start ${n}: Main admits execution on the session`).toBe(2);
- // Main's real user submission entry for the session: the refused deletion
- // leaves it exactly as on a degraded root that never attempted one.
- expect(await realSend(start),`start ${n}: send after the refused deletion`).toEqual(controlSend);
- expect(multi.service.readThreadDeletion({access}),`start ${n}: no deletion state after the send`).toMatchObject({deleteState:'none',operation:null});
-}
-/** Main's real user submission entry (desktop-services.ts submitUserTask) on the 1.6.2 session. */
+/** A new canonical conversation remains usable while legacy records stay restricted. */
 async function realSend(start:Start){
  const actorId=`desktop-user:${start.services.multiAgent!.profileId}`;
- return Promise.resolve().then(()=>start.services.submitUserTask({action:'submit_new',gestureId:randomUUID(),input:{kind:'materials',prompt:'Say hello.',materials:[],context:{threadId:'thread-162'}}} as never,{requestSource:'user',actorId} as never))
+ const p=start.services.continuity.port(),threadId=p.service.createConversation(p.actor,{operationId:randomUUID()}).id;
+ return Promise.resolve().then(()=>start.services.submitUserTask({action:'submit_new',gestureId:randomUUID(),input:{kind:'materials',prompt:'Say hello.',materials:[],context:{threadId}}} as never,{requestSource:'user',actorId} as never))
   .then(()=>({sent:true}),raw=>({error:raw instanceof Error?raw.message:String(raw)}));
 }
 /** Main's user deletion of the 1.6.2 session; a refusal is returned, not thrown. */
@@ -182,87 +171,25 @@ async function attemptDeletion(start:Start):Promise<unknown>{
  try{return await multi.service.deleteThread({access,requestSource:'user',operationId:`delete:${threadRevision}:degraded`,expectedThreadRevision:threadRevision,confirmTerminate:true});}
  catch(raw){return {thrown:raw instanceof Error?raw.message:String(raw)};}
 }
-describe('1.6.2 data upgraded, start / restart / restart',()=>{
- it('win32 degraded: deletion is refused at once with continuity_unavailable before delete_pending; the session keeps Main admission and its send result, and survives restart',async()=>{
-  // #233 PM/CTO (c), 东八区 18:3x: Main's deletion entry prechecks continuity;
-  // degraded, it refuses before beginThreadDeletion and the thread is untouched.
-  // Control: the same degraded 1.6.2 root, no deletion attempted. Its send result
-  // is what the session must still give after the refusal. (On a degraded root
-  // a threaded send is refused by continuity itself, runtime.ts assembleOwnedHistory;
-  // that is not deletion state and is reported separately, #233.)
-  const control=fixture('profile-scope-162-win32-delete-control-');
-  await seed162(control.base,control.dataRoot);writeModelConfig(control.base);
-  const controlStart=await mainStart('win32',control.base,control.dataRoot);
-  expect(controlStart.services.multiAgent!.service.assertExecutionAdmission('thread-162')).toBe(2);
-  const controlSend=await realSend(controlStart);await stop(controlStart);
-  const {base,dataRoot}=fixture('profile-scope-162-win32-delete-');
-  const {legacy,rows}=await seed162(base,dataRoot);
-  writeModelConfig(base);
-  const first=await mainStart('win32',base,dataRoot);
-  const multi=first.services.multiAgent!;
-  const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${multi.profileId}`,threadId:'thread-162',profileId:multi.profileId,workspaceId:multi.workspaceId});
-  const before=multi.service.readThreadDeletion({access});
-  expect(before).toEqual({threadId:'thread-162',threadRevision:0,deleteState:'none',operation:null});
-  const started=performance.now(),refused=await attemptDeletion(first),elapsed=performance.now()-started;
-  expect(refused,'Main refuses the deletion itself').toEqual({thrown:'continuity_unavailable'});
-  expect(elapsed,'refused deletion must not hang').toBeLessThan(5000);
-  await usableAfterRefusal(first,legacy,rows,dataRoot,before,controlSend,1);
-  await stop(first);
-  const restarted=await mainStart('win32',base,dataRoot);
-  expect(restarted.identity.failure).toMatch(/^profile_identity_unavailable \(cause: /);
-  await usableAfterRefusal(restarted,legacy,rows,dataRoot,undefined,controlSend,2);
-  const owner=await attachOwner('win32',restarted,dataRoot);
-  expect(owner.result,'restart after a refused deletion: owner attach').toEqual({attached:true});expect(owner.release).not.toHaveBeenCalled();
-  expect(restarted.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
-  await stop(restarted);
- },120_000);
- it('darwin: migrates once, keeps the 1.6.2 scope, authorization and session usable, owner attaches',async()=>{
-  const {base,dataRoot}=fixture('profile-scope-162-darwin-');
-  const {legacy,rows}=await seed162(base,dataRoot);
-  let uuid:string|undefined;
+describe.each(PLATFORMS)('1.6.2 data upgraded, start / restart / restart on %s',platform=>{
+ it('migrates once and keeps the original authorization, session, list and owner usable',async()=>{
+  const {base,dataRoot}=fixture('profile-scope-162-qualified-');const {legacy,rows}=await seed162(base,dataRoot);let uuid:string|undefined;
   for(const n of [1,2,3]){
-   const start=await mainStart('darwin',base,dataRoot);
-   expect(start.identity.failure,`start ${n}`).toBeUndefined();
-   expect(start.identity.continuity).toMatchObject({legacyProfileId:legacy});
-   uuid??=start.identity.continuity!.profileId;expect(start.identity.continuity!.profileId).toBe(uuid);
-   expect(existsSync(migrationFile(dataRoot)),`start ${n}: migration recorded`).toBe(true);
-   expect(()=>start.services.continuity.port()).not.toThrow();
-   await assertLegacyDataUsable(start,legacy,n);
-   expect(groupsRows(dataRoot),`start ${n}: 1.6.2 rows unchanged`).toEqual(rows);
-   const owner=await attachOwner('darwin',start,dataRoot);
-   expect(owner.result).toEqual({attached:true});expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);
-   await stop(start);
+   const start=await mainStart(platform,base,dataRoot);expect(start.identity.failure).toBeUndefined();expect(start.identity.continuity).toMatchObject({legacyProfileId:legacy});uuid??=start.identity.continuity!.profileId;expect(start.identity.continuity!.profileId).toBe(uuid);
+   expect(existsSync(migrationFile(dataRoot))).toBe(true);await assertLegacyDataUsable(start,legacy,n);expect(groupsRows(dataRoot)).toEqual(rows);
+   const port=start.services.continuity.port();await port.refresh?.();expect(Array.isArray(port.service.listConversations(port.actor))).toBe(true);
+   const owner=await attachOwner(platform,start,dataRoot);expect(owner.result).toEqual({attached:true});expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);await stop(start);
   }
  },120_000);
- it('win32: refuses adoption, continuity degrades with the inner reason logged; 1.6.2 rows, session and owner stay usable',async()=>{
-  const {base,dataRoot}=fixture('profile-scope-162-win32-');
-  const {legacy,rows}=await seed162(base,dataRoot);
-  for(const n of [1,2,3]){
-   const start=await mainStart('win32',base,dataRoot);
-   expect(start.identity.continuity).toBeNull();
-   expect(start.identity.failure).toMatch(/^profile_identity_unavailable \(cause: /);
-   const log=start.logs.join('\n');
-   expect(log).toContain(`[context-continuity] identity refused, continuity degrades: ${start.identity.failure}`);
-   expect(log).toContain(`[context-continuity] unavailable at identity: ${start.identity.failure}`);
-   expect(()=>start.services.continuity.port()).toThrow('continuity_unavailable');
-   // #233 review: the skipped effect inventory is visible in main-debug.log (continuityLog = debugMain).
-   expect(log).toContain('[context-continuity] effect inventory deferred: continuity degraded (identity refused)');
-   for(const name of ['continuity-profile.json','continuity-profile-migration.json'])expect(existsSync(join(dataRoot,name)),`start ${n}: ${name}`).toBe(false);
-   await assertLegacyDataUsable(start,legacy,n);
-   // #233 review: degraded continuity still blocks conversation deletion.
-   expect(()=>start.services.continuity.assertConversationDeletionSafe('thread-162')).toThrow('continuity_unavailable');
-   expect(groupsRows(dataRoot),`start ${n}: 1.6.2 rows kept as-is`).toEqual(rows);
-   const owner=await attachOwner('win32',start,dataRoot);
-   expect(owner.result,`start ${n}: owner attach must not fail with continuity degraded`).toEqual({attached:true});
-   expect(owner.release).not.toHaveBeenCalled();expect(owner.notices).toEqual([]);expect(owner.kswarmStart).toHaveBeenCalledTimes(1);
-   expect(start.logs.join('\n')).not.toMatch(/kswarm_business_retirement_failed|Activity owner attach failed/);
-   if(n===3){
-    // #233 (c): Main's real deletion path is refused at its entry precheck
-    // (before delete_pending) and deletes nothing.
-    expect(await attemptDeletion(start)).toEqual({thrown:'continuity_unavailable'});
-    expect(groupsRows(dataRoot),'refused deletion removed 1.6.2 rows').toEqual(rows);
-   }
-   await stop(start);
-  }
+ it('a migrated profile admits a new conversation while retaining legacy records',async()=>{
+  const {base,dataRoot}=fixture('profile-scope-162-send-');const {legacy}=await seed162(base,dataRoot);writeModelConfig(base);const start=await mainStart(platform,base,dataRoot);await assertLegacyDataUsable(start,legacy,1);
+  expect(await realSend(start)).toEqual({sent:true});await stop(start);
+ },120_000);
+ it('an unproven legacy deletion stays pending after migration without losing ownership',async()=>{
+  const {base,dataRoot}=fixture('profile-scope-162-delete-');const {legacy}=await seed162(base,dataRoot);
+  const db=new DatabaseSync(join(dataRoot,'multi-agent','groups.sqlite'));try{db.prepare("UPDATE thread_bindings SET delete_state='delete_pending',thread_revision=1,delete_json=? WHERE thread_id='thread-162'").run(JSON.stringify({operationId:'delete:0:old_pending',requestHash:'a'.repeat(64),actorId:`desktop-user:${legacy}`,bootId:'previous-fixture-boot',expectedRevision:0,startedAt:1,result:{operationId:'delete:0:old_pending',state:'cleanup_pending'}}));}finally{db.close();}
+  const start=await mainStart(platform,base,dataRoot);expect(start.identity.failure).toBeUndefined();const multi=start.services.multiAgent!;expect(multi.profileId).toBe(legacy);
+  const access=multi.service.createUserAccess({requestSource:'user',actorId:`desktop-user:${legacy}`,threadId:'thread-162',profileId:legacy,workspaceId:multi.workspaceId});expect(multi.service.readThreadDeletion({access})).toMatchObject({deleteState:'delete_pending'});
+  const result=await attemptDeletion(start);expect(result,JSON.stringify(result)).toMatchObject({state:'unknown',error:expect.stringContaining('blocked_unsettled')});expect(multi.service.readThreadDeletion({access})).toMatchObject({deleteState:'delete_pending'});await stop(start);
  },120_000);
 });

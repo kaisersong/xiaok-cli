@@ -2,7 +2,7 @@ import {assertInstalledAssemblyDatabase,assertInstalledBlackboxExecution,readIns
 import {consumeExecutionCommandContext} from '../isolated-execution/docker-runner.js';
 import type {ExecutionWriteContext} from './execution-command-dispatch.js';
 import {createHash} from 'node:crypto';
-import type {Database} from 'better-sqlite3';
+import type {Database} from '../../utils/builtin-sqlite.js';
 import {assertDockerRunnerDatabase,type createDockerRunner} from '../isolated-execution/docker-runner.js';
 import type {HostIssuedMountPlan} from '../isolated-execution/execution-port.js';
 import type {QuiescenceAuthority,QuiescenceExpectation,PhysicalQuiescenceReceipt} from '../isolated-execution/physical-quiescence.js';

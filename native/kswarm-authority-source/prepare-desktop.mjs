@@ -1,6 +1,5 @@
 import {spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync,mkdtempSync,lstatSync,realpathSync,renameSync,rmSync,existsSync} from 'node:fs';
-import {createRequire} from 'node:module';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
@@ -14,8 +13,6 @@ if(process.platform!=='darwin'){
  // test Main's SDK. A bare Node download may supply the build-only override.
  const headers=realpathSync(args.length?resolve(args[1]):resolve(dirname(realpathSync(process.execPath)),'../include/node'));
  if(!lstatSync(join(headers,'node_api.h')).isFile())throw Error('KSWARM_AUTHORITY_NODE_API_HEADERS_REQUIRED');
- const require=createRequire(join(repo,'desktop/package.json'));
- const dependency=dirname(require.resolve('better-sqlite3/package.json'));
  const parent=join(source,'build'),output=join(parent,'Release');mkdirSync(parent,{recursive:true});
  if(lstatSync(parent).isSymbolicLink())throw Error('KSWARM_AUTHORITY_BUILD_DIRECTORY_INVALID');
  if(existsSync(output)){
@@ -24,7 +21,7 @@ if(process.platform!=='darwin'){
   if(old.kind!=='original_kswarm_authority_build_v1')throw Error('KSWARM_AUTHORITY_BUILD_OUTPUT_NOT_OWNED');
  }
  const temporary=mkdtempSync(join(parent,'.kswarm-build-'));
- const p=spawnSync(process.execPath,[join(source,'build.mjs'),headers,temporary,dependency],{cwd:repo,encoding:'utf8',timeout:120000});
+ const p=spawnSync(process.execPath,[join(source,'build.mjs'),headers,temporary],{cwd:repo,encoding:'utf8',timeout:120000});
  const record={kind:'kswarm-authority-desktop-build',pid:p.pid,status:p.status,signal:p.signal,stdout:p.stdout,stderr:p.stderr,temporary,qualification:false,installed:false};
  writeFileSync(join(temporary,'prepare-run.json'),JSON.stringify(record,null,2)+'\n');
  if(p.error||p.status!==0||p.signal)throw Error('KSWARM_AUTHORITY_DESKTOP_BUILD_FAILED: '+(p.stderr||p.stdout),{cause:p.error});

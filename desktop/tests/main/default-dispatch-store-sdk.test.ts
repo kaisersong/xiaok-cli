@@ -112,7 +112,7 @@ it('writes a real closure through the original existing execution guard without 
  const result=await f.prepare(sourceWriteClosure);expect(hits).toBeGreaterThan(0);expect(existsSync(join(f.path,'protected-observation-sessions',desktopObservationSessionId(result.fact.taskId)+'.json'))).toBe(true);await f.io.drain();
 });
 it('defers the actual existing guard close until a held original BEGIN SDK tail finishes, then closes once',async()=>{
- const f=fixture(),guard=await originalProtectionGuard(f),Database=createRequire(new URL('../../../src/ai/runtime/session-store/execution-authority.ts',import.meta.url))('better-sqlite3'),exec=Database.prototype.exec,close=Database.prototype.close;
+ const f=fixture(),guard=await originalProtectionGuard(f),Database=createRequire(new URL('../../../src/ai/runtime/session-store/execution-authority.ts',import.meta.url))('../../../src/utils/builtin-sqlite.js'),exec=Database.prototype.exec,close=Database.prototype.close;
  let release!:()=>void,entered!:()=>void,target:any,closes=0,settled=false,closed=false;const held=new Promise<void>(yes=>{release=yes;}),ready=new Promise<void>(yes=>{entered=yes;});
  Database.prototype.exec=function(...args:unknown[]){const value=Reflect.apply(exec,this,args);if(this.name===guard&&args[0]==='BEGIN EXCLUSIVE'){target=this;const raw=Promise.resolve(value);Object.defineProperty(raw,Symbol('actual-execution-guard-sdk-tail'),{value:held});entered();return raw;}return value;};
  Database.prototype.close=function(...args:unknown[]){if(this.name===guard)closes++;return Reflect.apply(close,this,args);};

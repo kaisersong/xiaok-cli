@@ -1,0 +1,49 @@
+name: Electron fuse runtime migration
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'src/runtime/node-child-runtime.ts'
+      - 'desktop/electron/node-child-*'
+      - 'desktop/electron/broker-runtime-*'
+      - 'desktop/scripts/*node-child*'
+      - 'desktop/scripts/flip-packaged-fuses.cjs'
+      - 'desktop/resources/broker-runtime-lock.json'
+      - 'tests/native/electron-fuse-child.test.cjs'
+      - '.github/workflows/electron-fuses.yml'
+      - 'desktop/package*.json'
+permissions:
+  contents: read
+concurrency:
+  group: electron-fuses-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-main-and-child:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022, ubuntu-22.04]
+        node: ['22.22.1', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix desktop
+      - name: Install the locked Electron distribution
+        run: node desktop/node_modules/electron/install.js
+      - name: Prepare and verify the fixed child Node runtime
+        run: node desktop/scripts/prepare-broker-runtime.mjs
+      - name: Exercise real Main, physical Node entries, IPC and fuse negative controls
+        if: runner.os != 'Linux'
+        run: node --test tests/native/electron-fuse-child.test.cjs
+      - name: Exercise the real Linux Electron fixture under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node --test tests/native/electron-fuse-child.test.cjs

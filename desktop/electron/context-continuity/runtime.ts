@@ -17,6 +17,8 @@ import { ContinuityMcpController } from './mcp-control.js';
 import { CliArchiveImporter } from './cli-archive.js';
 import { getConfigDir } from '../../../src/utils/config.js';
 import type {ContinuityStore} from './store.js';
+import {ContinuityReconciliationQueue,type ReconciliationReader} from './reconciliation-queue.js';
+const cloneInventorySnapshot=structuredClone;
 export interface OriginalRuntimeSourceContext {readonly service:ContinuityService;readonly store:ContinuityStore;readonly actor:Readonly<ContinuityIpcPort['actor']>;}
 let originalSourceContext:(runtime:DesktopContextContinuity)=>OriginalRuntimeSourceContext;
 /** Actual original context only; no caller port/current/inspect field dispatch. */
@@ -35,6 +37,7 @@ export class DesktopContextContinuity {
   private scopePolicy?: (id: string) => 'readable' | 'blocked' | 'deleted';
   private deletionGuard?:()=>void;
   private pending = new Set<Promise<unknown>>();
+  readonly #reconciliationQueue=new ContinuityReconciliationQueue(this.pending,()=>this.closed,inspect=>this.#reconcilePass(inspect));
   private inputDependencies?:InputOwnerDependencies;
   private inputOwner?:ContinuityInputJournal;
   private inputAdmittedSources=new Map<string,string>();
@@ -53,6 +56,7 @@ export class DesktopContextContinuity {
     if(row){try{await this.inputOwner.reconcile(String(row.input_id));}catch{try{this.inputOwner.markClaimUnknown(String(row.input_id));}catch{/* An unavailable owner cannot relax the original claim. */}}}
   }
   private ownerReady=false;
+  private effectInventoryRunning=false;
   private effectInventoryState:'not_required'|'pending'|'ready'|'failed'='not_required';
   private preparedEffectRuns=new Map<string,string>();
   constructor(private readonly dataRoot: string, private readonly inspect?: (taskId: string) => Promise<TaskSnapshot | null>,private readonly identity?:DesktopProfileIdentity|null, private readonly authOwnerTarget?:import('./ipc.js').AuthOwnerIpcTarget,private readonly log?:(line:string)=>void) {
@@ -83,16 +87,27 @@ export class DesktopContextContinuity {
   private assertDeletionOwnerReady():void{if(['pending','failed'].includes(this.effectInventoryState))throw new Error('blocked_unsettled');this.deletionGuard?.();}
   configureDeletionGuard(guard:()=>void):void{this.deletionGuard=guard;this.current?.service.setDeletionGuard(()=>this.assertDeletionOwnerReady());}
   requireEffectInventory():void{this.effectInventoryState='pending';}
-  async auditEffectInventory(read:()=>Promise<TaskSnapshot[]>,legacyOwnerPresent:boolean):Promise<void>{
+  async auditEffectInventory(read:(accept:(snapshot:TaskSnapshot)=>void)=>Promise<void>,legacyOwnerPresent:boolean):Promise<void>{
     // Identity refused (Windows 1.6.2 profile, profile.ts): continuity is off for
     // this whole process and nothing can record into it. Stay fail-closed for
     // continuity deletion, but do not fail the multi-agent/owner readiness that
     // awaits this audit; a later boot with an admitted identity re-inventories
     // every persisted snapshot.
     if(this.identity===null){this.effectInventoryState='failed';try{this.log?.('[context-continuity] effect inventory deferred: continuity degraded (identity refused)');}catch{/* logging never changes degradation */}return;}
-    this.effectInventoryState='pending';
-    try{const snapshots=await this.#sdk.invoke<TaskSnapshot[]>(read,undefined,[]);if(this.closed)throw new Error('continuity_stopping');const p=this.port();p.service.completeEffectInventory(p.actor,snapshots,legacyOwnerPresent);this.effectInventoryState='ready';}
+    if(this.closed)throw new Error('continuity_stopping');
+    if(this.effectInventoryRunning)throw new Error('continuity_inventory_busy');
+    this.effectInventoryRunning=true;this.effectInventoryState='pending';
+    const snapshots:TaskSnapshot[]=[];let accepting=true;
+    // Each original SDK result retains its own full graph/tails. The aggregate
+    // is assembled locally, never returned by an SDK or exempted from custody.
+    const accept=(snapshot:TaskSnapshot)=>{
+      if(!accepting||this.closed){this.effectInventoryState='failed';throw new Error('continuity_inventory_closed');}
+      const original=this.#sdk.invokeSync<TaskSnapshot>((value:TaskSnapshot)=>value,undefined,[snapshot]);
+      snapshots.push(this.#sdk.invokeSync<TaskSnapshot>(cloneInventorySnapshot,undefined,[original]));
+    };
+    try{await this.#sdk.invoke<void>(read,undefined,[accept]);accepting=false;if(this.closed)throw new Error('continuity_stopping');const p=this.port();p.service.completeEffectInventory(p.actor,snapshots,legacyOwnerPresent);this.effectInventoryState='ready';}
     catch(error){this.effectInventoryState='failed';throw error;}
+    finally{accepting=false;this.effectInventoryRunning=false;}
   }
   registerGuardedSnapshot(snapshot:TaskSnapshot):void{const p=this.port();p.service.registerGuardedRun(p.actor,snapshot.taskId,snapshot.sessionId);this.preparedEffectRuns.set(snapshot.taskId,snapshot.sessionId);}
   async restoreMcpAfterOwnerReady():Promise<void>{if(this.closed||this.initializationFailed)return;this.ownerReady=true;await this.current?.mcp?.restore();}
@@ -130,16 +145,15 @@ export class DesktopContextContinuity {
   }
   async reconcile(inspect = this.inspect): Promise<void> {
     if (this.closed || !this.current || !inspect) return;
-    const run = (async () => {
-      const tasks = this.current!.service.store.db.prepare('SELECT task_id FROM task_bindings WHERE revoked=0').all();
-      for (const task of tasks) {
-        if (this.closed) return;
-        try { const snapshot = await this.#sdk.invoke<TaskSnapshot|null>(inspect,undefined,[String(task.task_id)]); if (!this.closed && snapshot) {try{this.source!.capture(snapshot,{physicallySettled:true});}catch{this.capture(snapshot);}} }
-        catch { /* missing/unreadable owner does not grant access or mutate execution */ }
-      }
-    })();
-    this.pending.add(run);
-    try { await run; } finally { this.pending.delete(run); }
+    await this.#reconciliationQueue.reconcile(inspect);
+  }
+  async #reconcilePass(inspect:ReconciliationReader):Promise<void>{
+    const tasks=this.current!.service.store.db.prepare('SELECT task_id FROM task_bindings WHERE revoked=0').all();
+    for(const task of tasks){
+      if(this.closed)return;
+      try { const snapshot = await this.#sdk.invoke<TaskSnapshot|null>(inspect,undefined,[String(task.task_id)]); if (!this.closed && snapshot) {try{this.source!.capture(snapshot,{physicallySettled:true});}catch{this.capture(snapshot);}} }
+      catch { /* missing/unreadable owner does not grant access or mutate execution */ }
+    }
   }
   assertTaskHistoryReadable(taskId: string, conversationId?: string): void {
     this.assertTaskReadable(taskId);

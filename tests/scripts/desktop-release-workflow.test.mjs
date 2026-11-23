@@ -25,7 +25,7 @@ test('both upload paths use the fixed guard and original build, signing and asse
  assert.doesNotMatch(s,/gh release upload/,'no unguarded sibling upload step');
 });
 test('every original sibling clone in both workflows pins the actual reviewed candidate',()=>{
- const expected={'kai-xiaok-plugins':'dd282c63829ba802f5e58a1d453090948b59779e',kswarm:'fdafa5a1558e8fd791aee1e97f9951e8841b99dd','intent-broker':'21defd02854fc38ae7526cdff9de3f46bf137311'};
+ const expected={'kai-xiaok-plugins':'dd1315fb961e80f18f14f35d8511dcc2c6aac3ed',kswarm:'9f969b7912cc94e660643d390184bd0c6f00058f','intent-broker':'21defd02854fc38ae7526cdff9de3f46bf137311'};
  for(const file of ['desktop-release.yml','desktop-cross-platform.yml']){
   const s=read(file);for(const [repo,sha] of Object.entries(expected)){
    const clones=[...s.matchAll(new RegExp('git clone[^\\n]*github\\.com/kaisersong/'+repo+'\\.git[^\\n]*','g'))];assert.ok(clones.length>=1);

@@ -1,7 +1,16 @@
-import {inject,vi} from 'vitest';
+import {afterAll,inject,vi} from 'vitest';
 import {mkdtempSync,realpathSync} from 'node:fs';
 import {dirname,isAbsolute,join,relative,resolve} from 'node:path';
 const account=vi.hoisted(()=>({home:undefined}));
+// Worker pools snapshot env before globalSetup; pass the actual private path
+// through ProvidedContext so fixtures and their real children inherit it.
+const privateTemp=inject('profileTestTempRoot');
+if(process.platform==='win32'){
+ if(typeof privateTemp!=='string'||realpathSync(privateTemp)!==privateTemp)throw Error('test_private_temp_required');
+ const previousTemp={TEMP:process.env.TEMP,TMP:process.env.TMP};
+ process.env.TEMP=privateTemp;process.env.TMP=privateTemp;
+ afterAll(()=>{for(const key of ['TEMP','TMP']){if(previousTemp[key]===undefined)delete process.env[key];else process.env[key]=previousTemp[key];}});
+}
 const root=inject('profileTestAccountRoot');
 if(typeof root!=='string'||!root)throw Error('test_profile_account_root_required');
 account.home=realpathSync(mkdtempSync(join(root,'account-')));

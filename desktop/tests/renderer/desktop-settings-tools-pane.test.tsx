@@ -41,6 +41,14 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     saveKswarmConfig: vi.fn().mockResolvedValue({ maxConcurrentTasks: 3 }),
     listMCPInstalls: vi.fn().mockResolvedValue([]),
     listPluginMcpServers: vi.fn().mockResolvedValue([]),
+    // 电脑操作区读取依赖状态；本文件聚焦搜索/抓取，默认无依赖条目。
+    listPluginDependencyStatuses: vi.fn().mockResolvedValue([]),
+    installPluginDependency: vi.fn().mockResolvedValue({ success: true }),
+    updatePluginDependency: vi.fn().mockResolvedValue({ success: true }),
+    cancelPluginDependencyTask: vi.fn().mockResolvedValue({ cancelling: true }),
+    installPlugin: vi.fn().mockResolvedValue({ success: true }),
+    enableComputerUse: vi.fn().mockResolvedValue({ state: 'ready', mcpConnected: true, wrapperReady: true }),
+    openPluginDependencyPermissionSettings: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -91,6 +99,17 @@ describe('DesktopSettings tools pane', () => {
     );
   }
 
+  async function openToolsTab() {
+    fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await screen.findByText('搜索 Provider');
+  }
+
+  // 零配置改版后 provider 列表默认折叠；既有用例先展开高级设置，
+  // 台账 #55 的保存/测试绑定语义保持不变。
+  async function openAdvanced(kind: 'search' | 'fetch') {
+    fireEvent.click(await screen.findByLabelText(`advanced-${kind}`));
+  }
+
   it('keeps account connections in their own tab and preserves a pending login across navigation', async () => {
     mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
     renderSettings();
@@ -123,7 +142,10 @@ describe('DesktopSettings tools pane', () => {
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
 
     await screen.findByText('搜索 Provider');
-    expect(screen.getByText('DuckDuckGo')).toBeInTheDocument();
+    await openAdvanced('search');
+    await openAdvanced('fetch');
+    // 摘要行与高级列表都会显示当前 provider 名称，允许重复。
+    expect(screen.getAllByText('DuckDuckGo').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Tavily')).toBeInTheDocument();
     expect(screen.getByText('Brave Search')).toBeInTheDocument();
     // SearXNG removed
@@ -157,6 +179,7 @@ describe('DesktopSettings tools pane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
+    await openAdvanced('search');
 
     // Switch to Tavily
     fireEvent.click(screen.getByLabelText('search-tavily'));
@@ -191,6 +214,7 @@ describe('DesktopSettings tools pane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
+    await openAdvanced('search');
 
     // Masked display visible, not plain password input
     const maskedEl = screen.getByLabelText('tavily-api-key');
@@ -216,6 +240,7 @@ describe('DesktopSettings tools pane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
+    await openAdvanced('search');
 
     fireEvent.click(screen.getByLabelText('test-search'));
 
@@ -232,6 +257,7 @@ describe('DesktopSettings tools pane', () => {
     mocks.testConnectorProvider.mockResolvedValue({ success: true, latencyMs: 87, providerName: 'web_search.firecrawl' });
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
     fireEvent.click(await screen.findByLabelText('search-firecrawl'));
     expect(screen.getByLabelText('test-search')).toBeDisabled();
     expect(screen.getAllByText('请先保存或刷新确认当前配置，再测试连接。').length).toBeGreaterThan(0);
@@ -252,6 +278,8 @@ describe('DesktopSettings tools pane', () => {
     mocks.getConnectorsConfig.mockResolvedValue(defaultSnapshot());
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
+    await openAdvanced('fetch');
     fireEvent.click(await screen.findByLabelText('fetch-firecrawl'));
     expect(screen.getByLabelText('test-fetch')).toBeDisabled();
     fireEvent.click(screen.getByLabelText('fetch-basic'));
@@ -271,6 +299,7 @@ describe('DesktopSettings tools pane', () => {
     mocks.saveConnectorsConfig.mockRejectedValue(new Error('connectors_operation_unknown'));
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
     fireEvent.click(await screen.findByLabelText('search-firecrawl'));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await screen.findByText('连接器操作结果尚未确认，请先刷新核对。');
@@ -287,6 +316,7 @@ describe('DesktopSettings tools pane', () => {
     mocks.testConnectorProvider.mockResolvedValue({ success: false, latencyMs: 5, providerName: 'web_search.duckduckgo', error: 'DuckDuckGo bot challenge' });
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
     fireEvent.click(await screen.findByLabelText('test-search'));
     await screen.findByText('DuckDuckGo bot challenge');
     fireEvent.click(screen.getByLabelText('search-firecrawl'));
@@ -302,6 +332,7 @@ describe('DesktopSettings tools pane', () => {
     mocks.saveConnectorsConfig.mockRejectedValue(new Error('connectors_operation_unknown'));
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
     await screen.findByLabelText('search-duckduckgo');
     fireEvent.click(screen.getByRole('button', { name: '刷新连接器配置' }));
     fireEvent.click(screen.getByLabelText('search-firecrawl'));
@@ -320,6 +351,7 @@ describe('DesktopSettings tools pane', () => {
     mocks.saveConnectorsConfig.mockImplementation(async input => ({ ...defaultSnapshot(), config: input }));
     renderSettings();
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
+    await openAdvanced('search');
     fireEvent.click(await screen.findByLabelText('test-search'));
     expect(screen.getByLabelText('test-search')).toBeDisabled();
     fireEvent.click(screen.getByLabelText('search-firecrawl'));
@@ -337,6 +369,8 @@ describe('DesktopSettings tools pane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
+    await openAdvanced('search');
+    await openAdvanced('fetch');
 
     // Both lists expose DeepSeek.
     expect(screen.getAllByText('DeepSeek').length).toBeGreaterThanOrEqual(2);
@@ -364,6 +398,8 @@ describe('DesktopSettings tools pane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '工具管理' }));
     await screen.findByText('搜索 Provider');
+    await openAdvanced('search');
+    await openAdvanced('fetch');
 
     fireEvent.click(screen.getByLabelText('search-deepseek'));
     fireEvent.click(screen.getByLabelText('fetch-deepseek'));

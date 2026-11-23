@@ -32,7 +32,7 @@ describe('Kimi K3 D9 CLI computed loader edges', () => {
       process.cwd(),
     );
 
-    expect(allowlist).toHaveLength(7);
+    expect(allowlist).toHaveLength(4);
     expect(allowlist).toContainEqual(expect.objectContaining({
       astLocation: '192:13',
       pattern: "require(join(dirname(require.resolve('nodejieba')), 'build', 'Release', 'nodejieba.node'))",
@@ -53,7 +53,7 @@ describe('Kimi K3 D9 CLI computed loader edges', () => {
     expect(graph.modules).toContain(
       'node_modules/onnxruntime-node/bin/napi-v6/darwin/arm64/onnxruntime_binding.node',
     );
-    expect(graph.modules).toContain(
+    expect(graph.modules).not.toContain(
       'node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
     );
     expect(graph.edges).toEqual(expect.arrayContaining([

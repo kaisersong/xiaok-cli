@@ -1,3 +1,4 @@
+import BuiltinDatabase from '../../../src/utils/builtin-sqlite.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {generateKeyPairSync} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -6,8 +7,8 @@ import {join} from 'node:path';
 import {setImmediate as nextTurn} from 'node:timers/promises';
 import {setFlagsFromString} from 'node:v8';
 import {runInNewContext} from 'node:vm';
-import Native from 'better-sqlite3';
-const f=vi.hoisted(()=>({root:'',mode:'key',primary:undefined as Error|undefined,cleanup:undefined as Error|undefined,publicPem:'',privatePem:'',lock:undefined as WeakRef<{assertCurrent():void;close():void}>|undefined,database:undefined as WeakRef<import('better-sqlite3').Database>|undefined}));
+import Native from '../../../src/utils/builtin-sqlite.js';
+const f=vi.hoisted(()=>({root:'',mode:'key',primary:undefined as Error|undefined,cleanup:undefined as Error|undefined,publicPem:'',privatePem:'',lock:undefined as WeakRef<{assertCurrent():void;close():void}>|undefined,database:undefined as WeakRef<import('../../../src/utils/builtin-sqlite.js').Database>|undefined}));
 const installedBase='/Library/Application Support/xiaok-verification';
 // Only installation/identity leaves are fixtures. All returned owner locks and
 // metadata databases below use actual native SQLite and private temporary paths.
@@ -38,7 +39,7 @@ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64').each(['controller
  let error:unknown;try{if(kind==='controller')createInstalledControllerLifetime();else if(kind==='receiver')createInstalledReceiverLifetime();else createInstalledCompositeLifetime(kind);}catch(cause){error=cause;}
  expect(error).toBeInstanceOf(AggregateError);expect((error as AggregateError).cause).toBe(f.primary);expect((error as AggregateError).errors).toEqual([f.primary,f.cleanup]);
  f.cleanup=undefined;await gc();expect(f.lock?.deref()).toBeDefined();
- const {createRequire}=await import('node:module'),Sqlite=createRequire(import.meta.url)('better-sqlite3') as typeof Native;
+ const {createRequire}=await import('node:module'),Sqlite=BuiltinDatabase as typeof Native;
  const second=new Sqlite(join(f.root,'controller-owner.sqlite'),{timeout:0});try{expect(()=>second.exec('BEGIN EXCLUSIVE')).toThrow(/locked/);}finally{second.close();}
 });
 it.skipIf(process.platform!=='darwin'||process.arch!=='arm64')('retains both actual databases when controller metadata close fails, without closing its dependent lifetime lock',async()=>{

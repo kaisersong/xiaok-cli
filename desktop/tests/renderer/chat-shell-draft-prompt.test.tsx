@@ -3,7 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion } = vi.hoisted(() => ({
+const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion, mockReadArchive, mockHasArchive } = vi.hoisted(() => ({
+  mockReadArchive: vi.fn(),
+  mockHasArchive: vi.fn(() => false),
   mockSubmitUserTask: vi.fn(),
   mockAnswerQuestion: vi.fn(),
   mockGetThread: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock('../../renderer/src/api', () => ({
     answerQuestion: mockAnswerQuestion,
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
+    hasLocalLegacyTaskArchive: mockHasArchive,
+    readLocalLegacyTaskArchive: mockReadArchive,
     getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
     getObservationPreconditions: vi.fn().mockResolvedValue({ ready: false }),
     subscribeTask: mockSubscribeTask,
@@ -44,6 +48,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas,
     onAnswer,
     historyContent,
+    emptyContent,
   }: {
     prompt: string;
     currentQuestion?: {questionId:string}|null;
@@ -64,8 +69,10 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas?: () => void;
     onAnswer?: (choiceId:string)=>void;
     historyContent?: ReactNode;
+    emptyContent?: ReactNode;
   }) => (
     <div>
+      {emptyContent}
       {historyContent}
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
@@ -124,6 +131,7 @@ import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 beforeEach(() => {
+  mockHasArchive.mockReturnValue(false);
   // This suite exercises the wide chat layout. Unlike the global no-op mock,
   // report the measured region so production responsive behavior is exercised.
   vi.stubGlobal('ResizeObserver', class {
@@ -143,15 +151,77 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
-  function HistoryNavigation() {
+  function HistoryNavigation({emptyContent}: {emptyContent?:ReactNode}) {
     const navigate = useNavigate();
-    return <><button onClick={() => navigate('/t/other')}>switch conversation</button><ChatShell /></>;
+    return <><button onClick={() => navigate('/t/other')}>switch conversation</button><ChatShell emptyContent={emptyContent} /></>;
   }
-  function renderHistory() {
+  function renderHistory(emptyContent?:ReactNode) {
     return render(<MemoryRouter initialEntries={['/t/history']}><LocaleProvider><Routes>
-      <Route path="/t/:taskId" element={<HistoryNavigation />} />
+      <Route path="/t/:taskId" element={<HistoryNavigation emptyContent={emptyContent} />} />
+      <Route path="/automations/schedules" element={<p>Automation destination</p>} />
+      <Route path="/" element={<p>New task destination</p>} />
     </Routes></LocaleProvider></MemoryRouter>);
   }
+  function setupEmptyCompleteHistory() {
+    mockGetThread.mockResolvedValue({id:'history',title:'Saved entry',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'complete'});
+  }
+  it('shows an explicit display-only state for a saved empty record and navigates without dispatching',async()=>{
+    setupEmptyCompleteHistory();renderHistory();
+    expect(await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。')).toBeVisible();
+    expect(mockRecoverTask).not.toHaveBeenCalled();expect(mockSubmitUserTask).not.toHaveBeenCalled();expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'自动化'}));expect(await screen.findByText('Automation destination')).toBeVisible();
+  });
+  it('opens a selected schedule’s old run from an empty recent conversation without attaching it', async () => {
+    setupEmptyCompleteHistory();
+    const scheduleA = { id: 'schedule-a', title: 'Saved entry', executor: { kind: 'agent_task' }, createdAt: 1000, runCount: 2 };
+    const scheduleB = { ...scheduleA, id: 'schedule-b', createdAt: 100000 };
+    const latest = { actionId: scheduleB.id, runId: 'newer', executorKind: 'agent_task', startedAt: 400000, runtimeTaskId: 'task_newer' };
+    const older = { ...latest, runId: 'older', startedAt: 200000, runtimeTaskId: 'task_older' };
+    const getTimedActionRuns = vi.fn().mockResolvedValue([
+      { ...latest, actionId: scheduleA.id, runId: 'wrong', runtimeTaskId: 'task_wrong' },
+      older,
+      latest,
+    ]);
+    window.xiaokDesktop = {
+      getGoal: vi.fn().mockResolvedValue(null),
+      onGoalChanged: vi.fn(() => () => {}),
+      onGoalTaskPrepared: vi.fn(() => () => {}),
+      getTimedActions: vi.fn().mockResolvedValue([scheduleA, scheduleB]),
+      getTimedActionRuns,
+    } as unknown as NonNullable<typeof window.xiaokDesktop>;
+    mockHasArchive.mockReturnValue(true);
+    mockReadArchive.mockImplementation(async (taskId: string) => ({
+      taskId, sourceEpoch: 'archive-epoch',
+      messages: [{ sourceMessageId: 'assistant:0', role: 'assistant', text: `Saved output for ${taskId}` }],
+    }));
+    renderHistory();
+
+    const candidates = await screen.findByLabelText('选择定时任务');
+    expect(within(candidates).getAllByRole('option')).toHaveLength(3);
+    expect(getTimedActionRuns).not.toHaveBeenCalled();
+    fireEvent.change(candidates, { target: { value: scheduleB.id } });
+    expect(await screen.findByText('Saved output for task_newer')).toBeVisible();
+    const runs = screen.getByLabelText('运行记录');
+    expect(within(runs).getAllByRole('option')).toHaveLength(2);
+    fireEvent.change(runs, { target: { value: 'older' } });
+    expect(await screen.findByText('Saved output for task_older')).toBeVisible();
+    expect(screen.queryByText('Saved output for task_newer')).not.toBeInTheDocument();
+    expect(getTimedActionRuns).toHaveBeenCalledExactlyOnceWith(scheduleB.id);
+    expect(mockReadArchive.mock.calls).toEqual([['task_newer'], ['task_older']]);
+    expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
+    expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
+  });
+  it('preserves an unsent draft while explaining an empty saved record',async()=>{
+    setupEmptyCompleteHistory();localStorage.setItem('xiaok.threadDraft.history',JSON.stringify({draftPrompt:'My unsent draft'}));renderHistory();
+    await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。');
+    expect(screen.getByLabelText('chat-input')).toHaveValue('My unsent draft');expect(mockSubmitUserTask).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'新建任务'}));expect(await screen.findByText('New task destination')).toBeVisible();
+  });
+  it('keeps the caller supplied welcome instead of replacing it with the saved-record state',async()=>{
+    setupEmptyCompleteHistory();renderHistory(<p>Custom welcome</p>);expect(await screen.findByText('Custom welcome')).toBeVisible();
+    expect(screen.queryByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。')).not.toBeInTheDocument();
+  });
   function setupLongHistory() {
     const taskIds = Array.from({ length: 45 }, (_, index) => `task_${index}`);
     mockGetThread.mockImplementation(async id => ({ id, title: 'saved title', status: 'idle', mode: 'work',
@@ -161,6 +231,44 @@ describe('ChatShell draft prompt navigation state', () => {
     mockSubscribeTask.mockImplementation(() => () => {});
     return taskIds;
   }
+  function setupLegacyArchiveHistory(count: number) {
+    const ids = Array.from({ length: count }, (_, i) => `legacy_${i}`);
+    mockGetThread.mockResolvedValue({id:'history',title:'saved legacy',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:ids.at(-1),taskIds:ids,coverage:'unclaimed'});
+    mockHasArchive.mockReturnValue(true);
+    mockRecoverTask.mockImplementation(async id => ({snapshot:{taskId:id,sessionId:`epoch-${id}`,status:'completed',prompt:`PRIVATE RAW ${id}`,events:[],materials:[],createdAt:1,updatedAt:2}}));
+    mockReadArchive.mockImplementation(async id => ({version:1,taskId:id,sourceEpoch:`epoch-${id}`,messages:[{sourceMessageId:'answer',text:`archive ${id}`}]}));
+    return ids;
+  }
+  it('opens four legacy runs first and retains all seventeen archive answers through earlier pages', async () => {
+    const ids=setupLegacyArchiveHistory(17);renderHistory();
+    await screen.findByText('archive legacy_16');
+    expect(mockRecoverTask.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
+    expect(mockReadArchive.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_0');
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.map(id=>`archive ${id}`).join(''));
+    expect(screen.queryByText(/PRIVATE RAW/)).toBeNull();
+    expect(mockSubscribeTask).not.toHaveBeenCalled();
+    expect(mockSubmitUserTask).not.toHaveBeenCalled();
+  });
+  it('keeps a denied legacy archive page retryable without raw snapshot fallback', async () => {
+    const ids=setupLegacyArchiveHistory(25);renderHistory();
+    await screen.findByText('archive legacy_24');
+    const read=mockReadArchive.getMockImplementation()!;
+    mockReadArchive.mockImplementation(async id=>{if(id==='legacy_2')throw Error('denied');return read(id);});
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/PRIVATE RAW/)).toBeNull();
+    expect(screen.queryByText('archive legacy_1')).toBeNull();
+    expect(screen.getByText('archive legacy_24')).toBeVisible();
+    mockReadArchive.mockImplementation(read);
+    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_1');
+    if(screen.queryByRole('button',{name:/加载更早记录/}))fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    await screen.findByText('archive legacy_0');
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.map(id=>`archive ${id}`).join(''));
+    expect(mockSubscribeTask).not.toHaveBeenCalled();
+  });
   it('opens the latest 20 runs, then prepends every older page in order without resubscribing the live task', async () => {
     const ids = setupLongHistory(); renderHistory();
     await screen.findByText('history prompt task_44');
@@ -1070,6 +1178,54 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.queryByText(/authentication_error/)).not.toBeInTheDocument();
     expect(screen.queryByText(/The API Key appears/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Failed:/)).not.toBeInTheDocument();
+  });
+  it.each([false,true])('keeps legacy refusal visible without a Goal panel and allows an empty unclaimed draft (legacy=%s)',async legacy=>{
+    mockGetThread.mockResolvedValue({id:'thread-unclaimed',title:'Legacy fixture',status:'idle',mode:'work',createdAt:1,updatedAt:2,starred:false,gtdBucket:'inbox',pinnedAt:null,currentTaskId:legacy?'task_legacy':null,taskIds:legacy?['task_legacy']:[],coverage:'unclaimed'});
+    mockRecoverTask.mockResolvedValue({snapshot:{taskId:'task_legacy',sessionId:'legacy_epoch',prompt:'old',status:'completed',materials:[],events:[],createdAt:1,updatedAt:2}});
+    mockSubmitUserTask.mockRejectedValue(Error('new_task_submission_reached'));
+    render(<MemoryRouter initialEntries={['/t/thread-unclaimed']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    if(legacy){expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).not.toHaveBeenCalled();}
+    else await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledOnce());
+  });
+
+  it.each(['complete','unclaimed','rejected'] as const)('refreshes first-submit ownership from the actual thread record (%s)', async coverage => {
+    const empty={id:'history',title:'new',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'unclaimed'};
+    mockGetThread.mockResolvedValueOnce(empty);
+    if(coverage==='rejected')mockGetThread.mockRejectedValue(Error('read_unavailable'));
+    else mockGetThread.mockResolvedValue({...empty,coverage,currentTaskId:'task-first',taskIds:['task-first']});
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('second_submission_reached'));
+    let handler:((event:any)=>void)|undefined;
+    mockSubscribeTask.mockImplementation((_id,callback)=>{handler=callback;return()=>{};});
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockSubscribeTask).toHaveBeenCalledWith('task-first',expect.any(Function)));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
+    act(()=>handler?.({type:'result',result:{summary:'first complete',artifacts:[]}}));
+    await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    if(coverage==='complete')await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
+    else{expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).toHaveBeenCalledOnce();}
+  });
+
+  it('discards an ownership refresh after navigating to another thread', async () => {
+    const empty={id:'history',title:'new',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'unclaimed'};
+    let finish!:(value:unknown)=>void;
+    mockGetThread.mockImplementation(id=>id==='other'?Promise.resolve({...empty,id,coverage:'complete'}):Promise.resolve(empty));
+    mockGetThread.mockResolvedValueOnce(empty).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('other_submission_reached'));
+    mockSubscribeTask.mockImplementation(()=>()=>{});
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button',{name:'switch conversation'}));
+    await waitFor(()=>expect(mockGetThread).toHaveBeenCalledWith('other'));
+    await act(async()=>finish({...empty,coverage:'complete',currentTaskId:'task-first',taskIds:['task-first']}));
+    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
+    expect(mockSubmitUserTask.mock.calls[1][0].input.context).toEqual({threadId:'other'});
   });
 
   it('replays persisted quota failures and restores failed status', async () => {

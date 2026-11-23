@@ -8,7 +8,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const config = process.argv[2];
   if (!config) throw new Error('activity_owner_config_required');
   void serveCanonicalConversationActivityOwner(config).catch((error: unknown) => {
-    const code = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : (error as { code?: string })?.code ?? 'unclassified';
+    const code = error instanceof Error && (/^[a-z_]+$/.test(error.message)||error.message==='activity_source_start_timeout:local_connection_unavailable') ? error.message : (error as { code?: string })?.code ?? 'unclassified';
     process.stderr.write(`activity_owner_start_failed:${code}\n`); process.exitCode = 1;
   });
 }
