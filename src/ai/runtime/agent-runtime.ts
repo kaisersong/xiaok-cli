@@ -237,6 +237,8 @@ export class AgentRuntime {
         this.session.appendUserBlocks(input);
       }
 
+      let historyBeforeTurn: number | undefined;
+      let contextRetry = false;
       let iteration = 0;
       let emptyRetries = 0;
       const verificationToolCalls: TraceToolCall[] = [];
@@ -266,7 +268,11 @@ export class AgentRuntime {
         const pendingInput = this.takePendingInput?.();
         if (pendingInput) this.session.appendUserText(pendingInput);
 
-        const stageViewActive=prepareCompoundRootIntentStageView(this.session).active;
+        const { active: stageViewActive, messages: { length: messageCount } } = prepareCompoundRootIntentStageView(this.session);
+        // Everything appended since the user started this run, including queued instructions
+        // and completed tools, belongs to the retry and must survive verbatim.
+        historyBeforeTurn ??= messageCount - (pendingInput ? 2 : 1);
+        const turnMessageCount = messageCount - historyBeforeTurn;
         const publicResume=this.restoredProviderHistory.active;
         if(publicResume){
           const request=this.restoredProviderHistory.project(this.session.getMessages(),stageViewActive);
@@ -389,6 +395,25 @@ export class AgentRuntime {
         for await (const chunk of recoverModelStream({
           physicalRun,
           signal: mergedSignal,
+          compactContext: () => {
+            if (contextRetry || autoCompactionBlocked || currentAssistantBlocks.length > 0
+              || stageViewActive || publicResume || strictK3Run || this.observationOwner) return false;
+            const plan = this.session.planCompaction(Math.max(1, turnMessageCount));
+            if (plan.sourceMessageCount !== messageCount) return false;
+            const { record } = this.session.applyCompaction(plan);
+            if (!record) return false;
+
+            contextRetry = true;
+            autoCompactionBlocked = true;
+            onEvent({ type: 'compact_triggered', runId: run.runId, summary: record.summary, compactionId: record.id });
+            const usage = this.session.getUsage();
+            onEvent({ type: 'usage_updated', runId: run.runId, usage: {
+              ...usage, inputTokens: usage.inputTokens
+                + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+            } });
+            onEvent({ type: 'model_request_started', runId: run.runId });
+            return true;
+          },
           onRetry: (notice) => {
             const partial = currentAssistantBlocks.filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text').map(block => block.text).join('').slice(-12000);
             currentAssistantBlocks = [];
@@ -400,7 +425,7 @@ export class AgentRuntime {
           open: (requestSignal) => {
             const runtime = this;
             return (async function* () {
-              const logicalInvocationId = `${run.runId}:${iteration}:recovery-${recoveryAttempt}`;
+              const logicalInvocationId = `${run.runId}:${iteration}:recovery-${recoveryAttempt}${contextRetry ? ':compact' : ''}`;
               toolProviderInvocationId = logicalInvocationId;
               const tools = runtime.registry.getToolDefinitions();
               const view=prepareCompoundRootIntentStageView(runtime.session,logicalInvocationId);

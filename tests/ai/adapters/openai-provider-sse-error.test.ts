@@ -101,6 +101,56 @@ describe('real SDK status-less provider SSE errors', () => {
       ? frame(text('partial')) + frame({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'UNCOMMITTED', type: 'function', function: { name: 'effect', arguments: '{}' } }] }, finish_reason: null }] }) + frame({ error: { type: 'server_error', message: 'NoRoom' } })
       : frame(text('finished', 'stop')));
   });
+  it.each([false, true])('compacts after a tool result and retries once (still over limit=%s)', async stillOverLimit => {
+    const overflow = frame({ error: { type: 'context_length_exceeded' } });
+    await fixture(async (adapter, calls) => {
+      const session = new AgentSessionState();
+      session.appendUserText('old history '.repeat(1000));
+      session.appendAssistantBlocks([{ type: 'text', text: 'earlier answer' }]);
+      let queued: string | undefined;
+      const execute = vi.fn(async () => {
+        queued = 'queued instruction';
+        return 'COMPLETED_EFFECT';
+      });
+      const registry = new ToolRegistry({ autoMode: true }, [{
+        permission: 'safe', definition: { name: 'effect', description: 'fixture', inputSchema: { type: 'object', properties: {} } }, execute,
+      }]);
+      const runtime = new AgentRuntime({ adapter, registry, session, controller: new AgentRunController(), systemPrompt: '',
+        takePendingInput: () => { const input = queued; queued = undefined; return input; },
+      });
+      const events: string[] = [];
+      const run = runtime.run('current user task', event => events.push(event.type));
+      if (stillOverLimit) {
+        const error = await run.catch(error => error);
+        expect(normalizeRuntimeError(error).message).toContain('缩短');
+      } else {
+        await run;
+        expect(events.at(-1)).toBe('run_completed');
+      }
+      expect(calls).toHaveLength(3);
+      const retry = JSON.stringify(calls[2]);
+      expect(retry.length).toBeLessThan(JSON.stringify(calls[1]).length);
+      expect(retry).toContain('current user task');
+      expect(retry).toContain('queued instruction');
+      expect(retry).toContain('COMPLETED_EFFECT');
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(events.filter(event => event === 'compact_triggered')).toHaveLength(1);
+    }, count => count === 1 ? frame(tool('COMMITTED')) : count === 2 || stillOverLimit ? overflow : frame(text('finished', 'stop')));
+  });
+
+  it.each(['no prefix', 'partial output', 'quota'])('keeps history and stops on %s', async scenario => {
+    await fixture(async (adapter, calls) => {
+      const session = new AgentSessionState();
+      if (scenario !== 'no prefix') session.appendUserText('old history '.repeat(1000));
+      const runtime = new AgentRuntime({ adapter, registry: new ToolRegistry({ autoMode: true }, []),
+        session, controller: new AgentRunController(), systemPrompt: '' });
+      await expect(runtime.run('current user task', () => {})).rejects.toBeInstanceOf(Error);
+      expect(calls).toHaveLength(1);
+      expect(session.getCompactions()).toHaveLength(0);
+    }, () => (scenario === 'partial output' ? frame(text('partial')) : '')
+      + frame({ error: { type: scenario === 'quota' ? 'insufficient_quota' : 'context_length_exceeded' } }));
+  });
+
   it('classifies exhausted NoRoom recovery as a model failure', async () => {
     vi.stubEnv('XIAOK_MODEL_RECOVERY_WINDOW_MS', '20');
     await fixture(async adapter => {
