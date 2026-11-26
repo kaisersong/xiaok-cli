@@ -4,12 +4,56 @@ import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import
 import {ASSISTANT_CHAT_THREAD,LEGACY_ASSISTANT_CHAT_THREAD,isAssistantThread} from '../../shared/assistant-inbox-contract.js';
 import {ASSISTANT_THREAD_ID} from '../../renderer/src/lib/assistant-thread.js';
 import {ContinuityService} from '../../electron/context-continuity/service.js';
-import {assembleOwnedHistory} from '../../electron/context-continuity/history.js';
+import {assembleOwnedHistory, withAssistantUserHistory} from '../../electron/context-continuity/history.js';
+import { TaskContinuitySource } from '../../electron/context-continuity/task-source.js';
+import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 it('keeps legacy assistant data distinct while recognizing both exact protected assistant identities',()=>{
  expect(LEGACY_ASSISTANT_CHAT_THREAD).toBe('a0c11111-1111-4111-8111-111111111111');expect(ASSISTANT_CHAT_THREAD).toBe('a0c11111-1111-4111-8111-111111111112');expect(ASSISTANT_THREAD_ID).toBe(ASSISTANT_CHAT_THREAD);
  expect(isAssistantThread(ASSISTANT_CHAT_THREAD)).toBe(true);expect(isAssistantThread(LEGACY_ASSISTANT_CHAT_THREAD)).toBe(true);expect(isAssistantThread('a0c11111-1111-4111-8111-111111111113')).toBe(false);
  const root=mkdtempSync(join(tmpdir(),'assistant-chat-generation-')),service=new ContinuityService({dbPath:join(root,'actual.sqlite'),profileId:'profile'}),actor={requestSource:'user' as const,profileId:'profile',actorId:'desktop-user:profile'};
  try{const old=service.ensureAssistantConversation(actor,LEGACY_ASSISTANT_CHAT_THREAD);const before=service.store.db.prepare('SELECT record FROM conversations WHERE id=?').get(LEGACY_ASSISTANT_CHAT_THREAD);const current=service.ensureAssistantConversation(actor,ASSISTANT_CHAT_THREAD);expect(current?.id).not.toBe(old?.id);expect(current?.taskIds).toEqual([]);expect(service.ensureAssistantConversation(actor,ASSISTANT_CHAT_THREAD)).toEqual(current);expect(service.store.db.prepare('SELECT record FROM conversations WHERE id=?').get(LEGACY_ASSISTANT_CHAT_THREAD)).toEqual(before);}finally{service.store.close();rmSync(root,{recursive:true,force:true});}
+});
+
+it('continues the same assistant thread after a terminal read turn without granting source closure', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'assistant-chat-readlike-'));
+  const service = new ContinuityService({ dbPath: join(root, 'actual.sqlite'), profileId: 'profile' });
+  const actor = { requestSource: 'user' as const, profileId: 'profile', actorId: 'desktop-user:profile' };
+  const threadId = ASSISTANT_CHAT_THREAD;
+  const source = new TaskContinuitySource(service, actor);
+  try {
+    service.ensureAssistantConversation(actor, threadId);
+    const snapshot: TaskSnapshot = {
+      taskId: 'task_previous', sessionId: 'epoch_fixture', status: 'completed' as const,
+      prompt: 'Prior text must stay out of the next model request', materials: [],
+      events: [
+        { type: 'canvas_tool_call', toolName: 'web_search', toolUseId: 'request_fixture', input: {}, eventId: 'request_start' },
+        { type: 'goal_tool_finished', toolName: 'web_search', invocationId: 'request_fixture', ok: true },
+      ],
+      context: { threadId, taskIds: [], loadedTaskIds: [], skipped: [] },
+      createdAt: 1, updatedAt: 2,
+    };
+    await source.bindPrepared({ conversationId: threadId, taskId: snapshot.taskId, publicPrompt: snapshot.prompt }, async () => snapshot);
+    service.recordUnprovenEffect(actor, snapshot.taskId, 'request_fixture', 'web_search');
+    expect(() => assembleOwnedHistory(service, actor, 'task_automatic', { threadId })).toThrow('blocked_unsettled');
+    const next = withAssistantUserHistory(threadId, () => assembleOwnedHistory(service, actor, 'task_next', { threadId }, () => snapshot));
+    expect(next).toEqual({
+      history: [],
+      audit: { threadId, taskIds: [snapshot.taskId], loadedTaskIds: [], skipped: [{ taskId: snapshot.taskId, reason: 'unsettled' }] },
+    });
+    expect(service.getConversation(actor, threadId)?.taskIds).toEqual([snapshot.taskId]);
+    expect(() => service.assertHistorySourceClosed(snapshot.taskId)).toThrow('blocked_unsettled');
+    const conflicting: TaskSnapshot = { ...snapshot, events: [
+      { type: 'canvas_tool_call', toolName: 'write', toolUseId: 'request_fixture', input: {}, eventId: 'request_start' },
+      snapshot.events[1],
+    ] };
+    expect(() => withAssistantUserHistory(threadId, () => assembleOwnedHistory(service, actor, 'task_conflict', { threadId }, () => conflicting))).toThrow('blocked_unsettled');
+
+    service.recordUnprovenEffect(actor, snapshot.taskId, 'write_fixture', 'write');
+    expect(() => withAssistantUserHistory(threadId, () => assembleOwnedHistory(service, actor, 'task_later', { threadId }, () => snapshot))).toThrow('blocked_unsettled');
+  } finally {
+    service.store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 it('admits the recovery conversation while preserving the blocked original source', () => {

@@ -295,6 +295,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const hideObservationControls = hideObservationControlsOverride || isAssistantThread(taskId);
   const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
   const [assistantRecoveryScope, setAssistantRecoveryScope] = useState<DisplayScope | null>(null);
+  const [assistantCheckpointScope, setAssistantCheckpointScope] = useState<DisplayScope | null>(null);
   const assistantRecoveryNavigation = useRef<DisplayScope | null>(null);
   const liveRenderScope = useRef<typeof renderScope | null>(renderScope);
   const admissionPending = useRef<typeof renderScope | null>(null);
@@ -1529,6 +1530,9 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 
         // Final check before setting any state
         if (!loadCurrent()) return;
+        if (isAssistantThread(taskId)) {
+          setAssistantCheckpointScope(lastSnapshot?.context?.skipped.some(item => item.reason === 'unsettled') ? renderScope : null);
+        }
 
         if (missingTaskIds.length) allMessages.push({ id: 'history-unavailable', role: 'assistant', content: t.chatShell.historyUnavailable(missingTaskIds.join(', ')) });
 
@@ -1830,12 +1834,15 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         threadRef.current = record;
         setThread(record);
       }).catch(() => {});
-      if(taskId===ASSISTANT_CHAT_THREAD){
+      if(isAssistantThread(taskId)){
         // Main's task creation time is the shared live/replay timeline anchor.
         // Metadata failure leaves an un-timed pending turn; never invent now().
         void api.recoverTask(newTaskId).then(({snapshot})=>{
-          if(liveRenderScope.current!==renderScope||snapshot?.taskId!==newTaskId||!Number.isFinite(snapshot.createdAt))return;
-          setMessages(previous=>previous.map(message=>message.id===userMsg.id?{...message,createdAt:snapshot.createdAt}:message));
+          if(!current()||snapshot?.taskId!==newTaskId)return;
+          setAssistantCheckpointScope(snapshot.context?.skipped.some(item => item.reason === 'unsettled') ? renderScope : null);
+          if(taskId===ASSISTANT_CHAT_THREAD&&Number.isFinite(snapshot.createdAt)){
+            setMessages(previous=>previous.map(message=>message.id===userMsg.id?{...message,createdAt:snapshot.createdAt}:message));
+          }
         }).catch(()=>{});
       }
     } catch (e) {
@@ -2355,7 +2362,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       )}
       <ChatView
         localCommands={hideObservationControls ? undefined : [{name: 'observation', description: t.observation.commandHint}]}
-        inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} /> : undefined}
+        inputAccessory={!hideObservationControls ? <ObservationControls key={taskId} ref={observationCommands} draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
+          : assistantCheckpointScope === renderScope ? <p role="note" className="text-xs text-[var(--c-text-secondary)]">{t.chatShell.assistantHistoryCheckpoint}</p> : undefined}
         emptyContent={emptyContent !== undefined ? emptyContent : (
           !isAssistantThread(taskId) && thread.coverage === 'complete' && thread.taskIds.length === 0 &&
           !thread.currentTaskId && !thread.legacyTaskIds?.length && assistantTimeline.length === 0 && status === 'idle'
