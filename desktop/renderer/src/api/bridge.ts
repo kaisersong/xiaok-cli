@@ -328,16 +328,26 @@ export const api = {
 
   async getThread(id: string): Promise<ThreadRecord | null> {
     const owner = getDesktopApi();
-    if (owner?.getContextConversation) { const record = await owner.getContextConversation({ conversationId: id }); if (record) {
+    let record = await owner?.getContextConversation?.({ conversationId: id });
+    if (!record) {
+      const state = await inspectThreadState(id);
+      if (state === 'deleted') return null;
+      if (state === 'blocked') throw new Error('not_readable');
+      if (state === 'active' && owner?.getContextConversation) {
+        record = await owner.getContextConversation({ conversationId: id });
+        if (!record) throw new Error('continuity_unavailable');
+      }
+    }
+    if (record) {
       const candidates: string[] = []; let offset: number | undefined;
-      if (record.coverage === 'partial' && owner.getLegacyThreadMetadata) do {
+      if (record.coverage === 'partial' && owner?.getLegacyThreadMetadata) do {
         const page = await owner.getLegacyThreadMetadata({ legacyThreadId: id, offset, limit: 100 });
         if (!page) break;
         candidates.push(...page.taskIds); if (page.nextOffset !== undefined && page.nextOffset <= (offset ?? 0)) throw new Error('invalid_cursor'); offset = page.nextOffset;
       } while (offset !== undefined);
-      return withThreadCompatibility({ ...record, legacyTaskIds: [...new Set(candidates)].filter(taskId => !record.taskIds.includes(taskId)) });
-    } }
-    const state = await inspectThreadState(id); if (state === 'deleted') return null; if (state === 'blocked') throw new Error('not_readable');
+      const canonicalIds = new Set(record.taskIds);
+      return withThreadCompatibility({ ...record, legacyTaskIds: [...new Set(candidates)].filter(taskId => !canonicalIds.has(taskId)) });
+    }
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
     return withThreadCompatibility({

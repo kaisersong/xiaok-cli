@@ -1338,7 +1338,8 @@ export function ChatShell({ threadId, initialThread, onInitialViewReady, emptyCo
       try {
         const storedThread = threadRef.current;
         const { snapshot, presentation, archive } = await recoverForDisplay(api, id, undefined, current,
-          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id));
+          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id),
+          storedThread?.coverage === 'complete' && storedThread.taskIds.includes(id) ? storedThread.id : undefined);
         if (!current()) return;
         if (archive) {
           hasArchive = true;
@@ -1502,7 +1503,8 @@ export function ChatShell({ threadId, initialThread, onInitialViewReady, emptyCo
         const visibleTaskIds = allTaskIds.slice(-firstPageSize);
         const readHistory = (id: string) => recoverForDisplay(api, id,
           allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,
-          threadData.coverage === 'unclaimed' || Boolean(threadData.legacyTaskIds?.includes(id)));
+          threadData.coverage === 'unclaimed' || Boolean(threadData.legacyTaskIds?.includes(id)),
+          threadData.coverage === 'complete' && threadData.status !== 'running' && threadData.taskIds.includes(id) ? threadData.id : undefined);
         const batchSize = isAssistantThread(taskId) ? 4 : 1;
         let batch: PromiseSettledResult<Awaited<ReturnType<typeof readHistory>>>[] = [];
         for (const [index, tid] of visibleTaskIds.entries()) {

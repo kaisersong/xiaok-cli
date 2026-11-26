@@ -37,3 +37,34 @@ it('uses an explicit legacy display hint for scoped local history but never retr
  const scoped={...snapshot,context:{threadId:'historical-thread'}},read=vi.fn(async()=>{throw Error('local_legacy_archive_unavailable');}),protectedRead=vi.fn();window.xiaokDesktop={recoverTask:vi.fn(async()=>({snapshot:scoped})),readTaskHistory:protectedRead,readLocalLegacyTaskArchive:read} as unknown as typeof window.xiaokDesktop;
  await expect(recoverForDisplay(api,snapshot.taskId,undefined,()=>true,true)).rejects.toThrow('local_legacy_archive_unavailable');expect(read).toHaveBeenCalledOnce();expect(protectedRead).not.toHaveBeenCalled();
 });
+
+it('opens a completed canonical task from the authenticated history snapshot alone', async () => {
+  const canonical = { ...snapshot, context: { threadId: 'thread-current' } };
+  const presentation = { version: 1 as const, taskId: canonical.taskId, sourceEpoch: canonical.sessionId, prompt: canonical.prompt, includeUser: true };
+  const read = vi.fn(async () => ({ snapshot: canonical, presentation }));
+  const recover = vi.fn(async () => { throw Error('duplicate recovery'); });
+  window.xiaokDesktop = { recoverTask: recover, readTaskHistory: read } as unknown as typeof window.xiaokDesktop;
+  const value = await recoverForDisplay(api, canonical.taskId, undefined, () => true, false, 'thread-current');
+  expect(value).toEqual({ snapshot: canonical, presentation });
+  expect(recover).not.toHaveBeenCalled();
+});
+
+it('still runs the recovery path for a task with historical workflow results', async () => {
+  const workflow = { ...snapshot, context: { threadId: 'thread-current' }, events: [
+    { type: 'canvas_tool_call', toolName: 'get_dynamic_workflow_status', toolUseId: 'workflow', eventId: 'workflow', input: {} },
+  ] };
+  const presentation = { version: 1 as const, taskId: workflow.taskId, sourceEpoch: workflow.sessionId, prompt: workflow.prompt, includeUser: true };
+  const read = vi.fn(async () => ({ snapshot: workflow, presentation }));
+  const recover = vi.fn(async () => ({ snapshot: workflow }));
+  window.xiaokDesktop = { recoverTask: recover, readTaskHistory: read } as unknown as typeof window.xiaokDesktop;
+  await recoverForDisplay(api, workflow.taskId, undefined, () => true, false, 'thread-current');
+  expect(recover).toHaveBeenCalledOnce();
+});
+
+it('does not recover a canonical task after its authenticated history read is denied', async () => {
+  const recover = vi.fn(async () => ({ snapshot }));
+  const readTaskHistory = vi.fn(async () => { throw Error('task_history_unavailable'); });
+  window.xiaokDesktop = { recoverTask: recover, readTaskHistory } as unknown as typeof window.xiaokDesktop;
+  await expect(recoverForDisplay(api, snapshot.taskId, undefined, () => true, false, 'thread-current')).rejects.toThrow('task_history_unavailable');
+  expect(recover).not.toHaveBeenCalled();
+});
