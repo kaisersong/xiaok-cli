@@ -328,7 +328,6 @@ export const api = {
 
   async getThread(id: string): Promise<ThreadRecord | null> {
     const owner = getDesktopApi();
-    const state = await inspectThreadState(id); if (state === 'deleted') return null; if (state === 'blocked') throw new Error('not_readable');
     if (owner?.getContextConversation) { const record = await owner.getContextConversation({ conversationId: id }); if (record) {
       const candidates: string[] = []; let offset: number | undefined;
       if (record.coverage === 'partial' && owner.getLegacyThreadMetadata) do {
@@ -338,6 +337,7 @@ export const api = {
       } while (offset !== undefined);
       return withThreadCompatibility({ ...record, legacyTaskIds: [...new Set(candidates)].filter(taskId => !record.taskIds.includes(taskId)) });
     } }
+    const state = await inspectThreadState(id); if (state === 'deleted') return null; if (state === 'blocked') throw new Error('not_readable');
     const result = await withStore('readonly', (store) => store.get(id));
     if (!result) return null;
     return withThreadCompatibility({

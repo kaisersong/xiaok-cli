@@ -32,6 +32,20 @@ it('does not silently fall back to renderer writes when the main owner fails', a
   await expect(api.createThread({})).rejects.toThrow('storage unavailable'); expect(open).not.toHaveBeenCalled();
 });
 
+it('reads canonical metadata in one IPC and never falls back after a denial', async () => {
+  const open = vi.fn(() => { throw Error('unexpected browser read'); });
+  vi.stubGlobal('indexedDB', { open });
+  const inspect = vi.fn(), get = vi.fn(async () => conversation);
+  state.desktop = { inspectContextConversations: inspect, getContextConversation: get };
+  expect((await api.getThread(conversation.id))?.id).toBe(conversation.id);
+  expect(inspect).not.toHaveBeenCalled();
+
+  get.mockRejectedValueOnce(Error('not_readable'));
+  await expect(api.getThread(conversation.id)).rejects.toThrow('not_readable');
+  expect(inspect).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+});
+
 it('never revives a claimed conversation from IndexedDB after the main owner tombstones it', async () => {
   const open = vi.fn(() => { throw new Error('deleted fallback prohibited'); }); vi.stubGlobal('indexedDB', { open });
   state.desktop = { inspectContextConversations: vi.fn(async () => [{ id: 'main-owned', state: 'deleted' }]), getContextConversation: vi.fn(async () => null) };

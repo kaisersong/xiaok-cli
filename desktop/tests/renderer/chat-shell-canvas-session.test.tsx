@@ -328,7 +328,7 @@ describe('ChatShell canvas is scoped per session', () => {
     expect(mockReadFileContent).toHaveBeenCalledWith('/tmp/report.html');
   });
 
-  it('loads assistant history concurrently and replays it in chronological order', async () => {
+  it('opens the latest assistant task before earlier history and preserves chronological order', async () => {
     const id = 'a0c11111-1111-4111-8111-111111111112';
     const initialThread = { ...thread(id), currentTaskId: 'later', taskIds: ['earlier', 'later'] };
     let finishEarlier!: (value: unknown) => void;
@@ -343,8 +343,9 @@ describe('ChatShell canvas is scoped per session', () => {
       <ChatShell threadId={id} initialThread={initialThread} />
     </LocaleProvider></MemoryRouter>);
 
-    await waitFor(() => expect(mockRecoverTask).toHaveBeenCalledWith('later', undefined));
+    await waitFor(() => expect(screen.getByTestId('narration-output')).toHaveTextContent(/^later$/));
     expect(mockGetThread).not.toHaveBeenCalled();
+    await waitFor(() => expect(finishEarlier).toBeDefined());
     await act(async () => finishEarlier(resolved('earlier')));
     expect(screen.getByTestId('narration-output')).toHaveTextContent('earlierlater');
   });
