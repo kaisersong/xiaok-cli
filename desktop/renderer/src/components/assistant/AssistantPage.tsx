@@ -16,8 +16,10 @@ import { AssistantWorkspaceContent } from './AssistantWorkspaceContent';
 export function AssistantPage() {
   const { t } = useLocale();
   const labels = t.assistant.conversation;
-  const data = useAssistantWorkspace();
-  const inbox = useAssistantInbox(data.overview?.profile.status);
+  const [chatVisible, setChatVisible] = useState(false);
+  const onInitialViewReady = useCallback(() => setChatVisible(true), []);
+  const data = useAssistantWorkspace(chatVisible);
+  const inbox = useAssistantInbox(data.overview?.profile.status, chatVisible);
   const navigate = useNavigate();
   const location = useLocation();
   const openItem = async (item:AttentionItem) => { if(!item.threadId||!item.taskId)return; await api.ensureAssistantWorkThread({id:item.threadId,title:item.title,taskId:item.taskId});navigate(`/t/${item.threadId}`); };
@@ -61,6 +63,6 @@ export function AssistantPage() {
   </div>;
   return <div data-testid="assistant-page" className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]">
     {!thread ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
-      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} initialThread={thread} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
+      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} initialThread={thread} onInitialViewReady={onInitialViewReady} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
   </div>;
 }

@@ -10,9 +10,26 @@ interface DisplayRecoveryPort {
   hasLocalLegacyTaskArchive?():boolean;
 }
 
+function canDisplayCompletedHistory(history: TaskHistoryRead, taskId: string, threadId: string): boolean {
+  const { snapshot, presentation } = history;
+  return snapshot.taskId === taskId && snapshot.context?.threadId === threadId
+    && snapshot.status === 'completed' && !snapshot.executionScope && !snapshot.inputPreparation
+    && !snapshot.executionProtected && !snapshot.protectedObservationClosure
+    && presentation?.version === 1 && presentation.taskId === taskId && presentation.sourceEpoch === snapshot.sessionId
+    && !snapshot.events.some(event => (event.type === 'canvas_tool_call' || event.type === 'canvas_tool_result')
+      && ['create_project', 'get_dynamic_workflow_status'].includes(event.toolName.trim().toLowerCase()));
+}
+
 /** Existing workflow cards retain their owner; a Task proof never certifies them. */
 export async function recoverForDisplay(port: DisplayRecoveryPort, taskId: string, legacyPrompt: string | undefined,
-  current: () => boolean,legacyDisplay=false): Promise<{ snapshot: TaskSnapshot; presentation?: TaskPublicPresentation | null; recoveredFromTaskId?: string;archive?:LocalLegacyTaskArchive }> {
+  current: () => boolean, legacyDisplay = false, canonicalThreadId?: string): Promise<{ snapshot: TaskSnapshot; presentation?: TaskPublicPresentation | null; recoveredFromTaskId?: string;archive?:LocalLegacyTaskArchive }> {
+  const available = port.hasTaskHistoryPresentation ? port.hasTaskHistoryPresentation() : typeof port.readTaskHistory === 'function';
+  if (canonicalThreadId && !legacyDisplay && available) {
+    if (typeof port.readTaskHistory !== 'function') throw new Error('task_history_unavailable');
+    const history = await port.readTaskHistory(taskId);
+    if (!current()) throw new Error('stale_task_history');
+    if (canDisplayCompletedHistory(history, taskId, canonicalThreadId)) return history;
+  }
   const recovered = await port.recoverTask(taskId, legacyPrompt);
   if (!current()) throw new Error('stale_task_history');
   const localArchive=port.hasLocalLegacyTaskArchive?port.hasLocalLegacyTaskArchive():typeof port.readLocalLegacyTaskArchive==='function';
@@ -23,7 +40,6 @@ export async function recoverForDisplay(port: DisplayRecoveryPort, taskId: strin
     if(archive.taskId!==recovered.snapshot.taskId||archive.sourceEpoch!==recovered.snapshot.sessionId)throw Error('local_legacy_archive_unavailable');
     return {...recovered,presentation:null,archive};
   }
-  const available = port.hasTaskHistoryPresentation ? port.hasTaskHistoryPresentation() : typeof port.readTaskHistory === 'function';
   if (available !== true) {
     // Explicit older API capability only. A rejected new API cannot reach here.
     return { ...recovered, ...(recovered.snapshot.executionScope?.kind === 'goal_turn' ? { presentation: null } : {}) };

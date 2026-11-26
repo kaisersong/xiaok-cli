@@ -301,9 +301,10 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, initialThread, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls: hideObservationControlsOverride }: {
+export function ChatShell({ threadId, initialThread, onInitialViewReady, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls: hideObservationControlsOverride }: {
   threadId?: string;
   initialThread?: ThreadRecord;
+  onInitialViewReady?: () => void;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
   assistantContent?: React.ReactNode;
@@ -1320,14 +1321,14 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
     return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
   }, [t]);
 
-  const loadOlderHistory = useCallback(async () => {
+  const loadOlderHistory = useCallback(async (initialRemainder?: number) => {
     const page = olderHistoryRef.current;
     if (page.loading || !page.remaining.length) return;
     page.loading = true;
     const gen = mountGenRef.current;
     const current = () => mountGenRef.current === gen && liveRenderScope.current === renderScope && olderHistoryRef.current === page;
     setOlderHistory({ remaining: page.remaining.length, loading: true, error: '' });
-    const ids = page.remaining.slice(-HISTORY_PAGE_SIZE);
+    const ids = page.remaining.slice(-(initialRemainder ?? HISTORY_PAGE_SIZE));
     const olderMessages: ChatMessage[] = [];
     const olderEvents: DesktopTaskEvent[] = [];
     let hasArchive = false;
@@ -1337,7 +1338,8 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
       try {
         const storedThread = threadRef.current;
         const { snapshot, presentation, archive } = await recoverForDisplay(api, id, undefined, current,
-          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id));
+          storedThread?.coverage === 'unclaimed' || !!storedThread?.legacyTaskIds?.includes(id),
+          storedThread?.coverage === 'complete' && storedThread.taskIds.includes(id) ? storedThread.id : undefined);
         if (!current()) return;
         if (archive) {
           hasArchive = true;
@@ -1352,7 +1354,7 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
     }
     if (!current()) return;
     page.loading = false;
-    if (!missing.length) {
+    if (!missing.length || initialRemainder !== undefined) {
       if (hasArchive) setLocalArchivePresent(true);
       page.remaining = page.remaining.slice(0, -ids.length);
       allEventsRef.current = [...olderEvents, ...allEventsRef.current];
@@ -1409,6 +1411,8 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
     const loadCurrent = () => mountGenRef.current === gen && liveRenderScope.current === renderScope
       && goalAttemptRef.current === capturedIntent && displaySourceRef.current === capturedSource;
     let loadedSource: DisplaySource | null = null;
+    let olderHistoryFrame: number | undefined;
+    let olderHistoryTimer: ReturnType<typeof setTimeout> | undefined;
     const initialization = { scope: renderScope, promise: Promise.resolve(), succeeded: false };
     initializationRef.current = initialization;
 
@@ -1492,10 +1496,15 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
         const initialPageSize = threadData.coverage === 'unclaimed' ? LEGACY_INITIAL_PAGE_SIZE : HISTORY_PAGE_SIZE;
-        const visibleTaskIds = allTaskIds.slice(-initialPageSize);
+        // A normal open needs the current task immediately. History links and
+        // refreshes still restore the entire initial page before selecting a target.
+        const progressive = !initialPrompt && !refreshing && !location.search && allTaskIds.length > 1;
+        const firstPageSize = progressive ? 1 : initialPageSize;
+        const visibleTaskIds = allTaskIds.slice(-firstPageSize);
         const readHistory = (id: string) => recoverForDisplay(api, id,
           allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,
-          threadData.coverage === 'unclaimed' || Boolean(threadData.legacyTaskIds?.includes(id)));
+          threadData.coverage === 'unclaimed' || Boolean(threadData.legacyTaskIds?.includes(id)),
+          threadData.coverage === 'complete' && threadData.status !== 'running' && threadData.taskIds.includes(id) ? threadData.id : undefined);
         const batchSize = isAssistantThread(taskId) ? 4 : 1;
         let batch: PromiseSettledResult<Awaited<ReturnType<typeof readHistory>>>[] = [];
         for (const [index, tid] of visibleTaskIds.entries()) {
@@ -1575,7 +1584,7 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
 
         // Now set all state atomically after final check
         setThread(threadData);
-        olderHistoryRef.current.remaining = allTaskIds.slice(0, -initialPageSize);
+        olderHistoryRef.current.remaining = allTaskIds.slice(0, -firstPageSize);
         setOlderHistory({ remaining: olderHistoryRef.current.remaining.length, loading: false, error: '' });
         threadRef.current = threadData;
         if (allMessages.length > 0) {
@@ -1621,6 +1630,15 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
           promoteSource(loadedSource, null, false);
         }
         initialization.succeeded = true;
+        if (progressive || onInitialViewReady) {
+          olderHistoryFrame = window.requestAnimationFrame(() => {
+            olderHistoryTimer = setTimeout(() => {
+              if (mountGenRef.current !== gen || liveRenderScope.current !== renderScope) return;
+              onInitialViewReady?.();
+              if (progressive) void loadOlderHistory(initialPageSize - 1);
+            }, 0);
+          });
+        }
       } else {
         const empty: ThreadRecord = {
           id: taskId,
@@ -1639,6 +1657,7 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
         setThread(empty);
         if (assistantRecoveryDraft && draftPrompt) setPrompt(draftPrompt);
         initialization.succeeded = true;
+        onInitialViewReady?.();
       }
     }).catch((err) => {
       if (loadCurrent()) {
@@ -1650,10 +1669,12 @@ export function ChatShell({ threadId, initialThread, emptyContent, conversationH
     return () => {
       // Invalidate in-flight async operations from this effect run
       mountGenRef.current++;
+      if (olderHistoryFrame !== undefined) window.cancelAnimationFrame(olderHistoryFrame);
+      if (olderHistoryTimer !== undefined) clearTimeout(olderHistoryTimer);
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, assistantRecoveryDraft, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, assistantRecoveryDraft, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision, location.search, loadOlderHistory, onInitialViewReady]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();

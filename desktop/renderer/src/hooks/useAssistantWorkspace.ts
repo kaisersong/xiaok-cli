@@ -14,7 +14,7 @@ export type MutationExpectation = (overview: AssistantOverviewDto) => RecheckVer
 export const AUTO_RECHECK_DELAY_MS = 600;
 
 /** Page read owner only. Scheduling and execution stay in Main. */
-export function useAssistantWorkspace() {
+export function useAssistantWorkspace(enabled = true) {
   const [product,setProduct]=useState<AssistantActionOverviewDto|null>(null);
   const [overview, setOverview] = useState<AssistantOverviewDto | null>(null);
   const [schedules, setSchedules] = useState<ScheduledTaskDto[] | null>(null);
@@ -82,13 +82,14 @@ export function useAssistantWorkspace() {
   requestRef.current = refresh;
 
   useEffect(() => {
+    if (!enabled) return;
     const owner: Owner = { active: true, busy: false, queued: false, revision: 0 };
     life.current = owner; refresh();
     const stop = getDesktopApi()?.onScheduledTaskDue?.(() => refresh());
     const stopAssistant = getDesktopApi()?.onAssistantInboxChanged?.(refresh);
     window.addEventListener('xiaok:scheduled-tasks-updated', refresh);
     return () => { owner.active = false; owner.queued = false; if (recheckTimer.current !== null) clearTimeout(recheckTimer.current); stop?.(); stopAssistant?.(); window.removeEventListener('xiaok:scheduled-tasks-updated', refresh); };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   /** Never replays a mutation. On an unknown result it schedules one read-back
    * and reports the checked outcome instead of asking the user to verify. */
