@@ -685,6 +685,65 @@ describe('AgentRuntime', () => {
     expect(JSON.stringify(session.getMessages())).not.toContain('PRIVATE_REASONING_CANARY');
   });
 
+  it('compacts after a network retry overflows while preserving the current turn', async () => {
+    const session = new AgentSessionState();
+    const oldHistory = 'old history '.repeat(1000);
+    session.appendUserText(oldHistory);
+    session.appendAssistantBlocks([{ type: 'text', text: 'earlier answer' }]);
+    const task = 'list files and report completion';
+    const partialOutput = 'the files have been listed';
+    const toolResult = 'completed tool result';
+    const requests: ReturnType<AgentSessionState['getMessages']>[] = [];
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      async *stream(messages) {
+        requests.push(structuredClone(messages));
+        if (requests.length === 1) {
+          yield { type: 'tool_use', id: 'once', name: 'glob', input: { pattern: '*.ts' } };
+        } else if (requests.length === 2) {
+          yield { type: 'text', delta: partialOutput };
+          throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+        } else if (requests.length === 3) {
+          throw Object.assign(new Error('context_length_exceeded'), { code: 'context_length_exceeded' });
+        } else {
+          yield { type: 'text', delta: 'recovery complete' };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const execute = vi.fn(async () => toolResult);
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({ executeTool: execute }) as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const events: string[] = [];
+    const outcome = await runtime.run(task, event => events.push(event.type)).then(
+      () => 'completed',
+      error => error,
+    );
+
+    expect(requests[2]?.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: expect.stringContaining(JSON.stringify({ partialOutput })) }],
+    });
+    expect(events.filter(type => type === 'model_recovery' || type === 'compact_triggered'))
+      .toEqual(['model_recovery', 'compact_triggered']);
+    expect(outcome).toBe('completed');
+    expect(requests).toHaveLength(4);
+    expect(session.getCompactions()).toHaveLength(1);
+    const turn = requests[2].slice(2);
+    expect(turn[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: task }] });
+    expect(JSON.stringify(turn)).toContain(toolResult);
+    expect(requests[3].slice(-turn.length)).toEqual(turn);
+    expect(session.getMessages().slice(-turn.length - 1, -1)).toEqual(turn);
+    expect(JSON.stringify(requests[3])).not.toContain(oldHistory);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toBe('run_completed');
+  });
+
   it('binds host-only execution facts and tool_finished to the same invocation id', async () => {
     let streamCalls = 0;
     const adapter: ModelAdapter = {

@@ -271,8 +271,7 @@ export class AgentRuntime {
         const { active: stageViewActive, messages: { length: messageCount } } = prepareCompoundRootIntentStageView(this.session);
         // Everything appended since the user started this run, including queued instructions
         // and completed tools, belongs to the retry and must survive verbatim.
-        historyBeforeTurn ??= messageCount - (pendingInput ? 2 : 1);
-        const turnMessageCount = messageCount - historyBeforeTurn;
+        const turnStart = (historyBeforeTurn ??= messageCount - (pendingInput ? 2 : 1));
         const publicResume=this.restoredProviderHistory.active;
         if(publicResume){
           const request=this.restoredProviderHistory.project(this.session.getMessages(),stageViewActive);
@@ -398,8 +397,10 @@ export class AgentRuntime {
           compactContext: () => {
             if (contextRetry || autoCompactionBlocked || currentAssistantBlocks.length > 0
               || stageViewActive || publicResume || strictK3Run || this.observationOwner) return false;
-            const plan = this.session.planCompaction(Math.max(1, turnMessageCount));
-            if (plan.sourceMessageCount !== messageCount) return false;
+            // A network retry may have appended partial output to the current turn.
+            const liveMessageCount = this.session.getMessages().length;
+            const plan = this.session.planCompaction(Math.max(1, liveMessageCount - turnStart));
+            if (plan.sourceMessageCount !== liveMessageCount) return false;
             const { record } = this.session.applyCompaction(plan);
             if (!record) return false;
 
