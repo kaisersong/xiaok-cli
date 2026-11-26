@@ -3,7 +3,52 @@ import {it,expect} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
 import {createAssistantRegistry} from '../../electron/assistant-tool-policy.js';
 import {DesktopToolCatalogBridge} from '../../electron/desktop-multi-agent-catalog-bridge.js';
-import {mkdirSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdirSync,writeFileSync,existsSync,readFileSync,symlinkSync} from 'node:fs';
+
+it('resolves file tools against the assistant workspace through the scoped root invocation', async () => {
+  const parent = mkdtempSync(join(tmpdir(), 'assistant-relative-'));
+  const root = join(parent, 'assistant');
+  const source = createAssistantRegistry(root, []);
+  const bridge = new DesktopToolCatalogBridge({ registry: source, workspaceId: 'assistant' });
+  bridge.authorizeRoot();
+  const scoped = bridge.catalog.createScopedRegistry(bridge.catalog.snapshotPolicy(), {
+    groupId: 'group', agentId: 'root_group', turnId: 'turn',
+    cwd: parent, workspaceId: 'assistant', materialIds: [], permissionRevision: 0,
+    signal: new AbortController().signal, deadlineAt: Date.now() + 60_000,
+  }, { autoMode: true });
+  try {
+    const file = 'summary.md';
+    const destination = join(root, file);
+    for (const name of ['write', 'edit']) {
+      expect(source.getRegisteredTool(name)?.compoundFilePrecondition?.({ file_path: file })).toMatchObject({ filePath: destination });
+    }
+    const { registry } = scoped;
+    for (const name of ['read', 'write', 'edit']) {
+      const definition = registry.getToolDefinitions().find(tool => tool.name === name);
+      expect(definition?.inputSchema.properties?.file_path).toMatchObject({ description: expect.stringContaining('相对路径') });
+    }
+    expect(await registry.executeTool('write', { file_path: file, content: 'draft' })).toContain(destination);
+    expect(await registry.executeTool('edit', { file_path: './summary.md', old_string: 'draft', new_string: 'ready' })).not.toMatch(/^Error/);
+    expect(await registry.executeTool('read', { file_path: file })).toContain('ready');
+    expect(readFileSync(destination, 'utf8')).toBe('ready');
+
+    const outside = join(parent, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'private.txt'), 'PRIVATE');
+    symlinkSync(outside, join(root, 'redirect'), process.platform === 'win32' ? 'junction' : 'dir');
+    for (const filePath of ['../outside/private.txt', join(outside, 'private.txt'), 'redirect/private.txt']) {
+      expect(await registry.executeTool('read', { file_path: filePath })).toMatch(/outside workspace/i);
+      expect(await registry.executeTool('write', { file_path: filePath, content: 'bad' })).toMatch(/outside workspace/i);
+      expect(await registry.executeTool('edit', { file_path: filePath, old_string: 'PRIVATE', new_string: 'bad' })).toMatch(/outside workspace/i);
+    }
+    expect(readFileSync(join(outside, 'private.txt'), 'utf8')).toBe('PRIVATE');
+  } finally {
+    scoped.dispose();
+    bridge.dispose();
+    source.dispose();
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
 it('exposes K-IM judgment and status in the actual closed assistant registry',()=>{const root=mkdtempSync(join(tmpdir(),'assistant-kim-'));const registry=createAssistantRegistry(root,[]);try{expect(registry.getToolDefinitions().map(t=>t.name)).toEqual(expect.arrayContaining(['kim_judge_messages','kim_model_status']));}finally{registry.dispose();rmSync(root,{recursive:true,force:true});}});
 it('removes forbidden root tools from discovery as well as execution',async()=>{const {ToolRegistry}=await import('../../../src/ai/tools/index.js');const {constrainAssistantInvocation}=await import('../../electron/assistant-tool-policy.js');const root=mkdtempSync(join(tmpdir(),'assistant-truthful-'));const source=createAssistantRegistry(root,[]),target=new ToolRegistry({autoMode:true},[{permission:'bash',definition:{name:'bash',description:'escape',inputSchema:{type:'object'}},execute:async()=> 'bad'}]);try{constrainAssistantInvocation(source,target);expect(target.getToolDefinitions().map(t=>t.name)).not.toContain('bash');expect(target.getToolDiscoveries().map(t=>t.coreDefinition.name)).not.toContain('tool_search');expect(await target.executeTool('bash',{})).toMatch(/Error|not available|not found|not allowed|不可用|禁止|允许/i);}finally{source.dispose();target.dispose();rmSync(root,{recursive:true,force:true});}});
 it('retains the assistant file boundary through the real root capability binding',async()=>{const root=mkdtempSync(join(tmpdir(),'assistant-scope-')),work=join(root,'work');mkdirSync(work);writeFileSync(join(root,'private.txt'),'PRIVATE');const source=createAssistantRegistry(work,[]),bridge=new DesktopToolCatalogBridge({registry:source,workspaceId:'assistant'});bridge.authorizeRoot();const scoped=bridge.catalog.createScopedRegistry(bridge.catalog.snapshotPolicy(),{groupId:'group',agentId:'root_group',turnId:'turn',cwd:root,workspaceId:'assistant',materialIds:[],permissionRevision:0,signal:new AbortController().signal,deadlineAt:Date.now()+60000},{autoMode:true});try{expect(await scoped.registry.executeTool('read',{file_path:join(root,'private.txt')})).not.toContain('PRIVATE');expect(await scoped.registry.executeTool('write',{file_path:join(root,'escape.txt'),content:'bad'})).toMatch(/Error|工作区|workspace/i);expect(existsSync(join(root,'escape.txt'))).toBe(false);expect(await scoped.registry.executeTool('write',{file_path:join(work,'allowed.txt'),content:'ok'})).not.toMatch(/^Error/);expect(existsSync(join(work,'allowed.txt'))).toBe(true);}finally{scoped.dispose();bridge.dispose();source.dispose();rmSync(root,{recursive:true,force:true});}});

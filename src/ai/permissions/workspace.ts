@@ -69,9 +69,10 @@ export function assertWorkspacePath(
   mode: 'read' | 'write',
   allowOutsideCwd = false,
   outsideGuard?: OutsideWorkspaceGuard,
+  relativeToWorkspace = false,
 ): string {
-  const resolvedPath = resolve(filePath);
   const workspaceRoot = resolve(cwd);
+  const resolvedPath = relativeToWorkspace ? resolve(workspaceRoot, filePath) : resolve(filePath);
 
   if (allowOutsideCwd && outsideGuard) {
     // 沙箱模式：路径（不论是否在工作区内）都交给守卫判定，允许清单和拒绝清单都生效
