@@ -1,4 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { isAbsolute } from 'node:path';
+import { assertWorkspacePath } from '../../../src/ai/permissions/workspace.js';
 import {digest} from './store.js';
 import type { OwnedTaskHistory } from '../../../src/runtime/task-host/task-runtime-host.js';
 import type { TaskContextSkip, TaskCreateContext, TaskSnapshot } from '../../../src/runtime/task-host/types.js';
@@ -11,7 +13,8 @@ import { isAssistantThread } from '../../shared/assistant-inbox-contract.js';
 const MINTED_LOCAL_THREAD_LIMIT=256;
 const mintedLocalThreads=new Set<string>();
 const assistantUserHistory = new AsyncLocalStorage<{ threadId: string; taskId?: string }>();
-const assistantReadEffects = new Set(['read_material', 'read', 'assistant_list_files', 'web_search']);
+const assistantCheckpointTools = new Set(['read_material', 'read', 'assistant_list_files', 'web_search', 'assistant_read_sources', 'write', 'edit']);
+const assistantFileMutations = new Set(['write', 'edit']);
 
 /** Main's typed foreground submission enters this scope after user admission. */
 export function withAssistantUserHistory<T>(threadId: string, submit: () => T): T {
@@ -27,7 +30,7 @@ export function mintedLocalThreadCount(): number { return mintedLocalThreads.siz
 
 /** Main canonical public history is mandatory. Renderer task IDs can never omit it. */
 export function assembleOwnedHistory(service: ContinuityService, actor: ContinuityActor, taskId: string, context?: TaskCreateContext,
-  inspectPriorSource?: (id: string) => TaskSnapshot | null): OwnedTaskHistory | null {
+  inspectPriorSource?: (id: string) => TaskSnapshot | null, assistantWorkRoot?: string): OwnedTaskHistory | null {
   if (!context?.threadId) return null;
   service.assertConversationExecution(context.threadId);
   // A thread Main minted for this unthreaded request has no conversation and therefore no prior history.
@@ -66,7 +69,7 @@ export function assembleOwnedHistory(service: ContinuityService, actor: Continui
         const effects = db.prepare('SELECT invocation_id,tool_name FROM unproven_effects WHERE task_id=? ORDER BY invocation_id').all(sourceId);
         const toolEffects = effects.filter(row => row.invocation_id !== 'owner_inventory' || row.tool_name !== 'legacy_task_without_closure');
         if (cursor.length !== 1 || !['completed','failed','cancelled'].includes(String(cursor[0].terminal_status))
-          || toolEffects.length === 0 || toolEffects.some(row => !assistantReadEffects.has(String(row.tool_name)))) throw closureFailure;
+          || toolEffects.length === 0 || toolEffects.some(row => !assistantCheckpointTools.has(String(row.tool_name)))) throw closureFailure;
         const snapshot = inspectPriorSource?.(sourceId);
         if (!snapshot || snapshot.taskId !== sourceId || snapshot.context?.threadId !== conversation.id
           || snapshot.sessionId !== cursor[0].source_epoch || snapshot.status !== cursor[0].terminal_status
@@ -77,9 +80,29 @@ export function assembleOwnedHistory(service: ContinuityService, actor: Continui
           || snapshot.events.some((event, index) => expectedEvents[index].sequence !== index || expectedEvents[index].event_hash !== digest(event))) throw closureFailure;
         const calls = snapshot.events.filter(event => event.type === 'canvas_tool_call');
         const finished = snapshot.events.filter(event => event.type === 'goal_tool_finished');
+        const fileFacts = snapshot.events.filter(event => event.type === 'goal_tool_fact')
+          .filter(event => event.factKind === 'file_mutation');
         if (calls.length === 0 || calls.length !== finished.length || new Set(calls.map(event => event.toolUseId)).size !== calls.length
-          || calls.some(call => !assistantReadEffects.has(call.toolName) || !finished.some(end => end.invocationId === call.toolUseId && end.toolName === call.toolName))
+          || new Set(finished.map(event => event.invocationId)).size !== finished.length
+          || calls.some(call => !assistantCheckpointTools.has(call.toolName) || !finished.some(end => end.invocationId === call.toolUseId && end.toolName === call.toolName))
           || toolEffects.some(effect => !calls.some(call => call.toolName === effect.tool_name))) throw closureFailure;
+        // File tools must have a successful executor result and its original
+        // host-reported absolute destination. Model input alone is insufficient.
+        const writes = calls.filter(call => assistantFileMutations.has(call.toolName));
+        if (writes.length !== fileFacts.length) throw closureFailure;
+        for (const call of writes) {
+          const matches = fileFacts.filter(fact => fact.invocationId === call.toolUseId && fact.toolName === call.toolName);
+          const destination = matches[0]?.normalizedFilePaths?.[0];
+          const pathInput = (call.input as { file_path?: unknown } | null)?.file_path;
+          if (!assistantWorkRoot || matches.length !== 1 || matches[0].normalizedFilePaths?.length !== 1
+            || typeof destination !== 'string' || !isAbsolute(destination) || typeof pathInput !== 'string' || !pathInput.trim()
+            || !finished.some(end => end.invocationId === call.toolUseId && end.ok)) throw closureFailure;
+          try {
+            const recorded = assertWorkspacePath(destination, assistantWorkRoot, 'write');
+            const requested = assertWorkspacePath(pathInput, assistantWorkRoot, 'write', false, undefined, true);
+            if (recorded !== requested) throw closureFailure;
+          } catch { throw closureFailure; }
+        }
         unsettled.add(sourceId);
         checkpointEvidence.push({ sourceId, cursor: cursor[0], effects, expectedEvents });
         boundary = index;

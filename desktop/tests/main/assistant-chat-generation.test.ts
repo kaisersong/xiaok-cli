@@ -1,6 +1,6 @@
 // @vitest-environment node
 import {expect,it} from 'vitest';
-import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {mkdirSync,mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {ASSISTANT_CHAT_THREAD,LEGACY_ASSISTANT_CHAT_THREAD,isAssistantThread} from '../../shared/assistant-inbox-contract.js';
 import {ASSISTANT_THREAD_ID} from '../../renderer/src/lib/assistant-thread.js';
 import {ContinuityService} from '../../electron/context-continuity/service.js';
@@ -77,5 +77,40 @@ it('admits the recovery conversation while preserving the blocked original sourc
   } finally {
     service.store.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it.each(['workspace', 'outside', 'missing'] as const)('checks historical file facts for a %s destination', async kind => {
+  const root = mkdtempSync(join(tmpdir(), 'assistant-file-history-'));
+  const work = join(root, 'assistant-workspace');
+  mkdirSync(work);
+  const service = new ContinuityService({ dbPath: join(root,'actual.sqlite'), profileId: 'profile' });
+  const actor = { requestSource:'user' as const, profileId:'profile', actorId:'desktop-user:profile' };
+  const threadId = ASSISTANT_CHAT_THREAD;
+  const source = new TaskContinuitySource(service, actor);
+  try {
+    service.ensureAssistantConversation(actor, threadId);
+    const snapshot: TaskSnapshot = {
+      taskId:'task_file', sessionId:'epoch_file', status:'completed', prompt:'Write a document', materials: [],
+      context:{threadId,taskIds:[],loadedTaskIds:[],skipped:[]}, createdAt:1, updatedAt:2,
+      events:[
+        {type:'canvas_tool_call',toolName:'assistant_read_sources',toolUseId:'refresh',input:{},eventId:'refresh_begin'},
+        {type:'goal_tool_finished',toolName:'assistant_read_sources',invocationId:'refresh',ok:true},
+        {type:'canvas_tool_call',toolName:'write',toolUseId:'file',input:{file_path:'report.md'},eventId:'file_begin'},
+        ...(kind === 'missing' ? [] : [{type:'goal_tool_fact' as const,toolName:'write',invocationId:'file',factKind:'file_mutation' as const,
+          normalizedFilePaths:[join(kind === 'outside' ? root : work,'report.md')]}]),
+        {type:'goal_tool_finished',toolName:'write',invocationId:'file',ok:true},
+      ],
+    };
+    await source.bindPrepared({conversationId:threadId,taskId:snapshot.taskId,publicPrompt:snapshot.prompt},async()=>snapshot);
+    service.recordUnprovenEffect(actor,snapshot.taskId,'refresh','assistant_read_sources');
+    service.recordUnprovenEffect(actor,snapshot.taskId,'file','write');
+    const resume = () => withAssistantUserHistory(threadId, () => assembleOwnedHistory(service,actor,'task_next',{threadId},()=>snapshot,work));
+    if (kind === 'workspace') expect(resume()?.audit?.skipped).toEqual([{taskId:snapshot.taskId,reason:'unsettled'}]);
+    else expect(resume).toThrow('blocked_unsettled');
+    expect(() => service.assertHistorySourceClosed(snapshot.taskId)).toThrow('blocked_unsettled');
+  } finally {
+    service.store.close();
+    rmSync(root,{recursive:true,force:true});
   }
 });

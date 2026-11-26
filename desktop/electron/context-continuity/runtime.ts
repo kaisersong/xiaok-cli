@@ -166,7 +166,7 @@ export class DesktopContextContinuity {
   assembleOwnedHistory(taskId: string, context?: TaskCreateContext) {
     if (this.initializationFailed || this.closed) throw new Error('continuity_unavailable');
     return this.current ? assembleOwnedHistory(this.current.service, this.current.actor, taskId, context,
-      id => recoverTaskSnapshotSync(join(this.dataRoot, 'tasks'), id)) : null;
+      id => recoverTaskSnapshotSync(join(this.dataRoot, 'tasks'), id), join(this.dataRoot, 'assistant-workspace')) : null;
   }
   recordLoadedHistory(taskId: string, sources: TaskSnapshot[], conversationId?: string): void {
     if (this.initializationFailed || this.closed) throw new Error('continuity_unavailable');
