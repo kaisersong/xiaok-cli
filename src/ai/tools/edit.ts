@@ -80,11 +80,12 @@ function generateUnifiedDiff(
 export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd()
   const allowOutsideCwd = options.allowOutsideCwd ?? false
+  const relativeToWorkspace = options.relativeToWorkspace ?? false
 
   return {
     permission: 'write',
     compoundFilePrecondition(input) {
-      const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd);
+      const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd, undefined, relativeToWorkspace);
       let beforeHash: string | null = null;
       try { beforeHash = createHash('sha256').update(readFileSync(filePath)).digest('hex'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -96,7 +97,7 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
       inputSchema: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件绝对路径' },
+          file_path: { type: 'string', description: relativeToWorkspace ? '助理工作区内的相对路径或绝对路径' : '文件绝对路径' },
           old_string: { type: 'string', description: '要替换的字符串（必须唯一）' },
           new_string: { type: 'string', description: '替换后的字符串' },
         },
@@ -110,7 +111,7 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
         new_string: string
       }
 
-      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard)
+      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard, relativeToWorkspace)
       let content: string
       try {
         content = readFileSync(resolvedPath, 'utf-8')

@@ -19,11 +19,12 @@ export type WriteTool = Omit<Tool, 'execute'> & {
 export function createWriteTool(options: WorkspaceToolOptions = {}): WriteTool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
+  const relativeToWorkspace = options.relativeToWorkspace ?? false;
 
   return {
     permission: 'write',
     compoundFilePrecondition(input) {
-      const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
+      const filePath = assertWorkspacePath(String(input.file_path ?? ''), cwd, 'write', allowOutsideCwd, options.outsideCwdGuard, relativeToWorkspace);
       let beforeHash: string | null = null;
       try { beforeHash = createHash('sha256').update(readFileSync(filePath)).digest('hex'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -35,7 +36,7 @@ export function createWriteTool(options: WorkspaceToolOptions = {}): WriteTool {
       inputSchema: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件绝对路径' },
+          file_path: { type: 'string', description: relativeToWorkspace ? '助理工作区内的相对路径或绝对路径' : '文件绝对路径' },
           content: { type: 'string', description: '文件内容' },
         },
         required: ['file_path', 'content'],
@@ -43,7 +44,7 @@ export function createWriteTool(options: WorkspaceToolOptions = {}): WriteTool {
     },
     async execute(input, context) {
       const { file_path, content } = input as { file_path: string; content: string };
-      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
+      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard, relativeToWorkspace);
       if (context?.compoundPhase) {
         let beforeHash: string | null = null;
         try { beforeHash = createHash('sha256').update(readFileSync(resolvedPath)).digest('hex'); }

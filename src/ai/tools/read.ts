@@ -16,6 +16,8 @@ import {
 
 export interface WorkspaceToolOptions {
   cwd?: string;
+  /** Host-only option for private workspaces whose root differs from process.cwd(). */
+  relativeToWorkspace?: boolean;
   allowOutsideCwd?: boolean;
   /** allowOutsideCwd 时对工作区外（含符号链接指向区外）路径的二次检查，通常是沙箱策略。 */
   outsideCwdGuard?: OutsideWorkspaceGuard;
@@ -105,6 +107,7 @@ function classifyReadContent(path: string, header: Buffer): ReadContentKind {
 export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
+  const relativeToWorkspace = options.relativeToWorkspace ?? false;
   const maxReadBytes = options.maxReadBytes;
   if (maxReadBytes !== undefined && (!Number.isSafeInteger(maxReadBytes) || maxReadBytes < 1 || maxReadBytes > 16 * 1024 * 1024))
     throw new Error('read_byte_ceiling_invalid');
@@ -118,7 +121,7 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
       inputSchema: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: '文件绝对路径' },
+          file_path: { type: 'string', description: relativeToWorkspace ? '助理工作区内的相对路径或绝对路径' : '文件绝对路径' },
           offset: { type: 'number', description: '起始行号（1-based，可选）' },
           limit: { type: 'number', description: '最多读取行数（可选）' },
           max_chars: { type: 'number', description: '输出字符上限（默认 256KB）' },
@@ -138,12 +141,12 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
       const outsideCwdGuard = options.outsideCwdGuard;
       if (allowOutsideCwd && outsideCwdGuard) {
         // An active sandbox guard owns every path; its rejection cannot become a reference exception.
-        resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, outsideCwdGuard);
+        resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, outsideCwdGuard, relativeToWorkspace);
       } else {
-        try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd); }
+        try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, undefined, relativeToWorkspace); }
         catch (error) {
           let reference: string | undefined;
-          try { reference = realpathSync(resolve(file_path)); } catch { /* Preserve the original denial. */ }
+          try { reference = realpathSync(relativeToWorkspace ? resolve(cwd, file_path) : resolve(file_path)); } catch { /* Preserve the original denial. */ }
           if (!reference || !readOnlyPaths.has(reference)) throw error;
           resolvedPath = reference;
         }

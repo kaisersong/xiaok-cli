@@ -7,7 +7,7 @@ const NATIVE_NAMES=new Set(['read','write','edit','web_search','kim_judge_messag
 const EXTRA_NAMES=new Set(['mail_list_accounts','mail_search','mail_read','mail_send','assistant_read_sources','assistant_analyze_messages','assistant_prepare_reply','assistant_list_calendar_events','assistant_prepare_calendar_event']);
 /** Construct from native factories, never from the broad host/MCP registry. */
 export function createAssistantRegistry(root:string,extras:Tool[]):DesktopOwnedToolRegistry{
- mkdirSync(root,{recursive:true,mode:0o700});const native=buildToolList(undefined,{cwd:root,allowOutsideCwd:false}).filter(tool=>NATIVE_NAMES.has(tool.definition.name));
+ mkdirSync(root,{recursive:true,mode:0o700});const native=buildToolList(undefined,{cwd:root,allowOutsideCwd:false,relativeToWorkspace:true}).filter(tool=>NATIVE_NAMES.has(tool.definition.name));
  const tools=[...native,...extras.filter(tool=>EXTRA_NAMES.has(tool.definition.name)),{permission:'safe' as const,definition:{name:'assistant_list_files',description:'只列出小K助理工作目录的文件名。严禁读取或配置凭据。',inputSchema:{type:'object',properties:{},additionalProperties:false}},execute:async()=>JSON.stringify(readdirSync(root,{withFileTypes:true}).filter(e=>!e.isSymbolicLink()).slice(0,100).map(e=>({name:e.name,directory:e.isDirectory()})))}];
  const registry=new DesktopOwnedToolRegistry({autoMode:true},tools);registry.unregisterTool('tool_search');
  for(const name of ['read','write','edit']){const tool=registry.getRegisteredTool(name)!;registry.registerOwnedTool(tool,{...registry.ownerOf(name)!,binding:'custom',verifiedReadOnly:false,bindInvocation:authority=>{if(authority.agentId!==`root_${authority.groupId}`)throw Error('tool_scope_unsupported');return tool.execute;}});}
