@@ -278,7 +278,7 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls }: {
+export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls: hideObservationControlsOverride }: {
   threadId?: string;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
@@ -292,7 +292,10 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 } = {}) {
   const { taskId: routeTaskId } = useParams<{ taskId: string }>();
   const taskId = threadId ?? routeTaskId;
+  const hideObservationControls = hideObservationControlsOverride || isAssistantThread(taskId);
   const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
+  const [assistantRecoveryScope, setAssistantRecoveryScope] = useState<DisplayScope | null>(null);
+  const assistantRecoveryNavigation = useRef<DisplayScope | null>(null);
   const liveRenderScope = useRef<typeof renderScope | null>(renderScope);
   const admissionPending = useRef<typeof renderScope | null>(null);
   useLayoutEffect(() => {
@@ -444,10 +447,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const titleLockedRef = useRef(false);
   const lastLiveErrorRef = useRef<{ taskKey: string; rawMessage: string } | null>(null);
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
-  const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string; createGoal?: boolean } | undefined;
+  const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string; createGoal?: boolean; assistantRecoveryDraft?: boolean } | undefined;
   const initialPrompt = state?.initialPrompt;
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
+  const assistantRecoveryDraft = state?.assistantRecoveryDraft === true && isAssistantThread(taskId);
 
   useEffect(() => {
     if (draftRequest) setPrompt(draftRequest.text);
@@ -1415,7 +1419,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setActionError(null);
     const storedDraft = readStoredThreadDraft(taskId);
     const refreshing = historyRefresh?.scope === renderScope && historyRefresh.attempt === capturedIntent;
-    if (!refreshing) setPrompt(draftPrompt || '');
+    if (!refreshing) setPrompt(assistantRecoveryDraft ? '' : draftPrompt || '');
 
     // If we have an initialPrompt from WelcomePage, pre-populate
     if (initialPrompt && !refreshing) {
@@ -1592,6 +1596,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         };
         threadRef.current = empty;
         setThread(empty);
+        if (assistantRecoveryDraft && draftPrompt) setPrompt(draftPrompt);
         initialization.succeeded = true;
       }
     }).catch((err) => {
@@ -1607,7 +1612,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, assistantRecoveryDraft, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
@@ -1711,6 +1716,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     }
     if (!taskId || admissionPending.current === renderScope) return false;
     setActionError(null);
+    setAssistantRecoveryScope(null);
     if (observationDraft && files?.length) {
       // Reuse the ordinary task error message position; no Goal panel is required.
       setMessages(previous => [...previous, {
@@ -1782,10 +1788,11 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       ...(contextTaskIds.length > 0 ? { taskIds: contextTaskIds } : {}),
     };
 
+    let awaitingUserTaskAdmission = false;
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
-      if (observationDraft && intent === 'composer') {
+      if (!hideObservationControls && observationDraft && intent === 'composer') {
         const draftId=observationDraft;setObservationDraft(null);
         newTaskId=(await api.createObservationTask({draftId,prompt:text,threadId:thread?.id??taskId})).taskId;
       } else {
@@ -1794,7 +1801,9 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         const wire:UserTaskSubmissionInput={action:'submit_new',gestureId:crypto.randomUUID(),input:files?.length
           ?{kind:'files',prompt:text,filePaths:files.map(file=>file.filePath),context:submitContext}
           :{kind:'materials',prompt:text,materials:[],context:submitContext}};
+        awaitingUserTaskAdmission = true;
         newTaskId=(await createGoalAwareTaskWithRetry(()=>api.submitUserTask(wire))).taskId;
+        awaitingUserTaskAdmission = false;
       }
       if (!current()) return false;
 
@@ -1832,6 +1841,13 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     } catch (e) {
       if (!current()) return false;
       const errorCode=e instanceof Error?e.message:String(e);
+      if (awaitingUserTaskAdmission && intent === 'composer' && isAssistantThread(taskId)
+        && (errorCode === 'blocked_unsettled' || errorCode === "Error invoking remote method 'desktop:submitUserTask': Error: blocked_unsettled")) {
+        setMessages(previous => previous.filter(message => message.id !== userMsg.id));
+        setAssistantRecoveryScope(renderScope);
+        setStatus('idle');
+        return false;
+      }
       const submissionMessage=errorCode.includes('user_submission_conflict')?t.chatShell.submissionConflict
         :errorCode.includes('user_submission_not_prepared')?t.chatShell.submissionNotPrepared
         :/user_submission_(?:reconciliation_required|write_unconfirmed|record_invalid|prepared_unverified|prepared_mismatch|prepared_changed|result_invalid|storage_changed|lock_unconfirmed|revision_exhausted)/.test(errorCode)?t.chatShell.submissionReconciliationRequired:undefined;
@@ -1846,6 +1862,31 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       return false;
     } finally {
       if (admissionPending.current === renderScope) admissionPending.current = null;
+    }
+  };
+
+  const recoverAssistantChat = async (text: string, files: Array<{ filePath: string; name: string }>) => {
+    if (assistantRecoveryScope !== renderScope || assistantRecoveryNavigation.current === renderScope
+      || liveRenderScope.current !== renderScope || admissionPending.current === renderScope) return;
+    assistantRecoveryNavigation.current = renderScope;
+    const submissionAttempt = goalAttemptRef.current;
+    // Main already owns the assistant-work namespace and creates its canonical
+    // conversation on first submission. This opens a draft, with no submission.
+    const next = crypto.randomUUID().replace(/^[a-f0-9]{8}/, 'a0c22222');
+    try {
+      if (await api.getThread(next)) throw Error('assistant_recovery_thread_exists');
+      if (liveRenderScope.current !== renderScope || admissionPending.current === renderScope
+        || goalAttemptRef.current !== submissionAttempt) return;
+      const draft = { draftPrompt: text, initialFiles: files };
+      navigate(location.pathname + location.search, {
+        replace: true,
+        state: { ...state, ...draft, assistantRecoveryDraft: false },
+      });
+      navigate(`/t/${next}`, { state: { ...draft, assistantRecoveryDraft: true } });
+    } catch {
+      if (liveRenderScope.current === renderScope) setActionError(t.chatShell.threadLoadFailed);
+    } finally {
+      if (assistantRecoveryNavigation.current === renderScope) assistantRecoveryNavigation.current = null;
     }
   };
 
@@ -2355,6 +2396,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         prompt={prompt}
         onPromptChange={setPrompt}
         onSubmit={handleSubmit}
+        onRecoverAssistantChat={assistantRecoveryScope === renderScope ? recoverAssistantChat : undefined}
         onQueue={queuePrompt}
         queuedText={queuedPrompt?.text ?? null}
         inputError={queueFailure?.scope===renderScope?queueFailure.message:null}
@@ -2364,7 +2406,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         onComputerUseAction={handleComputerUseAction}
         onComputerUseDismiss={handleComputerUseDismiss}
         canvasOpen={canvasVisible}
-        initialFiles={!initialPrompt && initialFiles ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
+        initialFiles={!initialPrompt && initialFiles && (!assistantRecoveryDraft || (!thread.currentTaskId && thread.taskIds.length === 0))
+          ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
         onToggleCanvas={() => {
           if (canvasVisible) setCanvasOpen(false);
           else { setCanvasOpen(true); setCanvasPreviewModeRequest(previous => ({ ...previous, id: previous.id + 1 })); }

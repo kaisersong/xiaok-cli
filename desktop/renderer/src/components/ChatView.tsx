@@ -308,6 +308,7 @@ interface ChatViewProps {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void | boolean | Promise<void | boolean>;
+  onRecoverAssistantChat?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   onQueue?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   queuedText?: string | null;
   inputError?: string | null;
@@ -327,7 +328,7 @@ export function ChatView({ uiPreviews = [],
   thread, contextNavigation, messages, streamingText, status, currentQuestion, interruptedTask, onInterruptedChoice, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection, localCommands, inputAccessory,
   generatedFiles,
-  prompt, onPromptChange, onSubmit, onQueue, queuedText, inputError, onCancelQueue, onAnswer, onCancel,
+  prompt, onPromptChange, onSubmit, onRecoverAssistantChat, onQueue, queuedText, inputError, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
   canvasOpen, onToggleCanvas, onArtifactClick, onArtifactOpenExternal,
   initialFiles,
@@ -795,10 +796,12 @@ export function ChatView({ uiPreviews = [],
       {inputError ? <p role="alert" className="px-4 py-2 whitespace-pre-wrap text-sm text-[var(--c-danger)]">{inputError}</p> : null}
         {inputAccessory}
       <ChatInput
+          key={thread.id}
           localCommands={localCommands}
           value={prompt}
           onChange={onPromptChange}
           onSubmit={onSubmit}
+          onRecoverAssistantChat={onRecoverAssistantChat}
           onQueue={onQueue}
           queuedText={queuedText}
           onCancelQueue={onCancelQueue}

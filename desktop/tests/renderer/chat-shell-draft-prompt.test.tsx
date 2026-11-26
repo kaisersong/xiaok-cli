@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { ASSISTANT_CHAT_THREAD, isAssistantThread } from '../../shared/assistant-inbox-contract';
 
 const { mockSubmitUserTask, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle, mockAnswerQuestion, mockReadArchive, mockHasArchive } = vi.hoisted(() => ({
   mockReadArchive: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onAnswer,
     historyContent,
     emptyContent,
+    onRecoverAssistantChat,
   }: {
     prompt: string;
     currentQuestion?: {questionId:string}|null;
@@ -70,6 +72,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onAnswer?: (choiceId:string)=>void;
     historyContent?: ReactNode;
     emptyContent?: ReactNode;
+    onRecoverAssistantChat?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   }) => (
     <div>
       {emptyContent}
@@ -101,6 +104,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
         <div key={file.filePath}>{file.name}</div>
       ))}</div>
       <button type="button" onClick={() => onSubmit?.('触发提交')}>submit-now</button>
+      {onRecoverAssistantChat && <button type="button" onClick={() => onRecoverAssistantChat('更正稿', [{ filePath: '/tmp/context.md', name: 'context.md' }])}>recover-assistant</button>}
       <button type="button" onClick={() => onSubmit?.('带附件提交', [{ filePath: '/tmp/context.md', name: 'context.md' }])}>submit-files</button>
       <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
       <button type="button" onClick={onToggleCanvas}>open-canvas</button>
@@ -1427,6 +1431,52 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByTestId('streaming-text')).toBeEmptyDOMElement();
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('第一段第二段第三段');
   });
+});
+
+it('recovers a blocked assistant submission into a new protected conversation with an unsent draft', async () => {
+  mockGetThread.mockImplementation(async id => id === ASSISTANT_CHAT_THREAD
+    ? { id, title: 'Assistant', status: 'idle', mode: 'work', createdAt: 1, updatedAt: 1, currentTaskId: null, taskIds: [] }
+    : null);
+  mockSubmitUserTask.mockRejectedValue(new Error("Error invoking remote method 'desktop:submitUserTask': Error: blocked_unsettled"));
+  function Destination() {
+    const { taskId } = useParams();
+    const { state } = useLocation();
+    return <output data-testid="destination">{JSON.stringify({ taskId, ...state })}</output>;
+  }
+  render(<MemoryRouter initialEntries={['/assistant']}><LocaleProvider><Routes>
+    <Route path="/assistant" element={<ChatShell threadId={ASSISTANT_CHAT_THREAD} hideObservationControls />} />
+    <Route path="/t/:taskId" element={<Destination />} />
+  </Routes></LocaleProvider></MemoryRouter>);
+
+  await screen.findByLabelText('chat-input');
+  fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+  const recover = await screen.findByRole('button', { name: 'recover-assistant' });
+  expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('触发提交');
+  expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
+  fireEvent.click(recover);
+  const destination = JSON.parse((await screen.findByTestId('destination')).textContent!);
+  expect(destination.taskId).not.toBe(ASSISTANT_CHAT_THREAD);
+  expect(isAssistantThread(destination.taskId)).toBe(true);
+  expect(destination).toMatchObject({
+    assistantRecoveryDraft: true,
+    draftPrompt: '更正稿',
+    initialFiles: [{ filePath: '/tmp/context.md', name: 'context.md' }],
+  });
+  expect(mockSubmitUserTask).toHaveBeenCalledTimes(1);
+});
+
+it('does not offer recovery when the task was created before a later UI error', async () => {
+  mockGetThread.mockResolvedValue({ id: ASSISTANT_CHAT_THREAD, title: 'Assistant', status: 'idle', mode: 'work', createdAt: 1, updatedAt: 1, currentTaskId: null, taskIds: [] });
+  mockSubmitUserTask.mockResolvedValue({ taskId: 'task_created' });
+  mockUpdateThreadTaskId.mockRejectedValueOnce(new Error('blocked_unsettled'));
+  render(<MemoryRouter initialEntries={['/assistant']}><LocaleProvider>
+    <ChatShell threadId={ASSISTANT_CHAT_THREAD} hideObservationControls />
+  </LocaleProvider></MemoryRouter>);
+  await screen.findByLabelText('chat-input');
+  fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+  await waitFor(() => expect(screen.getByTestId('chat-messages')).toHaveTextContent('blocked_unsettled'));
+  expect(screen.queryByRole('button', { name: 'recover-assistant' })).toBeNull();
+  expect(mockSubmitUserTask).toHaveBeenCalledTimes(1);
 });
 
 it('uses the explicit assistant thread on /assistant and applies draft requests without recovering again or starting execution', async () => {

@@ -35,6 +35,7 @@ interface ChatInputProps {
   value?: string;
   onChange?: (value: string) => void;
   onSubmit: (text: string, files: AttachedFile[]) => void | boolean | Promise<void | boolean>;
+  onRecoverAssistantChat?: (text: string, files: AttachedFile[]) => void;
   onQueue?: (text: string, files: AttachedFile[]) => void;
   queuedText?: string | null;
   onCancelQueue?: () => void;
@@ -75,7 +76,7 @@ function resolveMentionTrigger(value: string, caret: number, enabled: boolean): 
   return { start: caret - tokenLength, end: caret, query: match[1].toLowerCase() };
 }
 
-export function ChatInput({ localCommands = [], value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles, mentionItems = [], mentionAllLabel }: ChatInputProps) {
+export function ChatInput({ localCommands = [], value, onChange, onSubmit, onRecoverAssistantChat, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles, mentionItems = [], mentionAllLabel }: ChatInputProps) {
   const { t } = useLocale();
   const resolvedPlaceholder = placeholder ?? t.chatInput.replyPlaceholder;
   const [internalValue, setInternalValue] = useState(value ?? '');
@@ -358,6 +359,11 @@ export function ChatInput({ localCommands = [], value, onChange, onSubmit, onQue
 
   return (
     <div className="w-full relative">
+      {onRecoverAssistantChat && <div role="alert" className="mb-2 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-text-secondary)]">
+        <p>{t.chatShell.assistantHistoryBlocked}</p>
+        <button type="button" disabled={submitting} className="mt-2 text-[var(--c-accent)]"
+          onClick={() => onRecoverAssistantChat(internalValue, files)}>{t.chatShell.recoverAssistantChat}</button>
+      </div>}
       {skillFacts.data === null && !skillFacts.failed && <p role="status">{t.skillsReadonlyUnknown}</p>}
       {skillFacts.failed && <p role="alert">{t.skillsReadonlyListFailed}<button type="button" onClick={() => skillFacts.refresh()}>{t.skillsReadonlyRetry}</button></p>}
       {mentionTrigger && matchedMentions.length > 0 && (
