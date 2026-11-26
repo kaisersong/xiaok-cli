@@ -328,6 +328,27 @@ describe('ChatShell canvas is scoped per session', () => {
     expect(mockReadFileContent).toHaveBeenCalledWith('/tmp/report.html');
   });
 
+  it('loads assistant history concurrently and replays it in chronological order', async () => {
+    const id = 'a0c11111-1111-4111-8111-111111111112';
+    const initialThread = { ...thread(id), currentTaskId: 'later', taskIds: ['earlier', 'later'] };
+    let finishEarlier!: (value: unknown) => void;
+    const resolved = (taskId: string) => ({ snapshot: { taskId, status: 'completed', prompt: taskId, events: [
+      { type: 'result', result: { summary: taskId, artifacts: [] } },
+    ] } });
+    mockGetThread.mockResolvedValue(initialThread);
+    mockRecoverTask.mockImplementation((taskId: string) => taskId === 'earlier'
+      ? new Promise(resolve => { finishEarlier = resolve; })
+      : Promise.resolve(resolved(taskId)));
+    render(<MemoryRouter><LocaleProvider>
+      <ChatShell threadId={id} initialThread={initialThread} />
+    </LocaleProvider></MemoryRouter>);
+
+    await waitFor(() => expect(mockRecoverTask).toHaveBeenCalledWith('later', undefined));
+    expect(mockGetThread).not.toHaveBeenCalled();
+    await act(async () => finishEarlier(resolved('earlier')));
+    expect(screen.getByTestId('narration-output')).toHaveTextContent('earlierlater');
+  });
+
   it('opens a historical relative write artifact using its completed host file fact', async () => {
     const taskId = 'write-report';
     const toolUseId = 'write-invocation';

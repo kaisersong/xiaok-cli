@@ -301,8 +301,9 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
   }
 }
 
-export function ChatShell({ threadId, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls: hideObservationControlsOverride }: {
+export function ChatShell({ threadId, initialThread, emptyContent, conversationHeader, assistantContent, assistantHasMessages, assistantMessages, assistantFocusKey, onAssistantFocusHandled, draftRequest, hideObservationControls: hideObservationControlsOverride }: {
   threadId?: string;
+  initialThread?: ThreadRecord;
   emptyContent?: React.ReactNode;
   conversationHeader?: React.ReactNode;
   assistantContent?: React.ReactNode;
@@ -315,6 +316,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
 } = {}) {
   const { taskId: routeTaskId } = useParams<{ taskId: string }>();
   const taskId = threadId ?? routeTaskId;
+  const initialThreadRef = useRef(initialThread);
   const hideObservationControls = hideObservationControlsOverride || isAssistantThread(taskId);
   const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
   const [assistantRecoveryScope, setAssistantRecoveryScope] = useState<DisplayScope | null>(null);
@@ -1455,9 +1457,12 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       setStatus('running');
     }
 
-    initialization.promise = api.getThread(taskId).then(async (threadData) => {
+    const firstThread = initialThreadRef.current;
+    const threadLoad = firstThread?.id === taskId ? Promise.resolve(firstThread) : api.getThread(taskId);
+    initialization.promise = threadLoad.then(async (threadData) => {
       // Check if this is still the current load (prevent race condition)
       if (!loadCurrent()) return;
+      initialThreadRef.current = undefined;
 
       if (threadData) {
         titleLockedRef.current = Boolean(threadData.title?.trim());
@@ -1487,13 +1492,22 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         let lastSnapshot: TaskSnapshot | undefined;
         const missingTaskIds: string[] = [];
         const initialPageSize = threadData.coverage === 'unclaimed' ? LEGACY_INITIAL_PAGE_SIZE : HISTORY_PAGE_SIZE;
-        for (const tid of allTaskIds.slice(-initialPageSize)) {
-          // Check again after each async operation
+        const visibleTaskIds = allTaskIds.slice(-initialPageSize);
+        const readHistory = (id: string) => recoverForDisplay(api, id,
+          allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,
+          threadData.coverage === 'unclaimed' || Boolean(threadData.legacyTaskIds?.includes(id)));
+        const batchSize = isAssistantThread(taskId) ? 4 : 1;
+        let batch: PromiseSettledResult<Awaited<ReturnType<typeof readHistory>>>[] = [];
+        for (const [index, tid] of visibleTaskIds.entries()) {
           if (!loadCurrent()) return;
-
+          const batchIndex = index % batchSize;
+          if (batchIndex === 0) {
+            batch = await Promise.allSettled(visibleTaskIds.slice(index, index + batchSize).map(readHistory));
+          }
           try {
-            const { snapshot, presentation, recoveredFromTaskId,archive } = await recoverForDisplay(api, tid,
-              allTaskIds.length === 1 ? threadData.title ?? undefined : undefined, loadCurrent,threadData.coverage==='unclaimed'||!!threadData.legacyTaskIds?.includes(tid));
+            const loaded = batch[batchIndex];
+            if (loaded.status === 'rejected') throw loaded.reason;
+            const { snapshot, presentation, recoveredFromTaskId, archive } = loaded.value;
             if (!loadCurrent()) return;
             if(archive){
               setLocalArchivePresent(true);
