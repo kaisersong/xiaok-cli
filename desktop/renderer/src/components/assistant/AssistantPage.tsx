@@ -6,6 +6,7 @@ import type { AttentionItem,AttentionAction } from '../../../../shared/assistant
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { ChevronDown, CircleDot, RefreshCw, Settings2, X } from 'lucide-react';
 import { api } from '../../api';
+import type { ThreadRecord } from '../../api/types';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useAssistantWorkspace } from '../../hooks/useAssistantWorkspace';
 import { ASSISTANT_THREAD_ID } from '../../lib/assistant-thread';
@@ -30,7 +31,7 @@ export function AssistantPage() {
   const assistantContent=<><AssistantSecureInputs/><AssistantBriefConversation state={inbox.state} controls={controls} onApprove={input=>{void inbox.approve(input);}} onRefuse={draft=>{void inbox.refuse(draft);}}/>{inbox.error&&<p role="alert" className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.assistantInbox.errors[inbox.error]??t.assistantInbox.errors.failed}</p>}</>;
   const hasAssistantMessages=Boolean(assistantMessages.length||inbox.state?.briefs.length||inbox.state?.items.length||inbox.state?.outbox.length);
 
-  const [ready, setReady] = useState(false);
+  const [thread, setThread] = useState<ThreadRecord>();
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [draftRequest, setDraftRequest] = useState<{ id: number; text: string }>();
@@ -39,8 +40,8 @@ export function AssistantPage() {
     const current = ++generation.current;
     setFailed(false);
     try {
-      await api.ensureAssistantThread(t.assistant.title);
-      if (generation.current === current) setReady(true);
+      const readyThread = await api.ensureAssistantThread(t.assistant.title);
+      if (generation.current === current) setThread(readyThread);
     } catch { if (generation.current === current) setFailed(true); }
   }, [t.assistant.title]);
   useEffect(() => { void load(); return () => { generation.current++; }; }, [load]);
@@ -59,7 +60,7 @@ export function AssistantPage() {
     {expanded && <div role="dialog" aria-label={labels.expand} className="absolute inset-x-5 top-full mx-auto max-h-[65vh] max-w-[1000px] overflow-y-auto rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-page)] shadow-xl"><div className="sticky top-0 z-10 flex justify-end bg-[var(--c-bg-page)] px-3 py-2"><button type="button" aria-label={labels.collapse} onClick={() => setExpanded(false)} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={16}/></button></div>{inboxPanel}<div className="px-5 py-3"><button type="button" disabled={inbox.busy} className="text-xs text-[var(--c-accent)] disabled:opacity-40" onClick={()=>{void inbox.testMessage().then(()=>setExpanded(false));}}>{t.assistantInbox.testMessage}</button></div><AssistantWorkspaceContent data={data} onPrepareSuggestion={prepare} iconOnly hideSuggestions /></div>}
   </div>;
   return <div data-testid="assistant-page" className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]">
-    {!ready ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
-      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
+    {!thread ? <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-[var(--c-text-secondary)]"><p role={failed ? 'alert' : 'status'}>{failed ? labels.loadFailed : labels.loading}</p>{failed && <button type="button" className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] px-4 py-2" onClick={() => void load()}><RefreshCw size={14}/>{t.assistant.refreshStatus}</button>}</div>
+      : <ChatShell assistantFocusKey={location.state?.assistantMorningFocus&&morningMessages?.length?location.key:undefined} onAssistantFocusHandled={()=>navigate('/assistant',{replace:true,state:{...location.state,assistantMorningFocus:false}})} threadId={ASSISTANT_THREAD_ID} initialThread={thread} emptyContent={workspace} conversationHeader={compactCard} assistantContent={assistantContent} assistantHasMessages={hasAssistantMessages} assistantMessages={assistantMessages} draftRequest={draftRequest} hideObservationControls />}
   </div>;
 }
