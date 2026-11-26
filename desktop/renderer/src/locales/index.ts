@@ -3483,7 +3483,7 @@ followUpAcceptedDraft:string;
   // chatShell
   chatShell: {
     threadLoadFailed: string; threadLoadHelp: string; reloadThread: string; backToTasks: string; threadLoading: string; answerFailed: string; dismissError: string;
-    assistantHistoryBlocked: string; recoverAssistantChat: string;
+    assistantHistoryBlocked: string; recoverAssistantChat: string; assistantHistoryCheckpoint: string;
     attachmentLabel: string;
     cuUnavailable: string;
     historyUnavailable: (taskIds: string) => string;

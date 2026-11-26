@@ -159,7 +159,7 @@ export type DesktopTaskEvent =
 
 export type TaskSnapshotStatus = 'understanding' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
 export type TaskPermissionMode = 'plan' | 'auto' | 'default';
-export type TaskContextSkipReason = 'missing' | 'invalid' | 'non_terminal' | 'self' | 'too_old';
+export type TaskContextSkipReason = 'missing' | 'invalid' | 'non_terminal' | 'self' | 'too_old' | 'unsettled' | 'before_unsettled';
 
 export interface TaskCreateContext {
   threadId?: string;

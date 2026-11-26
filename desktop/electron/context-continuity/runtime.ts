@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { TaskSnapshot } from '../../shared/task-types.js';
 import type { PublicTaskInput } from '../../shared/context-continuity-types.js';
 import type { TaskCreateInput as HostTaskCreateInput } from '../../../src/runtime/task-host/types.js';
+import { recoverTaskSnapshotSync } from '../../../src/runtime/task-host/snapshot-store.js';
 import type { ContinuityIpcPort } from './ipc.js';
 import { resolveDesktopProfile,type DesktopProfileIdentity } from './profile.js';
 import { describeProfileFailure } from '../desktop-main-identity.js';
@@ -164,7 +165,8 @@ export class DesktopContextContinuity {
   }
   assembleOwnedHistory(taskId: string, context?: TaskCreateContext) {
     if (this.initializationFailed || this.closed) throw new Error('continuity_unavailable');
-    return this.current ? assembleOwnedHistory(this.current.service, this.current.actor, taskId, context) : null;
+    return this.current ? assembleOwnedHistory(this.current.service, this.current.actor, taskId, context,
+      id => recoverTaskSnapshotSync(join(this.dataRoot, 'tasks'), id)) : null;
   }
   recordLoadedHistory(taskId: string, sources: TaskSnapshot[], conversationId?: string): void {
     if (this.initializationFailed || this.closed) throw new Error('continuity_unavailable');
