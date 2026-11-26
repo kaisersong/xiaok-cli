@@ -1,14 +1,12 @@
 import { createLocalSourceWriterLifetime } from '../../src/runtime/verification/local-source-writer-lifetime.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import type {
   ArtifactGenerationTarget,
   ArtifactWorkspaceExecutionScope,
   DesktopTaskEvent,
-  TaskCreateInput,
-  TaskRuntimeHost,
   TaskSnapshot,
 } from '../../src/runtime/task-host/types.js';
 import type {
@@ -23,9 +21,7 @@ import type {
   ArtifactWorkspaceRequestSource,
   ArtifactWorkspaceRequestedKind,
   ArtifactWorkspaceSnapshot,
-  ArtifactWorkspaceStagingFile,
   ArtifactWorkspaceVersion,
-  ArtifactWorkspaceVersionView,
   ArtifactWorkspaceView,
   WorkspaceGenerationRequest,
 } from '../shared/artifact-workspace-types.js';
@@ -34,50 +30,61 @@ import {
   ArtifactWorkspaceFileError,
   ArtifactWorkspaceFileManager,
   type FinalizedWorkspaceArtifact,
-  type IngestedWorkspaceArtifact,
 } from './artifact-workspace-files.js';
 import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
+import {
+  ARTIFACT_WORKSPACE_NOTE_LIMIT,
+  ARTIFACT_WORKSPACE_LEASE_GRACE_MS,
+  ARTIFACT_WORKSPACE_LEASE_DURATION_MS,
+  ARTIFACT_WORKSPACE_STAGING_RETENTION_MS,
+} from './artifact-workspace-constants.js';
+import type {
+  ArtifactWorkspaceFeatureFlags,
+  PreparedTaskHost,
+  ArtifactWorkspaceServiceOptions,
+  ArtifactWorkspaceClaimResult,
+  ArtifactWorkspaceChange,
+} from './artifact-workspace-service-types.js';
+import {
+  ArtifactWorkspaceRecoveryTimeout,
+  withRecoveryTimeout,
+  snapshotReportsPluginUnavailable,
+  buildGenerationPrompt,
+  copyVersionForGeneration,
+  maybeExtendLease,
+} from './artifact-workspace-generation.js';
+import {
+  normalizeKind,
+  artifactMatchesRequestedKind,
+  mimeForPath,
+  pluginSourceFromCreator,
+  artifactContentMatchesKind,
+  proveMaterializedArtifactKind,
+  mapFileError,
+  isEligibleKind,
+  findArtifact,
+  resolveAllowedSource,
+  ingestArtifactSource,
+} from './artifact-workspace-source.js';
+import { toVersionView, readVersionPreview } from './artifact-workspace-version-view.js';
+import { cleanup, reconcileStagingRegistry } from './artifact-workspace-maintenance.js';
 
-export const ARTIFACT_WORKSPACE_NOTE_LIMIT = 20_000;
-export const ARTIFACT_WORKSPACE_LEASE_GRACE_MS = 300_000;
-export const ARTIFACT_WORKSPACE_LEASE_DURATION_MS = 30 * 60_000;
-export const ARTIFACT_WORKSPACE_LEASE_EXTENSION_MS = 300_000;
-export const ARTIFACT_WORKSPACE_LEASE_MAX_TOTAL_EXTENSION_MS = 900_000;
-export const ARTIFACT_WORKSPACE_STAGING_RETENTION_MS = 30 * 24 * 60 * 60_000;
-export const ARTIFACT_WORKSPACE_SECONDARY_VIEW_RETENTION_MS = 30 * 24 * 60 * 60_000;
-export const ARTIFACT_WORKSPACE_RECOVERY_TIMEOUT_MS = 30_000;
-
-export interface ArtifactWorkspaceFeatureFlags {
-  artifactWorkspaceRevisionUi: boolean;
-  artifactSpatialWorkspace: boolean;
-}
-
-type PreparedTaskHost = Pick<TaskRuntimeHost, 'prepareTask' | 'startTask' | 'cancelTask' | 'recoverTask'>;
-
-export interface ArtifactWorkspaceServiceOptions {
-  store: ArtifactWorkspaceStore;
-  snapshotStore: FileTaskSnapshotStore;
-  taskHost: PreparedTaskHost;
-  fileManager: ArtifactWorkspaceFileManager;
-  workspaceRoot: string;
-  allowedRoots?: string[];
-  generationRoot?: string;
-  featureFlags?: Partial<ArtifactWorkspaceFeatureFlags>;
-  now?: () => number;
-  createId?: (prefix: string) => string;
-}
-
-export interface ArtifactWorkspaceClaimResult {
-  outcomeKind: 'ready_version' | 'staging';
-  versionId?: string;
-  stagingId?: string;
-  quarantineReason?: ArtifactWorkspaceQuarantineReason;
-}
-
-export interface ArtifactWorkspaceChange {
-  conversationId: string;
-  workspaceId: string;
-}
+export {
+  ARTIFACT_WORKSPACE_NOTE_LIMIT,
+  ARTIFACT_WORKSPACE_LEASE_GRACE_MS,
+  ARTIFACT_WORKSPACE_LEASE_DURATION_MS,
+  ARTIFACT_WORKSPACE_LEASE_EXTENSION_MS,
+  ARTIFACT_WORKSPACE_LEASE_MAX_TOTAL_EXTENSION_MS,
+  ARTIFACT_WORKSPACE_STAGING_RETENTION_MS,
+  ARTIFACT_WORKSPACE_SECONDARY_VIEW_RETENTION_MS,
+  ARTIFACT_WORKSPACE_RECOVERY_TIMEOUT_MS,
+} from './artifact-workspace-constants.js';
+export type {
+  ArtifactWorkspaceFeatureFlags,
+  ArtifactWorkspaceServiceOptions,
+  ArtifactWorkspaceClaimResult,
+  ArtifactWorkspaceChange,
+} from './artifact-workspace-service-types.js';
 
 interface WorkspaceIdentityInput {
   conversationId: string;
@@ -110,154 +117,6 @@ function addMs(timestamp: number, milliseconds: number): string {
   return new Date(timestamp + milliseconds).toISOString();
 }
 
-class ArtifactWorkspaceRecoveryTimeout extends Error {}
-
-async function withRecoveryTimeout<T>(operation: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new ArtifactWorkspaceRecoveryTimeout('artifact workspace recovery timed out')),
-          ARTIFACT_WORKSPACE_RECOVERY_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function normalizeKind(kind: string | undefined, mimeType: string | undefined, filePath: string): string {
-  const raw = (kind ?? '').toLowerCase();
-  const mime = (mimeType ?? '').toLowerCase();
-  if (mime === 'application/pdf') return 'pdf';
-  if (mime.startsWith('image/')) return 'image';
-  if (mime === 'text/html') return 'html';
-  if (mime === 'text/markdown') return 'markdown';
-  if (mime.includes('presentation') || mime.includes('xiaok.slides')) return 'slides';
-  if (raw === 'pdf') return 'pdf';
-  if (raw === 'md' || raw === 'markdown') return 'markdown';
-  if (raw === 'text' && /\.(?:md|markdown)$/i.test(filePath)) return 'markdown';
-  if (raw === 'html') return 'html';
-  if (raw === 'image' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(raw)) return 'image';
-  if (raw === 'slides' || raw === 'pptx') return 'slides';
-  return raw || 'other';
-}
-
-function artifactMatchesRequestedKind(
-  requestedKind: ArtifactWorkspaceRequestedKind,
-  artifact: { kind: string; mimeType?: string; filePath?: string },
-): boolean {
-  const raw = artifact.kind.toLowerCase();
-  const mime = artifact.mimeType?.toLowerCase();
-  if (mime) {
-    if (requestedKind === 'image') return mime.startsWith('image/');
-    if (requestedKind === 'html') return mime === 'text/html';
-    if (requestedKind === 'markdown') return mime === 'text/markdown';
-    return mime.includes('presentation') || mime.includes('xiaok.slides');
-  }
-  if (requestedKind === 'image' || requestedKind === 'html') return false;
-  if (requestedKind === 'markdown') {
-    return raw === 'markdown'
-      || raw === 'md'
-      || (raw === 'text' && /\.(?:md|markdown)$/i.test(artifact.filePath ?? ''));
-  }
-  return raw === 'slides';
-}
-
-function mimeForPath(_filePath: string, declared?: string): string | undefined {
-  if (declared) return declared;
-  return undefined;
-}
-
-function pluginSourceFromCreator(creator?: string): string | undefined {
-  if (creator === 'plugin:kai-report-creator') return 'kai-report-creator';
-  if (creator === 'plugin:kai-slide-creator') return 'kai-slide-creator';
-  return undefined;
-}
-
-function snapshotReportsPluginUnavailable(snapshot: TaskSnapshot): boolean {
-  return snapshot.events.some((event) => (
-    event.type === 'canvas_tool_result'
-    && typeof event.response === 'string'
-    && event.response.includes('plugin_unavailable')
-  ));
-}
-
-function artifactContentMatchesKind(
-  requestedKind: ArtifactWorkspaceRequestedKind,
-  filePath: string,
-  mimeType?: string,
-): boolean {
-  if (requestedKind !== 'image') return true;
-  try {
-    const bytes = readFileSync(filePath);
-    const mime = mimeType?.toLowerCase();
-    if (mime === 'image/png') return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-    if (mime === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-    if (mime === 'image/gif') return ['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'));
-    if (mime === 'image/webp') return bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
-    if (mime === 'image/svg+xml') return /<svg(?:\s|>)/i.test(bytes.subarray(0, 4096).toString('utf8'));
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function sniffImageMime(filePath: string): string | undefined {
-  try {
-    const bytes = readFileSync(filePath);
-    if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
-    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
-    if (['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))) return 'image/gif';
-    if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
-    if (/<svg(?:\s|>)/i.test(bytes.subarray(0, 4096).toString('utf8'))) return 'image/svg+xml';
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function looksLikeHtmlDocument(filePath: string): boolean {
-  try {
-    const prefix = readFileSync(filePath).subarray(0, 8192).toString('utf8').replace(/^\uFEFF/, '').trimStart();
-    return /^(?:<!doctype\s+html\b|<html(?:\s|>))/i.test(prefix);
-  } catch {
-    return false;
-  }
-}
-
-function proveMaterializedArtifactKind(
-  requestedKind: ArtifactWorkspaceRequestedKind,
-  artifact: { kind: string; mimeType?: string; filePath: string },
-): { mimeType?: string } | null {
-  if (artifact.mimeType) {
-    return artifactMatchesRequestedKind(requestedKind, artifact)
-      && artifactContentMatchesKind(requestedKind, artifact.filePath, artifact.mimeType)
-      ? { mimeType: artifact.mimeType }
-      : null;
-  }
-
-  const raw = artifact.kind.toLowerCase();
-  if (requestedKind === 'html') {
-    return raw === 'html' && looksLikeHtmlDocument(artifact.filePath)
-      ? { mimeType: 'text/html' }
-      : null;
-  }
-  if (requestedKind === 'image') {
-    if (raw !== 'image' && !['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(raw)) return null;
-    const mimeType = sniffImageMime(artifact.filePath);
-    return mimeType ? { mimeType } : null;
-  }
-  if (!artifactMatchesRequestedKind(requestedKind, artifact)
-    || !artifactContentMatchesKind(requestedKind, artifact.filePath)) {
-    return null;
-  }
-  return requestedKind === 'markdown' ? { mimeType: 'text/markdown' } : {};
-}
-
 function ensureFiniteGeometry(input: { x?: number; y?: number }): { x: number; y: number } {
   const x = input.x ?? 0;
   const y = input.y ?? 0;
@@ -265,13 +124,6 @@ function ensureFiniteGeometry(input: { x?: number; y?: number }): { x: number; y
     throw new ArtifactWorkspaceError('invalid_target', 'node position is invalid');
   }
   return { x, y };
-}
-
-function mapFileError(error: unknown): never {
-  if (error instanceof ArtifactWorkspaceFileError) {
-    throw new ArtifactWorkspaceError(error.code, error.message);
-  }
-  throw error;
 }
 
 type ServiceWriter = { ingress: ReturnType<typeof createLocalSourceWriterLifetime>; recoveryTails: ReturnType<typeof createLocalSourceWriterLifetime>; closing?: Promise<void> };
@@ -359,7 +211,7 @@ export class ArtifactWorkspaceService {
       nodes: this.store.listNodes(workspace.id),
       relations: this.store.listRelations(workspace.id),
       lineages,
-      versions: versions.map((version) => this.toVersionView(version, lineages)),
+      versions: versions.map((version) => toVersionView(this.fileManager, version, lineages)),
       generationRequests: this.store.listGenerationRequests(workspace.id),
       staging: this.store.listStagingFiles().filter((entry) => {
         const request = entry.generationRequestId ? this.store.getGenerationRequest(entry.generationRequestId) : undefined;
@@ -394,13 +246,13 @@ export class ArtifactWorkspaceService {
     if (!this.flags.artifactWorkspaceRevisionUi) return false;
     const workspace = this.workspace(input);
     const snapshot = await this.snapshotStore.recoverTask(input.sourceTaskId);
-    const artifact = snapshot ? this.findArtifact(snapshot, input.artifactId) : undefined;
+    const artifact = snapshot ? findArtifact(snapshot, input.artifactId) : undefined;
     if (!artifact?.filePath) return false;
     const kind = normalizeKind(artifact.kind, artifact.mimeType, artifact.filePath);
-    if (!this.isEligibleKind(kind)) return false;
-    let identity: ReturnType<ArtifactWorkspaceService['resolveAllowedSource']>;
+    if (!isEligibleKind(kind)) return false;
+    let identity: ReturnType<typeof resolveAllowedSource>;
     try {
-      identity = this.resolveAllowedSource(artifact.filePath);
+      identity = resolveAllowedSource(this.fileManager, this.allowedRoots, artifact.filePath);
     } catch {
       return false;
     }
@@ -431,13 +283,13 @@ export class ArtifactWorkspaceService {
     this.assertRevisionWrite();
     const workspace = this.workspace(input);
     const snapshot = await this.snapshotStore.recoverTask(input.sourceTaskId);
-    const artifact = snapshot ? this.findArtifact(snapshot, input.artifactId) : undefined;
+    const artifact = snapshot ? findArtifact(snapshot, input.artifactId) : undefined;
     if (!artifact?.filePath) throw new ArtifactWorkspaceError('artifact_not_found', 'task artifact is missing');
     const kind = normalizeKind(artifact.kind, artifact.mimeType, artifact.filePath);
-    if (!this.isEligibleKind(kind)) throw new ArtifactWorkspaceError('artifact_kind_mismatch', 'artifact cannot be revised');
-    let identity: ReturnType<ArtifactWorkspaceService['resolveAllowedSource']>;
+    if (!isEligibleKind(kind)) throw new ArtifactWorkspaceError('artifact_kind_mismatch', 'artifact cannot be revised');
+    let identity: ReturnType<typeof resolveAllowedSource>;
     try {
-      identity = this.resolveAllowedSource(artifact.filePath);
+      identity = resolveAllowedSource(this.fileManager, this.allowedRoots, artifact.filePath);
     } catch (error) {
       return mapFileError(error);
     }
@@ -448,7 +300,7 @@ export class ArtifactWorkspaceService {
     const stagingToken = this.createId('materialized');
     let staged;
     try {
-      staged = this.ingestArtifactSource({
+      staged = ingestArtifactSource(this.fileManager, this.generationRoot, {
         sourcePath: identity.realPath,
         allowedRoot: identity.allowedRoot,
         stagingId: stagingToken,
@@ -992,7 +844,7 @@ export class ArtifactWorkspaceService {
       }
       const requestedKind = input.requestedKind
         ?? normalizeKind(selected?.kind ?? baseVersion.kind, selected?.mimeType ?? baseVersion.mimeType, baseVersion.kind);
-      if (!this.isEligibleKind(requestedKind)) {
+      if (!isEligibleKind(requestedKind)) {
         throw new ArtifactWorkspaceError('artifact_kind_mismatch', 'selected artifact cannot be revised');
       }
       const duplicate = this.store.listGenerationRequests(workspace.id).find((candidate) => (
@@ -1052,7 +904,7 @@ export class ArtifactWorkspaceService {
     let sourceCopyPath: string | undefined;
     if (sourceVersion) {
       try {
-        sourceCopyPath = this.copyVersionForGeneration(sourceVersion, leaseId);
+        sourceCopyPath = copyVersionForGeneration(this.fileManager, sourceVersion, this.generationTaskRoot(leaseId));
       } catch (error) {
         this.store.updateGenerationState(request.id, 'failed', 'artifact_missing');
         throw new ArtifactWorkspaceError('artifact_missing', error instanceof Error ? error.message : 'revision source is missing');
@@ -1080,7 +932,7 @@ export class ArtifactWorkspaceService {
     let prepared: Awaited<ReturnType<PreparedTaskHost['prepareTask']>>;
     try {
       prepared = await this.taskHost.prepareTask({
-        prompt: this.buildGenerationPrompt(prompt, node.placeholderKind, leaseId, allowedAction, sourceCopyPath, target),
+        prompt: buildGenerationPrompt(prompt, node.placeholderKind, leaseId, this.generationTaskRoot(leaseId), allowedAction, sourceCopyPath, target),
         materials: [],
         executionScope,
         watchdogMs: ARTIFACT_WORKSPACE_LEASE_DURATION_MS - ARTIFACT_WORKSPACE_LEASE_GRACE_MS,
@@ -1261,7 +1113,7 @@ export class ArtifactWorkspaceService {
       };
     }
     const snapshot = await this.snapshotStore.recoverTask(input.taskId);
-    const artifact = snapshot ? this.findArtifact(snapshot, input.producedArtifactId) : undefined;
+    const artifact = snapshot ? findArtifact(snapshot, input.producedArtifactId) : undefined;
     if (
       !snapshot
       || !artifact?.filePath
@@ -1284,7 +1136,7 @@ export class ArtifactWorkspaceService {
     const stagingToken = this.createId('generated');
     let staged;
     try {
-      staged = this.ingestArtifactSource({
+      staged = ingestArtifactSource(this.fileManager, this.generationRoot, {
         sourcePath: artifact.filePath,
         allowedRoot: this.generationTaskRoot(lease.id),
         stagingId: stagingToken,
@@ -1429,7 +1281,7 @@ export class ArtifactWorkspaceService {
     if (!scope || scope.kind !== 'artifact_workspace_generation') return;
     const cursor = this.store.getTaskCursor(input.taskId);
     if (input.eventIndex <= cursor) return;
-    this.maybeExtendLease(scope, input.snapshot);
+    maybeExtendLease(this.store, () => this.now(), scope, input.snapshot);
     const terminal = ['completed', 'failed', 'cancelled'].includes(input.snapshot.status);
     const firstDeferredArtifactIndex = input.snapshot.events.findIndex((event, index) => (
       index > cursor && event.type === 'artifact_recorded'
@@ -1515,7 +1367,7 @@ export class ArtifactWorkspaceService {
 
   async #reconcileStartup(): Promise<void> {
     try {
-      this.reconcileStagingRegistry();
+      reconcileStagingRegistry(this.store, this.fileManager);
     } catch (error) {
       console.warn('[artifact-workspace] staging reconciliation failed:', error instanceof Error ? error.message : String(error));
     }
@@ -1647,26 +1499,6 @@ export class ArtifactWorkspaceService {
     );
   }
 
-  private reconcileStagingRegistry(): void {
-    for (const staging of this.store.listStagingFiles()) {
-      if (staging.availability !== 'present' || !staging.fileRef) continue;
-      const currentPath = this.fileManager.resolveManagedRef(staging.fileRef);
-      if (existsSync(currentPath)) continue;
-      let finalRef: string;
-      try {
-        finalRef = this.fileManager.finalRefForStagingRef(staging.fileRef);
-      } catch {
-        continue;
-      }
-      if (!existsSync(this.fileManager.resolveManagedRef(finalRef))) continue;
-      this.store.updateStagingFile({
-        id: staging.id,
-        fileRef: finalRef,
-        quarantineReason: 'commit_recovery',
-      });
-    }
-  }
-
   async readArtifactWorkspaceVersionPreview(input: WorkspaceIdentityInput & { versionId: string }): Promise<ArtifactWorkspacePreview> {
     return serviceWriter(this).ingress.runAsync(() => this.#readArtifactWorkspaceVersionPreview(input));
   }
@@ -1674,32 +1506,7 @@ export class ArtifactWorkspaceService {
   async #readArtifactWorkspaceVersionPreview(input: WorkspaceIdentityInput & { versionId: string }): Promise<ArtifactWorkspacePreview> {
     const workspace = this.workspace(input);
     const version = this.requireOwnedVersion(workspace.id, input.versionId);
-    if (version.status !== 'ready') throw new ArtifactWorkspaceError('artifact_missing', 'artifact version is missing');
-    const path = this.fileManager.resolveManagedRef(version.fileRef);
-    if (!this.fileManager.verifyManagedArtifact(version, 'stat')) throw new ArtifactWorkspaceError('artifact_missing', 'artifact bytes are missing');
-    const title = basename(version.entryRef ?? version.fileRef);
-    if (version.storageKind === 'sealed_package') {
-      const manifestPath = this.fileManager.resolveManagedRef(`${version.fileRef}/${version.packageManifestRef}`);
-      return {
-        versionId: version.id,
-        kind: version.kind,
-        mimeType: version.mimeType,
-        title,
-        contentKind: 'package_manifest',
-        content: { entryRef: version.entryRef ?? '', files: JSON.parse(readFileSync(manifestPath, 'utf8')).files ?? [] },
-      };
-    }
-    const bytes = readFileSync(path);
-    if (version.kind === 'image') {
-      return {
-        versionId: version.id, kind: version.kind, mimeType: version.mimeType, title,
-        contentKind: 'data_url', content: `data:${version.mimeType ?? 'application/octet-stream'};base64,${bytes.toString('base64')}`,
-      };
-    }
-    return {
-      versionId: version.id, kind: version.kind, mimeType: version.mimeType, title,
-      contentKind: 'text', content: bytes.toString('utf8'),
-    };
+    return readVersionPreview(this.fileManager, version);
   }
 
   async exportArtifactWorkspaceVersion(input: WorkspaceIdentityInput & { versionId: string; destinationPath?: string }): Promise<{ fileName: string; sourcePath: string; destinationPath?: string }> {
@@ -1777,37 +1584,7 @@ export class ArtifactWorkspaceService {
   }
 
   cleanup(input: { activeViewKeys?: Set<string> } = {}): { stagingRows: number; secondaryViews: number } {
-    return serviceWriter(this).ingress.runSync(() => this.#cleanup(input));
-  }
-
-  #cleanup(input: { activeViewKeys?: Set<string> } = {}): { stagingRows: number; secondaryViews: number } {
-    const cutoff = this.now() - ARTIFACT_WORKSPACE_STAGING_RETENTION_MS;
-    let stagingRows = 0;
-    for (const entry of this.store.listStagingFiles()) {
-      if (!this.flags.artifactWorkspaceRevisionUi && !this.flags.artifactSpatialWorkspace) break;
-      if (entry.keep || Date.parse(entry.expiresAt) > this.now()) continue;
-      const request = entry.generationRequestId ? this.store.getGenerationRequest(entry.generationRequestId) : undefined;
-      if (request && ['prepared', 'running', 'needs_recovery'].includes(request.state)) continue;
-      if (entry.fileRef) this.fileManager.removeManagedRef(entry.fileRef);
-      const requestWorkspaceId = request?.workspaceId;
-      this.store.deleteStagingFile(entry.id);
-      this.store.recordAudit({
-        actorKind: 'system_reconcile', workspaceId: requestWorkspaceId,
-        producingTaskId: entry.producingTaskId,
-        action: 'cleanup_staging', result: 'success', errorCode: entry.quarantineReason,
-      });
-      stagingRows++;
-    }
-    const secondaryViews = this.store.cleanupSecondaryViews({
-      before: new Date(cutoff).toISOString(),
-      activeViewKeys: input.activeViewKeys ?? new Set(),
-    });
-    if (secondaryViews > 0) {
-      this.store.recordAudit({
-        actorKind: 'system_reconcile', action: 'cleanup_secondary_views', result: 'success',
-      });
-    }
-    return { stagingRows, secondaryViews };
+    return serviceWriter(this).ingress.runSync(() => cleanup(this.store, this.flags, this.fileManager, () => this.now(), input));
   }
 
   /**
@@ -1910,55 +1687,6 @@ export class ArtifactWorkspaceService {
     if (noteText.length > ARTIFACT_WORKSPACE_NOTE_LIMIT) throw new ArtifactWorkspaceError('artifact_too_large', 'note exceeds limit');
   }
 
-  private isEligibleKind(kind: string): kind is ArtifactWorkspaceRequestedKind {
-    return kind === 'image' || kind === 'html' || kind === 'markdown' || kind === 'slides';
-  }
-
-  private findArtifact(snapshot: TaskSnapshot, artifactId: string): {
-    artifactId: string;
-    kind: string;
-    label: string;
-    filePath?: string;
-    mimeType?: string;
-    creator?: string;
-  } | undefined {
-    const event = snapshot.events.find((candidate) => candidate.type === 'artifact_recorded' && candidate.artifactId === artifactId);
-    if (event?.type === 'artifact_recorded') {
-      return {
-        artifactId,
-        kind: event.kind,
-        label: event.label,
-        filePath: event.filePath,
-        mimeType: event.mimeType,
-        creator: event.creator,
-      };
-    }
-    const artifact = snapshot.result?.artifacts.find((candidate) => candidate.artifactId === artifactId);
-    return artifact ? {
-      artifactId,
-      kind: artifact.kind,
-      label: artifact.title,
-      filePath: artifact.filePath,
-      mimeType: artifact.mimeType,
-      creator: artifact.creator,
-    } : undefined;
-  }
-
-  private toVersionView(version: ArtifactWorkspaceVersion, lineages: ArtifactLineage[]): ArtifactWorkspaceVersionView {
-    const { fileRef: _fileRef, entryRef: _entryRef, packageManifestRef: _manifestRef, ...safe } = version;
-    const available = version.status === 'ready' && this.fileManager.verifyManagedArtifact(version, 'stat');
-    return {
-      ...safe,
-      status: available ? version.status : 'missing',
-      preferred: lineages.some((lineage) => lineage.id === version.lineageId && lineage.preferredVersionId === version.id),
-      preview: {
-        available,
-        title: basename(version.entryRef ?? version.fileRef),
-        contentKind: version.storageKind === 'sealed_package' ? 'package_manifest' : version.kind === 'image' ? 'data_url' : 'text',
-      },
-    };
-  }
-
   private requireOwnedVersion(workspaceId: string, versionId: string): ArtifactWorkspaceVersion {
     const version = this.store.getVersion(versionId);
     const lineage = version ? this.store.getLineage(version.lineageId) : undefined;
@@ -1966,68 +1694,6 @@ export class ArtifactWorkspaceService {
       throw new ArtifactWorkspaceError('artifact_not_found', 'artifact version is not in this workspace');
     }
     return version;
-  }
-
-  private buildGenerationPrompt(
-    prompt: string,
-    kind: ArtifactWorkspaceRequestedKind,
-    leaseId: string,
-    allowedAction: 'fulfill_placeholder' | 'append_revision' | 'append_collection_item',
-    sourceCopyPath?: string,
-    target?: ArtifactGenerationTarget,
-  ): string {
-    return [
-      prompt,
-      '',
-      `目标产物类型：${kind}`,
-      target ? `不可变目标描述：${JSON.stringify(target)}` : '',
-      sourceCopyPath ? `不可变来源副本：${sourceCopyPath}。只读取该副本，不修改 workspace 原始版本。` : '',
-      `产物必须写入此任务专用目录：${this.generationTaskRoot(leaseId)}`,
-      kind === 'html'
-        ? 'HTML/report 最终文件只能调用 render_report_artifact，由 kai-report-creator 生成；严禁手写 HTML 作为降级结果。'
-        : '',
-      kind === 'slides'
-        ? 'Slides 最终文件只能调用 mcp__slide-renderer__render_slide，由 kai-slide-creator 生成；严禁手写 HTML 作为降级结果。'
-        : '',
-      `如需多步编辑，先使用 .draft 或 .tmp 文件；只有内容最终完成后才写目标类型文件，并使用写入工具返回的 artifactId 调用一次 artifact_workspace_${allowedAction} 登记工具。`,
-      `完成后只能调用与当前任务 executionScope 匹配的 artifact_workspace_* 工具登记产物；leaseId=${leaseId}。`,
-      '严禁提交任意路径、其他任务产物或修改来源版本。',
-    ].filter(Boolean).join('\n');
-  }
-
-  private copyVersionForGeneration(version: ArtifactWorkspaceVersion, leaseId: string): string {
-    const sourcePath = this.fileManager.resolveManagedRef(version.fileRef);
-    if (!existsSync(sourcePath)) throw new Error('revision source bytes are missing');
-    const sourceRoot = join(this.generationTaskRoot(leaseId), 'source');
-    mkdirSync(sourceRoot, { recursive: true });
-    if (version.storageKind === 'sealed_package') {
-      const packageRoot = join(sourceRoot, 'package');
-      cpSync(sourcePath, packageRoot, { recursive: true, errorOnExist: true });
-      return join(packageRoot, ...(version.entryRef ?? '').split(/[\\/]+/));
-    }
-    const destination = join(sourceRoot, basename(sourcePath));
-    copyFileSync(sourcePath, destination);
-    return destination;
-  }
-
-  private maybeExtendLease(scope: ArtifactWorkspaceExecutionScope, snapshot: TaskSnapshot): void {
-    if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') return;
-    const lease = this.store.getLease(scope.leaseId);
-    if (!lease || lease.cancelledAt || lease.consumedAt) return;
-    const request = this.store.getGenerationRequest(lease.generationRequestId);
-    if (request?.state !== 'running') return;
-    const expiresAt = Date.parse(lease.expiresAt);
-    if (!Number.isFinite(expiresAt) || this.now() >= expiresAt || expiresAt - this.now() > ARTIFACT_WORKSPACE_LEASE_GRACE_MS) return;
-    const originalExpiry = Date.parse(lease.createdAt) + ARTIFACT_WORKSPACE_LEASE_DURATION_MS;
-    const maximumExpiry = originalExpiry + ARTIFACT_WORKSPACE_LEASE_MAX_TOTAL_EXTENSION_MS;
-    const nextExpiry = Math.min(expiresAt + ARTIFACT_WORKSPACE_LEASE_EXTENSION_MS, maximumExpiry);
-    if (nextExpiry <= expiresAt) return;
-    this.store.extendLease({ leaseId: lease.id, expiresAt: new Date(nextExpiry).toISOString() });
-    this.store.recordAudit({
-      actorKind: 'agent', requestSource: 'agent', workspaceId: lease.workspaceId,
-      nodeId: lease.nodeId, producingTaskId: lease.producingTaskId,
-      action: 'generation_lease_extended', result: 'success',
-    });
   }
 
   private recordWorkspaceEvent(
@@ -2134,61 +1800,7 @@ export class ArtifactWorkspaceService {
     return this.createIdFn(prefix).replace(/[^a-zA-Z0-9_-]/g, '_');
   }
 
-  private resolveAllowedSource(sourcePath: string): ReturnType<ArtifactWorkspaceFileManager['resolveSourceIdentity']> & { allowedRoot: string } {
-    for (const allowedRoot of this.allowedRoots) {
-      try {
-        return { ...this.fileManager.resolveSourceIdentity({ sourcePath, allowedRoot }), allowedRoot };
-      } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-        if (!(error instanceof ArtifactWorkspaceFileError) || error.code !== 'invalid_target') throw error;
-      }
-    }
-    throw new ArtifactWorkspaceFileError('invalid_target', 'artifact source is outside app-managed roots');
-  }
-
   private generationTaskRoot(leaseId: string): string {
     return join(this.generationRoot, leaseId);
-  }
-
-  private ingestArtifactSource(input: {
-    sourcePath: string;
-    allowedRoot: string;
-    stagingId: string;
-    kind: string;
-    mimeType?: string;
-  }): IngestedWorkspaceArtifact {
-    const sourceStat = statSync(input.sourcePath);
-    if (sourceStat.isDirectory()) {
-      const entryRef = ['index.html', 'slides.html', 'output.html', 'report.html']
-        .find(candidate => existsSync(join(input.sourcePath, candidate)));
-      if (!entryRef) throw new ArtifactWorkspaceFileError('artifact_package_invalid', 'sealed package has no supported entry');
-      return this.fileManager.ingestSealedPackage({
-        sourceDirectory: input.sourcePath,
-        allowedRoot: input.allowedRoot,
-        stagingId: input.stagingId,
-        entryRef,
-        kind: input.kind,
-        mimeType: input.mimeType,
-      });
-    }
-    if (input.kind === 'slides') {
-      const packageInput = join(this.generationRoot, `.package-input-${input.stagingId}`);
-      mkdirSync(packageInput, { recursive: false });
-      const entryRef = 'index.html';
-      try {
-        copyFileSync(input.sourcePath, join(packageInput, entryRef));
-        return this.fileManager.ingestSealedPackage({
-          sourceDirectory: packageInput,
-          allowedRoot: this.generationRoot,
-          stagingId: input.stagingId,
-          entryRef,
-          kind: input.kind,
-          mimeType: input.mimeType,
-        });
-      } finally {
-        rmSync(packageInput, { recursive: true, force: true, maxRetries: 3 });
-      }
-    }
-    return this.fileManager.ingestSingleFile(input);
   }
 }
