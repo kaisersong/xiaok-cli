@@ -328,6 +328,31 @@ describe('ChatShell canvas is scoped per session', () => {
     expect(mockReadFileContent).toHaveBeenCalledWith('/tmp/report.html');
   });
 
+  it('opens a historical relative write artifact using its completed host file fact', async () => {
+    const taskId = 'write-report';
+    const toolUseId = 'write-invocation';
+    const filePath = 'reports/report.html';
+    const absolutePath = 'C:\\workspace\\reports\\report.html';
+    mockGetThread.mockResolvedValue({ ...thread('thread-A'), currentTaskId: taskId, taskIds: [taskId] });
+    mockRecoverTask.mockResolvedValue({ snapshot: {
+      taskId, prompt: 'make a report', status: 'completed',
+      events: [
+        { type: 'canvas_tool_call', toolName: 'write', toolUseId, input: { file_path: filePath } },
+        { type: 'goal_tool_fact', toolName: 'write', invocationId: toolUseId, factKind: 'file_mutation', normalizedFilePaths: [absolutePath] },
+        { type: 'goal_tool_finished', toolName: 'write', invocationId: toolUseId, ok: true },
+        { type: 'artifact_recorded', artifactId: `artifact_${toolUseId}`, kind: 'html', label: 'report.html', filePath, previewAvailable: true, turnId: 'report-turn' },
+        { type: 'result', result: { summary: 'done', artifacts: [] } },
+      ],
+    } });
+    render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes>
+      <Route path="/t/:taskId" element={<ChatShell />} />
+    </Routes></LocaleProvider></MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole('button', { name: `open-artifact_${toolUseId}` }));
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalledWith(absolutePath));
+    expect(screen.getByTestId('canvas-panel-file')).toHaveTextContent(absolutePath);
+  });
+
   it('keeps each historical artifact bound to the task that produced it', async () => {
     mockReadFileContent.mockImplementation(async (filePath: string) => ({
       content: `<html><body>${filePath}</body></html>`,

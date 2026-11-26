@@ -110,8 +110,30 @@ function normalizeArtifactKind(kind: string): ArtifactKind {
   return ARTIFACT_KINDS.has(kind as ArtifactKind) ? kind as ArtifactKind : 'other';
 }
 
+// Older write events used the tool argument as their display path. The paired
+// executor fact identifies the actual file without resolving relative paths in the renderer.
+function artifactDisplayPath(artifactId: string, filePath: string | undefined, events: DesktopTaskEvent[]): string | undefined {
+  if (!filePath || isAbsoluteFilePath(filePath) || !artifactId.startsWith('artifact_')) return filePath;
+  const invocationId = artifactId.slice('artifact_'.length);
+  const calls = events.filter(event => event.type === 'canvas_tool_call').filter(event => event.toolUseId === invocationId);
+  const facts = events.filter(event => event.type === 'goal_tool_fact').filter(event => event.invocationId === invocationId);
+  const outcomes = events.filter(event => event.type === 'goal_tool_finished').filter(event => event.invocationId === invocationId);
+  const [call] = calls;
+  const [fact] = facts;
+  const [outcome] = outcomes;
+  const path = fact?.normalizedFilePaths?.[0];
+  if (calls.length === 1 && call.toolName === 'write' && (call.input as { file_path?: unknown } | null)?.file_path === filePath
+    && facts.length === 1 && fact.toolName === call.toolName && fact.factKind === 'file_mutation'
+    && fact.normalizedFilePaths?.length === 1 && isAbsoluteFilePath(path)
+    && outcomes.length === 1 && outcome.toolName === call.toolName && outcome.ok) {
+    return path;
+  }
+  return filePath;
+}
+
 function artifactSummaryFromEvent(
   event: Extract<DesktopTaskEvent, { type: 'artifact_recorded' }>,
+  events: DesktopTaskEvent[],
   sourceTaskId?: string,
 ): ArtifactSummary {
   return {
@@ -121,19 +143,20 @@ function artifactSummaryFromEvent(
     title: event.label,
     createdAt: event.turnId,
     previewAvailable: event.previewAvailable,
-    filePath: event.filePath,
+    filePath: artifactDisplayPath(event.artifactId, event.filePath, events),
     mimeType: event.mimeType,
     creator: event.creator ?? 'agent',
   };
 }
 
-function bindArtifactsToSourceTask(result: TaskResult, sourceTaskId?: string): TaskResult {
+function bindArtifactsToSourceTask(result: TaskResult, events: DesktopTaskEvent[], sourceTaskId?: string): TaskResult {
   if (!sourceTaskId || result.artifacts.length === 0) return result;
   return {
     ...result,
     artifacts: result.artifacts.map((artifact) => ({
       ...artifact,
       sourceTaskId: artifact.sourceTaskId ?? sourceTaskId,
+      filePath: artifactDisplayPath(artifact.artifactId, artifact.filePath, events),
     })),
   };
 }
@@ -593,7 +616,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
         break;
       }
       case 'artifact_recorded': {
-        const artifact = artifactSummaryFromEvent(event, sourceTaskId);
+        const artifact = artifactSummaryFromEvent(event, currentTaskEventsRef.current, sourceTaskId);
         if (isInlineUiArtifact(artifact)) {
           const key = inlineUiKey(artifact);
           source.inlineUiArtifacts ??= new Set();
@@ -617,10 +640,10 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       }
       case 'result': {
         setMessages(settleChatProgress);
-        const r = bindArtifactsToSourceTask((event as { type: 'result'; result: TaskResult }).result, sourceTaskId);
+        const r = bindArtifactsToSourceTask((event as { type: 'result'; result: TaskResult }).result, currentTaskEventsRef.current, sourceTaskId);
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
-          .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, sourceTaskId));
+          .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, currentTaskEventsRef.current, sourceTaskId));
         const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current, source.inlineUiNarrationCommitted);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
@@ -1133,7 +1156,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           continue;
         }
         if (ev.type === 'artifact_recorded') {
-          const artifact = artifactSummaryFromEvent(ev, snapshot.taskId);
+          const artifact = artifactSummaryFromEvent(ev, snapshot.events, snapshot.taskId);
           replayArtifacts.push(artifact);
           const key = inlineUiKey(artifact);
           if (isInlineUiArtifact(artifact) && !inlineKeys.has(key)) {
@@ -1256,7 +1279,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           }
         } else if (ev.type === 'result') {
           if (lastProgress?.stage !== 'completed' && lastProgress?.stage !== 'failed') lastProgress = null;
-          const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
+          const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.events, snapshot.taskId);
           const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events, committedNarration);
           const assistantContent = accumulated || resultWithArtifacts.summary;
           if (assistantContent) {
@@ -1558,7 +1581,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
             questions:restoredQuestions,executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
             terminalSeen: refreshing || lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: refreshing };
           const artifacts = (lastSnapshot?.events ?? []).flatMap(event => event.type === 'artifact_recorded'
-            ? [artifactSummaryFromEvent(event, lastTaskIdForSub!)] : []).filter(isInlineUiArtifact);
+            ? [artifactSummaryFromEvent(event, lastSnapshot?.events ?? [], lastTaskIdForSub)] : []).filter(isInlineUiArtifact);
           loadedSource.inlineUiArtifacts = new Set(artifacts.map(inlineUiKey));
           loadedSource.inlineUiNarrationCommitted = artifacts.length > 0 && allMessages.some(message => message.id.startsWith(`inline-prefix:${lastTaskIdForSub}:`));
         }
