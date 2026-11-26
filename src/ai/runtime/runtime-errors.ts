@@ -42,6 +42,9 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
     return { code: 'model_failed', message: KIMI_REASONING_ADMISSION_CODE, retryable: false };
   }
   const modelFailure = getModelFailure(error);
+  if (modelFailure?.category === 'context_length') {
+    return { code: 'model_failed', message: formatModelFailure(modelFailure) + '。请缩短当前输入或开启新会话。', retryable: false };
+  }
   if (errorCode === 'MODEL_RECOVERY_EXHAUSTED') return { code: 'model_failed', message: formatModelRecoveryExhaustion(modelFailure), retryable: false };
   if (modelFailure && errorCode !== 'OPENAI_PROVIDER_STREAM_ERROR' && errorCode !== MODEL_TEXT_REPETITION_CODE) {
     return { code: 'model_failed', message: formatModelFailure(modelFailure) + (!modelFailure.retryable ? '；已停止自动重试。' : ''), retryable: modelFailure.retryable };

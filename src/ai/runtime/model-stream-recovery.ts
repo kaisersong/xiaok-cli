@@ -30,11 +30,14 @@ export async function* recoverModelStream(input: {
   open(signal: AbortSignal): AsyncIterable<StreamChunk>; signal: AbortSignal;
   physicalRun?: ModelStreamPhysicalRun;
   policy?: ModelRecoveryPolicy; onRetry?(notice: ModelRecoveryNotice): void | Promise<void>;
+  /** Rebuild a smaller request after a provider rejects the input. Never retry unchanged input. */
+  compactContext?(): boolean;
   /** Additional owner gate; it cannot make permanent errors recoverable. */
   shouldRetry?(error: unknown): boolean;
 }): AsyncIterable<StreamChunk> {
   const policy = input.policy ?? resolveModelRecoveryPolicy();
   let recoveryStarted: number | undefined, attempt = 0;
+  let compactContext = input.compactContext;
   let lastFailure: ModelFailureDiagnostic | undefined;
   const exhausted = () => {
     const error = Object.assign(new Error(formatModelRecoveryExhaustion(lastFailure)), {
@@ -74,6 +77,11 @@ export async function* recoverModelStream(input: {
       lastFailure = markModelReadFailure(error);
       const failureError = error instanceof Error ? error : new Error(formatModelFailure(lastFailure));
       associateModelFailure(failureError, lastFailure);
+      if (lastFailure.category === 'context_length' && compactContext) {
+        const compact = compactContext;
+        compactContext = undefined;
+        if (compact()) continue;
+      }
       if (!lastFailure.retryable || policy.windowMs === 0 || input.shouldRetry?.(failureError) === false) throw failureError;
       recoveryStarted ??= Date.now();
       const remainingMs = policy.windowMs - (Date.now() - recoveryStarted);
