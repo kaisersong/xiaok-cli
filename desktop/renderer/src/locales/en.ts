@@ -3674,6 +3674,8 @@ followUpAcceptedDraft:'Accepted; no task linked',
   // chatShell
   chatShell: {
     threadLoadFailed: "This conversation could not be opened", threadLoadHelp: "Reload the conversation or return to your tasks and open it again.", reloadThread: "Reload conversation", backToTasks: "Back to tasks", threadLoading: "Loading conversation…", answerFailed: "Your reply could not be submitted. Please try again.", dismissError: "Dismiss",
+    assistantHistoryBlocked: "The previous turn has unconfirmed tool activity. Your message is still a draft. Open a new assistant conversation to continue while keeping this history.",
+    recoverAssistantChat: "Open a new assistant conversation with this draft",
     attachmentLabel: "Attachments:",
     cuUnavailable: "Computer Use is currently unavailable.",
     historyUnavailable: (taskIds) => `Historical task records are unavailable (${taskIds}). The conversation remains saved; existing projects and artifacts are preserved and will not restart automatically.`,

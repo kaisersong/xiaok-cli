@@ -3657,6 +3657,8 @@ followUpAcceptedDraft:'已采纳，尚未关联任务',
   // chatShell
   chatShell: {
     threadLoadFailed: "暂时无法打开此对话", threadLoadHelp: "请重新加载，或返回任务列表后再打开。", reloadThread: "重新加载对话", backToTasks: "返回任务列表", threadLoading: "正在读取对话…", answerFailed: "回复未能提交，请重试。", dismissError: "关闭提示",
+    assistantHistoryBlocked: "上一轮的工具执行状态尚未确认，这条消息还没发送。可以保留旧对话，把草稿带到新助理对话。",
+    recoverAssistantChat: "带草稿开启新助理对话",
     attachmentLabel: "附件:",
     cuUnavailable: "Computer Use 当前不可用。",
     historyUnavailable: (taskIds) => `历史任务记录暂时无法读取（${taskIds}）。会话仍保留；已有项目及产物不会因此删除，也不会自动重跑。`,

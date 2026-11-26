@@ -4883,6 +4883,7 @@ function createDesktopServicesBody(options: DesktopServicesOptions,dshLease:Orig
     async createObservationTask(input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode'> & {threadId?:string},
       authority: {requestSource:'user';approval:ApprovedDesktopObservation;onPrompt: import('../../src/ai/tools/index.js').RegistryOptions['onPrompt'];authorizeValidationMaterials?:Parameters<typeof import('../../src/runtime/sol-pi/product-validation-backend.js').createProductValidationBackend>[0]['authorize']}): Promise<{taskId:string;control:object}> {
       if (authority?.requestSource !== 'user') throw new Error('observation_user_required');
+      if (isAssistantThread(input.threadId)) throw new Error('assistant_executor_unavailable');
       const policy = consumeDesktopObservationApproval(authority.approval);
       if (observationAdmissionBusy) throw new Error('SOL_PI_DESKTOP_PROFILE_BUSY');
       observationAdmissionBusy = true;
