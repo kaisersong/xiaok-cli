@@ -241,10 +241,12 @@ describe('ChatShell draft prompt navigation state', () => {
   }
   it('opens four legacy runs first and retains all seventeen archive answers through earlier pages', async () => {
     const ids=setupLegacyArchiveHistory(17);renderHistory();
-    await screen.findByText('archive legacy_16');
-    expect(mockRecoverTask.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
-    expect(mockReadArchive.mock.calls.map(call=>call[0])).toEqual(ids.slice(-4));
-    fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
+    const loadEarlier = await screen.findByRole('button', { name: /加载更早记录/ });
+    const firstPage = [ids.at(-1), ...ids.slice(-4, -1)];
+    expect(mockRecoverTask.mock.calls.map(call=>call[0])).toEqual(firstPage);
+    expect(mockReadArchive.mock.calls.map(call=>call[0])).toEqual(firstPage);
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.slice(-4).map(id=>`archive ${id}`).join(''));
+    fireEvent.click(loadEarlier);
     await screen.findByText('archive legacy_0');
     expect(screen.getByTestId('chat-messages').textContent).toBe(ids.map(id=>`archive ${id}`).join(''));
     expect(screen.queryByText(/PRIVATE RAW/)).toBeNull();
@@ -253,7 +255,7 @@ describe('ChatShell draft prompt navigation state', () => {
   });
   it('keeps a denied legacy archive page retryable without raw snapshot fallback', async () => {
     const ids=setupLegacyArchiveHistory(25);renderHistory();
-    await screen.findByText('archive legacy_24');
+    await screen.findByRole('button', { name: /加载更早记录/ });
     const read=mockReadArchive.getMockImplementation()!;
     mockReadArchive.mockImplementation(async id=>{if(id==='legacy_2')throw Error('denied');return read(id);});
     fireEvent.click(screen.getByRole('button',{name:/加载更早记录/}));
@@ -271,8 +273,9 @@ describe('ChatShell draft prompt navigation state', () => {
   });
   it('opens the latest 20 runs, then prepends every older page in order without resubscribing the live task', async () => {
     const ids = setupLongHistory(); renderHistory();
-    await screen.findByText('history prompt task_44');
-    expect(mockRecoverTask.mock.calls.map(call => call[0])).toEqual(ids.slice(-20));
+    await screen.findByRole('button', { name: /加载更早记录/ });
+    expect(mockRecoverTask.mock.calls.map(call => call[0])).toEqual([ids.at(-1), ...ids.slice(-20, -1)]);
+    expect(screen.getByTestId('chat-messages').textContent).toBe(ids.slice(-20).map(id => `history prompt ${id}`).join(''));
     expect(mockSubscribeTask).toHaveBeenCalledTimes(1);
     expect(mockSubscribeTask).toHaveBeenLastCalledWith('task_44', expect.any(Function), 0);
     fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
@@ -287,7 +290,7 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(mockSubmitUserTask).not.toHaveBeenCalled();
   });
   it('keeps a failed older page retryable without duplicating the successful records', async () => {
-    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    setupLongHistory(); renderHistory(); await screen.findByRole('button', { name: /加载更早记录/ });
     const recover = mockRecoverTask.getMockImplementation()!;
     mockRecoverTask.mockImplementation(async id => { if (id === 'task_8') throw Error('unreadable'); return recover(id); });
     fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
@@ -311,7 +314,7 @@ describe('ChatShell draft prompt navigation state', () => {
       ];
       return reply;
     });
-    renderHistory(); await screen.findByText('history prompt task_44');
+    renderHistory(); await screen.findByRole('button', { name: /加载更早记录/ });
     fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
     await screen.findByText('history prompt task_5');
     expect(screen.getByTestId('streaming-text')).toHaveTextContent('latest stream');
@@ -320,7 +323,7 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByTestId('chat-messages')).toHaveTextContent('older partial output');
   });
   it('discards late older-page replies after navigating and stops reading the old page', async () => {
-    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    setupLongHistory(); renderHistory(); await screen.findByRole('button', { name: /加载更早记录/ });
     const recover = mockRecoverTask.getMockImplementation()!;
     let resolve!: (value: unknown) => void;
     mockRecoverTask.mockImplementation(id => id === 'task_5' ? new Promise(yes => { resolve = yes; }) : recover(id));
@@ -333,7 +336,7 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByText('history prompt task_other')).toBeVisible();
   });
   it('keeps live results received during a pending history page and prevents duplicate page reads', async () => {
-    setupLongHistory(); renderHistory(); await screen.findByText('history prompt task_44');
+    setupLongHistory(); renderHistory(); await screen.findByRole('button', { name: /加载更早记录/ });
     const recover = mockRecoverTask.getMockImplementation()!;
     let resolve!: (value: unknown) => void;
     mockRecoverTask.mockImplementation(id => id === 'task_5' ? new Promise(yes => { resolve = yes; }) : recover(id));
@@ -1198,7 +1201,7 @@ describe('ChatShell draft prompt navigation state', () => {
     mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('second_submission_reached'));
     let handler:((event:any)=>void)|undefined;
     mockSubscribeTask.mockImplementation((_id,callback)=>{handler=callback;return()=>{};});
-    renderHistory();
+    await act(async () => { renderHistory(); });
     fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
     await waitFor(()=>expect(mockSubscribeTask).toHaveBeenCalledWith('task-first',expect.any(Function)));
     await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));

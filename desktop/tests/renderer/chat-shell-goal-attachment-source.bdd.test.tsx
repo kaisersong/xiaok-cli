@@ -348,7 +348,8 @@ describe('R4 U12–U14: actual semantic correlation, automatic predecessor and i
     // This parent control is outside ChatShell; changing the real locale changes
     // handleEvent/replaySnapshot dependencies and triggers the actual load effect.
     fireEvent.click(screen.getByRole('button', { name: 'English locale' })); await act(async () => {});
-    expect(screen.queryByTestId('display-source')).toBeNull();
+    expect(screen.getByTestId('display-source')).toHaveTextContent('A');
+    expect(screen.getByTestId('history')).not.toHaveTextContent('STALE A reload');
     await act(async () => reply.resolve(value));
     const b = observer('B'); await emit(b, question('B')); const before = visibleState();
     const old: TaskSnapshot = { ...snapshot('A'), events: [result('STALE A reload'), { type: 'progress_plan_reported',
