@@ -1353,8 +1353,10 @@ describe('ChatShell draft prompt navigation state', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
-    await waitFor(() => expect(mockSubscribeTask).toHaveBeenCalledWith('task-live-failed', expect.any(Function)));
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+      expect(mockSubscribeTask).toHaveBeenCalledWith('task-live-failed', expect.any(Function));
+    });
 
     const failureReason = '429 您已达到每周/每月使用上限，您的限额将在 2026-07-15 14:18:50 重置。';
     act(() => {

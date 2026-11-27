@@ -38,6 +38,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { isRepetitionStopEvent, sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { recoverForDisplay } from '../lib/recover-for-display';
+import { conversationOpenAt } from '../lib/conversation-open';
 import { ScheduledRunHistory } from './ScheduledRunHistory';
 import type { TaskPublicPresentation } from '../../../shared/task-history';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
@@ -63,6 +64,21 @@ const paintedThreadHistory = new Map<string, {
   earlier: ChatMessage[];
   latest: ChatMessage[];
 }>();
+function pendingThread(id: string): ThreadRecord {
+  return {
+    id,
+    title: null,
+    status: 'idle',
+    mode: 'work',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    starred: false,
+    gtdBucket: 'inbox',
+    pinnedAt: null,
+    currentTaskId: null,
+    taskIds: [],
+  };
+}
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
 function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
@@ -455,6 +471,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
   const lastLiveErrorRef = useRef<{ taskKey: string; rawMessage: string } | null>(null);
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
   const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string; createGoal?: boolean } | undefined;
+  const openRequest = conversationOpenAt(location.state);
   const initialPrompt = state?.initialPrompt;
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
@@ -1432,7 +1449,8 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
     setPlanSteps([]);
     setCurrentQuestion(null);
     setInterruptedTask(null);
-    threadRef.current = cached?.thread ?? (threadRef.current?.id === taskId ? threadRef.current : null);
+    // Keep a stub on screen so a leftover fullscreen loader is dropped before getThread.
+    threadRef.current = cached?.thread ?? (threadRef.current?.id === taskId ? threadRef.current : pendingThread(taskId));
     setThread(threadRef.current);
     setStatus('idle');
     setLoadError(null);
@@ -1619,19 +1637,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
           paintedThreadHistory.delete(taskId);
           setMessages([]);
         }
-        const empty: ThreadRecord = {
-          id: taskId,
-          title: null,
-          status: 'idle',
-          mode: 'work' as const,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          starred: false,
-          gtdBucket: 'inbox',
-          pinnedAt: null,
-          currentTaskId: null,
-          taskIds: [],
-        };
+        const empty = pendingThread(taskId);
         threadRef.current = empty;
         setThread(empty);
         initialization.succeeded = true;
@@ -1650,7 +1656,7 @@ export function ChatShell({ threadId, emptyContent, conversationHeader, assistan
       currentLoadIdRef.current = null;
       loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
+  }, [taskId, openRequest, initialPrompt, initialFiles, draftPrompt, handleEvent, historyRefresh, replaySnapshot, promoteSource, renderScope, retainObserver, loadRevision]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();

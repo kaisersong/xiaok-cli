@@ -20,6 +20,7 @@ import {
   threadHasAnyRuntimeTask,
 } from '../lib/scheduled-task-threads';
 import { getAssistantScheduleDisplayName } from '../lib/assistant-schedule-display';
+import { openConversation } from '../lib/conversation-open';
 
 const log = createLogger('Sidebar');
 const SIDEBAR_DETAILS_DELAY_MS = 500;
@@ -300,7 +301,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       }
     } catch { /* best-effort */ }
     if (task.threadId) {
-      navigate(`/t/${task.threadId}`);
+      openConversation(navigate, task.threadId);
     } else {
       navigate('/automations/schedules');
     }
@@ -483,7 +484,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                                 isEditing={editingId === thread.id}
                                 editTitle={editTitle}
                                 renameLabel={t.sidebarRename}
-                                onOpen={() => navigate(`/t/${thread.id}`)}
+                                onOpen={() => openConversation(navigate, thread.id)}
                                 onEditStart={() => handleDoubleClick(thread)}
                                 onDelete={e => handleDelete(e, thread.id)}
                                 onEditTitleChange={setEditTitle}
@@ -513,7 +514,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                   isEditing={editingId === thread.id}
                   editTitle={editTitle}
                   renameLabel={t.sidebarRename}
-                  onOpen={() => navigate(`/t/${thread.id}`)}
+                  onOpen={() => openConversation(navigate, thread.id)}
                   onEditStart={() => handleDoubleClick(thread)}
                   onDelete={e => handleDelete(e, thread.id)}
                   onEditTitleChange={setEditTitle}

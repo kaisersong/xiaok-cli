@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatShell } from '../../renderer/src/components/ChatShell';
+import { openConversation } from '../../renderer/src/lib/conversation-open';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { zh } from '../../renderer/src/locales/zh';
 
@@ -50,7 +51,7 @@ function deferred<T>() {
 
 function Navigation({ ids }: { ids: string[] }) {
   const navigate = useNavigate();
-  return <>{ids.map(id => <button key={id} onClick={() => navigate('/t/' + id)}>{'Open ' + id}</button>)}</>;
+  return <>{ids.map(id => <button key={id} onClick={() => openConversation(navigate, id)}>{'Open ' + id}</button>)}</>;
 }
 
 function open(id: string, ids = [id]) {
@@ -76,16 +77,44 @@ afterEach(() => {
   window.localStorage.removeItem('xiaok:locale');
 });
 
-it('shows the thread record while the latest recovery is still pending', async () => {
+it('drops the leftover loading mask before getThread and shows the record while the latest recovery is pending', async () => {
   const thread = deferred<ReturnType<typeof record>>();
   api.getThread.mockReturnValue(thread.promise);
   api.recoverTask.mockReturnValueOnce(new Promise(() => {}));
   open('record-first');
-  expect(screen.getByText(zh.chatShell.threadLoading)).toBeVisible();
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
   await act(async () => thread.resolve(record('record-first', ['pending-latest'])));
   expect(screen.getByRole('region', { name: 'record-first' })).toBeVisible();
   expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
   expect(api.recoverTask).toHaveBeenCalledWith('pending-latest', 'record-first');
+});
+
+it('clears a leftover mask immediately when switching to another conversation before getThread returns', async () => {
+  const first = deferred<ReturnType<typeof record>>();
+  const second = deferred<ReturnType<typeof record>>();
+  api.getThread.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  open('stuck-a', ['stuck-a', 'ready-b']);
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Open ready-b' }));
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
+  await act(async () => second.resolve(record('ready-b', ['b-turn'])));
+  expect(await screen.findByText('b-turn')).toBeVisible();
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
+});
+
+it('reloads the current stuck conversation on a second click and paints the body without waiting behind the mask', async () => {
+  const first = deferred<ReturnType<typeof record>>();
+  const second = deferred<ReturnType<typeof record>>();
+  api.getThread.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  open('stuck-same', ['stuck-same']);
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
+  expect(api.getThread).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Open stuck-same' }));
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
+  await waitFor(() => expect(api.getThread).toHaveBeenCalledTimes(2));
+  await act(async () => second.resolve(record('stuck-same', ['same-turn'])));
+  expect(await screen.findByText('same-turn')).toBeVisible();
+  expect(screen.queryByText(zh.chatShell.threadLoading)).toBeNull();
 });
 
 it('paints and subscribes to the latest turn while an older recovery stays pending', async () => {
