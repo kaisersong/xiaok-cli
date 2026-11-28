@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { openConversation } from '../lib/conversation-open'
 import { Search, X, SquarePen } from 'lucide-react'
 import type { ThreadMode, ThreadResponse } from '../api'
 import { searchThreads } from '../api'
@@ -236,7 +237,7 @@ export function ChatsSearchModal({ threads, mode, accessToken, onClose }: Props)
 
   const handleThreadClick = useCallback(
     (threadId: string) => {
-      navigate(`/t/${threadId}`)
+      openConversation(navigate, threadId)
     },
     [navigate],
   )

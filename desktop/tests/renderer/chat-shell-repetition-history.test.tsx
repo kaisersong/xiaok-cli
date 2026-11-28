@@ -163,10 +163,11 @@ it.each([
     ] : [],
   } }));
   render(<MemoryRouter initialEntries={['/t/paging']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
-  await screen.findByText('current request');
+  const loadEarlier = await screen.findByRole('button', { name: /加载更早记录/ });
+  expect(screen.getByText('current request')).toBeVisible();
   expect(mockRecoverTask).toHaveBeenCalledTimes(20);
   expect(Boolean(screen.queryByRole('button', { name: '重新生成' }))).toBe(currentRepeat);
-  fireEvent.click(screen.getByRole('button', { name: /加载更早记录/ }));
+  fireEvent.click(loadEarlier);
   await screen.findByText('older request');
   expect(mockRecoverTask).toHaveBeenCalledTimes(21);
   expect(screen.getByTestId('chat-messages')).toHaveTextContent('read_file:done:raw result ' + ids[0]);

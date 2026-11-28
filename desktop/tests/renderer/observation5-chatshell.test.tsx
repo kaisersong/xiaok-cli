@@ -40,7 +40,10 @@ afterEach(()=>{cleanup();delete (window as unknown as {xiaokDesktop?:unknown}).x
 async function setup(locale:'zh'|'en'='en',options:{hidden?:boolean;open?:boolean;interrupted?:boolean}={}) {
  if(options.interrupted){state.getThread.mockImplementation(async id=>({...record(id),currentTaskId:'interrupted-task',taskIds:['interrupted-task']}));state.recoverTask.mockResolvedValue({snapshot:{taskId:'interrupted-task',sessionId:'thread_1',status:'failed',prompt:'old prompt',materials:[],createdAt:1,updatedAt:1,context:{threadId:'thread_1'},events:[{type:'needs_user',question:{taskId:'interrupted-task',questionId:'old-question',kind:'freeform',prompt:'old decision',choices:[{id:'observation-choice',label:'/observation'}]}},{type:'error',message:'app_shutdown'},{type:'task_terminal',status:'failed'}]}});}
  window.localStorage.setItem('xiaok:locale',locale);const f=await fixture(),ordinary=f.installControllerSurrogate(),calls:unknown[][]=[];
- window.xiaokDesktop=createPreloadApi({invoke:async(channel:string,...args:unknown[])=>{calls.push([channel,...args]);return Reflect.apply(f.listeners.get(channel)!,undefined,[{sender:f.sender,senderFrame:f.frame},...args]);},on(){},off(){},removeListener(){},send(){}} as never);
+ window.xiaokDesktop=createPreloadApi({invoke:async(channel:string,...args:unknown[])=>{calls.push([channel,...args]);if(channel==='desktop:readTaskHistory'&&options.interrupted){
+   const {snapshot}=await state.recoverTask((args[0] as {taskId:string}).taskId);
+   return {snapshot,presentation:{version:1,taskId:snapshot.taskId,sourceEpoch:snapshot.sessionId,prompt:snapshot.prompt,includeUser:true}};
+ }return Reflect.apply(f.listeners.get(channel)!,undefined,[{sender:f.sender,senderFrame:f.frame},...args]);},on(){},off(){},removeListener(){},send(){}} as never);
  const view=render(<MemoryRouter initialEntries={['/t/thread_1']}><LocaleProvider><NavigateThread/><Routes><Route path="/t/:taskId" element={<ChatShell hideObservationControls={options.hidden}/>}/></Routes></LocaleProvider></MemoryRouter>);
  await screen.findByTestId('chat-status');await waitFor(()=>expect(state.getThread).toHaveBeenCalledWith('thread_1'));
  if(options.open!==false){fireEvent.click(screen.getByRole('button',{name:'open observation'}));await screen.findByRole('region',{name:(locale==='zh'?zh:en).observation.menuTitle});}
