@@ -76,6 +76,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
       {historyContent}
       <textarea aria-label="chat-input" readOnly value={prompt} />
       <div data-testid="chat-status">{status}</div>
+      <div data-testid="chat-compose" data-ready={onQueue ? 'yes' : 'no'} />
       <div data-testid="current-question">{currentQuestion?.questionId??''}</div>
       <div data-testid="queued-text">{queuedText ?? ''}</div>
       <div data-testid="chat-messages">{messages?.map((message) => (
@@ -150,6 +151,13 @@ afterEach(() => {
   _resetDesktopApiCache();
 });
 
+async function clickWhenComposable(name: string) {
+  await waitFor(() => {
+    expect(screen.getByTestId('chat-compose')).toHaveAttribute('data-ready', 'yes');
+  });
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
 describe('ChatShell draft prompt navigation state', () => {
   function HistoryNavigation({emptyContent}: {emptyContent?:ReactNode}) {
     const navigate = useNavigate();
@@ -165,6 +173,7 @@ describe('ChatShell draft prompt navigation state', () => {
   function setupEmptyCompleteHistory() {
     mockGetThread.mockResolvedValue({id:'history',title:'Saved entry',status:'idle',mode:'work',createdAt:1,updatedAt:2,currentTaskId:null,taskIds:[],coverage:'complete'});
   }
+
   it('shows an explicit display-only state for a saved empty record and navigates without dispatching',async()=>{
     setupEmptyCompleteHistory();renderHistory();
     expect(await screen.findByText('当前会话暂未显示运行记录。定时任务历史请从“自动化”查看。')).toBeVisible();
@@ -723,7 +732,7 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
 
     await waitFor(() => {
       expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',
@@ -779,7 +788,7 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'submit-files' }));
+    await clickWhenComposable('submit-files');
 
     await waitFor(() => {
       expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'files',
@@ -853,7 +862,7 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('chat-messages')).toHaveTextContent('old-turn.md');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
 
     await waitFor(() => {
       expect(mockSubmitUserTask).toHaveBeenCalledWith({action:'submit_new',gestureId:expect.any(String),input:{kind:'materials',
@@ -926,7 +935,7 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('chat-messages')).toHaveTextContent('old-turn.md');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
 
     await waitFor(() => {
       expect(mockSubscribeTask).toHaveBeenCalledWith('task-new', expect.any(Function));
@@ -1038,7 +1047,7 @@ describe('ChatShell draft prompt navigation state', () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
 
     await waitFor(() => {
       expect(mockSubscribeTask).toHaveBeenCalledWith('task-a2ui-live', expect.any(Function));
@@ -1173,7 +1182,7 @@ describe('ChatShell draft prompt navigation state', () => {
       expect(screen.getByTestId('chat-status')).toHaveTextContent('idle');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
 
     await waitFor(() => {
       expect(screen.getByText(/API Key 无效或已过期/)).toBeInTheDocument();
@@ -1187,7 +1196,7 @@ describe('ChatShell draft prompt navigation state', () => {
     mockRecoverTask.mockResolvedValue({snapshot:{taskId:'task_legacy',sessionId:'legacy_epoch',prompt:'old',status:'completed',materials:[],events:[],createdAt:1,updatedAt:2}});
     mockSubmitUserTask.mockRejectedValue(Error('new_task_submission_reached'));
     render(<MemoryRouter initialEntries={['/t/thread-unclaimed']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell/>}/></Routes></LocaleProvider></MemoryRouter>);
-    await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    await clickWhenComposable('submit-now');
     if(legacy){expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).not.toHaveBeenCalled();}
     else await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledOnce());
   });
@@ -1202,12 +1211,12 @@ describe('ChatShell draft prompt navigation state', () => {
     let handler:((event:any)=>void)|undefined;
     mockSubscribeTask.mockImplementation((_id,callback)=>{handler=callback;return()=>{};});
     await act(async () => { renderHistory(); });
-    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await clickWhenComposable('submit-now');
     await waitFor(()=>expect(mockSubscribeTask).toHaveBeenCalledWith('task-first',expect.any(Function)));
     await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
     act(()=>handler?.({type:'result',result:{summary:'first complete',artifacts:[]}}));
     await waitFor(()=>expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
-    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    await clickWhenComposable('submit-now');
     if(coverage==='complete')await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
     else{expect(await screen.findByRole('alert')).toHaveTextContent('请先核验');expect(mockSubmitUserTask).toHaveBeenCalledOnce();}
   });
@@ -1221,12 +1230,12 @@ describe('ChatShell draft prompt navigation state', () => {
     mockSubmitUserTask.mockResolvedValueOnce({taskId:'task-first'}).mockRejectedValue(Error('other_submission_reached'));
     mockSubscribeTask.mockImplementation(()=>()=>{});
     renderHistory();
-    fireEvent.click(await screen.findByRole('button',{name:'submit-now'}));
+    await clickWhenComposable('submit-now');
     await waitFor(()=>expect(mockGetThread).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole('button',{name:'switch conversation'}));
     await waitFor(()=>expect(mockGetThread).toHaveBeenCalledWith('other'));
     await act(async()=>finish({...empty,coverage:'complete',currentTaskId:'task-first',taskIds:['task-first']}));
-    fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+    await clickWhenComposable('submit-now');
     await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledTimes(2));
     expect(mockSubmitUserTask.mock.calls[1][0].input.context).toEqual({threadId:'other'});
   });
@@ -1305,8 +1314,7 @@ describe('ChatShell draft prompt navigation state', () => {
       <Route path="/t/:taskId" element={<ChatShell />} />
     </Routes></LocaleProvider></MemoryRouter>);
     if (mode === 'live') {
-      await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
-      fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+      await clickWhenComposable('submit-now');
       await waitFor(() => expect(handler).toBeTypeOf('function'));
       act(() => {
         handler?.({ type: 'assistant_delta', eventId: 'prefix', delta: '保留的执行前缀。' });
@@ -1352,9 +1360,8 @@ describe('ChatShell draft prompt navigation state', () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+    await clickWhenComposable('submit-now');
     await waitFor(() => {
-      fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
       expect(mockSubscribeTask).toHaveBeenCalledWith('task-live-failed', expect.any(Function));
     });
 
@@ -1410,8 +1417,7 @@ describe('ChatShell draft prompt navigation state', () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
-    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await clickWhenComposable('submit-now');
     await waitFor(() => expect(mockSubscribeTask).toHaveBeenCalled());
 
     act(() => subscribedHandler?.({ type: 'assistant_delta', delta: '第一段' }));
@@ -1442,10 +1448,10 @@ it('uses the explicit assistant thread on /assistant and applies draft requests 
  const view=render(ui()); await screen.findByLabelText('chat-input'); expect(mockGetThread).toHaveBeenCalledWith('assistant-dedicated');
  const reads=mockGetThread.mock.calls.length;view.rerender(ui({id:1,text:'请继续跟进日程'}));await waitFor(()=>expect(screen.getByLabelText('chat-input')).toHaveValue('请继续跟进日程'));
  expect(mockGetThread).toHaveBeenCalledTimes(reads);expect(mockSubmitUserTask).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'submit-now'}));await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({action:'submit_new',gestureId:expect.any(String),input:expect.objectContaining({context:{threadId:'assistant-dedicated'}})})));
+ await clickWhenComposable('submit-now');await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenCalledWith(expect.objectContaining({action:'submit_new',gestureId:expect.any(String),input:expect.objectContaining({context:{threadId:'assistant-dedicated'}})})));
  expect(mockUpdateThreadTaskId).toHaveBeenCalledWith('assistant-dedicated','task-assistant-first');
  await act(async()=>next({type:'result',result:{summary:'第一条回复',artifacts:[]}}));
- mockSubmitUserTask.mockResolvedValue({taskId:'task-assistant-followup'});fireEvent.click(screen.getByRole('button',{name:'submit-now'}));
+ mockSubmitUserTask.mockResolvedValue({taskId:'task-assistant-followup'});await clickWhenComposable('submit-now');
  await waitFor(()=>expect(mockSubmitUserTask).toHaveBeenLastCalledWith(expect.objectContaining({action:'submit_new',gestureId:expect.any(String),input:expect.objectContaining({context:{threadId:'assistant-dedicated',taskIds:['task-assistant-first']}})})));
 });
 
